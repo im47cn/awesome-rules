@@ -23,3 +23,14 @@
 |---|---|
 | SQL 压测 | 以生产数据量 2-3 倍验证，执行 < 1s；< 10 万条时执行 < 500ms |
 | 索引有效性 | 索引字段须与查询条件一致，需 EXPLAIN 验证 |
+
+## PO 类规则（MyBatis-Plus）【强制】
+
+脚本自动检查 `@TableName` 表名/字段命名规范和必含字段，以下需人工判断：
+
+| 规则 | 要点 |
+|---|---|
+| 字段类型一致性 | PO 字段的 Java 类型须与 DDL 列类型匹配（如 `varchar(36)` → `String`，`datetime` → `LocalDateTime`） |
+| 继承字段完整性 | 若 PO 继承 `BaseEntity` 等基础类，需确认父类确实包含 id/creator_id/create_time 等必含字段 |
+| `@TableLogic` 配置 | 逻辑删除字段须标注 `@TableLogic`，且全局配置 `logic-delete-value`/`logic-not-delete-value` 与 `del_flag` 取值一致 |
+| 字段映射完整性 | 每个数据库列都须在 PO 中有对应字段（或显式声明 `@TableField(exist = false)`），避免隐式遗漏 |

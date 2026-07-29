@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 MyBatis SQL 规范检查脚本
-检查 MyBatis mapper XML 中的 DQL/DML 语句是否符合数据库设计开发规范。
+检查 MyBatis mapper XML 中的 DQL/DML 语句和 MyBatis-Plus PO 类（@TableName）
+是否符合数据库设计开发规范。
 
 用法:
   python3 sql_check.py <file_or_dir> [--format text|json]
@@ -463,6 +464,321 @@ def find_mybatis_files(path: str) -> list:
     return xml_files
 
 
+# ── MyBatis-Plus PO 类解析与检查 ────────────────────────────────────────
+
+MYSQL_RESERVED = {
+    "add", "all", "alter", "and", "as", "asc", "between", "bigint", "binary",
+    "blob", "both", "by", "call", "cascade", "case", "char", "check", "column",
+    "condition", "constraint", "continue", "convert", "create", "cross",
+    "current_date", "current_time", "current_timestamp", "cursor", "database",
+    "databases", "day_hour", "day_microsecond", "day_minute", "day_second",
+    "decimal", "declare", "default", "delete", "desc", "describe", "distinct",
+    "distinctrow", "div", "double", "drop", "dual", "else", "enclosed",
+    "escaped", "exists", "exit", "explain", "false", "fetch", "float", "float4",
+    "float8", "for", "force", "foreign", "from", "fulltext", "get", "grant",
+    "group", "grouping", "groups", "having", "high_priority", "hour_microsecond",
+    "hour_minute", "hour_second", "if", "ignore", "in", "index", "infile",
+    "inner", "inout", "insensitive", "insert", "int", "int1", "int2", "int3",
+    "int4", "int8", "integer", "interval", "into", "io_after_gtids",
+    "io_before_gtids", "is", "iterate", "join", "json_table", "key", "keys",
+    "kill", "leading", "leave", "left", "like", "limit", "linear", "lines",
+    "load", "localtime", "localtimestamp", "lock", "long", "longblob",
+    "longtext", "loop", "low_priority", "master_bind",
+    "master_ssl_verify_server_cert", "match", "maxvalue", "mediumblob",
+    "mediumint", "mediumtext", "middleint", "minute_microsecond",
+    "minute_second", "mod", "modifies", "natural", "not", "no_write_to_binlog",
+    "null", "numeric", "on", "optimize", "optimizer_costs", "option",
+    "optionally", "or", "order", "out", "outer", "outfile", "over", "partition",
+    "precision", "primary", "procedure", "purge", "range", "read", "read_write",
+    "reads", "real", "recursive", "references", "regexp", "release", "rename",
+    "repeat", "replace", "require", "resignal", "restrict", "return", "revoke",
+    "right", "rlike", "rows", "schema", "schemas", "second_microsecond",
+    "select", "sensitive", "separator", "set", "show", "signal", "smallint",
+    "spatial", "specific", "sql", "sqlexception", "sqlstate", "sqlwarning",
+    "sql_big_result", "sql_calc_found_rows", "sql_small_result", "ssl",
+    "starting", "stored", "straight_join", "system", "table", "terminated",
+    "then", "tinyblob", "tinyint", "tinytext", "to", "trailing", "trigger",
+    "true", "undo", "union", "unique", "unlock", "unsigned", "update", "usage",
+    "use", "using", "utc_date", "utc_time", "utc_timestamp", "values",
+    "varbinary", "varchar", "varcharacter", "varying", "virtual", "when",
+    "where", "while", "window", "with", "write", "xor", "year_month", "zerofill",
+    "date", "time", "timestamp", "text", "blob", "enum", "json", "geometry",
+    "point", "linestring", "polygon", "multipoint", "multilinestring",
+    "multipolygon", "geometrycollection",
+}
+
+PO_REQUIRED_FIELDS = [
+    "id", "creator_id", "create_time", "last_updater_id", "last_update_time",
+]
+PO_DEL_FLAG = "del_flag"
+
+
+@dataclass
+class PoFieldInfo:
+    java_name: str
+    column_name: str
+    java_type: str = ""
+    is_id: bool = False
+
+
+@dataclass
+class PoClassInfo:
+    table_name: str
+    class_name: str
+    file_path: str
+    fields: list
+    extends_base: bool = False
+
+
+def camel_to_snake(name: str) -> str:
+    """驼峰命名转下划线命名（MyBatis-Plus 默认策略）。"""
+    s1 = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
+    return re.sub(r"([a-z\d])([A-Z])", r"\1_\2", s1).lower()
+
+
+def parse_po_class(content: str, file_path: str):
+    """解析带 @TableName 注解的 Java PO 类，提取表名与字段映射。返回 None 表示非 PO 类。"""
+    if "@TableName" not in content:
+        return None
+
+    content = re.sub(r"/\*.*?\*/", "", content, flags=re.DOTALL)
+    content = re.sub(r"//.*$", "", content, flags=re.MULTILINE)
+
+    # 提取表名
+    table_name = None
+    m = re.search(r'@TableName\s*\(\s*(?:"([^"]+)"|value\s*=\s*"([^"]+)")', content)
+    if m:
+        table_name = m.group(1) or m.group(2)
+    elif re.search(r"@TableName\s*\(\s*\)", content):
+        class_m = re.search(r"class\s+(\w+)", content)
+        if class_m:
+            cn = class_m.group(1)
+            for suffix in ("PO", "DO", "Entity", "BO", "DTO"):
+                if cn.endswith(suffix) and len(cn) > len(suffix):
+                    cn = cn[: -len(suffix)]
+                    break
+            table_name = camel_to_snake(cn)
+
+    if not table_name:
+        return None
+
+    class_m = re.search(r"class\s+(\w+)", content)
+    class_name = class_m.group(1) if class_m else ""
+
+    extends_base = False
+    ext_m = re.search(r"class\s+\w+\s+extends\s+(\w+)", content)
+    if ext_m and re.search(r"(Base|Entity|Model|Abstract)", ext_m.group(1)):
+        extends_base = True
+
+    brace_start = content.find("{")
+    body = content[brace_start:] if brace_start != -1 else content
+
+    field_pattern = re.compile(
+        r"((?:@[\w.]+(?:\([^)]*\))?\s*)*)"  # 前置注解
+        r"(?:public|private|protected)\s+"
+        r"((?:\w+\s+)*?)"  # 其他修饰符
+        r"([\w.]+(?:<[^>]+>)?(?:\[\])*)\s+"  # 类型
+        r"(\w+)\s*[;=]",  # 字段名
+    )
+
+    fields = []
+    for fm in field_pattern.finditer(body):
+        annotations_str = fm.group(1)
+        modifiers = fm.group(2)
+        java_type = fm.group(3)
+        java_name = fm.group(4)
+
+        if "static" in modifiers:
+            continue
+
+        column_name = None
+        is_id = False
+        exist = True
+
+        for ann_m in re.finditer(r"@([\w.]+)(?:\(([^)]*)\))?", annotations_str):
+            ann_name = ann_m.group(1).split(".")[-1]
+            ann_args = ann_m.group(2) or ""
+
+            if ann_name == "TableId":
+                is_id = True
+                vm = re.search(r'value\s*=\s*"([^"]+)"', ann_args)
+                if vm:
+                    column_name = vm.group(1)
+                else:
+                    pm = re.match(r'\s*"([^"]+)"', ann_args)
+                    if pm:
+                        column_name = pm.group(1)
+            elif ann_name == "TableField":
+                if re.search(r"exist\s*=\s*false", ann_args, re.IGNORECASE):
+                    exist = False
+                    continue
+                vm = re.search(r'value\s*=\s*"([^"]+)"', ann_args)
+                if vm:
+                    column_name = vm.group(1)
+                else:
+                    pm = re.match(r'\s*"([^"]+)"', ann_args)
+                    if pm:
+                        column_name = pm.group(1)
+
+        if not exist:
+            continue
+
+        if column_name is None:
+            column_name = camel_to_snake(java_name)
+
+        fields.append(PoFieldInfo(
+            java_name=java_name, column_name=column_name,
+            java_type=java_type, is_id=is_id,
+        ))
+
+    return PoClassInfo(
+        table_name=table_name, class_name=class_name,
+        file_path=file_path, fields=fields, extends_base=extends_base,
+    )
+
+
+def check_po_table_name(po: PoClassInfo, issues: list):
+    """检查 @TableName 表名规范。"""
+    name = po.table_name
+    ctx = {"file": po.file_path, "statement_id": po.class_name, "statement_type": "PO"}
+
+    if len(name) > 30:
+        issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="PO表名长度",
+            location=f"@TableName:{name}", description=f"表名长度 {len(name)} 超过 30",
+            suggestion="表名长度不得超过 30"))
+
+    if not re.match(r"^[a-z]", name):
+        issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="PO表名开头",
+            location=f"@TableName:{name}", description="表名必须以小写英文字母开头",
+            suggestion="表名必须以英文字母开头"))
+
+    if not re.match(r"^[a-z0-9_]+$", name):
+        issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="PO表名字符",
+            location=f"@TableName:{name}", description="表名必须使用小写英文字母、下划线及数字",
+            suggestion="表名仅使用小写字母、下划线和数字"))
+
+    if "__" in name:
+        issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="PO表名连续下划线",
+            location=f"@TableName:{name}", description="表名中不得出现连续下划线",
+            suggestion="移除连续下划线"))
+
+    if name.lower() in MYSQL_RESERVED:
+        issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="PO表名保留字",
+            location=f"@TableName:{name}", description=f"'{name}' 是 MySQL 保留字",
+            suggestion="避免使用数据库保留字作为表名"))
+
+
+def check_po_field_names(po: PoClassInfo, issues: list):
+    """检查 PO 字段映射的列名规范。"""
+    ctx = {"file": po.file_path, "statement_id": po.class_name, "statement_type": "PO"}
+    seen = set()
+
+    for f in po.fields:
+        name = f.column_name
+        loc = f"字段:{name} (Java:{f.java_name})"
+
+        if name in seen:
+            issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="PO字段重复",
+                location=loc, description=f"列名 '{name}' 在 PO 类中重复",
+                suggestion="检查 @TableField 映射，避免列名冲突"))
+        seen.add(name)
+
+        if len(name) > 30:
+            issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="PO字段名长度",
+                location=loc, description=f"列名长度 {len(name)} 超过 30",
+                suggestion="字段名长度不得超过 30"))
+
+        if not re.match(r"^[a-z]", name):
+            issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="PO字段名开头",
+                location=loc, description="列名必须以英文字母开头",
+                suggestion="字段名必须以英文字母开头"))
+
+        if not re.match(r"^[a-z0-9_]+$", name):
+            issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="PO字段名字符",
+                location=loc, description="列名必须使用小写字母、下划线及数字",
+                suggestion="字段名仅使用小写字母、下划线和数字"))
+
+        if "__" in name:
+            issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="PO字段名连续下划线",
+                location=loc, description="列名中不得出现连续下划线",
+                suggestion="移除连续下划线"))
+
+        if name.lower() in MYSQL_RESERVED:
+            issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="PO字段名保留字",
+                location=loc, description=f"'{name}' 是 MySQL 保留字",
+                suggestion="避免使用数据库保留字作为字段名"))
+
+
+def check_po_required_fields(po: PoClassInfo, issues: list):
+    """检查 PO 类是否包含必含字段。继承基础实体类时跳过。"""
+    if po.extends_base:
+        return
+
+    ctx = {"file": po.file_path, "statement_id": po.class_name, "statement_type": "PO"}
+    column_names = {f.column_name.lower() for f in po.fields}
+
+    for req in PO_REQUIRED_FIELDS:
+        if req not in column_names:
+            issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="PO必含字段缺失",
+                location=f"@TableName:{po.table_name}",
+                description=f"PO 类缺少必含字段 '{req}'",
+                suggestion=f"PO 类须包含字段: {req}（或在基础实体类中定义）"))
+
+    if PO_DEL_FLAG not in column_names:
+        issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="PO缺少del_flag",
+            location=f"@TableName:{po.table_name}",
+            description="PO 类缺少 del_flag 字段",
+            suggestion="PO 类须包含 del_flag 字段（或在基础实体类中定义）"))
+
+
+def find_po_files(path: str) -> list:
+    """查找带 @TableName 注解的 Java 文件。"""
+    java_files = []
+
+    if os.path.isfile(path):
+        if path.endswith(".java"):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    if "@TableName" in f.read():
+                        java_files = [path]
+            except (UnicodeDecodeError, OSError):
+                pass
+    elif os.path.isdir(path):
+        for dirpath, dirnames, filenames in os.walk(path):
+            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+            for fn in filenames:
+                if fn.endswith(".java"):
+                    full = os.path.join(dirpath, fn)
+                    try:
+                        with open(full, "r", encoding="utf-8") as f:
+                            if "@TableName" in f.read():
+                                java_files.append(full)
+                    except (UnicodeDecodeError, OSError):
+                        continue
+
+    return java_files
+
+
+def check_po_file(file_path: str):
+    """检查单个 Java PO 类文件。返回 issues 列表；非 PO 类返回 None。"""
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except (UnicodeDecodeError, OSError):
+        return None
+
+    po = parse_po_class(content, file_path)
+    if po is None:
+        return None
+
+    issues = []
+    check_po_table_name(po, issues)
+    check_po_field_names(po, issues)
+    check_po_required_fields(po, issues)
+
+    return issues
+
+
 # ── 报告格式 ────────────────────────────────────────────────────────────
 
 
@@ -518,25 +834,32 @@ def format_report_json(file_path: str, issues: list) -> str:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="MyBatis SQL 规范检查脚本 - 检查 mapper XML 中的 DQL/DML 语句"
+        description="MyBatis SQL 规范检查脚本 - 检查 mapper XML 和 MyBatis-Plus PO 类"
     )
-    parser.add_argument("path", nargs="?", default=".", help="MyBatis XML 文件或项目目录路径（默认当前目录）")
+    parser.add_argument("path", nargs="?", default=".", help="文件或项目目录路径（默认当前目录）")
     parser.add_argument("--format", choices=["text", "json"], default="text", help="输出格式")
     args = parser.parse_args()
 
-    files = find_mybatis_files(args.path)
+    xml_files = find_mybatis_files(args.path)
+    po_files = find_po_files(args.path)
 
-    if not files:
-        print(f"未找到 MyBatis mapper XML 文件: {args.path}", file=sys.stderr)
+    if not xml_files and not po_files:
+        print(f"未找到 MyBatis mapper XML 或 @TableName PO 类: {args.path}", file=sys.stderr)
         return 2
 
     all_issues = {}
     total_mandatory = 0
 
-    for f in sorted(files):
+    for f in sorted(xml_files):
         issues = check_file(f)
         all_issues[f] = issues
         total_mandatory += sum(1 for i in issues if i.severity == Severity.MANDATORY)
+
+    for f in sorted(po_files):
+        result = check_po_file(f)
+        if result is not None:
+            all_issues[f] = result
+            total_mandatory += sum(1 for i in result if i.severity == Severity.MANDATORY)
 
     if args.format == "json":
         results = []
@@ -547,7 +870,7 @@ def main():
         for f, issues in all_issues.items():
             print(format_report_text(f, issues))
         print(f"{'='*60}")
-        print(f"总计: {len(files)} 个文件, {sum(len(v) for v in all_issues.values())} 个问题 ({total_mandatory} 个强制)")
+        print(f"总计: {len(all_issues)} 个文件, {sum(len(v) for v in all_issues.values())} 个问题 ({total_mandatory} 个强制)")
         print(f"{'='*60}")
 
     return 1 if total_mandatory > 0 else 0

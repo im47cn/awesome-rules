@@ -33,7 +33,7 @@ python3 scripts/sql_check.py <目标文件或目录> [--format json]
 
 - `<目标文件或目录>`：用户项目中待审查的路径；不传则默认扫描当前目录
 - 退出码：`0`=通过，`1`=有强制问题，`2`=运行错误
-- `sql_check.py` 自动扫描 Java 项目目录中的 mapper XML，解析 `<if>`/`<where>`/`<foreach>` 等动态标签和 `<include>` 引用
+- `sql_check.py` 自动扫描 mapper XML（解析 `<if>`/`<where>`/`<foreach>` 等动态标签和 `<include>` 引用）以及 MyBatis-Plus `@TableName` 注解的 PO 类（检查表名/字段命名规范、必含字段）
 
 ### 第 2 步：补充人工判断
 

@@ -16,10 +16,10 @@ python3 scripts/ddl_check.py
 # 审查指定 DDL 文件
 python3 scripts/ddl_check.py path/to/file.sql
 
-# 审查所有 MyBatis SQL（Java 项目）
+# 审查所有 MyBatis SQL 和 PO 类（Java 项目）
 python3 scripts/sql_check.py
 
-# 审查指定 MyBatis SQL（Java 项目）
+# 审查指定路径
 python3 scripts/sql_check.py path/to/mapper_or_project/
 
 # JSON 格式输出
@@ -55,7 +55,7 @@ python3 scripts/sql_check.py path/to/project/ --format json
 ## 相关文件
 
 - 技能定义：[`SKILL.md`](SKILL.md)
-- 检查脚本：[`scripts/ddl_check.py`](scripts/ddl_check.py)（DDL）、[`scripts/sql_check.py`](scripts/sql_check.py)（MyBatis SQL）
+- 检查脚本：[`scripts/ddl_check.py`](scripts/ddl_check.py)（DDL）、[`scripts/sql_check.py`](scripts/sql_check.py)（MyBatis SQL + PO 类）
 - DDL 人工规则：[`ddl-manual-rules.md`](ddl-manual-rules.md)
 - SQL 人工规则：[`sql-manual-rules.md`](sql-manual-rules.md)
 - 设计规范：[`steering/database-design-specification.md`](../../steering/database-design-specification.md)
