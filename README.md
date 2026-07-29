@@ -10,8 +10,8 @@ awesome-rules/
 │   ├── database-design-specification.md   # 数据库设计开发规范（MySQL）
 │   └── api-standards.md                  # API 设计规范（RESTful）
 ├── skills/                            # AI Agent 技能
-│   ├── ddl-review/                    # DDL 设计与审查
-│   └── api-review/                    # API 设计与审查
+│   ├── ddl-guard/                     # DDL 设计与审查
+│   └── api-guard/                     # API 设计与审查
 ├── docs/                              # 文档
 │   └── ai-coding-tools-setup.md       # 插件安装指南
 ├── .claude-plugin/                    # Claude Code 插件清单
@@ -37,8 +37,8 @@ awesome-rules/
 
 | 技能 | 说明 |
 |---|---|
-| [ddl-review](skills/ddl-review/README.md) | MySQL DDL 设计与规范审查 |
-| [api-review](skills/api-review/README.md) | Open API 设计与规范审查 |
+| [ddl-guard](skills/ddl-guard/README.md) | MySQL DDL 设计与规范审查 |
+| [api-guard](skills/api-guard/README.md) | Open API 设计与规范审查 |
 
 各技能的详细文档、用法和检查规则见各自目录下的 README。
 

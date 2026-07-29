@@ -24,7 +24,7 @@ claude plugin marketplace add git@github.com:im47cn/awesome-rules.git
 claude plugin install awesome-rules@awesome-rules
 ```
 
-验证：`/status` 查看已加载插件。触发：对话中提到"审查 DDL""建表"等关键词，或 `@awesome-rules:ddl-review`。
+验证：`/status` 查看已加载插件。触发：对话中提到"审查 DDL""建表"等关键词，或 `@awesome-rules:ddl-guard`。
 
 > **易错点**：安装命令格式是 `插件名@市场名`，两者都是 `awesome-rules`。
 
@@ -78,5 +78,5 @@ Pi 通过 `.pi/extensions/` 下的 TS 扩展注册 skills 路径。无需手动�
 检查脚本依赖 Python 3（标准库，无第三方依赖）：
 
 ```bash
-python3 /path/to/awesome-rules/skills/ddl-review/scripts/ddl_check.py --help
+python3 /path/to/awesome-rules/skills/ddl-guard/scripts/ddl_check.py --help
 ```

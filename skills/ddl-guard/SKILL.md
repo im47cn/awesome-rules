@@ -1,5 +1,5 @@
 ---
-name: ddl-review
+name: ddl-guard
 description: >
   数据库 DDL 设计与规范审查。当用户提到以下任意意图时激活：审查数据库设计、
   审查DDL、审查SQL、审查建表语句、审查Mapper、审查PO类、数据库设计、设计表结构、

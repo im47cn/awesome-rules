@@ -1,4 +1,4 @@
-# ddl-review
+# ddl-guard
 
 MySQL DDL 设计与规范审查技能。
 

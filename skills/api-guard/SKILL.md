@@ -1,5 +1,5 @@
 ---
-name: api-review
+name: api-guard
 description: >
   Open API 设计与规范审查。当用户提到以下任意意图时激活：审查API、审查接口、
   API设计、接口设计、API规范、接口规范、检查API、检查接口、API审核、接口审核、
