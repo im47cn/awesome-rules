@@ -34,18 +34,7 @@ inclusion: always
 ❌ /payment/v1/cancel/132     ← path 传标识
 ```
 
-## 3. 统一请求头
-
-所有自定义 header 以 `x-` 前缀。
-
-| Header | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `x-appid` | String | 是 | 应用唯一标识 |
-| `x-sign` | String | 是 | 请求签名（hex 小写） |
-| `x-timestamp` | Long | 是 | 毫秒级时间戳（网关校验前后 5 分钟防重放） |
-| `x-nonce` | String | 是 | 随机字符串（32 位 UUID，Redis 防重放，窗口 5min） |
-
-## 4. 参数约定
+## 3. 参数约定
 
 - **命名**：字段统一 camelCase
 - **时间**：ISO 8601 带时区，如 `2026-07-18T11:49:52+08:00`
@@ -54,7 +43,28 @@ inclusion: always
 - **分页响应**：`{ total, pages, pageNum, list }`
 - **强类型**：禁止 `Map<String, Object>` 作为对外契约，必须有明确 DTO/Schema
 
-## 5. 统一响应体
+分页响应示例：
+
+```json
+{
+  "code": "SUCCESS",
+  "message": "操作成功",
+  "timestamp": "2026-07-18T11:49:52+08:00",
+  "traceId": "c0a80101-8c43-11e3-bc3d-000c2915b432",
+  "model": {
+    "pageNum": 1,
+    "pageSize": 20,
+    "total": 100,
+    "pages": 5,
+    "list": [
+      { "orderNo": "T202607170001", "status": "PAID" },
+      { "orderNo": "T202607170002", "status": "PENDING" }
+    ]
+  }
+}
+```
+
+## 4. 统一响应体
 
 所有 API（包括业务失败和平台异常）统一返回 **HTTP 200**，仅限流 429、网关故障 5xx 除外。
 
@@ -64,6 +74,7 @@ inclusion: always
 {
   "code": "SUCCESS",
   "message": "操作成功",
+  "timestamp": "2026-07-18T11:49:52+08:00",
   "traceId": "c0a80101-8c43-11e3-bc3d-000c2915b432",
   "model": {
     "orderNo": "T202607170001",
@@ -78,7 +89,10 @@ inclusion: always
 {
   "code": "200001",
   "message": "操作失败",
-  "subMessage": "xx 字段校验失败",
+  "details": [
+    { "field": "orderNo", "message": "订单号不能为空" }
+  ],
+  "timestamp": "2026-07-18T11:49:52+08:00",
   "traceId": "c0a80101-8c43-11e3-bc3d-000c2915b432"
 }
 ```
@@ -87,11 +101,12 @@ inclusion: always
 |---|---|
 | code | 业务状态码，`SUCCESS` 表示成功，其余为错误码 |
 | message | 面向商户的中文消息 |
-| subMessage | 调试用的详细信息（可选） |
+| details | 校验错误明细（字段名 + 规则说明），仅校验失败时返回 |
+| timestamp | ISO 8601 带时区时间戳 |
 | traceId | 全链路追踪 ID，排障必备 |
 | model | 业务数据（失败时无此字段） |
 
-## 6. 错误码
+## 5. 错误码
 
 格式：`2 位分类-[3 位业务编码-]-3 位编号`，如 `LGI-OPEN-001`
 
@@ -107,27 +122,7 @@ inclusion: always
 - 错误码集中注册，通过全局 `@ExceptionHandler` 统一兜底，禁止逐方法手写 try-catch
 - 参数校验信息须给出明确的参数名和规则要求
 
-## 7. 安全规范
-
-### 签名
-
-防篡改，使用 **HmacSHA256**（国密场景 SM3，国际业务 RSA2048）。
-
-待签名串拼接顺序：
-
-```
-HTTP_METHOD\n                         // 大写 POST
-CANONICAL_URI\n                       // 不含 query string，以 / 开头
-CANONICAL_QUERY_STRING\n              // key 升序，RFC 3986 编码
-APP_ID\n
-TIMESTAMP\n
-NONCE\n
-HASHED_PAYLOAD                        // SHA256(raw body bytes) hex 小写；GET 为 SHA256("")
-```
-
-签名 = `HmacSHA256(待签名串, appSecret)`，输出 hex 小写，填入 `x-sign`。
-
-> 针对原始 raw payload 字节计算摘要，网关端直接读取未解析 raw body 验签，不做 JSON 重解析。
+## 6. 安全规范
 
 ### 加密
 
@@ -140,17 +135,17 @@ HASHED_PAYLOAD                        // SHA256(raw body bytes) hex 小写；GET
 
 禁止认证信息、敏感字段的明文打印到日志。
 
-## 8. 幂等性
+## 7. 幂等性
 
 - 业务系统必须基于业务主键实现幂等保护（唯一索引、状态机校验）
 - 定义 API 时必须声明**业务幂等键字段**
 
-## 9. 变更规范
+## 8. 变更规范
 
 - 接口或字段**只允许增加，不允许删除**
 - 废弃时须标记 `@Deprecated` 并公告下线时间表
 
-## 10. 文档规范
+## 9. 文档规范
 
 - 使用 **OpenAPI 3**（`@Operation`/`@Schema`/`@Tag`，springdoc），逐步淘汰 Swagger 2
 - 注解即文档源：自动生成文档，禁止代码与文档两处维护
