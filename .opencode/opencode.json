@@ -2,6 +2,8 @@
   "$schema": "https://opencode.ai/config.json",
   "instructions": [
     "skills/ddl-review/SKILL.md",
-    "steering/database-design-specification.md"
+    "skills/api-review/SKILL.md",
+    "steering/database-design-specification.md",
+    "steering/api-standards.md"
   ]
 }
