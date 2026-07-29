@@ -16,6 +16,7 @@ import os
 import re
 import sys
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from enum import Enum
 
@@ -850,24 +851,31 @@ def main():
     all_issues = {}
     total_mandatory = 0
 
-    for f in sorted(xml_files):
-        issues = check_file(f)
-        all_issues[f] = issues
-        total_mandatory += sum(1 for i in issues if i.severity == Severity.MANDATORY)
+    def _check(file_path, is_po):
+        return check_po_file(file_path) if is_po else check_file(file_path)
 
-    for f in sorted(po_files):
-        result = check_po_file(f)
-        if result is not None:
-            all_issues[f] = result
-            total_mandatory += sum(1 for i in result if i.severity == Severity.MANDATORY)
+    all_target_files = [(f, False) for f in xml_files] + [(f, True) for f in po_files]
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        future_to_file = {
+            executor.submit(_check, f, is_po): f
+            for f, is_po in all_target_files
+        }
+        for future in as_completed(future_to_file):
+            f = future_to_file[future]
+            result = future.result()
+            if result is not None:
+                all_issues[f] = result
+                total_mandatory += sum(
+                    1 for i in result if i.severity == Severity.MANDATORY
+                )
 
     if args.format == "json":
         results = []
-        for f, issues in all_issues.items():
+        for f, issues in sorted(all_issues.items()):
             results.append(json.loads(format_report_json(f, issues)))
         print(json.dumps(results, ensure_ascii=False, indent=2))
     else:
-        for f, issues in all_issues.items():
+        for f, issues in sorted(all_issues.items()):
             print(format_report_text(f, issues))
         print(f"{'='*60}")
         print(f"总计: {len(all_issues)} 个文件, {sum(len(v) for v in all_issues.values())} 个问题 ({total_mandatory} 个强制)")

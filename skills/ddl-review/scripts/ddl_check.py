@@ -13,6 +13,7 @@ import json
 import os
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
@@ -942,19 +943,22 @@ def main():
     all_issues = {}
     total_mandatory = 0
 
-    for sql_file in sorted(sql_files):
-        issues = check_file(sql_file)
-        all_issues[sql_file] = issues
-        total_mandatory += sum(1 for i in issues if i.severity == Severity.MANDATORY)
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        future_to_file = {executor.submit(check_file, f): f for f in sorted(sql_files)}
+        for future in as_completed(future_to_file):
+            sql_file = future_to_file[future]
+            issues = future.result()
+            all_issues[sql_file] = issues
+            total_mandatory += sum(1 for i in issues if i.severity == Severity.MANDATORY)
 
     # Output
     if args.format == "json":
         results = []
-        for f, issues in all_issues.items():
+        for f, issues in sorted(all_issues.items()):
             results.append(json.loads(format_report_json(f, issues)))
         print(json.dumps(results, ensure_ascii=False, indent=2))
     else:
-        for f, issues in all_issues.items():
+        for f, issues in sorted(all_issues.items()):
             print(format_report_text(f, issues))
 
         # Summary
