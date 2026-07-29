@@ -1,0 +1,17 @@
+{
+  "name": "awesome-rules",
+  "owner": {
+    "name": "万联易达"
+  },
+  "metadata": {
+    "description": "研发规范与 AI Agent 技能库",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "awesome-rules",
+      "source": ".",
+      "description": "数据库 DDL 规范审查与设计指导，含自动化检查脚本"
+    }
+  ]
+}

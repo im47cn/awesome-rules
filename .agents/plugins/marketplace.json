@@ -1,0 +1,19 @@
+{
+  "name": "awesome-rules",
+  "interface": {
+    "displayName": "Awesome Rules"
+  },
+  "plugins": [
+    {
+      "name": "awesome-rules",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

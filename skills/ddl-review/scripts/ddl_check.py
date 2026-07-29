@@ -921,7 +921,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="DDL 规范检查脚本 - 检查 MySQL DDL 文件是否符合数据库设计开发规范"
     )
-    parser.add_argument("path", help="SQL 文件或目录路径")
+    parser.add_argument("path", nargs="?", default=".", help="SQL 文件或目录路径（默认当前目录）")
     parser.add_argument("--format", choices=["text", "json"], default="text", help="输出格式")
     args = parser.parse_args()
 
@@ -934,12 +934,9 @@ def main():
             for f in files:
                 if f.endswith(".sql"):
                     sql_files.append(os.path.join(root, f))
-    else:
-        print(f"错误: 路径不存在: {args.path}", file=sys.stderr)
-        return 2
 
     if not sql_files:
-        print(f"错误: 未找到 .sql 文件", file=sys.stderr)
+        print("未找到 .sql 文件", file=sys.stderr)
         return 2
 
     all_issues = {}

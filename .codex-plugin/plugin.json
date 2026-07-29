@@ -1,0 +1,9 @@
+{
+  "name": "awesome-rules",
+  "version": "1.0.0",
+  "description": "数据库 DDL 规范审查与设计指导，含自动化检查脚本",
+  "author": {
+    "name": "万联易达"
+  },
+  "skills": "./skills/"
+}

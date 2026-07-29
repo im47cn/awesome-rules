@@ -1,0 +1,18 @@
+{
+  "name": "awesome-rules",
+  "displayName": "Awesome Rules",
+  "version": "1.0.0",
+  "description": "数据库 DDL 规范审查与设计指导，含自动化检查脚本",
+  "author": {
+    "name": "万联易达"
+  },
+  "homepage": "https://github.com/im47cn/awesome-rules",
+  "license": "Apache-2.0",
+  "keywords": [
+    "database",
+    "ddl",
+    "code-review",
+    "mysql",
+    "schema"
+  ]
+}

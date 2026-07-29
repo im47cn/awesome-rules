@@ -11,6 +11,15 @@ awesome-rules/
 │   └── api-standards.md                  # API 设计规范（RESTful）
 ├── skills/                            # AI Agent 技能
 │   └── ddl-review/                    # DDL 设计与审查
+├── docs/                              # 文档
+│   └── ai-coding-tools-setup.md       # 插件安装指南
+├── .claude-plugin/                    # Claude Code 插件清单
+├── .codex-plugin/                     # Codex CLI 插件清单
+├── .cursor-plugin/                    # Cursor 插件清单
+├── .kimi-plugin/                      # Kimi 插件清单
+├── .grok-plugin/                      # Grok 插件清单
+├── .opencode/                         # OpenCode 配置
+├── .pi/extensions/                    # Pi 扩展
 └── README.md
 ```
 
@@ -31,16 +40,6 @@ awesome-rules/
 
 各技能的详细文档、用法和检查规则见各自目录下的 README。
 
-## 协作流程
+## 安装
 
-```
-开发人员编写 DDL
-       │
-       ▼
-运行 ddl_check.py 自检 ──── 通过 ──→ 提交审核
-       │
-     未通过
-       │
-       ▼
-按报告修复 ──→ 重新自检
-```
+本仓库已适配多种 AI 编程工具的插件格式，支持一行命令安装。详见 [插件安装指南](docs/ai-coding-tools-setup.md)。

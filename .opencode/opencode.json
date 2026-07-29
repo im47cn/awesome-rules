@@ -1,0 +1,7 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    "skills/ddl-review/SKILL.md",
+    "steering/database-design-specification.md"
+  ]
+}
