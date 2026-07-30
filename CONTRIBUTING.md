@@ -87,10 +87,12 @@ skills/{skill-name}/
 ├── *-manual-rules.md             # 脚本无法覆盖、需人工核对的规则清单
 ├── scripts/                      # 检查脚本（Python 3 标准库，无第三方依赖）
 │   └── xxx_check.py
-├── steering -> ../../steering/   # 规范引用（实际通过相对路径引用）
-├── test/                         # 测试文件
-│   ├── *.sql / *.java / *.xml    # 正常样例
-└── badcase/                      # 反例用例（见下方专章）
+├── badcase/                      # 反例用例（见下方专章）
+│   └── {NN-xxx}/
+│       ├── input/               #   共享待审查文件
+│       ├── expected.md          #   期望结果（只写一次）
+│       └── prompts.md           #   提示词集 + 已知问题
+└── test/                         # 测试文件（正常样例）
 ```
 
 ### 新建技能
@@ -147,30 +149,75 @@ description: >
 
 ### 目录约定
 
-每个技能在 `badcase/` 下维护反例，**一个子目录一个 badcase**：
+每个技能在 `badcase/` 下维护反例，**一个子目录一个 badcase**。一个 badcase 共享一份 `input/`，期望结果只写一次（`expected.md`），提示词集中在 `prompts.md` 中维护：
 
 ```
 skills/{skill-name}/badcase/
-├── {序号}-{简短描述}/          # 例：001-missing-column-comment
-│   ├── prompt.md              # 【必需】触发审查的提示词
-│   ├── input/                 # 【必需】待审查文件（1 个或多个）
-│   │   └── example.sql        #   文件类型结合具体技能
-│   └── expected.md            # 【推荐】期望检出的违规项及对应规则
+├── {序号}-{简短描述}/              # 例：001-missing-column-comment
+│   ├── input/                     # 【必需】待审查文件
+│   │   └── example.sql
+│   ├── expected.md                # 【必需】期望结果（check 脚本 + 规则列表）
+│   └── prompts.md                 # 【推荐】提示词集 + 已知问题
 └── {序号}-{简短描述}/
     └── …
 ```
 
-### 文件说明
+### expected.md 格式
 
-| 文件 | 必需 | 作用 |
-| --- | --- | --- |
-| `prompt.md` | ✅ | 模拟用户发起审查时的原话提示词，应贴近真实使用场景（如"帮我审查这个建表语句"） |
-| `input/` | ✅ | 待审查的源文件，内含故意埋入的违规点；文件设计需结合具体项目 |
-| `expected.md` | 推荐 | 期望检出的违规清单（规则编号 + 违规描述），用于人工或自动化比对实际审查结果 |
+期望结果只写一次，所有提示词共享：
+
+```markdown
+# badcase 标题（可选）
+
+check: ddl_check.py
+
+- 禁用类型
+- 表注释缺失
+- 字段注释缺失
+```
+
+- `check:` — 指定运行的检查脚本文件名（如 `ddl_check.py`）；不填则自动运行该技能的全部 `*_check.py`
+- `- xxx` — 期望检出的规则名称，与脚本 JSON 输出中的 `rule` 字段对应；子串匹配，无需逐字一致
+- 列出的规则 **全部被检出才算通过**；实际多检出不算失败
+
+> 快速获取规则名称：对 `input/` 运行 `python3 scripts/xxx_check.py input/ --format json`，查看输出的 `rule` 字段。
+
+### prompts.md 格式
+
+提示词集中在一个文件中，每条一行。`## 已知问题` 下记录不可自动验证的问题（如提示词无法激活 skill），不影响通过/失败判定：
+
+```markdown
+# 提示词集
+
+- 帮我审查这个建表语句。
+- 审查一下这个 DDL。
+- 这个表设计有没有什么问题？
+
+## 已知问题
+
+- 提示词"这个表设计有没有什么问题？"缺少触发关键词，skill 可能不会被激活。建议在 description 中补充口语化表达。
+```
+
+### 回归测试工具
+
+发版前运行回归测试，一键验证所有 badcase 是否通过：
+
+```bash
+# 运行全部 badcase
+python3 scripts/badcase_runner.py
+
+# 只运行指定技能
+python3 scripts/badcase_runner.py --skill ddl-guard
+
+# 显示实际检出详情
+python3 scripts/badcase_runner.py --verbose
+```
+
+退出码 `0` = 全部通过，`1` = 存在失败，可直接集成到 CI。
 
 ### 命名规范
 
-- 子目录名：`{三位序号}-{英文短描述}`，如 `001-missing-column-comment`、`002-wrong-http-method`
+- badcase 子目录名：`{三位序号}-{英文短描述}`，如 `001-missing-column-comment`
 - 序号在当前技能内递增，不复用
 
 ### 什么时候添加 badcase
@@ -193,10 +240,12 @@ skills/{skill-name}/badcase/
 ### 贡献流程
 
 1. 在对应技能的 `badcase/` 下新建子目录（序号取当前最大值 +1）
-2. 编写 `prompt.md`（提示词）和 `input/`（待审查文件）
-3. 补充 `expected.md`（期望检出的违规项）
-4. 用技能实际跑一遍，确认审查结果与预期一致
-5. 提交 MR，标题 `[技能名] 添加 badcase: {描述}`，在描述中说明覆盖了哪些规则
+2. 在 `input/` 放入待审查文件
+3. 对 `input/` 运行检查脚本，记录实际检出的规则名称
+4. 编写 `expected.md`（用 `check:` 指定脚本，`- xxx` 列出期望规则）
+5. 编写 `prompts.md`（列出提示词，有已知问题则补充 `## 已知问题`）
+6. 运行 `python3 scripts/badcase_runner.py --skill {技能名}` 确认通过
+7. 提交 MR，标题 `[技能名] 添加 badcase: {描述}`
 
 ### 关于插件分发
 
@@ -217,5 +266,6 @@ skills/{skill-name}/badcase/
 - [ ] 修改了规范文件 → 已通知关联技能同步更新
 - [ ] 新增 / 修改了检查脚本 → 已用 `test/` 下样例验证
 - [ ] 修复了脚本的漏报 / 误报 → 已添加对应 badcase 防回归
+- [ ] 新增 / 修改了 badcase → 已运行 `python3 scripts/badcase_runner.py` 验证通过
 - [ ] 新增了技能 → 已在根 README 注册
 - [ ] 文档与代码实际行为一致

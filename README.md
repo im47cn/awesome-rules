@@ -12,8 +12,11 @@ awesome-rules/
 ├── skills/                            # AI Agent 技能
 │   ├── ddl-guard/                     # DDL 设计与审查
 │   └── api-guard/                     # API 设计与审查
+├── scripts/                           # 工具脚本
+│   └── badcase_runner.py              # Badcase 回归测试
 ├── docs/                              # 文档
 │   └── ai-coding-tools-setup.md       # 插件安装指南
+├── CONTRIBUTING.md                    # 贡献指南
 ├── .claude-plugin/                    # Claude Code 插件清单
 ├── .codex-plugin/                     # Codex CLI 插件清单
 ├── .cursor-plugin/                    # Cursor 插件清单

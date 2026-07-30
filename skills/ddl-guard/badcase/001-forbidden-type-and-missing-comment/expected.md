@@ -1,0 +1,8 @@
+# ddl-guard badcase 001 — 禁用类型 + 缺注释 + 缺必含字段
+
+check: ddl_check.py
+
+- 禁用类型
+- 表注释缺失
+- 字段注释缺失
+- 必含字段缺失
