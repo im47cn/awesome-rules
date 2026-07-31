@@ -1,10 +1,12 @@
 {
   "name": "awesome-rules",
-  "description": "DDL 数据库与 API 规范审查与设计指导，含自动化检查脚本",
+  "description": "研发规范与 AI Agent 技能库：DDL/SQL 审查、API 审查，包含测试、数据库、API、Git 四大规范自动注入",
   "version": "1.0.0",
   "author": {
     "name": "万联易达"
   },
   "homepage": "https://github.com/im47cn/awesome-rules",
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json"
 }

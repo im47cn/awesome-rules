@@ -3,7 +3,11 @@
   "instructions": [
     "skills/ddl-guard/SKILL.md",
     "skills/api-guard/SKILL.md",
+    "skills/arch-guard/SKILL.md",
     "steering/database-design-specification.md",
-    "steering/api-standards.md"
+    "steering/api-standards.md",
+    "steering/testing-standards.md",
+    "steering/git-conventions.md",
+    "steering/ddd-architecture.md"
   ]
 }
