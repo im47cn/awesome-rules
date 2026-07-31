@@ -258,6 +258,45 @@ python3 scripts/badcase_runner.py --verbose
 
 ---
 
+## 四、本地调试
+
+开发技能或规范后，需要在本地安装插件以验证实际效果。各工具的安装方式如下。
+
+### Claude Code
+
+从本地路径注册 marketplace 并安装插件：
+
+```bash
+# 在 awesome-rules 仓库根目录执行
+claude plugins marketplace add ./
+claude plugins install awesome-rules
+```
+
+安装后技能即刻生效。修改 `SKILL.md` 或脚本后无需重新安装（插件从源路径实时加载）。
+
+```bash
+# 查看已安装插件
+claude plugins list
+
+# 更新插件（拉取最新代码后）
+claude plugins update awesome-rules
+
+# 卸载
+claude plugins uninstall awesome-rules
+```
+
+### Codex
+
+```bash
+codex plugins install .
+```
+
+### Cursor / Kimi / Grok
+
+这三个工具通过 marketplace.json 安装。本地调试时，将插件目录链接或复制到工具的插件目录下即可。具体路径参考各工具的插件管理文档。
+
+---
+
 ## 检查清单
 
 提交 MR 前对照检查：
