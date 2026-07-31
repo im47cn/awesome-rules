@@ -1,0 +1,1145 @@
+#!/usr/bin/env python3
+"""
+DDD 架构分层守护脚本
+检查 Java 项目分层依赖是否违反 COLA/DDD 架构规范。
+
+用法:
+  python3 arch_check.py <project_root> [--format json] [--strict] [--config .arch-guard.json]
+  python3 arch_check.py <project_root> --baseline .arch-guard-baseline.json   # 仅报新增违规
+  python3 arch_check.py <project_root> --update-baseline .arch-guard-baseline.json  # 更新基线
+  python3 arch_check.py --mode graph          # 输出 Tier 2 知识图谱 Cypher 查询清单
+
+退出码: 0=通过, 1=有强制问题, 2=运行错误
+"""
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import sys
+import xml.etree.ElementTree as ET
+from collections import defaultdict
+from dataclasses import dataclass, field
+from enum import Enum
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# ── 配置默认值 ─────────────────────────────────────────────────────────────
+
+DEFAULT_CONFIG = {
+    "project_package_prefix": "",
+    "layer_paths": {
+        "adapter":        ["/adapter/"],
+        "client":         ["/client/"],
+        "application":    ["/application/"],
+        "domain":         ["/domain/"],
+        "infrastructure": ["/infrastructure/"],
+    },
+    # COLA 4.0 原生 web 层命名为 interfaces（开箱即用，无需配置）
+    "layer_aliases": {
+        "interfaces": "adapter",
+    },
+    "module_suffixes": {
+        "adapter":        "adapter",
+        "start":          "start",
+        "client":         "client",
+        "app":            "application",
+        "domain":         "domain",
+        "infrastructure": "infrastructure",
+        "infra":          "infrastructure",
+    },
+    "domain_forbidden_pom": [
+        "org.springframework.boot:spring-boot-starter",
+        "org.springframework:spring-context",
+        "org.mybatis:mybatis",
+        "org.mybatis.spring.boot:mybatis-spring-boot-starter",
+        "com.baomidou:mybatis-plus",
+        "com.baomidou:mybatis-plus-boot-starter",
+        "org.hibernate:hibernate-core",
+    ],
+    "domain_forbidden_imports": [
+        "org.springframework",
+        "org.mybatis",
+        "com.baomidou.mybatisplus",
+        "com.baomidou.mybatis",
+        "org.hibernate",
+        "org.apache.ibatis",
+    ],
+    "domain_allowed_imports": [
+        "jakarta.persistence",
+        "javax.persistence",
+    ],
+    # 务实 DDD：领域层允许使用的注解类框架包（仅注解，不含业务类）
+    "domain_annotation_imports": [
+        "org.springframework.stereotype",
+        "org.springframework.transaction.annotation",
+    ],
+}
+
+SKIP_DIRS = {
+    "target", "build", ".git", "node_modules", ".idea", ".vscode",
+    ".gradle", ".mvn", "dist", "out", ".next", ".nuxt", "test", "tests",
+}
+
+MAVEN_NS = "http://maven.apache.org/POM/4.0.0"
+
+
+# ── 规则代码（建议 fingerprint 纳入 code，中文 rule 保留为展示字段） ──────
+
+DEP_DIRECTION    = "DEP_DIRECTION"
+DOMAIN_PURITY    = "DOMAIN_PURITY"
+DOMAIN_PURITY_POM = "DOMAIN_PURITY_POM"
+NAMING           = "NAMING"
+ADAPTER_ISOLATION = "ADAPTER_ISOLATION"
+MAVEN_MODULE_DEP = "MAVEN_MODULE_DEP"
+CROSS_DOMAIN_DEP = "CROSS_DOMAIN_DEP"
+
+
+class Severity(Enum):
+    MANDATORY = "强制"
+    RECOMMENDED = "推荐"
+    STRUCTURAL_DEBT = "结构性债务"
+
+
+@dataclass
+class Issue:
+    file: str
+    line: int
+    severity: Severity
+    rule: str
+    description: str
+    rule_code: str = ""   # 英文字段，便于 CI/IDE 程序化解析（如 DEP_DIRECTION）
+    suggestion: str = ""
+
+
+# ── 调试/警告基础设施 ──────────────────────────────────────────────────────
+
+_debug_enabled = False
+_warnings: list[str] = []
+
+
+def _debug(msg: str):
+    if _debug_enabled:
+        print(f"[DEBUG] {msg}", file=sys.stderr)
+
+
+def _warn(msg: str):
+    _warnings.append(msg)
+    _debug(msg)
+
+
+# ── 配置加载 ────────────────────────────────────────────────────────────────
+
+def load_config(project_root: str, config_path: str | None) -> dict:
+    cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+
+    if config_path is None:
+        candidate = os.path.join(project_root, ".arch-guard.json")
+        if os.path.isfile(candidate):
+            config_path = candidate
+
+    if config_path and os.path.isfile(config_path):
+        with open(config_path, "r", encoding="utf-8") as fp:
+            overrides = json.load(fp)
+        _deep_merge(cfg, overrides)
+
+    return cfg
+
+
+def _deep_merge(base: dict, overrides: dict):
+    for k, v in overrides.items():
+        if k in base and isinstance(base[k], dict) and isinstance(v, dict):
+            _deep_merge(base[k], v)
+        else:
+            base[k] = v
+
+
+# ── 层/域识别 ──────────────────────────────────────────────────────────────
+
+def _build_layer_patterns(cfg: dict) -> list[tuple[str, re.Pattern]]:
+    patterns = []
+    for name, paths in cfg["layer_paths"].items():
+        for p in paths:
+            patterns.append((name, re.compile(re.escape(p))))
+    return patterns
+
+
+def identify_layer(file_path: str, layer_patterns: list[tuple[str, re.Pattern]],
+                   cfg: dict) -> str | None:
+    for name, pattern in layer_patterns:
+        if pattern.search(file_path):
+            return name
+    for alias, target in cfg["layer_aliases"].items():
+        if f"/{alias}/" in file_path:
+            return target
+    return None
+
+
+def _identify_module_layer(artifact_id: str, cfg: dict) -> str | None:
+    for suffix, layer in cfg["module_suffixes"].items():
+        if f"-{suffix}" in artifact_id or f"_{suffix}" in artifact_id or artifact_id.endswith(suffix):
+            return layer
+    return None
+
+
+def _identify_business_domain(artifact_id: str, pom_rel_path: str, cfg: dict) -> str | None:
+    parts = pom_rel_path.replace("\\", "/").split("/")
+    all_suffixes = set(cfg["module_suffixes"].keys())
+    exclude_dirs = {"src", "target", "build"}
+    if len(parts) >= 2:
+        candidate = parts[0]
+        if candidate not in exclude_dirs and not any(
+            candidate.endswith(f"-{s}") or candidate == s for s in all_suffixes
+        ):
+            return candidate
+    for suffix in list(all_suffixes) + ["common"]:
+        full = f"-{suffix}"
+        if artifact_id.endswith(full):
+            return artifact_id[:-len(full)]
+    return None
+
+
+# ── Maven pom 解析 ──────────────────────────────────────────────────────────
+
+def _pom_tag(tag: str) -> str:
+    return f"{{{MAVEN_NS}}}{tag}"
+
+
+def _parse_artifact_id(pom_file: str) -> str | None:
+    try:
+        tree = ET.parse(pom_file)
+        root = tree.getroot()
+        artifact = root.find(_pom_tag("artifactId"))
+        if artifact is not None and artifact.text:
+            return artifact.text.strip()
+        parent = root.find(_pom_tag("parent"))
+        if parent is not None:
+            artifact = parent.find(_pom_tag("artifactId"))
+            if artifact is not None and artifact.text:
+                return artifact.text.strip()
+    except Exception as e:
+        _debug(f"跳过 pom 解析 ({pom_file}): {e}")
+    return None
+
+
+def _parse_module_dependencies(pom_file: str) -> list[tuple[str, str]]:
+    deps = []
+    try:
+        tree = ET.parse(pom_file)
+        root = tree.getroot()
+        for dep_elem in root.findall(f".//{_pom_tag('dependencies')}/{_pom_tag('dependency')}"):
+            gid = dep_elem.find(_pom_tag("groupId"))
+            aid = dep_elem.find(_pom_tag("artifactId"))
+            if gid is not None and aid is not None and gid.text and aid.text:
+                deps.append((aid.text.strip(), f"{gid.text.strip()}:{aid.text.strip()}"))
+    except Exception as e:
+        _debug(f"跳过 pom 依赖解析 ({pom_file}): {e}")
+    return deps
+
+
+def _collect_poms(project_root: str) -> list[str]:
+    pom_files = []
+    for dirpath, dirnames, filenames in os.walk(project_root):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        for f in filenames:
+            if f == "pom.xml":
+                pom_files.append(os.path.join(dirpath, f))
+    return pom_files
+
+
+# ── 模块内层推断（artifact-id 无层后缀时） ────────────────────────────────
+
+def _infer_layer_from_packages(pom_file: str, layer_patterns: list[tuple[str, re.Pattern]],
+                               cfg: dict) -> str | None:
+    module_dir = os.path.dirname(pom_file)
+    src_java = os.path.join(module_dir, "src", "main", "java")
+    if not os.path.isdir(src_java):
+        return None
+
+    found_layers: dict[str, int] = defaultdict(int)
+    for dirpath, dirnames, _ in os.walk(src_java):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        for d in dirnames:
+            for name, _ in layer_patterns:
+                if d == name:
+                    found_layers[name] += 1
+
+    if not found_layers:
+        return None
+    return max(found_layers, key=found_layers.get)
+
+
+# ── import 提取（含行号） ──────────────────────────────────────────────────
+
+IMPORT_PATTERN = re.compile(r"^import\s+([\w.]+)", re.MULTILINE)
+
+
+def extract_imports_with_lines(content: str) -> list[tuple[str, int]]:
+    return [(m.group(1), content[:m.start()].count("\n") + 1)
+            for m in IMPORT_PATTERN.finditer(content)]
+
+
+# ── suggestion 分流（按 callee 性质给不同修复方向） ───────────────────────
+
+def _is_contract_object(imp_lower: str) -> bool:
+    """判断 import 目标是否为契约对象（DTO/Command/Query）。
+
+    单模块项目中这些类属于结构性债务——缺少独立 client 模块导致契约对象
+    被其他层引用。不应与真正的层间逆向依赖混在一起报强制违规。
+    """
+    return any(kw in imp_lower for kw in (
+        ".model.command.", ".model.dto.", ".model.query.",
+        ".model.request.", ".model.response.",
+        ".dto.", ".command.", ".query.", ".co.",
+    ))
+
+
+def _dep_direction_suggestion(source_layer: str, target_layer: str, imp: str) -> str:
+    """根据被引用类的性质分流修复建议，避免误导（如对枚举建议"抽接口"）。"""
+    imp_lower = imp.lower()
+
+    # 契约对象（DTO/Command/Query）——单模块项目结构性债务
+    if _is_contract_object(imp_lower):
+        return (f"被引用的 {imp.split('.')[-1]} 是契约对象（Command/DTO/Query），"
+                f"属于单模块结构性债务——应拆分为独立 client 模块后消除此依赖。"
+                f"当前阶段不计入强制违规，但应列入拆分计划")
+
+    # 业务数据型：异常、常量、枚举——不属于"服务依赖"范畴
+    if any(kw in imp_lower for kw in (".exception.", ".exceptions.",
+                                        ".constant.", ".constants.",
+                                        ".enums.", ".enum.",
+                                        ".errorcode", ".error_code",
+                                        ".dict.", ".dictionary.")):
+        return (f"被引用的 {imp.split('.')[-1]} 是业务数据型类（异常/常量/枚举），"
+                f"应将其上移至 domain.shared 或拆分为独立模块，而非反向依赖")
+
+    # 工具类 / 静态辅助方法
+    if any(kw in imp_lower for kw in (".util.", ".utils.", ".helper.", ".helpers.")):
+        return (f"被引用的 {imp.split('.')[-1]} 是工具类，应将其上移至 domain.shared.util，"
+                f"或改为纯 JDK 实现（无第三方依赖）")
+
+    # 领域服务类：编排应在 Application Executor
+    if imp_lower.endswith("domainservice"):
+        return f"编排应在 Application Executor 完成，{source_layer} 不直接依赖领域服务"
+
+    # 默认：服务/组件类，建议反向依赖
+    return f"反转依赖方向：{target_layer} 定义接口，{source_layer} 通过依赖注入使用"
+
+
+def _domain_purity_suggestion(imp: str) -> str:
+    """领域层纯净度违规的修复建议，按 import 性质分流。"""
+    imp_lower = imp.lower()
+
+    # MyBatis-Plus 注解类（@TableName、@TableField 等）——实体本身无法下沉
+    if "com.baomidou.mybatisplus.annotation" in imp_lower:
+        return ("MyBatis-Plus 实体注解（@TableName/@TableField）无法从领域实体移除。"
+                "方案：(1) 改用 XML 映射，实体纯 POJO；(2) 接受此违规并在 baseline 中登记为已知例外")
+
+    # Spring 事务注解
+    if "transaction" in imp_lower and ("annotation" in imp_lower or "Transactional" in imp_lower):
+        return ("@Transactional 属于 AOP 注解（不引入 Spring Bean 依赖），"
+                "若团队接受领域层使用事务注解，请在 domain_annotation_imports 中添加此包")
+
+    # 通用 Spring 工具
+    if "org.springframework.util" in imp_lower or "org.springframework.beans" in imp_lower:
+        return (f"引用 Spring 工具类 {imp}。"
+                "若为纯工具方法（无 Bean 依赖），复制实现到 domain 或改用 JDK 等价写法")
+
+    return "将框架相关逻辑下沉到 infrastructure 层，仓储实现通过依赖倒置接入"
+
+def check_domain_purity(file_path: str, content: str, cfg: dict) -> list[Issue]:
+    issues = []
+    forbidden = cfg["domain_forbidden_imports"]
+    allowed = set(cfg["domain_allowed_imports"])
+    annotations = set(cfg.get("domain_annotation_imports", []))
+
+    for imp, line in extract_imports_with_lines(content):
+        is_forbidden = any(imp.startswith(p) for p in forbidden)
+        if not is_forbidden:
+            continue
+        if any(imp.startswith(p) for p in allowed):
+            continue
+        if any(imp.startswith(p) for p in annotations):
+            continue
+        issues.append(Issue(
+            file=file_path, line=line, severity=Severity.MANDATORY,
+            rule="领域层纯净度", rule_code=DOMAIN_PURITY,
+            description=f"领域层禁止导入: {imp}",
+            suggestion=_domain_purity_suggestion(imp),
+        ))
+    return issues
+
+
+# ── 检查 2: 依赖方向（仅项目内部 import） ─────────────────────────────────
+
+# 无 project_package_prefix 时用于排除第三方包（回退启发式）
+_THIRD_PARTY_PREFIXES = (
+    "java.", "javax.", "jakarta.", "org.springframework.", "org.mybatis.",
+    "com.baomidou.", "org.hibernate.", "org.apache.", "com.fasterxml.",
+    "com.google.", "lombok.", "org.slf4j.", "ch.qos.logback.", "io.swagger.",
+    "io.github.", "cn.hutool.", "org.mapstruct.", "javax.annotation.",
+    "org.junit.", "org.mockito.", "org.aspectj.", "net.bytebuddy.",
+    "org.assertj.", "org.hamcrest.", "org.testng.",
+    "org.springframework.boot.test", "org.springframework.test",
+    "org.jetbrains.annotations", "javax.inject",
+)
+
+
+def _is_internal_import(imp: str, prefix: str) -> bool:
+    if prefix:
+        return imp.startswith(prefix)
+    return not imp.startswith(_THIRD_PARTY_PREFIXES)
+
+
+# Java import 层间依赖规则矩阵
+# 含义：行（source_layer）的代码中 import 列（target_layer）的类，是否允许？
+# 与 _MAVEN_DEP_MATRIX 的区别：本矩阵刻画 Java 文件级 import（同模块内），
+# _MAVEN_DEP_MATRIX 刻画 Maven pom.xml 级依赖（跨模块）。
+# 例如 client 层自身模块内可以互相 import (client→client=True)，
+# 但跨模块时 client 不应依赖其他 client 模块 (client→client=False)。
+_DEPENDENCY_RULES = {
+    "adapter": {"client": True, "application": True, "domain": False, "infrastructure": False},
+    "client": {"client": True, "application": False, "domain": False, "infrastructure": False},
+    "application": {"domain": True, "infrastructure": True, "client": True, "adapter": False, "application": True},
+    "domain": {"domain": True, "client": False, "adapter": False, "application": False, "infrastructure": False},
+    "infrastructure": {"domain": True, "infrastructure": True, "adapter": False, "client": False, "application": False},
+}
+
+# Maven 模块依赖矩阵（pom.xml <dependency> 级，跨模块）
+_MAVEN_DEP_MATRIX = {
+    "adapter": {"client": True, "application": True, "domain": False, "infrastructure": False, "start": False},
+    "start": {"adapter": True, "client": True, "application": True, "domain": True, "infrastructure": True, "start": False},
+    "client": {"client": False, "application": False, "domain": False, "infrastructure": False, "adapter": False, "start": False},
+    "application": {"domain": True, "infrastructure": True, "client": True, "adapter": False, "start": False, "application": False},
+    "domain": {"domain": False, "application": False, "infrastructure": False, "client": False, "adapter": False, "start": False},
+    "infrastructure": {"domain": True, "infrastructure": False, "client": False, "application": False, "adapter": False, "start": False},
+}
+
+
+def check_dependency_direction(file_path: str, source_layer: str, content: str,
+                               layer_patterns: list, cfg: dict) -> list[Issue]:
+    """检查各层 Java import 逆向依赖（仅分析项目内部 import）。"""
+    issues = []
+    prefix = cfg.get("project_package_prefix", "")
+    all_imports = extract_imports_with_lines(content)
+    internal_imports = [(imp, line) for imp, line in all_imports
+                        if _is_internal_import(imp, prefix)]
+
+    for imp, line in internal_imports:
+        imp_path = imp.replace(".", "/") + ".java"
+        # P0-4: 复用 identify_layer 获得 alias 感知的 target 层识别
+        target_layer = identify_layer(imp_path, layer_patterns, cfg)
+        if target_layer is None or target_layer == source_layer:
+            continue
+        allowed = _DEPENDENCY_RULES.get(source_layer, {}).get(target_layer, True)
+        if not allowed:
+            # 契约对象（Command/DTO/Query）被跨层引用——单模块项目结构性债务，
+            # 不是真正的服务依赖逆向。独立计数，不影响门禁。
+            severity = Severity.STRUCTURAL_DEBT if _is_contract_object(imp.lower()) else Severity.MANDATORY
+            description = (f"{source_layer} 层禁止依赖 {target_layer} 层: import {imp}"
+                           if severity == Severity.MANDATORY else
+                           f"[结构性债务] {source_layer} → {target_layer}: import {imp}"
+                           f"（契约对象，缺少独立 client 模块）")
+            issues.append(Issue(
+                file=file_path, line=line, severity=severity,
+                rule="依赖方向", rule_code=DEP_DIRECTION,
+                description=description,
+                suggestion=_dep_direction_suggestion(source_layer, target_layer, imp),
+            ))
+    return issues
+
+
+# ── 检查 3: 命名后缀 ──────────────────────────────────────────────────────
+
+CLASS_PATTERN = re.compile(r"(?:class|interface|enum|@interface)\s+(\w+)", re.MULTILINE)
+
+# 后缀必须前接小写字母，避免误匹配
+_SUFFIX_RULES = [
+    (re.compile(r"(?<=[a-z])Cmd$"),            "client",         Severity.MANDATORY,   "Command 对象应在 client 层"),
+    (re.compile(r"(?<=[a-z])Query$"),           "client",         Severity.MANDATORY,   "Query 对象应在 client 层"),
+    (re.compile(r"(?<=[a-z])CO$"),              "client",         Severity.MANDATORY,   "Client Object 应在 client 层"),
+    (re.compile(r"(?<=[a-z])ServiceI$"),        "client",         Severity.MANDATORY,   "API 服务接口应在 client 层"),
+    (re.compile(r"(?<=[a-z])CmdExe$"),          "application",    Severity.MANDATORY,   "命令执行器应在 application 层"),
+    (re.compile(r"(?<=[a-z])QryExe$"),          "application",    Severity.MANDATORY,   "查询执行器应在 application 层"),
+    (re.compile(r"(?<=[a-z])Assembler$"),       "application",    Severity.RECOMMENDED, "组装器应在 application 层"),
+    (re.compile(r"(?<=[a-z])E$"),              "domain",         Severity.MANDATORY,   "领域实体应在 domain 层"),
+    (re.compile(r"(?<=[a-z])V$"),              "domain",         Severity.MANDATORY,   "值对象应在 domain 层"),
+    (re.compile(r"(?<=[a-z])DomainService$"),   "domain",         Severity.MANDATORY,   "领域服务应在 domain 层"),
+    (re.compile(r"(?<=[a-z])Repository$"),      "domain",         Severity.MANDATORY,   "仓储接口应在 domain 层"),
+    (re.compile(r"(?<=[a-z])ExtPt$"),           "domain",         Severity.MANDATORY,   "扩展点接口应在 domain 层"),
+    (re.compile(r"(?<=[a-z])DO$"),             "infrastructure", Severity.MANDATORY,   "数据对象应在 infrastructure 层"),
+    (re.compile(r"(?<=[a-z])Ext$"),            "infrastructure", Severity.RECOMMENDED, "扩展点实现应在 infrastructure 层"),
+]
+
+_NAMING_EXCLUDE_STARTSWITH = (
+    "Hibernate", "Abstract", "Base", "Simple", "Default", "Generic",
+)
+
+
+def check_naming(file_path: str, source_layer: str, content: str,
+                 cfg: dict) -> list[Issue]:
+    issues = []
+    for m in CLASS_PATTERN.finditer(content):
+        class_name = m.group(1)
+
+        if class_name.startswith(_NAMING_EXCLUDE_STARTSWITH):
+            continue
+        if len(class_name) <= 2:
+            continue
+
+        for suffix_re, expected_layer, severity, desc in _SUFFIX_RULES:
+            if suffix_re.search(class_name):
+                if source_layer != expected_layer:
+                    line = content[:m.start()].count("\n") + 1
+                    issues.append(Issue(
+                        file=file_path, line=line, severity=severity,
+                        rule="命名规范", rule_code=NAMING,
+                        description=f"{class_name}: {desc}，当前位置在 {source_layer} 层",
+                        suggestion=f"将 {class_name} 移动到 {expected_layer} 层对应包",
+                    ))
+    return issues
+
+
+# ── 检查 4: Adapter 隔离（仅项目内部 import） ─────────────────────────────
+
+def check_adapter_isolation(file_path: str, content: str,
+                            layer_patterns: list, cfg: dict) -> list[Issue]:
+    issues = []
+    prefix = cfg.get("project_package_prefix", "")
+    all_imports = extract_imports_with_lines(content)
+    internal = [(imp, line) for imp, line in all_imports
+                if _is_internal_import(imp, prefix)]
+
+    for imp, line in internal:
+        imp_path = imp.replace(".", "/") + ".java"
+        if "/domain/" in imp_path and ("/entity/" in imp_path or "/valueobject/" in imp_path):
+            issues.append(Issue(
+                file=file_path, line=line, severity=Severity.MANDATORY,
+                rule="Adapter 隔离", rule_code=ADAPTER_ISOLATION,
+                description=f"Adapter 禁止直接引用领域对象: {imp}",
+                suggestion="通过 Application Executor + Assembler 返回 CO，禁止 domain 对象泄漏到 Adapter",
+            ))
+    return issues
+
+
+# ── 检查 5+6: Maven 模块依赖（同域层矩阵 + 跨域检查，单次扫描） ──────────
+
+def check_maven_modules(project_root: str, pom_files: list[str],
+                        cfg: dict) -> list[Issue]:
+    issues = []
+    layer_patterns = _build_layer_patterns(cfg)
+
+    module_info: dict[str, tuple[str, str, str]] = {}
+    for pom in pom_files:
+        aid = _parse_artifact_id(pom)
+        if aid is None:
+            continue
+        rel = os.path.relpath(pom, project_root)
+        layer = _identify_module_layer(aid, cfg)
+        if layer is None:
+            layer = _infer_layer_from_packages(pom, layer_patterns, cfg)
+        bd = _identify_business_domain(aid, rel, cfg)
+        if layer is not None:
+            module_info[aid] = (bd or "", layer, rel)
+
+    all_domains = {bd for bd, _, _ in module_info.values() if bd}
+    multi_domain = len(all_domains) >= 2
+
+    # 单模块场景：仅靠包约定软隔离，缺少 Maven 编译期物理屏障
+    if len(module_info) <= 1 and pom_files:
+        _warn("单模块项目缺少 Maven 编译期隔离——分层依赖仅靠包约定约束。"
+              "强烈建议拆分为多模块项目（adapter/client/app/domain/infrastructure）以获得编译期物理屏障。")
+
+    for pom in pom_files:
+        source_aid = _parse_artifact_id(pom)
+        if source_aid is None or source_aid not in module_info:
+            continue
+        src_domain, source_layer, rel_pom = module_info[source_aid]
+        deps = _parse_module_dependencies(pom)
+
+        for dep_aid, dep_coord in deps:
+            if dep_aid not in module_info:
+                continue
+            tgt_domain, target_layer, _ = module_info[dep_aid]
+
+            if tgt_domain == src_domain:
+                if target_layer == source_layer:
+                    continue
+                allowed = _MAVEN_DEP_MATRIX.get(source_layer, {}).get(target_layer, True)
+                if not allowed:
+                    issues.append(Issue(
+                        file=rel_pom, line=0, severity=Severity.MANDATORY,
+                        rule="Maven 模块依赖", rule_code=MAVEN_MODULE_DEP,
+                        description=f"{source_aid} ({source_layer} 层) 禁止依赖 {dep_aid} ({target_layer} 层)",
+                        suggestion=f"移除 {rel_pom} 中 <dependency><artifactId>{dep_aid}</artifactId>",
+                    ))
+                continue
+
+            if multi_domain and tgt_domain:
+                if target_layer != "client":
+                    issues.append(Issue(
+                        file=rel_pom, line=0, severity=Severity.MANDATORY,
+                        rule="跨域依赖", rule_code=CROSS_DOMAIN_DEP,
+                        description=f"跨域依赖仅允许通过 -client: {source_aid} ({src_domain} 域) → {dep_aid} ({tgt_domain} 域的 {target_layer} 层)",
+                        suggestion=f"改为引入 {tgt_domain}-client，或通过领域事件/MQ 异步解耦",
+                    ))
+
+        if source_layer == "domain":
+            for dep_aid, dep_coord in deps:
+                for forbidden in cfg["domain_forbidden_pom"]:
+                    if dep_coord.startswith(forbidden):
+                        issues.append(Issue(
+                            file=rel_pom, line=0, severity=Severity.MANDATORY,
+                            rule="领域层纯净度(POM)", rule_code=DOMAIN_PURITY_POM,
+                            description=f"domain 模块禁止依赖框架: {dep_coord}",
+                            suggestion="domain 模块只能依赖 JDK + JPA 注解（jakarta.persistence），移除该依赖",
+                        ))
+    return issues
+
+
+# ── Java 文件收集与检查调度 ───────────────────────────────────────────────
+
+def check_file(file_path: str, project_root: str,
+               layer_patterns: list, cfg: dict) -> tuple[list[Issue], bool, str | None]:
+    """返回 (issues, classified, layer)。
+
+    classified=False 表示该文件未被任何层识别（不属于分层模块）。
+    """
+    try:
+        with open(file_path, "r", encoding="utf-8") as fp:
+            content = fp.read()
+    except Exception as e:
+        _debug(f"跳过文件读取 ({file_path}): {e}")
+        return [], False, None
+
+    rel_path = os.path.relpath(file_path, project_root)
+    layer = identify_layer(rel_path, layer_patterns, cfg)
+    if layer is None:
+        return [], False, None
+
+    issues = []
+    # layer 识别一次，传递给各检查函数，避免重复调用 identify_layer
+    issues.extend(check_domain_purity(rel_path, content, cfg) if layer == "domain" else [])
+    issues.extend(check_dependency_direction(rel_path, layer, content, layer_patterns, cfg))
+    issues.extend(check_naming(rel_path, layer, content, cfg))
+    issues.extend(check_adapter_isolation(rel_path, content, layer_patterns, cfg) if layer == "adapter" else [])
+    return issues, True, layer
+
+
+def collect_java_files(project_root: str) -> list[str]:
+    java_files = []
+    for dirpath, dirnames, filenames in os.walk(project_root):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        for f in filenames:
+            if f.endswith(".java"):
+                java_files.append(os.path.join(dirpath, f))
+    return java_files
+
+
+# ── 基线机制 ────────────────────────────────────────────────────────────────
+
+def _issue_fingerprint(issue: Issue) -> str:
+    """生成违规指纹：sha1(file + rule_code + description) 前 12 位。
+
+    不含 line 号（行号随代码格式化位移），不含 severity（同一违规不因级别变化而变）。
+    rule_code 保证指纹跨规则版本稳定（中文 rule 可能被优化表述而变）。
+    """
+    raw = f"{issue.file}:{issue.rule_code}:{issue.description}"
+    return hashlib.sha1(raw.encode()).hexdigest()[:12]
+
+
+def load_baseline(baseline_path: str) -> set[str]:
+    """加载基线文件（.json 数组），返回指纹集合。"""
+    if not os.path.isfile(baseline_path):
+        return set()
+    try:
+        with open(baseline_path, "r", encoding="utf-8") as fp:
+            data = json.load(fp)
+        return set(data.get("fingerprints", []))
+    except Exception:
+        return set()
+
+
+def save_baseline(baseline_path: str, issues: list[Issue]):
+    fingerprints = sorted(_issue_fingerprint(i) for i in issues)
+    with open(baseline_path, "w", encoding="utf-8") as fp:
+        json.dump({
+            "version": 1,
+            "created": _now_iso(),
+            "total_issues": len(fingerprints),
+            "fingerprints": fingerprints,
+        }, fp, ensure_ascii=False, indent=2)
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
+
+
+def filter_by_baseline(issues: list[Issue], baseline_fingerprints: set[str]
+                       ) -> tuple[list[Issue], int]:
+    """过滤掉基线中已存在的存量违规，仅返回新增违规。"""
+    new_issues = []
+    suppressed = 0
+    for issue in issues:
+        fp = _issue_fingerprint(issue)
+        if fp in baseline_fingerprints:
+            suppressed += 1
+            _debug(f"基线抑制: {issue.file}: {issue.description[:60]}")
+        else:
+            new_issues.append(issue)
+    return new_issues, suppressed
+
+
+# ── 主入口 ──────────────────────────────────────────────────────────────────
+
+def run(project_root: str, strict: bool = False, config_path: str | None = None,
+        baseline_path: str | None = None, warn_unclassified: bool = False
+        ) -> tuple[list[Issue], int, int, dict]:
+    """返回 (issues, mandatory_count, recommended_count, stats)。"""
+    global _warnings, _debug_enabled
+    _warnings = []
+
+    cfg = load_config(project_root, config_path)
+    layer_patterns = _build_layer_patterns(cfg)
+
+    if not cfg.get("project_package_prefix", ""):
+        _warn("未配置 project_package_prefix，依赖方向检查使用回退启发式过滤第三方包。"
+              "建议在 .arch-guard.json 中配置以消除误报风险。")
+
+    java_files = collect_java_files(project_root)
+    all_issues: list[Issue] = []
+    classified_count = 0
+    unclassified_count = 0
+
+    with ThreadPoolExecutor() as executor:
+        futures = {executor.submit(check_file, f, project_root, layer_patterns, cfg): f
+                   for f in java_files}
+        for future in as_completed(futures):
+            result = future.result()
+            if result is not None:
+                file_issues, classified, _ = result
+                all_issues.extend(file_issues)
+                if classified:
+                    classified_count += 1
+                else:
+                    unclassified_count += 1
+
+    pom_files = _collect_poms(project_root)
+    all_issues.extend(check_maven_modules(project_root, pom_files, cfg))
+
+    if strict:
+        for issue in all_issues:
+            if issue.severity == Severity.RECOMMENDED:
+                issue.severity = Severity.MANDATORY
+
+    # 基线过滤
+    suppressed_count = 0
+    if baseline_path:
+        baseline_fps = load_baseline(baseline_path)
+        if baseline_fps:
+            all_issues, suppressed_count = filter_by_baseline(all_issues, baseline_fps)
+
+    # 去重（含 severity：同一位置强制+推荐并存时保留两者）
+    seen = set()
+    deduped: list[Issue] = []
+    for i in all_issues:
+        key = (i.file, i.line, i.rule_code, i.description, i.severity)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(i)
+
+    mandatory_count = sum(1 for i in deduped if i.severity == Severity.MANDATORY)
+    recommended_count = sum(1 for i in deduped if not strict and i.severity == Severity.RECOMMENDED)
+    structural_debt_count = sum(1 for i in deduped if i.severity == Severity.STRUCTURAL_DEBT)
+
+    stats = {
+        "java_files_total": len(java_files),
+        "java_files_classified": classified_count,
+        "java_files_unclassified": unclassified_count,
+        "pom_files_total": len(pom_files),
+        "baseline_suppressed": suppressed_count,
+        "structural_debt_count": structural_debt_count,
+        "warnings": list(_warnings),
+    }
+
+    return deduped, mandatory_count, recommended_count, stats
+
+
+# ── 输出 ──────────────────────────────────────────────────────────────────
+
+def format_text(issues: list[Issue], mandatory_count: int, recommended_count: int,
+                stats: dict | None = None) -> str:
+    structural_debt_count = stats.get("structural_debt_count", 0) if stats else 0
+
+    if not issues and not (stats and stats.get("warnings")):
+        return "✅ 所有架构分层检查通过"
+
+    lines = []
+
+    # 统计摘要
+    if stats:
+        lines.append("## 统计\n")
+        lines.append(f"  检查 Java 文件: {stats['java_files_total']}"
+                     f"（识别分层: {stats['java_files_classified']}，"
+                     f"跳过: {stats['java_files_unclassified']}）")
+        lines.append(f"  检查 pom.xml: {stats['pom_files_total']}")
+        if stats.get("baseline_suppressed"):
+            lines.append(f"  基线抑制存量违规: {stats['baseline_suppressed']}")
+        if structural_debt_count:
+            lines.append(f"  📋 结构性债务: {structural_debt_count}（已知架构约束，不计入门禁）")
+        if stats.get("warnings"):
+            for w in stats["warnings"]:
+                lines.append(f"  ⚠️  {w}")
+        lines.append("")
+
+    if not issues:
+        lines.append("✅ 无新增违规")
+        return "\n".join(lines)
+
+    lines.append(f"发现 {mandatory_count} 个强制问题，{recommended_count} 个推荐问题")
+    if structural_debt_count:
+        lines.append(f"     （另有 {structural_debt_count} 个结构性债务，不计入门禁）")
+    lines.append("")
+
+    # 按规则分组统计
+    by_rule: dict[str, list[Issue]] = defaultdict(list)
+    for i in issues:
+        by_rule[i.rule].append(i)
+
+    lines.append("## 摘要\n")
+    for rule, items in sorted(by_rule.items()):
+        m = sum(1 for x in items if x.severity == Severity.MANDATORY)
+        r = sum(1 for x in items if x.severity == Severity.RECOMMENDED)
+        s = sum(1 for x in items if x.severity == Severity.STRUCTURAL_DEBT)
+        parts = []
+        if m: parts.append(f"{m} 强制")
+        if r: parts.append(f"{r} 推荐")
+        if s: parts.append(f"{s} 结构债务")
+        lines.append(f"  [{rule}] {'，'.join(parts)}")
+
+    lines.append("\n## 明细\n")
+    for issue in sorted(issues, key=lambda x: (
+        (0 if x.severity == Severity.MANDATORY else 1 if x.severity == Severity.RECOMMENDED else 2),
+        x.file, x.line)):
+        if issue.severity == Severity.STRUCTURAL_DEBT:
+            prefix = "📋"
+        elif issue.severity == Severity.MANDATORY:
+            prefix = "🔴"
+        else:
+            prefix = "🟡"
+        loc = f":{issue.line}" if issue.line else ""
+        lines.append(f"{prefix} [{issue.rule}] {issue.file}{loc}")
+        lines.append(f"   {issue.description}")
+        if issue.suggestion:
+            lines.append(f"   → {issue.suggestion}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def format_json(issues: list[Issue], mandatory_count: int, recommended_count: int,
+                strict: bool = False, stats: dict | None = None) -> str:
+    # 根因聚类：提取 callee 的包前缀，归类同源违规
+    callee_clusters: dict[str, int] = defaultdict(int)
+    _CALLEE_RE = re.compile(r"(:?import|[→]\s*)\s*([\w.]+)")
+    for i in issues:
+        m = _CALLEE_RE.search(i.description)
+        if m:
+            callee_full = m.group(2)
+            # 去掉项目包前缀和末段类名，保留中间包路径作为 cluster key
+            parts = callee_full.split(".")
+            if len(parts) >= 4:
+                callee_clusters[".".join(parts[1:-1])] += 1
+            else:
+                callee_clusters[callee_full] += 1
+
+    summary = {
+        "by_rule": {},
+        "by_callee_root": [{"package": pkg, "count": cnt}
+                          for pkg, cnt in
+                          sorted(callee_clusters.items(), key=lambda x: -x[1])],
+    }
+    for i in issues:
+        summary["by_rule"].setdefault(i.rule, 0)
+        summary["by_rule"][i.rule] += 1
+
+    result = {
+        "passed": mandatory_count == 0,
+        "mandatory_count": mandatory_count,
+        "recommended_count": recommended_count,
+        "structural_debt_count": (stats or {}).get("structural_debt_count", 0),
+        "strict": strict,
+        "summary": summary,
+        "stats": stats or {},
+        "issues": [
+            {
+                "file": i.file, "line": i.line,
+                "severity": i.severity.value, "rule": i.rule,
+                "rule_code": i.rule_code,
+                "description": i.description, "suggestion": i.suggestion,
+            }
+            for i in issues
+        ],
+    }
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+# ── CLI ────────────────────────────────────────────────────────────────────
+
+def print_graph_mode(config_path: str | None = None):
+    """输出 Tier 2 Cypher 查询清单，根据配置文件动态生成。
+
+    先尝试加载配置以获得 layer_aliases/layer_paths，若失败则使用默认值。
+    """
+    try:
+        cfg = load_config(".", config_path)
+    except Exception:
+        cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+
+    # 收集所有层的路径变体（含别名）
+    # 例如 layer_paths["adapter"]=["/adapter/"] + layer_aliases["interfaces"]="adapter"
+    # → adapter 层的匹配模式为 [".adapter.", ".interfaces."]
+    layer_patterns: dict[str, list[str]] = {}
+    for name, paths in cfg["layer_paths"].items():
+        layer_patterns[name] = [p.strip("/") for p in paths]
+    for alias, target in cfg["layer_aliases"].items():
+        if target not in layer_patterns:
+            layer_patterns[target] = []
+        if alias not in layer_patterns[target]:
+            layer_patterns[target].append(alias)
+
+    def _layer_condition(layer_name: str, var: str) -> str:
+        """生成 Cypher CONTAINS 条件，覆盖该层的所有路径变体。"""
+        variants = layer_patterns.get(layer_name, [layer_name])
+        conditions = [f"{var}.qualified_name CONTAINS '.{v}.'" for v in variants]
+        return " OR ".join(conditions) if len(conditions) <= 1 else f"({' OR '.join(conditions)})"
+
+    def _layer_case(layer_name: str, var: str) -> str:
+        """生成 CASE WHEN 子句中的一个分支。"""
+        variants = layer_patterns.get(layer_name, [layer_name])
+        # 首个条件用 WHEN，其余用 OR 同层
+        conds = " OR ".join([f"{var}.qualified_name CONTAINS '.{v}.'" for v in variants])
+        return f"WHEN {conds} THEN '{layer_name}'"
+
+    adapter_cond = _layer_condition("adapter", "f")
+    domain_cond = _layer_condition("domain", "f")
+    infra_cond = _layer_condition("infrastructure", "f")
+    app_cond = _layer_condition("application", "f")
+    client_cond = _layer_condition("client", "f")
+
+    domain_d = _layer_condition("domain", "d")
+    infra_d = _layer_condition("infrastructure", "d")
+    app_d = _layer_condition("application", "d")
+    adapter_d = _layer_condition("adapter", "d")
+    client_d = _layer_condition("client", "d")
+
+    adapter_case_f = _layer_case("adapter", "f")
+    domain_case_f = _layer_case("domain", "f")
+    infra_case_f = _layer_case("infrastructure", "f")
+    app_case_f = _layer_case("application", "f")
+    client_case_f = _layer_case("client", "f")
+
+    adapter_case_d = _layer_case("adapter", "d")
+    domain_case_d = _layer_case("domain", "d")
+    infra_case_d = _layer_case("infrastructure", "d")
+    app_case_d = _layer_case("application", "d")
+    client_case_d = _layer_case("client", "d")
+
+    print(f"""## Tier 2: 知识图谱深度审查 — Cypher 查询清单
+
+以下查询通过 codebase-memory-mcp 的 query_graph 工具执行。前提：项目已建立索引。
+
+> ⚠️ IMPORTS 边的端点通常为 File 节点（qualified_name 以 __file__ 结尾），
+> 切勿在 MATCH 中限定 :Function 标签——使用无标签变量 (f)。
+
+### 1. Domain → Infrastructure（禁止）
+
+MATCH (f)-[:IMPORTS]->(d)
+WHERE {domain_cond}
+  AND {infra_d}
+RETURN f.qualified_name AS domain_caller, d.qualified_name AS infra_callee
+ORDER BY domain_caller
+
+### 2. Domain → Application（禁止）
+
+MATCH (f)-[:IMPORTS]->(d)
+WHERE {domain_cond}
+  AND {app_d}
+RETURN f.qualified_name, d.qualified_name ORDER BY f.qualified_name
+
+### 3. Adapter → Domain Entity（禁止）
+
+MATCH (f)-[:IMPORTS]->(d)
+WHERE {adapter_cond}
+  AND {domain_d}
+RETURN f.qualified_name AS adapter_caller, d.qualified_name AS domain_entity_ref
+ORDER BY adapter_caller
+
+### 4. Infrastructure → Application（禁止）
+
+MATCH (f)-[:IMPORTS]->(d)
+WHERE {infra_cond}
+  AND {app_d}
+RETURN f.qualified_name, d.qualified_name ORDER BY f.qualified_name
+
+### 5. Application → Adapter（禁止）
+
+MATCH (f)-[:IMPORTS]->(d)
+WHERE {app_cond}
+  AND {adapter_d}
+RETURN f.qualified_name, d.qualified_name ORDER BY f.qualified_name
+
+### 6. 跨层违规汇总（矩阵过滤）
+
+MATCH (f)-[:IMPORTS]->(d)
+WITH f, d,
+     CASE {adapter_case_f} {domain_case_f} {app_case_f} {infra_case_f} {client_case_f} ELSE 'other' END AS src_layer,
+     CASE {adapter_case_d} {domain_case_d} {app_case_d} {infra_case_d} {client_case_d} ELSE 'other' END AS tgt_layer
+WHERE src_layer <> 'other' AND tgt_layer <> 'other'
+WITH f, d, src_layer, tgt_layer
+WHERE NOT (
+  (src_layer = 'adapter' AND tgt_layer IN ['client', 'application']) OR
+  (src_layer = 'application' AND tgt_layer IN ['domain', 'infrastructure', 'client']) OR
+  (src_layer = 'domain' AND tgt_layer IN ['domain']) OR
+  (src_layer = 'infrastructure' AND tgt_layer IN ['domain', 'infrastructure'])
+)
+RETURN src_layer, tgt_layer, f.qualified_name AS caller, d.qualified_name AS callee
+ORDER BY src_layer, tgt_layer, caller
+
+---
+> 层路径识别基于配置文件：{json.dumps(cfg.get("layer_aliases", {}), ensure_ascii=False)}（可通过 .arch-guard.json 覆盖）
+> 知识图谱天然不索引第三方包，无需额外过滤。
+""")
+
+
+# ── init ────────────────────────────────────────────────────────────────────
+
+def _infer_prefix_from_pom(project_root: str) -> str | None:
+    """从根目录 pom.xml 的 <groupId> 自动推断 project_package_prefix。"""
+    pom = os.path.join(project_root, "pom.xml")
+    if not os.path.isfile(pom):
+        # 尝试子目录第一层
+        for entry in os.listdir(project_root):
+            sub = os.path.join(project_root, entry, "pom.xml")
+            if os.path.isfile(sub):
+                pom = sub
+                break
+    if not os.path.isfile(pom):
+        return None
+    try:
+        tree = ET.parse(pom)
+        root = tree.getroot()
+        gid = root.find(_pom_tag("groupId"))
+        if gid is None or not gid.text:
+            parent = root.find(_pom_tag("parent"))
+            if parent is not None:
+                gid = parent.find(_pom_tag("groupId"))
+        if gid is not None and gid.text:
+            return gid.text.strip()
+    except Exception:
+        pass
+    return None
+
+
+def _do_init(project_root: str, output_path: str):
+    """自动推断配置并生成 .arch-guard.json。"""
+    prefix = _infer_prefix_from_pom(project_root)
+    if prefix:
+        inferred_msg = f"从 pom.xml <groupId> 推断: {prefix}"
+    else:
+        inferred_msg = "未找到 pom.xml，project_package_prefix 留空（使用启发式回退）"
+
+    config = {
+        "project_package_prefix": prefix or "",
+        "_comment": f"自动生成 by arch_check --init。{inferred_msg}",
+    }
+
+    out = os.path.join(project_root, output_path)
+    if os.path.exists(out):
+        print(f"错误: {out} 已存在。若需覆盖请手动删除后重试。", file=sys.stderr)
+        sys.exit(1)
+
+    with open(out, "w", encoding="utf-8") as fp:
+        json.dump(config, fp, ensure_ascii=False, indent=2)
+        fp.write("\n")
+    print(f"已生成: {out}")
+    print(f"  {inferred_msg}")
+    print(f"  layer_aliases 默认内置 interfaces→adapter，无需额外配置")
+    if not prefix:
+        print(f"  ⚠️  建议手动设置 project_package_prefix 以消除第三方 import 误报风险")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="DDD 架构分层守护检查")
+    parser.add_argument("project_root", nargs="?", default=".",
+                       help="Java 项目根目录（--mode graph 时不需要）")
+    parser.add_argument("--format", choices=["text", "json"], default="text")
+    parser.add_argument("--strict", action="store_true",
+                       help="推荐问题升级为强制（影响退出码和 passed）")
+    parser.add_argument("--config", default=None,
+                       help="配置文件路径（默认查找 .arch-guard.json）")
+    parser.add_argument("--mode", choices=["check", "graph"], default="check",
+                       help="check: 脚本巡检（默认）; graph: 输出 Tier 2 Cypher 查询清单")
+    parser.add_argument("--baseline", default=None,
+                       help="基线文件路径（仅报基线中不存在的【新增】违规）")
+    parser.add_argument("--update-baseline", default=None,
+                       help="用当前所有违规更新基线文件（不执行检查）")
+    parser.add_argument("--warn-unclassified", action="store_true",
+                       help="将未识别层的文件数输出为警告")
+    parser.add_argument("--debug", action="store_true",
+                       help="输出调试信息到 stderr（文件跳过原因等）")
+    parser.add_argument("--init", nargs="?", const=".arch-guard.json", default=None,
+                       metavar="PATH",
+                       help="自动生成最小配置文件，从 pom.xml 推断 project_package_prefix")
+    args = parser.parse_args()
+
+    global _debug_enabled
+    _debug_enabled = args.debug
+
+    if args.init:
+        _do_init(args.project_root, args.init)
+        sys.exit(0)
+
+    if args.mode == "graph":
+        print_graph_mode(config_path=args.config)
+        sys.exit(0)
+
+    if not os.path.isdir(args.project_root):
+        print(f"错误: 路径不存在或不是目录: {args.project_root}", file=sys.stderr)
+        sys.exit(2)
+
+    # --update-baseline 模式：执行完整检查，将所有违规写入基线
+    if args.update_baseline:
+        issues, m, r, stats = run(args.project_root, strict=True,
+                                  config_path=args.config)
+        # 使用原始违规（不含基线过滤）保存
+        save_baseline(args.update_baseline, issues)
+        sd = stats.get("structural_debt_count", 0)
+        print(f"更新基线: {args.update_baseline} ({len(issues)} 个违规)")
+        print(f"  其中 {m} 强制, {r} 推荐"
+              + (f", {sd} 结构债务" if sd else ""))
+        sys.exit(0)
+
+    issues, m, r, stats = run(args.project_root, strict=args.strict,
+                              config_path=args.config,
+                              baseline_path=args.baseline,
+                              warn_unclassified=args.warn_unclassified)
+
+    if args.format == "json":
+        print(format_json(issues, m, r, strict=args.strict, stats=stats))
+    else:
+        print(format_text(issues, m, r, stats=stats))
+
+    # 输出未分类文件的警告（如果很多文件未被识别层，可能是配置问题）
+    if args.warn_unclassified and stats.get("java_files_unclassified", 0) > stats.get("java_files_total", 1) * 0.5:
+        print(f"\n⚠️  超过半数 Java 文件 ({stats['java_files_unclassified']}/{stats['java_files_total']}) "
+              f"未被识别到架构分层。请检查 layer_paths 和 layer_aliases 配置。",
+              file=sys.stderr)
+
+    if m > 0:
+        sys.exit(1)
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

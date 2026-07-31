@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.example</groupId>
+        <artifactId>order-parent</artifactId>
+        <version>1.0.0</version>
+    </parent>
+    <artifactId>order-adapter</artifactId>
+    <dependencies>
+        <!-- ❌ adapter 禁止直接依赖 domain -->
+        <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>order-domain</artifactId>
+            <version>1.0.0</version>
+        </dependency>
+        <!-- ❌ adapter 禁止直接依赖 infrastructure -->
+        <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>order-infrastructure</artifactId>
+            <version>1.0.0</version>
+        </dependency>
+        <!-- ✅ adapter 可以依赖 client -->
+        <dependency>
+            <groupId>com.example</groupId>
+            <artifactId>order-client</artifactId>
+            <version>1.0.0</version>
+        </dependency>
+    </dependencies>
+</project>
