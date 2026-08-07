@@ -1,12 +1,89 @@
 #!/bin/bash
-# SessionStart hook — 注入 steering 规范索引，不直接注入全文以避免 token 浪费
-# AI 会在需要时主动 Read 对应规范文件
+# SessionStart hook — 动态扫描 steering/ 生成规范索引
+# 索引内容从各规范文件 frontmatter 的 title / scenario 字段读取，
+# 新增规范文件只需带 frontmatter（title + scenario），无需改本脚本。
+# 分组约定：steering/*.md（直接子文件）= 通用设计规范；steering/gtsp/*.md = GTSP 工程规范。
 
-cat << 'EOF'
-{
-  "hookSpecificOutput": {
-    "hookEventName": "SessionStart",
-    "additionalContext": "## Awesome Rules 规范索引\n\n以下团队规范文件已就绪，在相关任务中必须主动 Read 并遵守：\n\n| 规范 | 路径 | 适用场景 |\n|---|---|---|\n| 测试规范 | steering/testing-standards.md | 编写/审查测试 |\n| API 设计规范 | steering/api-standards.md | 设计/审查 API |\n| 数据库规范 | steering/database-design-specification.md | 设计表结构/SQL |\n| Git 提交规范 | steering/git-conventions.md | 提交/分支/PR |\n| DDD 架构规范 | steering/ddd-architecture.md | 架构设计/分包/领域建模 |\n\n**使用规则**：\n- 遇到上述场景时，先 `Read` 对应规范文件，再开始工作\n- 规范中【强制】标记的条款不可违反\n- 规范中【推荐】标记的条款尽可能遵守\n- 审查类任务可使用 `/ddl-guard`、`/api-guard`、`/arch-guard` 自动检查"
-  }
-}
-EOF
+# 定位 steering 目录：优先 CLAUDE_PLUGIN_ROOT，否则回退到脚本上级目录
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+STEERING_DIR="${CLAUDE_PLUGIN_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}/steering"
+
+python3 - "$STEERING_DIR" <<'PY'
+import sys, os, re, json
+
+steering = sys.argv[1]
+
+def parse_meta(path):
+    """从 frontmatter 读取 title / scenario，缺失则回退到 H1 标题。"""
+    with open(path, encoding='utf-8') as f:
+        content = f.read()
+    title = scenario = None
+    if content.startswith('---'):
+        end = content.find('\n---', 3)
+        if end != -1:
+            fm = content[3:end]
+            m = re.search(r'^title:\s*(.+)$', fm, re.M)
+            if m:
+                title = m.group(1).strip()
+            m = re.search(r'^scenario:\s*(.+)$', fm, re.M)
+            if m:
+                scenario = m.group(1).strip()
+    if not title:
+        m = re.search(r'^#\s+(.+)$', content, re.M)
+        title = m.group(1).strip() if m else os.path.basename(path)
+    if not scenario:
+        scenario = '—'
+    return title, scenario
+
+def md_files(base):
+    d = os.path.join(steering, base) if base else steering
+    if not os.path.isdir(d):
+        return []
+    return sorted(fn for fn in os.listdir(d) if fn.endswith('.md')
+                  and os.path.isfile(os.path.join(d, fn)))
+
+def table(files, base, header):
+    lines = [f"| {header} | 路径 | 适用场景 |", "|---|---|---|"]
+    for fn in files:
+        title, scen = parse_meta(os.path.join(steering, base, fn) if base
+                                 else os.path.join(steering, fn))
+        rel = f"steering/{base}/{fn}" if base else f"steering/{fn}"
+        lines.append(f"| {title} | {rel} | {scen} |")
+    return '\n'.join(lines)
+
+# A. 通用设计规范：steering/ 直接子 .md
+general = md_files('')
+# B. GTSP 工程规范：steering/gtsp/*.md，README 作总入口，其余作维度
+gtsp_readme = [fn for fn in md_files('gtsp') if fn.upper() == 'README.MD']
+gtsp_dims = [fn for fn in md_files('gtsp') if fn.upper() != 'README.MD']
+
+parts = [
+    "## Awesome Rules 规范索引",
+    "",
+    "规范分两组：**通用设计规范**（设计阶段）与 **GTSP 工程规范**（Java/Spring Cloud 编码）。"
+    "两者体系独立，按任务所属体系选择对应规范，勿混用。在相关任务中必须主动 Read 并遵守：",
+    "",
+    "### A. 通用设计规范（设计阶段）",
+    "",
+    table(general, '', '规范'),
+    "",
+    "### B. GTSP 工程规范（编码阶段）",
+    "",
+]
+if gtsp_readme:
+    parts.append("总入口 steering/gtsp/README.md，gtsp-*/fss-* 微服务编码按维度加载：")
+else:
+    parts.append("gtsp-*/fss-* 微服务编码按维度加载：")
+parts.append("")
+parts.append(table(gtsp_dims, 'gtsp', '维度'))
+parts.append("")
+parts.append("**使用规则**：")
+parts.append("- 遇到对应场景时，先 Read 相关规范文件，再开始工作")
+parts.append("- 【强制】条款不可违反，【推荐】条款尽可能遵守")
+parts.append("- 审查类任务可使用 /ddl-guard、/api-guard、/arch-guard 自动检查")
+
+ctx = '\n'.join(parts)
+print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
+                                         "additionalContext": ctx}},
+                 ensure_ascii=False))
+PY

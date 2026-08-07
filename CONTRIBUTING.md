@@ -34,12 +34,21 @@
 
 ### 目录结构
 
+规范分两组，分组决定索引归属（见下文 [frontmatter 机制](#规范文件-frontmatter必需)）：
+
 ```
 steering/
-├── database-design-specification.md   # 数据库设计开发规范
-├── api-standards.md                   # API 设计规范
-└── git-conventions.md                 # Git 提交规范
+├── testing-standards.md              # 通用：测试规范
+├── api-standards.md                  # 通用：API 设计规范
+├── database-design-specification.md  # 通用：数据库设计规范
+├── git-conventions.md                # 通用：Git 提交规范
+└── gtsp/                             # GTSP 工程规范（Java/Spring Cloud，按维度拆分，含 DDD 架构）
+    ├── README.md                     #   总入口
+    └── 00-overview.md … 10-migration-checklist.md   #   各维度
 ```
+
+- **通用设计规范**：`steering/` 直接子文件，覆盖架构/API/数据库/测试/Git 等设计阶段
+- **GTSP 工程规范**：`steering/gtsp/` 子目录，覆盖 `gtsp-*`/`fss-*` 微服务的编码阶段
 
 ### 什么时候需要改
 
@@ -61,10 +70,36 @@ steering/
     `orderNo` VARCHAR(32)    -- 命名用 camelCase、缺注释
 ```
 
+### 规范文件 frontmatter（必需）
+
+每个规范 `.md` 必须在头部带 frontmatter，声明 `title` 和 `scenario`：
+
+```yaml
+---
+title: 规范显示名
+scenario: 适用场景（何时该读它）
+---
+```
+
+随后是正文（`# 标题` + 内容）。
+
+`hooks/load-steering.sh`（SessionStart hook）会**动态扫描** `steering/` 目录、读取每个文件的 frontmatter，自动生成规范索引注入 AI 上下文。新增规范文件只需带 frontmatter，**无需改脚本或 `CLAUDE.md`**。
+
+约定：
+
+- **分组靠目录**：`steering/*.md`（直接子文件）归入「通用设计规范」；`steering/{组}/*.md`（子目录，如 `gtsp/`）归入该组；子目录下的 `README.md` 自动识别为该组总入口
+- **排序靠文件名**：用 `00-`/`01-` 数字前缀控制顺序
+- frontmatter 字段：
+  - `title` — 索引表显示名（缺失时回退到 H1 标题）
+  - `scenario` — 适用场景，AI 据此判断何时加载（缺失时显示 `—`，强烈建议填写）
+  - `inclusion: always` — 部分历史文件保留的既有字段，新增文件无需写
+
+> 本地验证：`CLAUDE_PLUGIN_ROOT=$(pwd) bash hooks/load-steering.sh` 可查看生成的索引，确认新文件已出现。
+
 ### 贡献流程
 
 1. **先讨论**：在工作项或群里提出修改建议，达成初步共识
-2. **改文件**：修改 `steering/` 下对应的规范文件
+2. **改文件**：修改 `steering/` 下对应的规范文件；**新增文件须带 frontmatter**（见上节）
 3. **联动更新**：检查是否需要同步更新关联内容：
    - 对应技能的检查脚本（`scripts/`）能否覆盖新规则
    - 对应技能的人工规则文档（`*-manual-rules.md`）是否需补充
@@ -97,10 +132,10 @@ skills/{skill-name}/
 
 ### 新建技能
 
-1. 在 `skills/` 下新建目录，命名格式 `{领域}-guard`（如 `order-guard`）
+1. 在 `skills/` 下新建目录。审查类技能命名格式 `{领域}-guard`（如 `order-guard`），工具类技能可使用描述性名称（如 `doc-gen`）
 2. 创建 `SKILL.md`（参考现有技能的 frontmatter 和结构）
 3. 创建 `README.md`，包含能力说明、快速使用、检查覆盖、相关文件
-4. 编写检查脚本到 `scripts/`，仅用 Python 3 标准库
+4. 编写检查脚本到 `scripts/`，仅用 Python 3 标准库（测试文件可使用 pytest）
 5. 补充 `*-manual-rules.md`，列出脚本无法覆盖的规则
 6. 在根 `README.md` 的技能表格和项目结构树中注册新技能
 
@@ -129,11 +164,11 @@ description: >
 
 ### 脚本编写约定
 
-- **仅用 Python 3 标准库**，不引入第三方依赖
+- **检查脚本仅用 Python 3 标准库**，不引入第三方依赖（测试文件可使用 pytest 等测试框架）
 - 退出码统一：`0`=通过，`1`=有问题，`2`=运行错误
-- 支持 `--format json` 输出，便于集成到 CI
+- 支持 `--format json` 输出，便于集成到 CI（审查类技能必须；工具类技能可选）
 - 支持 `--help`，说明用法和检查规则
-- 参考现有脚本（`ddl_check.py`、`api_check.py`）的代码结构
+- 审查类脚本参考 `ddl_check.py`、`api_check.py`；工具类脚本参考 `doc_gen.py`
 
 ### 技能贡献流程
 
@@ -303,6 +338,7 @@ codex plugins install .
 
 - [ ] Commit 信息符合 [Git 提交规范](steering/git-conventions.md)
 - [ ] 修改了规范文件 → 已通知关联技能同步更新
+- [ ] 新增规范文件 → 头部已带 frontmatter（`title` + `scenario`），运行 `bash hooks/load-steering.sh` 确认已入索引
 - [ ] 新增 / 修改了检查脚本 → 已用 `test/` 下样例验证
 - [ ] 修复了脚本的漏报 / 误报 → 已添加对应 badcase 防回归
 - [ ] 新增 / 修改了 badcase → 已运行 `python3 scripts/badcase_runner.py` 验证通过

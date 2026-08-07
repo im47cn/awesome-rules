@@ -1,4 +1,6 @@
 ---
+title: API 设计规范
+scenario: 设计/审查对外 Open API
 inclusion: always
 ---
 

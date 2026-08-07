@@ -11,7 +11,9 @@ awesome-rules/
 │   └── api-standards.md                  # API 设计规范（RESTful）
 ├── skills/                            # AI Agent 技能
 │   ├── ddl-guard/                     # DDL 设计与审查
-│   └── api-guard/                     # API 设计与审查
+│   ├── api-guard/                     # API 设计与审查
+│   ├── arch-guard/                    # DDD 架构分层审查
+│   └── doc-gen/                       # DDD 技术文档自动生成
 ├── scripts/                           # 工具脚本
 │   └── badcase_runner.py              # Badcase 回归测试
 ├── docs/                              # 文档
@@ -42,6 +44,8 @@ awesome-rules/
 | --- | --- |
 | [ddl-guard](skills/ddl-guard/README.md) | MySQL DDL 设计与规范审查 |
 | [api-guard](skills/api-guard/README.md) | Open API 设计与规范审查 |
+| [arch-guard](skills/arch-guard/README.md) | DDD 架构分层规范审查 |
+| [doc-gen](skills/doc-gen/README.md) | DDD 技术文档自动生成（交互式静态站点） |
 
 各技能的详细文档、用法和检查规则见各自目录下的 README。
 
