@@ -430,16 +430,33 @@ def check_forbidden_clauses(text: str, issues: list, file_path: str):
 
 
 def check_comment_style(text: str, issues: list, file_path: str):
-    """Check comment style (# or /* */ instead of -- )."""
+    """Check comment style (# or /* */ instead of -- ).
+
+    检查两种注释风格问题：
+    1. 使用 # 注释（应改为 --）
+    2. 使用 -- 注释但 -- 后没有空格（不规范，应改为 -- 空格）
+    """
     lines = text.split("\n")
     for i, line in enumerate(lines, 1):
         stripped = line.lstrip()
+        # 检查 # 注释（排除 shebang #!）
         if stripped.startswith("#") and not stripped.startswith("#!"):
             issues.append(Issue(
                 table="(文件级)", severity=Severity.MANDATORY, rule="注释符号",
                 location=f"{file_path}:{i}", description="使用了 # 注释",
                 suggestion="注释统一使用 '-- '(注意 -- 后有一个空格)",
             ))
+        # 检查 -- 注释但 -- 后没有空格（常见错误）
+        # 需要排除 SQL 关键字中的 --（如 column name 包含 -- 的情况）
+        # 匹配行首或括号后的 -- 注释，且 -- 后紧跟非空格字符
+        if re.search(r"(?<![\w\x27\x60])(--)(?![\s\-\x27\x60])", stripped, re.IGNORECASE):
+            # 排除 COMMENT 定义中的 --（如 COMMENT 'xxx--yyy'）
+            if not re.search(r"(?i)comment\s*['\"]", stripped):
+                issues.append(Issue(
+                    table="(文件级)", severity=Severity.MANDATORY, rule="注释格式",
+                    location=f"{file_path}:{i}", description="-- 注释后缺少空格（应为 '-- '）",
+                    suggestion="-- 后必须跟一个空格，如 '-- 注释内容'，否则可能被误解析",
+                ))
 
 
 def check_partition(text: str, issues: list, file_path: str):

@@ -12,6 +12,8 @@ DDD 架构分层守护脚本
 退出码: 0=通过, 1=有强制问题, 2=运行错误
 """
 
+from __future__ import annotations
+
 import argparse
 import hashlib
 import json
@@ -20,9 +22,10 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from enum import Enum
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Dict, List, Optional, Tuple
 
 # ── 配置默认值 ─────────────────────────────────────────────────────────────
 
@@ -74,6 +77,11 @@ DEFAULT_CONFIG = {
         "org.springframework.stereotype",
         "org.springframework.transaction.annotation",
     ],
+    # 状态机框架 import 前缀（识别形态 C，用于状态机治理检查）
+    "state_machine_imports": [
+        "org.springframework.statemachine",
+        "com.alibaba.cola.statemachine",
+    ],
 }
 
 SKIP_DIRS = {
@@ -93,6 +101,8 @@ NAMING           = "NAMING"
 ADAPTER_ISOLATION = "ADAPTER_ISOLATION"
 MAVEN_MODULE_DEP = "MAVEN_MODULE_DEP"
 CROSS_DOMAIN_DEP = "CROSS_DOMAIN_DEP"
+STATE_MACHINE       = "STATE_MACHINE"
+STATE_FIELD_LEAKAGE = "STATE_FIELD_LEAKAGE"
 
 
 class Severity(Enum):
@@ -115,7 +125,7 @@ class Issue:
 # ── 调试/警告基础设施 ──────────────────────────────────────────────────────
 
 _debug_enabled = False
-_warnings: list[str] = []
+_warnings: List[str] = []
 
 
 def _debug(msg: str):
@@ -130,7 +140,7 @@ def _warn(msg: str):
 
 # ── 配置加载 ────────────────────────────────────────────────────────────────
 
-def load_config(project_root: str, config_path: str | None) -> dict:
+def load_config(project_root: str, config_path: Optional[str] = None) -> Dict:
     cfg = json.loads(json.dumps(DEFAULT_CONFIG))
 
     if config_path is None:
@@ -156,7 +166,7 @@ def _deep_merge(base: dict, overrides: dict):
 
 # ── 层/域识别 ──────────────────────────────────────────────────────────────
 
-def _build_layer_patterns(cfg: dict) -> list[tuple[str, re.Pattern]]:
+def _build_layer_patterns(cfg: Dict) -> List[Tuple[str, re.Pattern]]:
     patterns = []
     for name, paths in cfg["layer_paths"].items():
         for p in paths:
@@ -164,8 +174,8 @@ def _build_layer_patterns(cfg: dict) -> list[tuple[str, re.Pattern]]:
     return patterns
 
 
-def identify_layer(file_path: str, layer_patterns: list[tuple[str, re.Pattern]],
-                   cfg: dict) -> str | None:
+def identify_layer(file_path: str, layer_patterns: List[Tuple[str, re.Pattern]],
+                   cfg: Dict) -> Optional[str]:
     for name, pattern in layer_patterns:
         if pattern.search(file_path):
             return name
@@ -175,14 +185,14 @@ def identify_layer(file_path: str, layer_patterns: list[tuple[str, re.Pattern]],
     return None
 
 
-def _identify_module_layer(artifact_id: str, cfg: dict) -> str | None:
+def _identify_module_layer(artifact_id: str, cfg: Dict) -> Optional[str]:
     for suffix, layer in cfg["module_suffixes"].items():
         if f"-{suffix}" in artifact_id or f"_{suffix}" in artifact_id or artifact_id.endswith(suffix):
             return layer
     return None
 
 
-def _identify_business_domain(artifact_id: str, pom_rel_path: str, cfg: dict) -> str | None:
+def _identify_business_domain(artifact_id: str, pom_rel_path: str, cfg: Dict) -> Optional[str]:
     parts = pom_rel_path.replace("\\", "/").split("/")
     all_suffixes = set(cfg["module_suffixes"].keys())
     exclude_dirs = {"src", "target", "build"}
@@ -205,7 +215,7 @@ def _pom_tag(tag: str) -> str:
     return f"{{{MAVEN_NS}}}{tag}"
 
 
-def _parse_artifact_id(pom_file: str) -> str | None:
+def _parse_artifact_id(pom_file: str) -> Optional[str]:
     try:
         tree = ET.parse(pom_file)
         root = tree.getroot()
@@ -222,7 +232,7 @@ def _parse_artifact_id(pom_file: str) -> str | None:
     return None
 
 
-def _parse_module_dependencies(pom_file: str) -> list[tuple[str, str]]:
+def _parse_module_dependencies(pom_file: str) -> List[Tuple[str, str]]:
     deps = []
     try:
         tree = ET.parse(pom_file)
@@ -237,7 +247,7 @@ def _parse_module_dependencies(pom_file: str) -> list[tuple[str, str]]:
     return deps
 
 
-def _collect_poms(project_root: str) -> list[str]:
+def _collect_poms(project_root: str) -> List[str]:
     pom_files = []
     for dirpath, dirnames, filenames in os.walk(project_root):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
@@ -249,8 +259,8 @@ def _collect_poms(project_root: str) -> list[str]:
 
 # ── 模块内层推断（artifact-id 无层后缀时） ────────────────────────────────
 
-def _infer_layer_from_packages(pom_file: str, layer_patterns: list[tuple[str, re.Pattern]],
-                               cfg: dict) -> str | None:
+def _infer_layer_from_packages(pom_file: str, layer_patterns: List[Tuple[str, re.Pattern]],
+                               cfg: Dict) -> Optional[str]:
     module_dir = os.path.dirname(pom_file)
     src_java = os.path.join(module_dir, "src", "main", "java")
     if not os.path.isdir(src_java):
@@ -274,7 +284,7 @@ def _infer_layer_from_packages(pom_file: str, layer_patterns: list[tuple[str, re
 IMPORT_PATTERN = re.compile(r"^import\s+([\w.]+)", re.MULTILINE)
 
 
-def extract_imports_with_lines(content: str) -> list[tuple[str, int]]:
+def extract_imports_with_lines(content: str) -> List[Tuple[str, int]]:
     return [(m.group(1), content[:m.start()].count("\n") + 1)
             for m in IMPORT_PATTERN.finditer(content)]
 
@@ -347,7 +357,7 @@ def _domain_purity_suggestion(imp: str) -> str:
 
     return "将框架相关逻辑下沉到 infrastructure 层，仓储实现通过依赖倒置接入"
 
-def check_domain_purity(file_path: str, content: str, cfg: dict) -> list[Issue]:
+def check_domain_purity(file_path: str, content: str, cfg: Dict) -> List[Issue]:
     issues = []
     forbidden = cfg["domain_forbidden_imports"]
     allowed = set(cfg["domain_allowed_imports"])
@@ -417,7 +427,7 @@ _MAVEN_DEP_MATRIX = {
 
 
 def check_dependency_direction(file_path: str, source_layer: str, content: str,
-                               layer_patterns: list, cfg: dict) -> list[Issue]:
+                               layer_patterns: List, cfg: Dict) -> List[Issue]:
     """检查各层 Java import 逆向依赖（仅分析项目内部 import）。"""
     issues = []
     prefix = cfg.get("project_package_prefix", "")
@@ -455,20 +465,36 @@ CLASS_PATTERN = re.compile(r"(?:class|interface|enum|@interface)\s+(\w+)", re.MU
 
 # 后缀必须前接小写字母，避免误匹配
 _SUFFIX_RULES = [
-    (re.compile(r"(?<=[a-z])Cmd$"),            "client",         Severity.MANDATORY,   "Command 对象应在 client 层"),
-    (re.compile(r"(?<=[a-z])Query$"),           "client",         Severity.MANDATORY,   "Query 对象应在 client 层"),
-    (re.compile(r"(?<=[a-z])CO$"),              "client",         Severity.MANDATORY,   "Client Object 应在 client 层"),
-    (re.compile(r"(?<=[a-z])ServiceI$"),        "client",         Severity.MANDATORY,   "API 服务接口应在 client 层"),
-    (re.compile(r"(?<=[a-z])CmdExe$"),          "application",    Severity.MANDATORY,   "命令执行器应在 application 层"),
-    (re.compile(r"(?<=[a-z])QryExe$"),          "application",    Severity.MANDATORY,   "查询执行器应在 application 层"),
-    (re.compile(r"(?<=[a-z])Assembler$"),       "application",    Severity.RECOMMENDED, "组装器应在 application 层"),
-    (re.compile(r"(?<=[a-z])E$"),              "domain",         Severity.MANDATORY,   "领域实体应在 domain 层"),
-    (re.compile(r"(?<=[a-z])V$"),              "domain",         Severity.MANDATORY,   "值对象应在 domain 层"),
-    (re.compile(r"(?<=[a-z])DomainService$"),   "domain",         Severity.MANDATORY,   "领域服务应在 domain 层"),
-    (re.compile(r"(?<=[a-z])Repository$"),      "domain",         Severity.MANDATORY,   "仓储接口应在 domain 层"),
-    (re.compile(r"(?<=[a-z])ExtPt$"),           "domain",         Severity.MANDATORY,   "扩展点接口应在 domain 层"),
-    (re.compile(r"(?<=[a-z])DO$"),             "infrastructure", Severity.MANDATORY,   "数据对象应在 infrastructure 层"),
-    (re.compile(r"(?<=[a-z])Ext$"),            "infrastructure", Severity.RECOMMENDED, "扩展点实现应在 infrastructure 层"),
+    # client 层契约对象（DTO/Command/Query 允许 client 或 adapter.web，见 02-naming §1）
+    (re.compile(r"(?<=[a-z])Inter$"),          ("client",),                Severity.MANDATORY,   "Feign 接口应在 client 层"),
+    (re.compile(r"(?<=[a-z])DTO$"),            ("client", "adapter"),      Severity.MANDATORY,   "DTO 应在 client 或 adapter 层"),
+    (re.compile(r"(?<=[a-z])Command$"),        ("client", "adapter"),      Severity.RECOMMENDED, "Command 应在 client 或 adapter 层"),
+    (re.compile(r"(?<=[a-z])Query$"),          ("client", "adapter"),      Severity.RECOMMENDED, "Query 应在 client 或 adapter 层"),
+    # adapter 层
+    (re.compile(r"(?<=[a-z])Controller$"),     ("adapter",),               Severity.MANDATORY,   "Controller 应在 adapter 层"),
+    # application 层
+    (re.compile(r"(?<=[a-z])AppService$"),     ("application",),           Severity.MANDATORY,   "应用服务应在 application 层"),
+    (re.compile(r"(?<=[a-z])CmdExe$"),         ("application",),           Severity.MANDATORY,   "命令执行器应在 application 层"),
+    (re.compile(r"(?<=[a-z])QryExe$"),         ("application",),           Severity.MANDATORY,   "查询执行器应在 application 层"),
+    (re.compile(r"(?<=[a-z])Assembler$"),      ("application",),           Severity.RECOMMENDED, "装配器应在 application 层"),
+    (re.compile(r"(?<=[a-z])Handler$"),        ("application",),           Severity.RECOMMENDED, "策略处理器应在 application 层"),
+    (re.compile(r"(?<=[a-z])Manager$"),        ("application",),           Severity.RECOMMENDED, "流程编排应在 application 层"),
+    # domain 层（实体/值对象无后缀，无法用后缀规则检查）
+    (re.compile(r"(?<=[a-z])DomainService$"),  ("domain",),                Severity.MANDATORY,   "领域服务应在 domain 层"),
+    (re.compile(r"(?<=[a-z])Repository$"),     ("domain",),                Severity.MANDATORY,   "仓储接口应在 domain 层"),
+    (re.compile(r"(?<=[a-z])ExtPt$"),          ("domain",),                Severity.MANDATORY,   "扩展点接口应在 domain 层"),
+    # infrastructure 层
+    (re.compile(r"(?<=[a-z])RepositoryImpl$"), ("infrastructure",),        Severity.MANDATORY,   "仓储实现应在 infrastructure 层"),
+    (re.compile(r"(?<=[a-z])Mapper$"),         ("infrastructure",),        Severity.MANDATORY,   "Mapper 应在 infrastructure 层"),
+    (re.compile(r"(?<=[a-z])Converter$"),      ("infrastructure",),        Severity.RECOMMENDED, "PO 转换器应在 infrastructure 层"),
+    (re.compile(r"(?<=[a-z])PO$"),             ("infrastructure",),        Severity.MANDATORY,   "持久化对象应在 infrastructure 层"),
+    (re.compile(r"(?<=[a-z])Ext$"),            ("infrastructure",),        Severity.RECOMMENDED, "扩展点实现应在 infrastructure 层"),
+    (re.compile(r"(?<=[a-z])Constant$"),       ("infrastructure",),        Severity.RECOMMENDED, "常量类应在 infrastructure 层"),
+    (re.compile(r"(?<=[a-z])Exception$"),      ("infrastructure",),        Severity.RECOMMENDED, "异常类应在 infrastructure 层"),
+    # 枚举按语义分层（02-naming §1）：领域状态枚举（*StatusEnum/*StateEnum，被 DomainService 引用）→ domain；
+    # 技术分类枚举 → infrastructure。后者用 lookbehind 排除 Status/State，避免与状态枚举规则重叠。
+    (re.compile(r"(?<=[a-z])(?:Status|State)Enum$"),       ("domain",),         Severity.MANDATORY,   "领域状态枚举应在 domain 层（放 infrastructure 会导致 domain 逆向依赖）"),
+    (re.compile(r"(?<=[a-z])(?<!Status)(?<!State)Enum$"),  ("infrastructure",), Severity.RECOMMENDED, "技术分类枚举应在 infrastructure 层"),
 ]
 
 _NAMING_EXCLUDE_STARTSWITH = (
@@ -477,7 +503,7 @@ _NAMING_EXCLUDE_STARTSWITH = (
 
 
 def check_naming(file_path: str, source_layer: str, content: str,
-                 cfg: dict) -> list[Issue]:
+                 cfg: Dict) -> List[Issue]:
     issues = []
     for m in CLASS_PATTERN.finditer(content):
         class_name = m.group(1)
@@ -487,15 +513,16 @@ def check_naming(file_path: str, source_layer: str, content: str,
         if len(class_name) <= 2:
             continue
 
-        for suffix_re, expected_layer, severity, desc in _SUFFIX_RULES:
+        for suffix_re, expected_layers, severity, desc in _SUFFIX_RULES:
             if suffix_re.search(class_name):
-                if source_layer != expected_layer:
+                if source_layer not in expected_layers:
                     line = content[:m.start()].count("\n") + 1
+                    allowed = "或".join(expected_layers)
                     issues.append(Issue(
                         file=file_path, line=line, severity=severity,
                         rule="命名规范", rule_code=NAMING,
                         description=f"{class_name}: {desc}，当前位置在 {source_layer} 层",
-                        suggestion=f"将 {class_name} 移动到 {expected_layer} 层对应包",
+                        suggestion=f"将 {class_name} 移动到 {allowed} 层对应包",
                     ))
     return issues
 
@@ -503,7 +530,7 @@ def check_naming(file_path: str, source_layer: str, content: str,
 # ── 检查 4: Adapter 隔离（仅项目内部 import） ─────────────────────────────
 
 def check_adapter_isolation(file_path: str, content: str,
-                            layer_patterns: list, cfg: dict) -> list[Issue]:
+                            layer_patterns: List, cfg: Dict) -> List[Issue]:
     issues = []
     prefix = cfg.get("project_package_prefix", "")
     all_imports = extract_imports_with_lines(content)
@@ -517,19 +544,91 @@ def check_adapter_isolation(file_path: str, content: str,
                 file=file_path, line=line, severity=Severity.MANDATORY,
                 rule="Adapter 隔离", rule_code=ADAPTER_ISOLATION,
                 description=f"Adapter 禁止直接引用领域对象: {imp}",
-                suggestion="通过 Application Executor + Assembler 返回 CO，禁止 domain 对象泄漏到 Adapter",
+                suggestion="通过 Application Executor + Assembler 返回 DTO，禁止 domain 对象泄漏到 Adapter",
             ))
+    return issues
+
+
+# ── 检查: 状态泄漏与状态机治理 ────────────────────────────────────────────
+
+# 状态改写调用：setXxxStatus / setXxxState / changeStatus / updateStatus / modifyStatus
+_STATUS_WRITE_RE = re.compile(r"\b(?:set|change|update|modify)\w*(?:Status|State)\s*\(")
+# 状态枚举命名（形态 A 锚点）
+_STATUS_ENUM_RE = re.compile(r"\benum\s+\w*(?:Status|State)\b")
+
+
+def check_state_field_leakage(file_path: str, source_layer: str, content: str,
+                              cfg: Dict) -> List[Issue]:
+    """检测 adapter/infrastructure 层直接改写领域状态（状态泄漏）。
+
+    状态流转应经 Application 编排、Domain 封装；Adapter/Infra 只传递事件。
+    启发式：adapter/infrastructure 层出现 set/change/update/modify...Status/State() 调用。
+    adapter 层强制，infrastructure 层推荐（DO 转换等场景可能合理）。
+    """
+    if source_layer not in ("adapter", "infrastructure"):
+        return []
+    severity = Severity.MANDATORY if source_layer == "adapter" else Severity.RECOMMENDED
+    issues: List[Issue] = []
+    for m in _STATUS_WRITE_RE.finditer(content):
+        line = content[:m.start()].count("\n") + 1
+        call = m.group(0).rstrip("(")
+        issues.append(Issue(
+            file=file_path, line=line, severity=severity,
+            rule="状态泄漏", rule_code=STATE_FIELD_LEAKAGE,
+            description=f"{source_layer} 层直接改写状态: {call}()（状态流转应收敛在 Domain 层）",
+            suggestion="通过 Application Executor 调用 Domain 服务/聚合方法触发状态流转，Adapter 只传递事件",
+        ))
+    return issues
+
+
+def check_state_machine_governance(project_root: str, java_files: List[str],
+                                   cfg: Dict) -> List[Issue]:
+    """全局：检测状态枚举但未引入状态机框架/统一管理（启发式）。
+
+    形态 A 状态枚举若散落 switch/if 管理，流转规则难以审计。
+    有状态枚举 + 无任何状态机框架 import → 推荐级提醒。
+    """
+    sm_imports = cfg.get("state_machine_imports", [])
+    has_framework = False
+    status_enums: List[Tuple[str, str]] = []
+    for jf in java_files:
+        try:
+            with open(jf, "r", encoding="utf-8") as fp:
+                content = fp.read()
+        except Exception:
+            continue
+        if any(imp in content for imp in sm_imports):
+            has_framework = True
+        rel = os.path.relpath(jf, project_root)
+        for m in _STATUS_ENUM_RE.finditer(content):
+            status_enums.append((rel, m.group(0).split()[-1]))
+
+    if has_framework or not status_enums:
+        return []
+
+    seen_enum: set = set()
+    issues: List[Issue] = []
+    for rel, enum_name in status_enums:
+        if enum_name in seen_enum:
+            continue
+        seen_enum.add(enum_name)
+        issues.append(Issue(
+            file=rel, line=0, severity=Severity.RECOMMENDED,
+            rule="状态机治理", rule_code=STATE_MACHINE,
+            description=f"识别到状态枚举 {enum_name} 但未引入状态机框架，状态流转可能散落于 switch/if",
+            suggestion="引入 Cola Statemachine，或在 Domain 服务集中封装流转规则（参见 steering/gtsp/01-project-structure.md 状态机章节）",
+        ))
     return issues
 
 
 # ── 检查 5+6: Maven 模块依赖（同域层矩阵 + 跨域检查，单次扫描） ──────────
 
-def check_maven_modules(project_root: str, pom_files: list[str],
-                        cfg: dict) -> list[Issue]:
+def check_maven_modules(project_root: str, pom_files: List[str],
+                        cfg: Dict) -> List[Issue]:
     issues = []
     layer_patterns = _build_layer_patterns(cfg)
 
-    module_info: dict[str, tuple[str, str, str]] = {}
+    module_info: Dict[str, Tuple[str, str, str]] = {}
     for pom in pom_files:
         aid = _parse_artifact_id(pom)
         if aid is None:
@@ -600,7 +699,7 @@ def check_maven_modules(project_root: str, pom_files: list[str],
 # ── Java 文件收集与检查调度 ───────────────────────────────────────────────
 
 def check_file(file_path: str, project_root: str,
-               layer_patterns: list, cfg: dict) -> tuple[list[Issue], bool, str | None]:
+               layer_patterns: List, cfg: Dict) -> Tuple[List[Issue], bool, Optional[str]]:
     """返回 (issues, classified, layer)。
 
     classified=False 表示该文件未被任何层识别（不属于分层模块）。
@@ -623,10 +722,11 @@ def check_file(file_path: str, project_root: str,
     issues.extend(check_dependency_direction(rel_path, layer, content, layer_patterns, cfg))
     issues.extend(check_naming(rel_path, layer, content, cfg))
     issues.extend(check_adapter_isolation(rel_path, content, layer_patterns, cfg) if layer == "adapter" else [])
+    issues.extend(check_state_field_leakage(rel_path, layer, content, cfg) if layer in ("adapter", "infrastructure") else [])
     return issues, True, layer
 
 
-def collect_java_files(project_root: str) -> list[str]:
+def collect_java_files(project_root: str) -> List[str]:
     java_files = []
     for dirpath, dirnames, filenames in os.walk(project_root):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
@@ -660,7 +760,7 @@ def load_baseline(baseline_path: str) -> set[str]:
         return set()
 
 
-def save_baseline(baseline_path: str, issues: list[Issue]):
+def save_baseline(baseline_path: str, issues: List[Issue]):
     fingerprints = sorted(_issue_fingerprint(i) for i in issues)
     with open(baseline_path, "w", encoding="utf-8") as fp:
         json.dump({
@@ -676,8 +776,7 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def filter_by_baseline(issues: list[Issue], baseline_fingerprints: set[str]
-                       ) -> tuple[list[Issue], int]:
+def filter_by_baseline(issues: List[Issue], baseline_fingerprints: Optional[set] = None) -> Tuple[List[Issue], int]:
     """过滤掉基线中已存在的存量违规，仅返回新增违规。"""
     new_issues = []
     suppressed = 0
@@ -693,9 +792,9 @@ def filter_by_baseline(issues: list[Issue], baseline_fingerprints: set[str]
 
 # ── 主入口 ──────────────────────────────────────────────────────────────────
 
-def run(project_root: str, strict: bool = False, config_path: str | None = None,
-        baseline_path: str | None = None, warn_unclassified: bool = False
-        ) -> tuple[list[Issue], int, int, dict]:
+def run(project_root: str, strict: bool = False, config_path: Optional[str] = None,
+        baseline_path: Optional[str] = None, warn_unclassified: bool = False
+        ) -> Tuple[List[Issue], int, int, Dict]:
     """返回 (issues, mandatory_count, recommended_count, stats)。"""
     global _warnings, _debug_enabled
     _warnings = []
@@ -727,6 +826,7 @@ def run(project_root: str, strict: bool = False, config_path: str | None = None,
 
     pom_files = _collect_poms(project_root)
     all_issues.extend(check_maven_modules(project_root, pom_files, cfg))
+    all_issues.extend(check_state_machine_governance(project_root, java_files, cfg))
 
     if strict:
         for issue in all_issues:
@@ -768,8 +868,8 @@ def run(project_root: str, strict: bool = False, config_path: str | None = None,
 
 # ── 输出 ──────────────────────────────────────────────────────────────────
 
-def format_text(issues: list[Issue], mandatory_count: int, recommended_count: int,
-                stats: dict | None = None) -> str:
+def format_text(issues: List[Issue], mandatory_count: int, recommended_count: int,
+                stats: Optional[Dict] = None) -> str:
     structural_debt_count = stats.get("structural_debt_count", 0) if stats else 0
 
     if not issues and not (stats and stats.get("warnings")):
@@ -803,7 +903,7 @@ def format_text(issues: list[Issue], mandatory_count: int, recommended_count: in
     lines.append("")
 
     # 按规则分组统计
-    by_rule: dict[str, list[Issue]] = defaultdict(list)
+    by_rule: Dict[str, List[Issue]] = defaultdict(list)
     for i in issues:
         by_rule[i.rule].append(i)
 
@@ -837,10 +937,10 @@ def format_text(issues: list[Issue], mandatory_count: int, recommended_count: in
     return "\n".join(lines)
 
 
-def format_json(issues: list[Issue], mandatory_count: int, recommended_count: int,
-                strict: bool = False, stats: dict | None = None) -> str:
+def format_json(issues: List[Issue], mandatory_count: int, recommended_count: int,
+                strict: bool = False, stats: Optional[Dict] = None) -> str:
     # 根因聚类：提取 callee 的包前缀，归类同源违规
-    callee_clusters: dict[str, int] = defaultdict(int)
+    callee_clusters: Dict[str, int] = defaultdict(int)
     _CALLEE_RE = re.compile(r"(:?import|[→]\s*)\s*([\w.]+)")
     for i in issues:
         m = _CALLEE_RE.search(i.description)
@@ -886,7 +986,7 @@ def format_json(issues: list[Issue], mandatory_count: int, recommended_count: in
 
 # ── CLI ────────────────────────────────────────────────────────────────────
 
-def print_graph_mode(config_path: str | None = None):
+def print_graph_mode(config_path: Optional[str] = None):
     """输出 Tier 2 Cypher 查询清单，根据配置文件动态生成。
 
     先尝试加载配置以获得 layer_aliases/layer_paths，若失败则使用默认值。
@@ -899,7 +999,7 @@ def print_graph_mode(config_path: str | None = None):
     # 收集所有层的路径变体（含别名）
     # 例如 layer_paths["adapter"]=["/adapter/"] + layer_aliases["interfaces"]="adapter"
     # → adapter 层的匹配模式为 [".adapter.", ".interfaces."]
-    layer_patterns: dict[str, list[str]] = {}
+    layer_patterns: Dict[str, List[str]] = {}
     for name, paths in cfg["layer_paths"].items():
         layer_patterns[name] = [p.strip("/") for p in paths]
     for alias, target in cfg["layer_aliases"].items():
@@ -1006,6 +1106,17 @@ WHERE NOT (
 RETURN src_layer, tgt_layer, f.qualified_name AS caller, d.qualified_name AS callee
 ORDER BY src_layer, tgt_layer, caller
 
+### 7. 状态泄漏（Adapter/Infrastructure → 状态枚举，需人工确认）
+
+> 状态枚举的深度质量分析（死状态/不可达/缺失流转）由 doc-gen 的 StateMachineScanner 负责；
+> 此查询聚焦架构层面：adapter/infrastructure 是否直接依赖状态枚举。
+
+MATCH (f)-[:IMPORTS]->(d)
+WHERE ({adapter_cond} OR {infra_cond})
+  AND d.qualified_name =~ '(?i).*\\.(Status|State)$'
+RETURN f.qualified_name AS caller, d.qualified_name AS status_enum
+ORDER BY caller
+
 ---
 > 层路径识别基于配置文件：{json.dumps(cfg.get("layer_aliases", {}), ensure_ascii=False)}（可通过 .arch-guard.json 覆盖）
 > 知识图谱天然不索引第三方包，无需额外过滤。
@@ -1014,7 +1125,7 @@ ORDER BY src_layer, tgt_layer, caller
 
 # ── init ────────────────────────────────────────────────────────────────────
 
-def _infer_prefix_from_pom(project_root: str) -> str | None:
+def _infer_prefix_from_pom(project_root: str) -> Optional[str]:
     """从根目录 pom.xml 的 <groupId> 自动推断 project_package_prefix。"""
     pom = os.path.join(project_root, "pom.xml")
     if not os.path.isfile(pom):

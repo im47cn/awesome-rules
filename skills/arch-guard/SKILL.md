@@ -11,12 +11,13 @@ description: >
 
 ## 两层架构
 
-| 层级 | 工具 | 精度 | 适用场景 |
-|---|---|---|---|
-| **Tier 1: 快速巡检** | `arch_check.py` 脚本 | 文件级，启发式字符串匹配 | CI 门禁、提交前自检 |
+| 层级                 | 工具                              | 精度                          | 适用场景                         |
+| -------------------- | --------------------------------- | ----------------------------- | -------------------------------- |
+| **Tier 1: 快速巡检** | `arch_check.py` 脚本              | 文件级，启发式字符串匹配      | CI 门禁、提交前自检              |
 | **Tier 2: 深度审查** | `codebase-memory-mcp` Cypher 查询 | `qualified_name` 精确到方法级 | 代码审查、人工复核、违规证据输出 |
 
 **分界原则**：Tier 1 覆盖脚本天然擅长的事项（pom.xml 解析、正则命名匹配、框架 import 检测）。Tier 2 覆盖脚本做不准的事项——层间依赖方向分析，因为知识图谱：
+
 - 天然过滤第三方包（图只索引项目自身节点）
 - 精确到方法级 qualified_name（而不仅是文件）
 - 输出完整的证据链（caller → callee）
@@ -53,13 +54,15 @@ python3 scripts/arch_check.py <项目根目录> [--format json] [--strict] [--co
 
 脚本检查项（字符串匹配，文件级）：
 
-| 检查项 | 说明 |
-|---|---|
-| Maven 模块依赖 | 同域层依赖矩阵 + 跨域仅允许 `-client` |
-| 领域层框架引用 | pom.xml 禁止 Spring Boot/MyBatis；Java import 禁止框架业务类 |
-| 命名后缀 | CmdExe/E/CO/DO 等后缀是否在正确分层 |
-| 结构性债务 | 契约对象（Command/DTO/Query）被跨层引用——单独计数，不计入门禁 `mandatory_count` |
-| 报告输出 | `--mode graph` 输出 Tier 2 Cypher 查询清单（动态生成，适配 `layer_aliases`） |
+| 检查项         | 说明                                                                            |
+| -------------- | ------------------------------------------------------------------------------- |
+| Maven 模块依赖 | 同域层依赖矩阵 + 跨域仅允许 `-client`                                           |
+| 领域层框架引用 | pom.xml 禁止 Spring Boot/MyBatis；Java import 禁止框架业务类                    |
+| 命名后缀       | Inter/PO/DTO/Command/Mapper/Repository 等后缀是否在正确分层（对齐 02-naming）   |
+| 状态泄漏       | adapter/infrastructure 层禁止直接改写状态（setStatus/changeStatus 等）          |
+| 状态机治理     | 有状态枚举但未引入状态机框架（Spring/Cola）→ 推荐级提醒                         |
+| 结构性债务     | 契约对象（Command/DTO/Query）被跨层引用——单独计数，不计入门禁 `mandatory_count` |
+| 报告输出       | `--mode graph` 输出 Tier 2 Cypher 查询清单（动态生成，适配 `layer_aliases`）    |
 
 ### Tier 2: 深度审查（知识图谱）
 
@@ -86,14 +89,14 @@ python3 scripts/arch_check.py --mode graph --config .arch-guard.json
 
 ### 补充人工判断
 
-读取 [`../../steering/ddd-architecture.md`](../../steering/ddd-architecture.md)，逐项核对两轮自动检查无法覆盖的规则：
+读取 [`../../steering/gtsp/01-project-structure.md`](../../steering/gtsp/01-project-structure.md)（架构与分层：模块/业务域/分层/CQRS/状态机/扩展点），逐项核对两轮自动检查无法覆盖的规则：
 
-| 自动检查覆盖 | 仍需人工 |
-|---|---|
-| 依赖方向（脚本 + Cypher） | 聚合设计合理性（大小、边界） |
-| 领域层纯净度（脚本 import + pom） | 值对象是否不可变（setter 检查） |
-| 命名后缀（脚本） | 应用服务是否包含业务逻辑 |
-| 跨域 Maven 依赖（脚本） | 跨域通信是否使用了事件而非 API（应偏向事件解耦） |
+| 自动检查覆盖                      | 仍需人工                                         |
+| --------------------------------- | ------------------------------------------------ |
+| 依赖方向（脚本 + Cypher）         | 聚合设计合理性（大小、边界）                     |
+| 领域层纯净度（脚本 import + pom） | 值对象是否不可变（setter 检查）                  |
+| 命名后缀（脚本）                  | 应用服务是否包含业务逻辑                         |
+| 跨域 Maven 依赖（脚本）           | 跨域通信是否使用了事件而非 API（应偏向事件解耦） |
 
 ## 配置文件
 
@@ -116,12 +119,12 @@ python3 scripts/arch_check.py . --init     # 从 pom.xml 推断 prefix，生成 
 }
 ```
 
-| 配置项 | 作用 |
-|---|---|
-| `project_package_prefix` | 脚本依赖方向检查仅分析此前缀下的 import，避免第三方误报 |
-| `layer_aliases` | 层路径别名（如 `interfaces` → `adapter`） |
-| `domain_annotation_imports` | 领域层额外允许的注解类框架包（务实 DDD） |
-| `module_suffixes` | Maven 模块后缀 → 层映射（覆盖默认） |
+| 配置项                      | 作用                                                    |
+| --------------------------- | ------------------------------------------------------- |
+| `project_package_prefix`    | 脚本依赖方向检查仅分析此前缀下的 import，避免第三方误报 |
+| `layer_aliases`             | 层路径别名（如 `interfaces` → `adapter`）               |
+| `domain_annotation_imports` | 领域层额外允许的注解类框架包（务实 DDD）                |
+| `module_suffixes`           | Maven 模块后缀 → 层映射（覆盖默认）                     |
 
 ## CI 集成
 

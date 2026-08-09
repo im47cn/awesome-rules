@@ -10,6 +10,8 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import pytest
+
 import arch_check
 
 
@@ -133,14 +135,15 @@ def test_naming_suffix_matches_layer():
     cfg = _cfg()
     patterns = _patterns(cfg)
 
-    content = "public class OrderE {\n"
+    # GTSP 后缀规则：Repository 应在 domain 层（02-naming §1）
+    content = "public class OrderRepository {\n"
     issues = arch_check.check_naming(
-        "src/main/java/com/example/order/domain/entity/OrderE.java",
+        "src/main/java/com/example/order/domain/repository/OrderRepository.java",
         "domain", content, cfg)
     assert len(issues) == 0
 
     issues = arch_check.check_naming(
-        "src/main/java/com/example/order/adapter/controller/OrderE.java",
+        "src/main/java/com/example/order/adapter/controller/OrderRepository.java",
         "adapter", content, cfg)
     assert len(issues) == 1
     assert issues[0].rule == "命名规范"
@@ -156,17 +159,11 @@ def test_naming_skips_hibernate_and_short():
         "infrastructure", content_hib, cfg)
     assert len(issues) == 0
 
-    # Todo — 结尾 "do" (大写 DO)，但前接小写 o → 匹配 DO 后缀？
-    # (?<=[a-z])DO$: "Todo" 中 D 前是 "o" (小写), 然后 "DO" 结尾 → 匹配！
-    # 这是我们期望的吗？Todo 不应该被判断为 DO。但 (?<=[a-z])DO$ 排除了纯大写类名
-    # 不过 "Todo" 恰好匹配 DO 后缀——这是可接受的已知局限。
-    # 实际项目中 Todo 类名很少出现在 infrastructure 层之外
-
-    # OrderDO 在 infrastructure — 合规
-    content_do = "public class OrderDO {\n"
+    # OrderPO 在 infrastructure — 合规（GTSP 持久化对象后缀 PO，02-naming §1）
+    content_po = "public class OrderPO {\n"
     issues = arch_check.check_naming(
-        "src/main/java/com/example/order/infrastructure/persistence/OrderDO.java",
-        "infrastructure", content_do, cfg)
+        "src/main/java/com/example/order/infrastructure/repository/po/OrderPO.java",
+        "infrastructure", content_po, cfg)
     assert len(issues) == 0
 
 
@@ -178,10 +175,47 @@ def test_short_class_name_skip():
 
 
 def test_suffix_with_camel_boundary():
-    assert not arch_check._SUFFIX_RULES[0][0].search("ABC")
-    assert not arch_check._SUFFIX_RULES[1][0].search("XYZ")
-    assert arch_check._SUFFIX_RULES[0][0].search("CreateCmd")
-    assert arch_check._SUFFIX_RULES[1][0].search("OrderQuery")
+    # 按后缀名定位规则，避免依赖列表索引（重排序脆弱）
+    def rule_matching(sample: str):
+        for rx, _, _, _ in arch_check._SUFFIX_RULES:
+            if rx.search(sample):
+                return rx
+        return None
+
+    cmd = rule_matching("CreateCommand")
+    assert cmd is not None
+    assert not cmd.search("ABC")          # 前接大写字母，不匹配
+    assert cmd.search("CreateCommand")
+
+    qry = rule_matching("OrderQuery")
+    assert qry is not None
+    assert qry.search("OrderQuery")
+
+
+def test_naming_enum_layering():
+    """枚举按语义分层：领域状态枚举（*StatusEnum/*StateEnum）→ domain；技术分类枚举 → infrastructure。"""
+    cfg = _cfg()
+
+    # 领域状态枚举放 infrastructure → 报强制（应移到 domain，否则 domain 逆向依赖）
+    content = "public class OrderStatusEnum {\n"
+    issues = arch_check.check_naming(
+        "src/main/java/com/example/order/infrastructure/enums/OrderStatusEnum.java",
+        "infrastructure", content, cfg)
+    assert len(issues) == 1
+    assert issues[0].severity == arch_check.Severity.MANDATORY
+
+    # 状态枚举在 domain 合规
+    issues = arch_check.check_naming(
+        "src/main/java/com/example/order/domain/model/enum/OrderStatusEnum.java",
+        "domain", content, cfg)
+    assert len(issues) == 0
+
+    # 技术分类枚举在 infrastructure 合规
+    content_tech = "public class GenderEnum {\n"
+    issues = arch_check.check_naming(
+        "src/main/java/com/example/order/infrastructure/enums/GenderEnum.java",
+        "infrastructure", content_tech, cfg)
+    assert len(issues) == 0
 
 
 # ── Adapter isolation ──────────────────────────────────────────────────────
@@ -567,3 +601,145 @@ def test_format_json_has_callee_summary():
     clusters = sorted(result["summary"]["by_callee_root"], key=lambda x: -x["count"])
     assert clusters[0]["count"] == 2
     assert "infra.common.enums" in clusters[0]["package"]
+
+
+# ── State machine ──────────────────────────────────────────────────────────
+
+def test_state_field_leakage_adapter_mandatory():
+    """adapter 层改写状态 → 强制级状态泄漏。"""
+    cfg = _cfg()
+    content = 'public class OrderController {\n  void pay() { order.setStatus(PAID); }\n}'
+    issues = arch_check.check_state_field_leakage(
+        "src/main/java/com/example/order/adapter/controller/OrderController.java",
+        "adapter", content, cfg)
+    assert len(issues) == 1
+    assert issues[0].rule_code == arch_check.STATE_FIELD_LEAKAGE
+    assert issues[0].severity == arch_check.Severity.MANDATORY
+
+
+def test_state_field_leakage_infra_recommended():
+    """infrastructure 层改写状态 → 推荐级（DO 转换等可能合理）。"""
+    cfg = _cfg()
+    content = 'public class OrderMapperImpl { void map() { do.updateStatus(X); } }'
+    issues = arch_check.check_state_field_leakage(
+        "src/main/java/com/example/order/infrastructure/persistence/OrderMapperImpl.java",
+        "infrastructure", content, cfg)
+    assert len(issues) == 1
+    assert issues[0].severity == arch_check.Severity.RECOMMENDED
+
+
+def test_state_field_leakage_domain_skipped():
+    """domain 层改写状态 → 不报（状态流转本就属于 Domain）。"""
+    cfg = _cfg()
+    content = 'public class OrderE { void pay() { this.setStatus(PAID); } }'
+    issues = arch_check.check_state_field_leakage(
+        "src/main/java/com/example/order/domain/entity/OrderE.java",
+        "domain", content, cfg)
+    assert issues == []
+
+
+def test_state_machine_governance_without_framework(tmp_path):
+    """有状态枚举但无状态机框架 → 推荐级治理提醒。"""
+    src = tmp_path / "src/main/java/com/example/order/domain"
+    src.mkdir(parents=True)
+    (src / "OrderStatus.java").write_text(
+        "package com.example.order.domain; enum OrderStatus { INIT, PAID; }", encoding="utf-8")
+    cfg = _cfg()
+    java_files = [str(src / "OrderStatus.java")]
+    issues = arch_check.check_state_machine_governance(str(tmp_path), java_files, cfg)
+    assert any(i.rule_code == arch_check.STATE_MACHINE for i in issues)
+
+
+def test_state_machine_governance_with_framework_silent(tmp_path):
+    """引入了状态机框架 → 不报治理问题。"""
+    src = tmp_path / "src/main/java/com/example/order/domain"
+    src.mkdir(parents=True)
+    (src / "OrderStatus.java").write_text(
+        "package com.example.order.domain; enum OrderStatus { INIT, PAID; }", encoding="utf-8")
+    (src / "OrderConfig.java").write_text(
+        "import org.springframework.statemachine.config.StateMachineConfigurer;", encoding="utf-8")
+    cfg = _cfg()
+    java_files = [str(src / "OrderStatus.java"), str(src / "OrderConfig.java")]
+    assert arch_check.check_state_machine_governance(str(tmp_path), java_files, cfg) == []
+
+
+def test_run_integration_state_machine():
+    """端到端：004 夹具应触发状态泄漏 + 状态机治理。"""
+    import pathlib
+    test_dir = pathlib.Path(__file__).parent.parent.parent
+    badcase_dir = test_dir / "badcase" / "004-state-machine-violation" / "input"
+    if not badcase_dir.exists():
+        return
+    issues, m, r, stats = arch_check.run(str(badcase_dir), strict=False)
+    codes = {i.rule_code for i in issues}
+    assert arch_check.STATE_FIELD_LEAKAGE in codes
+    assert arch_check.STATE_MACHINE in codes
+
+
+# ── graph 模式 / init 子命令 ───────────────────────────────────────────────
+
+_POM_HEADER = '<project xmlns="http://maven.apache.org/POM/4.0.0">'
+
+
+def test_print_graph_mode_outputs_cypher(capsys):
+    arch_check.print_graph_mode()
+    out = capsys.readouterr().out
+    assert "Tier 2" in out
+    assert "Domain → Infrastructure" in out
+    # 默认 layer_aliases（interfaces→adapter）注入 adapter 层匹配条件
+    assert "interfaces" in out
+
+
+def test_print_graph_mode_bad_config_falls_back(capsys):
+    """配置加载失败时回退 DEFAULT_CONFIG，仍正常输出查询清单。"""
+    arch_check.print_graph_mode(config_path="/nonexistent/.arch-guard.json")
+    out = capsys.readouterr().out
+    assert "Tier 2" in out
+
+
+def test_infer_prefix_no_pom(tmp_path):
+    assert arch_check._infer_prefix_from_pom(str(tmp_path)) is None
+
+
+def test_infer_prefix_from_root_pom(tmp_path):
+    (tmp_path / "pom.xml").write_text(
+        f'{_POM_HEADER}<groupId>com.example.order</groupId></project>',
+        encoding="utf-8")
+    assert arch_check._infer_prefix_from_pom(str(tmp_path)) == "com.example.order"
+
+
+def test_infer_prefix_from_parent(tmp_path):
+    (tmp_path / "pom.xml").write_text(
+        f'{_POM_HEADER}<parent><groupId>com.example.parent</groupId>'
+        '</parent></project>', encoding="utf-8")
+    assert arch_check._infer_prefix_from_pom(str(tmp_path)) == "com.example.parent"
+
+
+def test_infer_prefix_from_subdir_pom(tmp_path):
+    sub = tmp_path / "order"
+    sub.mkdir()
+    (sub / "pom.xml").write_text(
+        f'{_POM_HEADER}<groupId>com.sub</groupId></project>', encoding="utf-8")
+    assert arch_check._infer_prefix_from_pom(str(tmp_path)) == "com.sub"
+
+
+def test_do_init_generates_config_with_prefix(tmp_path, capsys):
+    (tmp_path / "pom.xml").write_text(
+        f'{_POM_HEADER}<groupId>com.example</groupId></project>', encoding="utf-8")
+    arch_check._do_init(str(tmp_path), ".arch-guard.json")
+    cfg = json.loads((tmp_path / ".arch-guard.json").read_text(encoding="utf-8"))
+    assert cfg["project_package_prefix"] == "com.example"
+    assert "_comment" in cfg
+
+
+def test_do_init_without_pom_empty_prefix(tmp_path, capsys):
+    arch_check._do_init(str(tmp_path), ".arch-guard.json")
+    cfg = json.loads((tmp_path / ".arch-guard.json").read_text(encoding="utf-8"))
+    assert cfg["project_package_prefix"] == ""
+
+
+def test_do_init_exits_when_config_exists(tmp_path):
+    (tmp_path / ".arch-guard.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(SystemExit) as exc:
+        arch_check._do_init(str(tmp_path), ".arch-guard.json")
+    assert exc.value.code == 1

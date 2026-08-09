@@ -94,22 +94,48 @@ def strip_dynamic_tags(elem: ET.Element) -> str:
 
 
 def resolve_includes(elem: ET.Element, root: ET.Element) -> ET.Element:
-    """解析 <include refid='...'> 标签，将引用的 <sql> 片段内联。"""
-    sql_fragments = {}
+    """解析 <include refid='...'> 标签，将引用的 <sql> 片段内联。
+
+    refid 匹配方式（按优先级）：
+    1. 精确匹配：refid='baseColumns' 匹配 id='baseColumns'
+    2. 短名匹配（按 id 末段）：支持命名空间前缀与反向匹配
+       - refid='com.example.mapper.baseColumns' 匹配 id='baseColumns'
+       - refid='baseColumns' 匹配 id='com.example.mapper.baseColumns'
+    """
+    sql_fragments = {}  # 完整 id → Element
+    sql_fragments_by_short = {}  # 短名（最后一段）→ [Element, ...]
+
     for sql_el in root.findall(".//sql"):
         sid = sql_el.get("id")
-        if sid:
-            sql_fragments[sid] = sql_el
+        if not sid:
+            continue
+        sql_fragments[sid] = sql_el
+        # 提取短名（最后一段，支持 namespace.id 格式）
+        short_name = sid.split(".")[-1]
+        if short_name not in sql_fragments_by_short:
+            sql_fragments_by_short[short_name] = []
+        sql_fragments_by_short[short_name].append(sql_el)
 
     def _resolve(e: ET.Element):
         for child in list(e):
             if child.tag.lower() == "include":
                 refid = child.get("refid", "")
-                # 尝试去前缀匹配（namespace.id → id）
-                refid_short = refid.split(".")[-1]
+                if not refid:
+                    continue
+
+                frag = None
+                # 策略 1: 精确匹配完整 refid
                 frag = sql_fragments.get(refid)
+                # 策略 2: 尝试去掉 refid 的命名空间前缀后匹配
                 if frag is None:
-                    frag = sql_fragments.get(refid_short)
+                    refid_short = refid.split(".")[-1]
+                    frag_list = sql_fragments_by_short.get(refid_short, [])
+                    if frag_list:
+                        # 如果有多个匹配，取第一个（通常是最精确的）
+                        frag = frag_list[0]
+                # 注：原“策略3 多级后缀匹配”已移除——其成功路径与策略2 互斥
+                # （suffix 命中完整 id 时，refid 末段必等于该 id 末段，策略2 必先命中），
+                # 属不可达 dead code。
                 if frag is not None:
                     idx = list(e).index(child)
                     e.remove(child)
@@ -316,7 +342,18 @@ def check_left_like(sql: str, issues: list, ctx: dict):
 
 
 def check_where_function(sql: str, issues: list, ctx: dict):
-    """WHERE 中不对字段做函数转换。"""
+    """WHERE 中不对字段做函数转换。
+
+    覆盖以下常见函数（对字段操作导致索引失效）：
+    字符串：upper/lower/ltrim/rtrim/trim/concat/concat_ws/substring/substr/
+             substring_index/replace/locate/instr/length/char_length/
+             lcase/ucase/regexp_replace/regexp_substr/replace/translate/
+    日期：date_format/str_to_date/year/month/day/hour/minute/second/
+          datediff/timestampdiff/interval/date/adddate/adddate/
+    数值：abs/round/ceil/floor/mod/ceil/mod/power/sqrt/log/
+    类型转换：cast/convert/convert_tz/
+    其他：ifnull/nvl/coalesce/if/if/case/
+    """
     # 提取 WHERE 子句
     m = re.search(r"(?i)\bwhere\b\s+(.+?)(\border\s+by|\bgroup\s+by|\blimit\b|$)", sql)
     if not m:
@@ -324,14 +361,25 @@ def check_where_function(sql: str, issues: list, ctx: dict):
     where_clause = m.group(1)
 
     # 检测字段上包了函数: func(field_name) op value
+    # 扩展函数列表，覆盖更多常见字符串/日期/数值函数
+    # 使用更宽松的正则，支持多参数和复杂表达式
     func_patterns = [
-        (r"(?i)\b(upper|lower|ltrim|rtrim|substring|substr|left|right|date_format|str_to_date|convert|cast|year|month|day|hour|concat|trim|replace|abs|round|ceil|floor)\s*\(\s*[a-zA-Z_][a-zA-Z0-9_]*\s*\)", "WHERE 条件中对字段使用了函数"),
+        # 字符串函数（支持多参数和复杂表达式）
+        (r"(?i)\b(upper|lower|left|right|ltrim|rtrim|trim|concat|concat_ws|substring|substr|substring_index|replace|locate|instr|length|char_length|lcase|ucase|regexp_replace|regexp_substr|translate)\s*\(", "WHERE 条件中对字段使用了字符串函数"),
+        # 日期函数（支持多参数和复杂表达式）
+        (r"(?i)\b(date_format|str_to_date|year|month|day|hour|minute|second|datediff|timestampdiff|to_date|to_timestamp|from_unixtime|unix_timestamp)\s*\(", "WHERE 条件中对字段使用了日期函数"),
+        # 数值函数（支持多参数和复杂表达式）
+        (r"(?i)\b(abs|round|ceil|ceiling|floor|mod|power|sqrt|log|sign)\s*\(", "WHERE 条件中对字段使用了数值函数"),
+        # 类型转换（支持多参数和复杂表达式）
+        (r"(?i)\b(cast|convert|convert_tz)\s*\(", "WHERE 条件中对字段使用了类型转换函数"),
+        # 空值处理（支持多参数和复杂表达式）
+        (r"(?i)\b(ifnull|nvl|coalesce)\s*\(", "WHERE 条件中对字段使用了空值处理函数"),
     ]
     for pattern, desc in func_patterns:
         if re.search(pattern, where_clause):
             issues.append(Issue(**ctx, severity=Severity.RECOMMENDED, rule="WHERE避免函数转换",
                 description=desc,
-                suggestion="WHERE 中尽量不对字段进行函数转换，会降低性能"))
+                suggestion="WHERE 中尽量不对字段进行函数转换，会降低性能。建议改为字段值与常量比较，或使用覆盖索引"))
 
 
 def check_insert_columns(sql: str, issues: list, ctx: dict):
@@ -431,14 +479,19 @@ SKIP_DIRS = {
 
 
 def is_mapper(path: str) -> bool:
-    """判断 XML 文件是否为 MyBatis mapper。"""
+    """判断 XML 文件是否为 MyBatis mapper。
+
+    使用 iter() 搜索所有后代元素，而非仅搜索直接子元素。
+    修复 find() 无法找到嵌套在深层的 select/insert/update/delete 标签的问题。
+    """
     if not path.endswith(".xml"):
         return False
     try:
         tree = ET.parse(path)
         root = tree.getroot()
         for tag in STATEMENT_TAGS:
-            if root.find(f".//{tag}") is not None:
+            # 使用 iter() 搜索所有后代元素（修复 find() 仅搜索直接子元素的问题）
+            if list(root.iter(tag)):
                 return True
         return False
     except Exception:

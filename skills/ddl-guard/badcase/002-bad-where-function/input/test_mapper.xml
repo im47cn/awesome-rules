@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.BadWhereFunctionMapper">
+
+    <!-- 违规: WHERE 中对字段使用 date_format 函数 -->
+    <select id="selectByDateFormat" resultType="Order">
+        SELECT id, order_no, create_time
+        FROM t_order
+        WHERE DATE_FORMAT(create_time, '%Y%m') = '202401'
+    </select>
+
+    <!-- 违规: WHERE 中对字段使用 substring_index 函数 -->
+    <select id="selectBySubstringIndex" resultType="Order">
+        SELECT id, order_no
+        FROM t_order
+        WHERE SUBSTRING_INDEX(order_no, '-', 1) = 'ORD'
+    </select>
+
+    <!-- 违规: WHERE 中对字段使用 replace 函数 -->
+    <select id="selectByReplace" resultType="Order">
+        SELECT id, order_no
+        FROM t_order
+        WHERE REPLACE(order_no, '-', '') = '12345'
+    </select>
+
+    <!-- 违规: WHERE 中对字段使用 upper/lower 函数 -->
+    <select id="selectByUpper" resultType="Order">
+        SELECT id, order_no
+        FROM t_order
+        WHERE UPPER(order_status) = 'PAID'
+    </select>
+
+    <!-- 违规: WHERE 中对字段使用 concat 函数 -->
+    <select id="selectByConcat" resultType="Order">
+        SELECT id, order_no
+        FROM t_order
+        WHERE CONCAT(first_name, last_name) = 'John Doe'
+    </select>
+
+    <!-- 违规: WHERE 中对字段使用 cast/convert 函数 -->
+    <select id="selectByCast" resultType="Order">
+        SELECT id, order_amount
+        FROM t_order
+        WHERE CAST(order_amount AS DECIMAL(10,2)) > 1000
+    </select>
+
+    <!-- 违规: WHERE 中对字段使用 ifnull 函数 -->
+    <select id="selectByIfnull" resultType="Order">
+        SELECT id, order_no
+        FROM t_order
+        WHERE IFNULL(discount_code, '') = ''
+    </select>
+
+    <!-- 合规: 字段值与常量比较（推荐写法） -->
+    <select id="selectByExactMatch" resultType="Order">
+        SELECT id, order_no, create_time
+        FROM t_order
+        WHERE create_time &gt;= '2024-01-01' AND create_time &lt; '2024-02-01'
+    </select>
+
+    <!-- 合规: 使用覆盖索引 -->
+    <select id="selectByCoveringIndex" resultType="Order">
+        SELECT id, order_no
+        FROM t_order
+        WHERE order_no = 'ORD-2024-001'
+    </select>
+
+</mapper>

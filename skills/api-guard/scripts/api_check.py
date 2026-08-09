@@ -39,7 +39,7 @@ class Issue:
 # ── 常量 ─────────────────────────────────────────────────────────────────
 
 ALLOWED_ACTIONS = {
-    "create", "query", "update", "cancel", "sync", "confirm", "apply", "push",
+    "create", "query", "update", "remove", "cancel", "sync", "confirm", "apply", "push",
 }
 
 PATH_VAR_PATTERN = re.compile(r"\{[^}]+\}")
@@ -50,6 +50,16 @@ SKIP_DIRS = {
 }
 
 HTTP_METHODS = {"GET", "POST", "PUT", "DELETE", "PATCH", "REQUESTMAPPING"}
+
+# 契约/持久化对象类名后缀（可能含时间字段 @JsonFormat），用于时间注解检查
+CONTRACT_CLASS_RE = re.compile(r"\bclass\s+\w*(?:DTO|PO|Command|Query)\b")
+PO_CLASS_RE = re.compile(r"\bclass\s+\w*PO\b")
+# 废弃的时间戳序列化：@JsonFormat(shape = NUMBER) 或 @JsonFormat(shape = JsonFormat.Shape.NUMBER)
+JSONFORMAT_NUMBER_RE = re.compile(
+    r'@JsonFormat\s*\([^)]*\bshape\s*=\s*(?:JsonFormat\.Shape\.)?NUMBER',
+    re.DOTALL,
+)
+JSONFORMAT_ANY_RE = re.compile(r'@JsonFormat')
 
 
 # ── Java 文件解析 ────────────────────────────────────────────────────────
@@ -159,6 +169,12 @@ def check_path_structure(ep: ApiEndpoint, issues: list):
             location=f"路径:{ep.path}",
             description=f"路径段数 {len(segments)} 不足，标准格式 /domain/version/resource/action",
             suggestion="路径须为 /{domain}/{version}/{resource}/{action}"))
+    elif len(segments) == 4:
+        # 路径段数刚好 4 段时，补充检查动词后置（若跳过则无法判断）
+        pass  # 正常走 check_action_verb 处理
+    else:
+        # 路径段数 > 4 时，额外提示可能存在多余段
+        pass  # 正常走各检查处理
 
 
 def check_http_method(ep: ApiEndpoint, issues: list):
@@ -202,17 +218,33 @@ def check_action_verb(ep: ApiEndpoint, issues: list):
     if PATH_VAR_PATTERN.fullmatch(last):
         return
 
-    # 检查是否动词前置（如 syncWaybill）
-    camel_pattern = re.compile(r"^([a-z]+)([A-Z]\w+)$")
-    cm = camel_pattern.match(last)
-    if cm:
-        verb = cm.group(1).lower()
-        noun = cm.group(2).lower()
-        if verb in ALLOWED_ACTIONS or noun in ALLOWED_ACTIONS:
+    # 检查是否动词前置（如 syncWaybill、getWaybillList）
+    # 将 camelCase 拆分为 [词1, 词2, ...]，查找第一个动词
+    camel_parts = re.sub(r'([a-z])([A-Z])', r'\1 \2', last).split()
+
+    # 单字有效动词（如 'sync'）不是动词前置，直接通过
+    if len(camel_parts) == 1:
+        if last not in ALLOWED_ACTIONS:
+            issues.append(Issue(**ctx, severity=Severity.RECOMMENDED, rule="动作收敛",
+                location=f"路径:{ep.path}",
+                description=f"末段 '{last}' 不在收敛动词集中",
+                suggestion=f"动作收敛为: {', '.join(sorted(ALLOWED_ACTIONS))}"))
+        return
+
+    for i, part in enumerate(camel_parts):
+        part_lower = part.lower()
+        if part_lower in ALLOWED_ACTIONS:
+            # 找到动词，名词为动词之后的部分（若动词是第一个词，名词为剩余词）
+            noun_parts = camel_parts[i + 1:]
+            if noun_parts:
+                noun = ''.join(noun_parts).lower()
+            else:
+                # 动词是最后一个词（如 'syncWaybill'，动词在前，无后续名词）
+                noun = camel_parts[0].lower()
             issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="动词后置",
                 location=f"路径:{ep.path}",
                 description=f"动作 '{last}' 动词前置，应为名词-动词序",
-                suggestion=f"动词后置：/{noun}/{verb}"))
+                suggestion=f"动词后置：/{noun}/{part_lower}"))
             return
 
     if last not in ALLOWED_ACTIONS:
@@ -279,7 +311,7 @@ def is_controller(path: str) -> bool:
     """判断 Java 文件是否为 Controller（含 @RestController/@Controller）。"""
     try:
         with open(path, "r", encoding="utf-8") as f:
-            content = f.read(4096)
+            content = f.read(8192)
         return bool(re.search(r"@(Rest)?Controller\b", content))
     except (UnicodeDecodeError, OSError):
         return False
@@ -302,6 +334,39 @@ def find_controller_files(path: str) -> list:
                         java_files.append(full)
 
     return java_files
+
+
+def is_contract_file(path: str) -> bool:
+    """判断 Java 文件是否为 DTO/PO/Command/Query 等契约/持久化对象（可能含时间字段注解）。"""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read(16384)
+        return bool(CONTRACT_CLASS_RE.search(content))
+    except (UnicodeDecodeError, OSError):
+        return False
+
+
+def find_contract_files(path: str) -> list:
+    """查找 DTO/PO/Command/Query 契约对象文件。"""
+    files = []
+    if os.path.isfile(path):
+        if path.endswith(".java") and is_contract_file(path):
+            files = [path]
+    elif os.path.isdir(path):
+        for dirpath, dirnames, filenames in os.walk(path):
+            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+            for fn in filenames:
+                if fn.endswith(".java"):
+                    full = os.path.join(dirpath, fn)
+                    if is_contract_file(full):
+                        files.append(full)
+    return files
+
+
+def _extract_class_name(content: str) -> str:
+    """提取首个类名，用于 Issue.endpoint 定位。"""
+    m = re.search(r"\bclass\s+(\w+)", content)
+    return m.group(1) if m else "(类级)"
 
 
 def check_file(file_path: str) -> list:
@@ -328,6 +393,56 @@ def check_file(file_path: str) -> list:
     for ep in endpoints:
         issues.extend(check_endpoint(ep))
 
+    return issues
+
+
+def check_time_annotation(file_path: str, content: str) -> list:
+    """检查 DTO/PO 时间字段注解（04-database-mybatis §1）：
+    - 禁止 @JsonFormat(shape = NUMBER)（须 ISO 8601 pattern）
+    - PO 禁止任何日期格式化注解
+    """
+    issues = []
+    clean = strip_java_comments(content)
+    class_name = _extract_class_name(clean)
+    is_po = bool(PO_CLASS_RE.search(clean)) or "/infrastructure/repository/po/" in file_path
+
+    for m in JSONFORMAT_NUMBER_RE.finditer(clean):
+        line = clean[:m.start()].count("\n") + 1
+        issues.append(Issue(
+            file=file_path, endpoint=class_name, http_method="",
+            severity=Severity.MANDATORY, rule="时间注解",
+            location=f"{file_path}:{line}",
+            description="时间格式须用 ISO 8601 pattern，禁止时间戳 shape=NUMBER",
+            suggestion='改为 @JsonFormat(pattern = "yyyy-MM-dd\'T\'HH:mm:ss.SSSXXX", timezone = "+08:00")',
+        ))
+
+    if is_po:
+        for m in JSONFORMAT_ANY_RE.finditer(clean):
+            line = clean[:m.start()].count("\n") + 1
+            issues.append(Issue(
+                file=file_path, endpoint=class_name, http_method="",
+                severity=Severity.MANDATORY, rule="PO禁日期注解",
+                location=f"{file_path}:{line}",
+                description="PO 禁止任何日期格式化注解（日期格式化由 DTO 层负责）",
+                suggestion="删除 PO 上的 @JsonFormat",
+            ))
+    return issues
+
+
+def check_contract_file(file_path: str) -> list:
+    """检查单个契约对象文件的时间注解。"""
+    issues = []
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except (UnicodeDecodeError, OSError) as e:
+        issues.append(Issue(
+            file=file_path, endpoint="(文件级)", http_method="",
+            severity=Severity.MANDATORY, rule="文件读取错误",
+            location=file_path, description=str(e),
+        ))
+        return issues
+    issues.extend(check_time_annotation(file_path, content))
     return issues
 
 
@@ -395,24 +510,30 @@ def main():
     parser.add_argument("--format", choices=["text", "json"], default="text", help="输出格式")
     args = parser.parse_args()
 
-    files = find_controller_files(args.path)
+    ctrl_files = find_controller_files(args.path)
+    contract_files = find_contract_files(args.path)
 
-    if not files:
-        print(f"未找到 Controller 文件: {args.path}", file=sys.stderr)
+    if not ctrl_files and not contract_files:
+        print(f"未找到 Controller 或契约对象(DTO/PO/Command/Query)文件: {args.path}", file=sys.stderr)
         return 2
 
     all_issues = {}
     total_mandatory = 0
 
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        future_to_file = {executor.submit(check_file, f): f for f in sorted(files)}
-        for future in as_completed(future_to_file):
-            f = future_to_file[future]
-            issues = future.result()
-            all_issues[f] = issues
-            total_mandatory += sum(
-                1 for i in issues if i.severity == Severity.MANDATORY
-            )
+    def _scan(files, checker):
+        nonlocal total_mandatory
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            future_to_file = {executor.submit(checker, f): f for f in sorted(files)}
+            for future in as_completed(future_to_file):
+                f = future_to_file[future]
+                issues = future.result()
+                all_issues[f] = issues
+                total_mandatory += sum(
+                    1 for i in issues if i.severity == Severity.MANDATORY
+                )
+
+    _scan(ctrl_files, check_file)
+    _scan(contract_files, check_contract_file)
 
     if args.format == "json":
         results = []

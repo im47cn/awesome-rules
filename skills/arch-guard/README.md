@@ -82,12 +82,14 @@ python3 scripts/arch_check.py --mode graph
 | 领域层纯净度 (POM) | domain 模块 pom.xml 禁止依赖 Spring Boot/MyBatis 等框架 |
 | 领域层纯净度 (Java) | domain/ 下 Java 文件禁止 import 框架业务类（JPA 注解类除外） |
 | 依赖方向 | 各层 Java import 逆向依赖检测（如 domain → adapter） |
-| 命名后缀 | CmdExe/E/CO/DO 等 14 种后缀是否在正确的分层 |
+| 命名后缀 | Inter/PO/DTO/Command/Mapper/Repository 等后缀是否在正确分层（对齐 02-naming） |
 | Adapter 隔离 | adapter 层禁止直接 import 领域实体/值对象 |
+| 状态泄漏 | adapter/infrastructure 层禁止直接改写状态（setStatus/changeStatus 等） |
+| 状态机治理 | 有状态枚举但未引入状态机框架（Spring/Cola）→ 推荐级提醒 |
 
 ## 需人工补充的规则
 
-读取 [`steering/ddd-architecture.md`](../../steering/ddd-architecture.md)，逐项核对脚本无法覆盖的规则：
+读取 [`steering/gtsp/01-project-structure.md`](../../steering/gtsp/01-project-structure.md)（架构与分层：模块/业务域/分层/CQRS/状态机/扩展点），逐项核对脚本无法覆盖的规则：
 
 | 自动检查覆盖 | 仍需人工判断 |
 |---|---|
@@ -100,6 +102,6 @@ python3 scripts/arch_check.py --mode graph
 
 - 技能定义：[`SKILL.md`](SKILL.md)
 - 检查脚本：[`scripts/arch_check.py`](scripts/arch_check.py)
-- 单元测试：[`scripts/tests/test_arch_check.py`](scripts/tests/test_arch_check.py)（27 条）
-- 设计规范：[`steering/ddd-architecture.md`](../../steering/ddd-architecture.md)
-- 审查样例：[`badcase/`](badcase/)（3 组场景，9 处违规）
+- 单元测试：[`scripts/tests/test_arch_check.py`](scripts/tests/test_arch_check.py)（53 条）
+- 架构规范：[`steering/gtsp/01-project-structure.md`](../../steering/gtsp/01-project-structure.md)
+- 审查样例：[`badcase/`](badcase/)（4 组场景，覆盖 9 处违规）

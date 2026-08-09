@@ -27,6 +27,7 @@ python3 scripts/api_check.py <目标文件或目录> [--format json]
 - `<目标文件或目录>`：用户项目中待审查的路径；不传则默认扫描当前目录
 - 退出码：`0`=通过，`1`=有强制问题，`2`=运行错误
 - 自动扫描 Java Controller，提取 `@PostMapping`/`@GetMapping` 等注解的端点定义
+- 自动扫描 DTO/PO 契约对象，检查 `@JsonFormat` 时间注解合规性
 
 ### 第 2 步：补充人工判断
 
@@ -38,4 +39,4 @@ python3 scripts/api_check.py <目标文件或目录> [--format json]
 
 ## 设计新 API
 
-读取 [`../../steering/api-standards.md`](../../steering/api-standards.md) 后按规范生成 API 定义，再用上述脚本自检。
+读取 [`../../steering/openapi-standards.md`](../../steering/openapi-standards.md) 后按规范生成 API 定义，再用上述脚本自检。
