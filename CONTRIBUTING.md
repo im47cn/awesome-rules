@@ -39,15 +39,15 @@
 ```
 steering/
 ├── testing-standards.md              # 通用：测试规范
-├── api-standards.md                  # 通用：API 设计规范
+├── openapi-standards.md                  # 通用：Open API 设计规范
 ├── database-design-specification.md  # 通用：数据库设计规范
 ├── git-conventions.md                # 通用：Git 提交规范
 └── gtsp/                             # GTSP 工程规范（Java/Spring Cloud，按维度拆分，含 DDD 架构）
     ├── README.md                     #   总入口
-    └── 00-overview.md … 10-migration-checklist.md   #   各维度
+    └── 01-project-structure.md … 09-cr-checklist.md   #   各维度
 ```
 
-- **通用设计规范**：`steering/` 直接子文件，覆盖架构/API/数据库/测试/Git 等设计阶段
+- **通用设计规范**：`steering/` 直接子文件，覆盖 API/数据库/测试/Git 等设计阶段
 - **GTSP 工程规范**：`steering/gtsp/` 子目录，覆盖 `gtsp-*`/`fss-*` 微服务的编码阶段
 
 ### 什么时候需要改
@@ -58,7 +58,7 @@ steering/
 
 ### 写作要求
 
-- **规则分级**：每条规则标注【强制】或【推荐】，与现有规范风格一致
+- **规则分级**：通用设计规范在条款中标注【强制】/【推荐】；GTSP 维度文件（01-08）不逐条分级，合并门禁项集中在 `steering/gtsp/09-cr-checklist.md`。正反例用 ✅/❌ 展示
 - **给出理由**：不只写"怎么做"，还要写"为什么"
 - **示例对比**：用 ✅ / ❌ 展示正例与反例，降低理解成本
 

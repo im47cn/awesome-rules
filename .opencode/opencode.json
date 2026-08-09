@@ -5,9 +5,9 @@
     "skills/api-guard/SKILL.md",
     "skills/arch-guard/SKILL.md",
     "steering/database-design-specification.md",
-    "steering/api-standards.md",
+    "steering/openapi-standards.md",
     "steering/testing-standards.md",
     "steering/git-conventions.md",
-    "steering/ddd-architecture.md"
+    "steering/gtsp/README.md"
   ]
 }

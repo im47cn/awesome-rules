@@ -7,8 +7,11 @@
 ```
 awesome-rules/
 ├── steering/                          # 规范文件（团队标准，唯一真相源）
-│   ├── database-design-specification.md   # 数据库设计开发规范（MySQL）
-│   └── api-standards.md                  # API 设计规范（RESTful）
+│   ├── openapi-standards.md               # Open API 设计规范（RESTful）
+│   ├── database-design-specification.md # 数据库设计规范（MySQL）
+│   ├── git-conventions.md             # Git 提交规范
+│   ├── testing-standards.md           # 测试规范
+│   └── gtsp/                          # GTSP 工程规范（Java/Spring Cloud，按维度拆分，含 DDD 架构）
 ├── skills/                            # AI Agent 技能
 │   ├── ddl-guard/                     # DDL 设计与审查
 │   ├── api-guard/                     # API 设计与审查
@@ -31,10 +34,20 @@ awesome-rules/
 
 ## 规范文件（steering/）
 
+规范分两组，体系独立：
+
+### 通用设计规范（`steering/*.md`，设计阶段）
+
 | 规范 | 说明 |
 | --- | --- |
-| [数据库设计开发规范](steering/database-design-specification.md) | MySQL DDL/DML 设计标准，覆盖表、字段、索引、注释、SQL 语句等，规则按【强制】【推荐】分级 |
-| [API 设计规范](steering/api-standards.md) | RESTful API 约定，包括 URL 结构、HTTP 方法、响应格式、错误码、分页 |
+| [Open API 设计规范](steering/openapi-standards.md) | RESTful API 约定：URL 结构、HTTP 方法、响应格式、错误码、分页 |
+| [数据库设计规范](steering/database-design-specification.md) | MySQL DDL/DML 设计标准：表、字段、索引、注释、SQL 语句，按【强制】【推荐】分级 |
+| [Git 提交规范](steering/git-conventions.md) | 分支命名、Commit 格式、MR 约定 |
+| [测试规范](steering/testing-standards.md) | 测试编写与审查标准 |
+
+### GTSP 工程规范（`steering/gtsp/`，编码阶段）
+
+Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分为 10 个文件（项目结构、分层架构、命名、Feign、MyBatis、日志、异常、配置、注释、CR 清单）。总入口：[steering/gtsp/README.md](steering/gtsp/README.md)。
 
 规范文件由人工维护，是所有审查和设计的唯一依据。
 
