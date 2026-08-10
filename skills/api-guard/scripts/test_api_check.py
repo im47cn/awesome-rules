@@ -2,11 +2,11 @@
 """
 api_check.py 单元测试
 
-覆盖所有检查函数：
-- 路径结构、HTTP 方法、命名、动词后置、路径变量、版本段
+覆盖业务接口规范检查：
+- 路径命名（kebab-case）、路径变量（禁止 path 传标识）
 - 时间注解（DTO shape=NUMBER、PO 任何@JsonFormat）
-- 文件发现（Controller / Contract）
-- 报告格式
+- 端点提取、注释剥离、文件发现（Controller / Contract）
+- 报告格式、main() CLI 端到端
 """
 
 import json
@@ -24,12 +24,9 @@ from api_check import (
     Severity,
     ALLOWED_ACTIONS,
     SKIP_DIRS,
-    check_path_structure,
-    check_http_method,
     check_kebab_case,
     check_action_verb,
     check_path_variable,
-    check_version_segment,
     check_endpoint,
     check_time_annotation,
     strip_java_comments,
@@ -61,72 +58,6 @@ def _ep(**kwargs) -> ApiEndpoint:
         file_path=kwargs.get("file_path", "Test.java"),
         line=kwargs.get("line", 1),
     )
-
-
-# ── 路径结构检查 ─────────────────────────────────────────────────────────
-
-class TestCheckPathStructure(unittest.TestCase):
-    """检查路径结构 /{domain}/{version}/{resource}/{action}。"""
-
-    def test_valid_four_segments(self):
-        issues = []
-        check_path_structure(_ep(path="/logistics/v1/waybill/sync"), issues)
-        self.assertEqual(len(issues), 0)
-
-    def test_three_segments(self):
-        issues = []
-        check_path_structure(_ep(path="/logistics/v1/waybill"), issues)
-        self.assertEqual(len(issues), 1)
-        self.assertEqual(issues[0].rule, "路径结构不完整")
-        self.assertEqual(issues[0].severity, Severity.MANDATORY)
-
-    def test_two_segments(self):
-        issues = []
-        check_path_structure(_ep(path="/waybill/sync"), issues)
-        self.assertEqual(len(issues), 1)
-        self.assertIn("2 不足", issues[0].description)
-
-    def test_one_segment(self):
-        issues = []
-        check_path_structure(_ep(path="/waybill"), issues)
-        self.assertEqual(len(issues), 1)
-
-
-# ── HTTP 方法检查 ─────────────────────────────────────────────────────────
-
-class TestCheckHttpMethod(unittest.TestCase):
-    """统一用 POST。"""
-
-    def test_post_allowed(self):
-        issues = []
-        check_http_method(_ep(http_method="POST"), issues)
-        self.assertEqual(len(issues), 0)
-
-    def test_get_rejected(self):
-        issues = []
-        check_http_method(_ep(http_method="GET"), issues)
-        self.assertEqual(len(issues), 1)
-        self.assertEqual(issues[0].rule, "统一POST")
-
-    def test_put_rejected(self):
-        issues = []
-        check_http_method(_ep(http_method="PUT"), issues)
-        self.assertEqual(len(issues), 1)
-
-    def test_delete_rejected(self):
-        issues = []
-        check_http_method(_ep(http_method="DELETE"), issues)
-        self.assertEqual(len(issues), 1)
-
-    def test_patch_rejected(self):
-        issues = []
-        check_http_method(_ep(http_method="PATCH"), issues)
-        self.assertEqual(len(issues), 1)
-
-    def test_empty_method(self):
-        issues = []
-        check_http_method(_ep(http_method=""), issues)
-        self.assertEqual(len(issues), 0)
 
 
 # ── 命名检查 ──────────────────────────────────────────────────────────────
@@ -219,7 +150,7 @@ class TestCheckActionVerb(unittest.TestCase):
         self.assertIn("receive", issues[0].description)
 
     def test_two_segments_with_valid_action(self):
-        """两段路径且末段为有效动词，check_action_verb 不报错（路径结构检查会单独报段数不足）。"""
+        """两段路径且末段为有效动词，check_action_verb 不报错。"""
         issues = []
         check_action_verb(_ep(path="/waybill/sync"), issues)
         self.assertEqual(len(issues), 0)
@@ -247,39 +178,10 @@ class TestCheckPathVariable(unittest.TestCase):
         self.assertEqual(len(issues), 1)
 
 
-# ── 版本段检查 ────────────────────────────────────────────────────────────
-
-class TestCheckVersionSegment(unittest.TestCase):
-    """第二段须为版本号（v1, v2...）。"""
-
-    def test_valid_version(self):
-        issues = []
-        check_version_segment(_ep(path="/logistics/v1/waybill/sync"), issues)
-        self.assertEqual(len(issues), 0)
-
-    def test_valid_version_v2(self):
-        issues = []
-        check_version_segment(_ep(path="/logistics/v2/waybill/sync"), issues)
-        self.assertEqual(len(issues), 0)
-
-    def test_invalid_version(self):
-        issues = []
-        check_version_segment(_ep(path="/logistics/api/waybill/sync"), issues)
-        self.assertEqual(len(issues), 1)
-        self.assertEqual(issues[0].rule, "版本段")
-
-    def test_missing_version(self):
-        """路径段数刚好 2 时，第二段 'sync' 不是有效版本号，应被标记。"""
-        issues = []
-        check_version_segment(_ep(path="/waybill/sync"), issues)
-        self.assertEqual(len(issues), 1)
-        self.assertEqual(issues[0].rule, "版本段")
-
-
 # ── 综合检查 ──────────────────────────────────────────────────────────────
 
 class TestCheckEndpoint(unittest.TestCase):
-    """对单个端点执行全部检查。"""
+    """对单个端点执行业务接口规范检查。"""
 
     def test_compliant_endpoint(self):
         """完全合规的端点应无问题。"""
@@ -295,12 +197,20 @@ class TestCheckEndpoint(unittest.TestCase):
         self.assertEqual(data["summary"]["total"], 0)
 
     def test_non_compliant_endpoint(self):
-        """不合规端点应检测到多个问题。"""
+        """不合规端点应检测到命名/路径变量问题。"""
         ep = _ep(path="/logistics/v1/waybill/syncWaybill/{id}", http_method="GET")
         issues = check_endpoint(ep)
-        # 应检测到：HTTP 方法、路径变量、动词后置、路径结构
+        # 应检测到：路径命名（camelCase）+ 路径变量
         mandatory = [i for i in issues if i.severity == Severity.MANDATORY]
         self.assertGreater(len(mandatory), 0)
+
+    def test_no_structure_or_method_check(self):
+        """业务接口不检查四段结构/HTTP 方法：2 段 GET 路径不报结构或方法问题。"""
+        ep = _ep(path="/base/query", http_method="GET")
+        issues = check_endpoint(ep)
+        rules = [i.rule for i in issues]
+        self.assertNotIn("路径结构不完整", rules)
+        self.assertNotIn("统一POST", rules)
 
 
 # ── 注释剥离 ──────────────────────────────────────────────────────────────
@@ -478,25 +388,25 @@ class TestReportFormat(unittest.TestCase):
     def test_text_with_issues(self):
         issues = [
             Issue(
-                file="Test.java", endpoint="/waybill/sync", http_method="GET",
-                severity=Severity.MANDATORY, rule="统一POST",
-                location="路径:/waybill/sync 方法:GET",
-                description="使用了 GET，规范要求统一 POST",
-                suggestion="所有 API 统一使用 POST 请求方式",
+                file="Test.java", endpoint="/waybill/syncWaybill", http_method="POST",
+                severity=Severity.MANDATORY, rule="路径命名",
+                location="路径:/waybill/syncWaybill 段:syncWaybill",
+                description="路径段 'syncWaybill' 包含大写字母",
+                suggestion="路径全小写 kebab-case，禁止 camelCase",
             )
         ]
         result = format_report_text("Test.java", issues)
         self.assertIn("【强制】问题: 1 项", result)
-        self.assertIn("统一POST", result)
+        self.assertIn("路径命名", result)
 
     def test_json_with_issues(self):
         issues = [
             Issue(
-                file="Test.java", endpoint="/waybill/sync", http_method="GET",
-                severity=Severity.MANDATORY, rule="统一POST",
-                location="路径:/waybill/sync 方法:GET",
-                description="使用了 GET，规范要求统一 POST",
-                suggestion="所有 API 统一使用 POST 请求方式",
+                file="Test.java", endpoint="/order/{id}", http_method="POST",
+                severity=Severity.MANDATORY, rule="禁止path传标识",
+                location="路径:/order/{id}",
+                description="路径中包含路径变量 {var}",
+                suggestion="禁止在 path 中传递唯一标识，改用请求体",
             )
         ]
         result = format_report_json("Test.java", issues)
@@ -685,6 +595,16 @@ class TestContractAndMain(unittest.TestCase):
         _, out = self._run_main(["api_check.py", d, "--format", "json"])
         stripped = out.strip()
         self.assertTrue(stripped.startswith("[") or stripped.startswith("{"))
+
+    def test_main_two_segment_path_no_structure_check(self):
+        """业务接口不检查四段式结构：2 段路径不报路径结构问题，退出码 0。"""
+        d = self._tmpdir()
+        with open(os.path.join(d, "C.java"), "w", encoding="utf-8") as f:
+            f.write('@RestController @RequestMapping("/base") '
+                    'public class C { @PostMapping("/query") public String q() { return ""; } }')
+        code, out = self._run_main(["api_check.py", d])
+        self.assertNotIn("路径结构不完整", out)
+        self.assertEqual(code, 0)
 
 
 # ── 运行 ──────────────────────────────────────────────────────────────────

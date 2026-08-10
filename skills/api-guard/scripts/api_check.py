@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-Open API 规范检查脚本
-检查 Java 项目中的 API 定义是否符合 Open API 设计与安全规范。
+业务接口规范检查脚本
+检查 Java 项目中业务 Controller（@RestController）的 API 定义是否符合规范。
+
+仅覆盖业务接口通用规则（路径命名、禁止 path 传标识、时间注解），
+不检查对外 Open API 四段式规范（四段式请见 steering/openapi-standards.md）。
 
 用法:
   python3 api_check.py <file_or_dir> [--format text|json]
@@ -38,6 +41,7 @@ class Issue:
 
 # ── 常量 ─────────────────────────────────────────────────────────────────
 
+# 末段（action）允许的收敛动词集
 ALLOWED_ACTIONS = {
     "create", "query", "update", "remove", "cancel", "sync", "confirm", "apply", "push",
 }
@@ -159,34 +163,6 @@ def extract_endpoints(content: str, file_path: str):
 # ── 规则检查 ─────────────────────────────────────────────────────────────
 
 
-def check_path_structure(ep: ApiEndpoint, issues: list):
-    """检查路径结构 /{domain}/{version}/{resource}/{action}。"""
-    ctx = _ctx(ep)
-    segments = [s for s in ep.path.split("/") if s]
-
-    if len(segments) < 4:
-        issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="路径结构不完整",
-            location=f"路径:{ep.path}",
-            description=f"路径段数 {len(segments)} 不足，标准格式 /domain/version/resource/action",
-            suggestion="路径须为 /{domain}/{version}/{resource}/{action}"))
-    elif len(segments) == 4:
-        # 路径段数刚好 4 段时，补充检查动词后置（若跳过则无法判断）
-        pass  # 正常走 check_action_verb 处理
-    else:
-        # 路径段数 > 4 时，额外提示可能存在多余段
-        pass  # 正常走各检查处理
-
-
-def check_http_method(ep: ApiEndpoint, issues: list):
-    """统一用 POST。"""
-    ctx = _ctx(ep)
-    if ep.http_method and ep.http_method != "POST":
-        issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="统一POST",
-            location=f"路径:{ep.path} 方法:{ep.http_method}",
-            description=f"使用了 {ep.http_method}，规范要求统一 POST",
-            suggestion="所有 API 统一使用 POST 请求方式"))
-
-
 def check_kebab_case(ep: ApiEndpoint, issues: list):
     """路径全小写 kebab-case，禁止 camelCase。"""
     ctx = _ctx(ep)
@@ -206,6 +182,16 @@ def check_kebab_case(ep: ApiEndpoint, issues: list):
                 description=f"路径段 '{seg}' 包含下划线",
                 suggestion="路径使用 kebab-case（短横线），禁止下划线"))
             return
+
+
+def check_path_variable(ep: ApiEndpoint, issues: list):
+    """禁止 path 中传递唯一标识。"""
+    ctx = _ctx(ep)
+    if PATH_VAR_PATTERN.search(ep.path):
+        issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="禁止path传标识",
+            location=f"路径:{ep.path}",
+            description="路径中包含路径变量 {var}",
+            suggestion="禁止在 path 中传递唯一标识，改用请求体"))
 
 
 def check_action_verb(ep: ApiEndpoint, issues: list):
@@ -254,30 +240,6 @@ def check_action_verb(ep: ApiEndpoint, issues: list):
             suggestion=f"动作收敛为: {', '.join(sorted(ALLOWED_ACTIONS))}"))
 
 
-def check_path_variable(ep: ApiEndpoint, issues: list):
-    """禁止 path 中传递唯一标识。"""
-    ctx = _ctx(ep)
-    if PATH_VAR_PATTERN.search(ep.path):
-        issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="禁止path传标识",
-            location=f"路径:{ep.path}",
-            description="路径中包含路径变量 {var}",
-            suggestion="禁止在 path 中传递唯一标识，改用请求体"))
-
-
-def check_version_segment(ep: ApiEndpoint, issues: list):
-    """第二段须为版本号（v1, v2...）。"""
-    ctx = _ctx(ep)
-    segments = [s for s in ep.path.split("/") if s]
-    if len(segments) < 2:
-        return
-    version = segments[1]
-    if not re.match(r"^v\d+$", version):
-        issues.append(Issue(**ctx, severity=Severity.RECOMMENDED, rule="版本段",
-            location=f"路径:{ep.path}",
-            description=f"第二段 '{version}' 不是标准版本号（v1/v2...）",
-            suggestion="路径第二段须为版本号，如 v1"))
-
-
 def _ctx(ep: ApiEndpoint) -> dict:
     return {
         "file": ep.file_path,
@@ -286,20 +248,19 @@ def _ctx(ep: ApiEndpoint) -> dict:
     }
 
 
-ALL_CHECKS = [
-    check_path_structure,
-    check_http_method,
+# 业务接口规范检查集：与段数无关的通用规则（命名 + 动作收敛 + path 变量）。
+# 四段式结构 / 统一 POST / 版本段属对外 Open API 规范，不在此检查。
+CHECKS = [
     check_kebab_case,
     check_action_verb,
     check_path_variable,
-    check_version_segment,
 ]
 
 
 def check_endpoint(ep: ApiEndpoint) -> list:
-    """对单个端点执行全部检查。"""
+    """对单个端点执行业务接口规范检查。"""
     issues = []
-    for check in ALL_CHECKS:
+    for check in CHECKS:
         check(ep, issues)
     return issues
 
@@ -504,7 +465,7 @@ def format_report_json(file_path: str, issues: list) -> str:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Open API 规范检查脚本 - 检查 Java Controller 中的 API 定义"
+        description="业务接口规范检查脚本 - 检查 Java Controller 的路径命名与 path 变量"
     )
     parser.add_argument("path", nargs="?", default=".", help="文件或项目目录路径（默认当前目录）")
     parser.add_argument("--format", choices=["text", "json"], default="text", help="输出格式")
@@ -544,7 +505,8 @@ def main():
         for f, issues in sorted(all_issues.items()):
             print(format_report_text(f, issues))
         print(f"{'='*60}")
-        print(f"总计: {len(all_issues)} 个文件, {sum(len(v) for v in all_issues.values())} 个问题 ({total_mandatory} 个强制)")
+        print(f"总计: {len(all_issues)} 个文件, {sum(len(v) for v in all_issues.values())} 个问题 "
+              f"({total_mandatory} 个强制)")
         print(f"{'='*60}")
 
     return 1 if total_mandatory > 0 else 0

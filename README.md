@@ -56,7 +56,7 @@ Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分�
 | 技能 | 说明 |
 | --- | --- |
 | [ddl-guard](skills/ddl-guard/README.md) | MySQL DDL 设计与规范审查 |
-| [api-guard](skills/api-guard/README.md) | Open API 设计与规范审查 |
+| [api-guard](skills/api-guard/README.md) | 业务接口规范审查 |
 | [arch-guard](skills/arch-guard/README.md) | DDD 架构分层规范审查 |
 | [doc-gen](skills/doc-gen/README.md) | DDD 技术文档自动生成（交互式静态站点） |
 
