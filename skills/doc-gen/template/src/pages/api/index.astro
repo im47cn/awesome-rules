@@ -1,0 +1,33 @@
+---
+// 独立 API 文档页面 — 不经 Starlight 布局，避免全局 CSS 干扰 Scalar 全屏渲染。
+// 使用 Scalar 官方 standalone bundle（自包含 CSS/JS）：
+// standalone.js 检测 id="api-reference" 的 script，按 data-url 自动渲染完整桌面双栏。
+// 注意：必须用 standalone UMD bundle 而非 ESM import —— 后者经构建会丢失部分布局 CSS，
+// 导致 Scalar 降级为 mobile 单列堆叠。
+---
+
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>API 接口 · 架构鹰眼</title>
+  </head>
+  <body>
+    <a href="/" class="back">← 返回站点</a>
+    <script is:inline id="api-reference" data-url="/openapi.json" src="/scalar.js"></script>
+    <style>
+      body { margin: 0; font-family: system-ui, -apple-system, sans-serif; }
+      .back {
+        position: absolute;
+        top: 0;
+        left: 0;
+        z-index: 10;
+        padding: 10px 16px;
+        color: #0099ff;
+        text-decoration: none;
+        font-size: 14px;
+      }
+    </style>
+  </body>
+</html>

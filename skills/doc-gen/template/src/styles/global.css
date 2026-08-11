@@ -1,0 +1,250 @@
+@layer base, starlight, theme, components, utilities;
+
+@import "@astrojs/starlight-tailwind";
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+/* 回归 Starlight 原生：不再覆盖 --sl-color-* / 不引入 Dockit 主题插件，
+   使用 Starlight 默认紫色 accent。以下仅保留 doc-gen 生成内容所需的业务样式。 */
+
+/* ── doc-gen / 架构鹰眼 自定义样式（保留兼容） ── */
+
+:root {
+  /* 统一色彩：派生自 Starlight --sl-color-*，自动跟随深浅主题。
+     修复原 --hawkeye-* 蓝白硬编码与框架粉黑深色的冲突（深色页面冒白块的根因）。 */
+  --hawkeye-primary: var(--sl-color-accent);
+  --hawkeye-primary-light: var(--sl-color-accent-high);
+  --hawkeye-accent: var(--sl-color-accent);
+  --hawkeye-bg: var(--sl-color-black);
+  --hawkeye-bg-card: var(--sl-color-gray-6);
+  --hawkeye-text: var(--sl-color-white);
+  --hawkeye-text-muted: var(--sl-color-gray-3);
+  --hawkeye-border: var(--sl-color-hairline);
+  --hawkeye-radius: 0.75rem;
+  --hawkeye-shadow: 0 1px 3px rgba(0, 0, 0, 0.25), 0 1px 2px rgba(0, 0, 0, 0.18);
+  --hawkeye-shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.3);
+  --hawkeye-gradient: linear-gradient(135deg, var(--sl-color-accent-low) 0%, var(--sl-color-accent) 100%);
+}
+
+/* ── Mermaid 图表 ── */
+.mermaid-wrapper {
+  margin: 1.5rem 0;
+  padding: 1rem;
+  background: var(--hawkeye-bg-card);
+  border: 1px solid var(--hawkeye-border);
+  border-radius: var(--hawkeye-radius);
+  overflow-x: auto;
+}
+
+.mermaid-wrapper svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.mermaid-wrapper .clickable { cursor: pointer !important; }
+.mermaid-wrapper .clickable:hover { opacity: 0.8; }
+
+/* ── 层级徽章 ── */
+.layer-badge {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.layer-badge.adapter { background: #dbeafe; color: #1d4ed8; }
+:root:not([data-theme="light"]) .layer-badge.adapter { background: #1e3a5f; color: #93c5fd; }
+.layer-badge.application { background: #dcfce7; color: #15803d; }
+:root:not([data-theme="light"]) .layer-badge.application { background: #14532d; color: #86efac; }
+.layer-badge.domain { background: #fef3c7; color: #b45309; }
+:root:not([data-theme="light"]) .layer-badge.domain { background: #451a03; color: #fcd34d; }
+.layer-badge.infrastructure { background: #f3e8ff; color: #7c3aed; }
+:root:not([data-theme="light"]) .layer-badge.infrastructure { background: #3b0764; color: #c4b5fd; }
+.layer-badge.client { background: #ffe4e6; color: #be123c; }
+:root:not([data-theme="light"]) .layer-badge.client { background: #4c0519; color: #fda4af; }
+
+/* ── 组件表格 ── */
+.component-table { width: 100%; border-collapse: collapse; }
+.component-table th { text-align: left; font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.component-table td:first-child { font-family: ui-monospace, "SF Mono", "Fira Code", monospace; font-size: 0.88rem; }
+
+/* ── 聚合卡片 ── */
+.aggregate-card {
+  border: 1px solid var(--hawkeye-border);
+  border-radius: var(--hawkeye-radius);
+  padding: 1.25rem;
+  margin: 1rem 0;
+  background: var(--hawkeye-bg-card);
+  box-shadow: var(--hawkeye-shadow);
+}
+
+.aggregate-card h4 { margin-top: 0; border-bottom: 1px solid var(--hawkeye-border); padding-bottom: 0.5rem; }
+
+.aggregate-root {
+  display: inline-block;
+  background: var(--hawkeye-gradient);
+  color: white;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  margin-left: 0.5rem;
+}
+
+/* 行为域/能力域标识: 领域层无聚合根实体(仅服务/网关/值对象), 区别于聚合根 */
+.behavior-domain {
+  display: inline-block;
+  background: #d97706;
+  color: white;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  margin-left: 0.5rem;
+}
+
+/* ── 数据库 ER 图容器 ── */
+.er-diagram-container {
+  background: var(--hawkeye-bg-card);
+  border: 1px solid var(--hawkeye-border);
+  border-radius: var(--hawkeye-radius);
+  padding: 1.5rem;
+  margin: 1.5rem 0;
+  overflow-x: auto;
+}
+
+/* ── API 端点卡片 ── */
+.endpoint-card { border: 1px solid var(--hawkeye-border); border-radius: 8px; margin: 0.5rem 0; overflow: hidden; }
+.endpoint-card-header { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.75rem; background: var(--hawkeye-bg-card); }
+.endpoint-method { font-weight: 700; font-size: 0.72rem; padding: 0.15rem 0.35rem; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.02em; }
+.endpoint-method.get { background: #dcfce7; color: #15803d; }
+.endpoint-method.post { background: #dbeafe; color: #1d4ed8; }
+.endpoint-method.put { background: #fef3c7; color: #b45309; }
+.endpoint-method.delete { background: #ffe4e6; color: #be123c; }
+.endpoint-method.patch { background: #f3e8ff; color: #7c3aed; }
+.endpoint-path { font-family: ui-monospace, "SF Mono", "Fira Code", monospace; font-size: 0.85rem; }
+.endpoint-card-body { padding: 0.75rem 1rem; }
+
+/* ── 多项目仪表盘卡片 ── */
+.project-dashboard { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; margin: 1.5rem 0; }
+.project-card { background: var(--hawkeye-bg-card); border: 1px solid var(--hawkeye-border); border-radius: var(--hawkeye-radius); padding: 1.25rem; box-shadow: var(--hawkeye-shadow); transition: box-shadow 0.2s, transform 0.15s; }
+.project-card:hover { box-shadow: var(--hawkeye-shadow-lg); transform: translateY(-2px); }
+.project-card h3 { margin-top: 0; font-size: 1.1rem; }
+.project-card-meta { display: flex; gap: 0.75rem; margin-top: 0.75rem; flex-wrap: wrap; }
+.project-stat { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.8rem; color: var(--hawkeye-text-muted); padding: 0.2rem 0.5rem; background: var(--hawkeye-bg); border-radius: 4px; }
+
+/* ── 公司级全景图 ── */
+.panorama-container { background: var(--hawkeye-bg-card); border: 1px solid var(--hawkeye-border); border-radius: var(--hawkeye-radius); padding: 2rem; margin: 1.5rem 0; box-shadow: var(--hawkeye-shadow); }
+
+/* ── Hero 区域 ── */
+.hero-section { background: var(--hawkeye-gradient); border-radius: var(--hawkeye-radius); padding: 3rem 2rem; margin: 1.5rem 0; color: white; text-align: center; }
+.hero-section h1 { font-size: 2.25rem; font-weight: 800; margin-bottom: 0.75rem; color: white; }
+.hero-section p { font-size: 1.1rem; opacity: 0.9; max-width: 640px; margin: 0 auto 1.5rem; }
+.hero-stats { display: flex; gap: 2rem; justify-content: center; flex-wrap: wrap; }
+.hero-stat { text-align: center; }
+.hero-stat-number { font-size: 2rem; font-weight: 800; }
+.hero-stat-label { font-size: 0.8rem; opacity: 0.8; }
+
+/* ── 响应式 ── */
+@media (max-width: 768px) {
+  .project-dashboard { grid-template-columns: 1fr; }
+  .hero-section h1 { font-size: 1.6rem; }
+  .hero-stats { gap: 1rem; }
+  .endpoint-card-header { flex-wrap: wrap; }
+  .aggregate-card { padding: 1rem; }
+}
+
+/* ── 数据库 ER 图 & 表字段 折叠/展开 ── */
+.sl-markdown-content details { border: 1px solid var(--hawkeye-border); border-radius: var(--hawkeye-radius); padding: 0.75rem 1rem; margin: 0.75rem 0; background: var(--hawkeye-bg-card); }
+details[open] { padding-bottom: 1rem; }
+/* 限定到正文 Markdown 容器，避免污染 sidebar 的 group <details>
+   （否则 Starlight group summary 会变粉红 + ▸ 字符与 caret 图标重叠） */
+.sl-markdown-content details summary { cursor: pointer; font-weight: 600; font-size: 0.92rem; color: var(--hawkeye-primary); user-select: none; padding: 0.25rem 0; list-style: none; }
+.sl-markdown-content details summary::before { content: '▸ '; display: inline-block; transition: transform 0.2s; font-size: 0.8rem; }
+.sl-markdown-content details[open] > summary::before { content: '▾ '; }
+.sl-markdown-content details summary:hover { color: var(--hawkeye-primary-light); }
+.sl-markdown-content details table { margin-top: 0.5rem; }
+
+/* ── 架构风险清单 ── */
+.risk-summary { display: flex; gap: 1.5rem; margin: 1rem 0 1.5rem; flex-wrap: wrap; }
+.risk-stat { display: flex; flex-direction: column; align-items: center; padding: 1rem 1.5rem; border-radius: var(--hawkeye-radius); min-width: 100px; }
+.risk-critical { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+.risk-warning  { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+.risk-info     { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; }
+:root:not([data-theme="light"]) .risk-critical { background: #450a0a; border-color: #7f1d1d; color: #fca5a5; }
+:root:not([data-theme="light"]) .risk-warning  { background: #451a03; border-color: #78350f; color: #fcd34d; }
+:root:not([data-theme="light"]) .risk-info     { background: #172554; border-color: #1e3a5f; color: #93c5fd; }
+.risk-count { font-size: 1.6rem; font-weight: 800; }
+.risk-rule-group { margin: 0.75rem 0; }
+.risk-rule-group > summary { font-size: 0.95rem; font-weight: 600; }
+
+/* ── ADR 架构决策记录 ── */
+.adr-status { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 6px; font-size: 0.78rem; font-weight: 600; }
+.adr-accepted   { background: #dcfce7; color: #15803d; }
+.adr-proposed   { background: #dbeafe; color: #1d4ed8; }
+.adr-deprecated { background: #f3f4f6; color: #6b7280; }
+.adr-superseded { background: #fef3c7; color: #b45309; }
+.adr-rejected   { background: #fef2f2; color: #991b1b; }
+.adr-draft      { background: #f3e8ff; color: #7c3aed; }
+:root:not([data-theme="light"]) .adr-accepted   { background: #14532d; color: #86efac; }
+:root:not([data-theme="light"]) .adr-proposed   { background: #1e3a5f; color: #93c5fd; }
+:root:not([data-theme="light"]) .adr-deprecated { background: #374151; color: #9ca3af; }
+:root:not([data-theme="light"]) .adr-superseded { background: #451a03; color: #fcd34d; }
+:root:not([data-theme="light"]) .adr-rejected   { background: #450a0a; color: #fca5a5; }
+:root:not([data-theme="light"]) .adr-draft      { background: #3b0764; color: #c4b5fd; }
+.adr-detail { margin: 0.5rem 0; }
+.adr-detail > summary { font-size: 0.92rem; }
+
+/* ── @Deprecated 代码废弃标记（与 ADR 废弃状态同灰色基调）── */
+.deprecated-badge {
+  display: inline-block; padding: 0.1rem 0.4rem; border-radius: 6px;
+  background: #f3f4f6; color: #6b7280; font-size: 0.78rem; font-weight: 600;
+  vertical-align: middle; margin-left: 0.25rem; white-space: nowrap;
+}
+:root:not([data-theme="light"]) .deprecated-badge {
+  background: #374151; color: #9ca3af;
+}
+
+/* 多项目业务域的项目归属标记 —— 刻意低调：无背景、淡灰小字，仅作归属提示，不喧宾夺主。
+   通过 sidebar badge 机制渲染在域名右侧（非名称前缀）。 */
+.badge.project-tag {
+  background: transparent !important;
+  color: var(--sl-color-gray-3) !important;
+  font-size: 0.72rem !important;
+  font-weight: 400 !important;
+  border: none !important;
+  padding: 0 !important;
+  margin-inline-start: 0.4rem;
+  opacity: 0.7;
+  line-height: 1.4;
+}
+.badge.project-tag :where(svg, [class*="icon"]) {
+  display: none !important;
+}
+
+/* ── 首页快捷入口卡片（独立 Hero 着陆页）── */
+.landing-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 1rem;
+  margin: 2rem 0;
+}
+.landing-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 1.25rem 1.4rem;
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 0.75rem;
+  background: var(--sl-color-gray-6);
+  text-decoration: none;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+.landing-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--sl-color-accent);
+}
+.lc-icon { font-size: 1.5rem; }
+.lc-title { font-size: 1.05rem; font-weight: 600; color: var(--sl-color-white); }
+.lc-desc { font-size: 0.85rem; color: var(--sl-color-gray-3); }

@@ -1,0 +1,30 @@
+---
+title: "Demo - 业务域概览"
+---
+
+
+
+## 分层架构
+
+```mermaid
+graph TD
+  subgraph demo["Demo 域"]
+    A[Adapter] --> B[Application]
+    B --> C[Domain]
+    C <-- D[Infrastructure]
+    B --> D
+  end
+```
+
+## 各层组件
+
+### [Adapter 接口层](/domains/demo/adapter/) (1 个组件)
+
+| 类名 | 类型 | 源代码 |
+| ------ | ------ | ------ |
+| `OldCtrl` | controller | `OldCtrl.java` |
+### [Infrastructure 基础设施层](/domains/demo/infrastructure/) (1 个组件)
+
+| 类名 | 类型 | 源代码 |
+| ------ | ------ | ------ |
+| `DemoDO` | persistentObject | `DemoDO.java` |

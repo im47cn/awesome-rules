@@ -1,0 +1,164 @@
+---
+// 回归 Starlight 原生 PageFrame：仅透传原生 slot 结构，
+// 末尾追加 doc-gen 的两个全局增强 —— ChatAgent 与 Mermaid 渲染。
+// @ts-expect-error — Starlight 运行时解析的 virtual module，astro check 无其类型声明
+import MobileMenuToggle from 'virtual:starlight/components/MobileMenuToggle';
+import ChatAgent from '../ChatAgent.astro';
+
+const { hasSidebar: routeHasSidebar } = Astro.locals.starlightRoute;
+// 首页为原生 Hero 着陆页：隐藏侧边栏，让 Hero 居中全宽展示。
+const isLanding = Astro.url.pathname.replace(/\/+$/, '') === '';
+const hasSidebar = isLanding ? false : routeHasSidebar;
+---
+
+<div class="page sl-flex">
+	<header class="header"><slot name="header" /></header>
+	{
+		hasSidebar && (
+			<nav class="sidebar print:hidden" aria-label={Astro.locals.t('sidebarNav.accessibleLabel')}>
+				<MobileMenuToggle />
+				<div id="starlight__sidebar" class="sidebar-pane">
+					<div class="sidebar-content sl-flex">
+						<slot name="sidebar" />
+					</div>
+				</div>
+			</nav>
+		)
+	}
+	<div class="main-frame"><slot /></div>
+</div>
+<ChatAgent />
+
+<style>
+	@layer starlight.core {
+		.page {
+			flex-direction: column;
+			min-height: 100vh;
+		}
+
+		.header {
+			z-index: var(--sl-z-index-navbar);
+			position: fixed;
+			inset-inline-start: 0;
+			inset-block-start: 0;
+			width: 100%;
+			height: var(--sl-nav-height);
+			border-bottom: 1px solid var(--sl-color-hairline-shade);
+			padding: var(--sl-nav-pad-y) var(--sl-nav-pad-x);
+			padding-inline-end: var(--sl-nav-pad-x);
+			background-color: var(--sl-color-bg-nav);
+		}
+
+		:global([data-has-sidebar]) .header {
+			padding-inline-end: calc(
+				var(--sl-nav-gap) + var(--sl-nav-pad-x) + var(--sl-menu-button-size)
+			);
+		}
+
+		.sidebar-pane {
+			visibility: var(--sl-sidebar-visibility, hidden);
+			position: fixed;
+			z-index: var(--sl-z-index-menu);
+			inset-block: var(--sl-nav-height) 0;
+			inset-inline-start: 0;
+			width: 100%;
+			background-color: var(--sl-color-black);
+			overflow-y: auto;
+			scrollbar-gutter: stable;
+		}
+
+		:global([aria-expanded='true']) ~ .sidebar-pane {
+			--sl-sidebar-visibility: visible;
+		}
+
+		.sidebar-content {
+			height: 100%;
+			min-height: max-content;
+			padding: 1rem var(--sl-sidebar-pad-x) 0;
+			flex-direction: column;
+			gap: 1rem;
+		}
+
+		@media (min-width: 50rem) {
+			.sidebar-content::after {
+				content: '';
+				padding-bottom: 1px;
+			}
+		}
+
+		.main-frame {
+			padding-top: calc(var(--sl-nav-height) + var(--sl-mobile-toc-height));
+			padding-inline-start: var(--sl-content-inline-start);
+		}
+
+		@media (min-width: 50rem) {
+			:global([data-has-sidebar]) .header {
+				padding-inline-end: var(--sl-nav-pad-x);
+			}
+			.sidebar-pane {
+				--sl-sidebar-visibility: visible;
+				width: var(--sl-sidebar-width);
+				background-color: var(--sl-color-bg-sidebar);
+				border-inline-end: 1px solid var(--sl-color-hairline-shade);
+			}
+		}
+	}
+</style>
+
+<script>
+	// 全局 Mermaid 渲染：所有页面 .mdx 正文里的 ```mermaid 块（经 remarkMermaid 转成 <div class="mermaid">）
+	// 与首页 ArchitectureDiagram 的 <pre class="mermaid"> 统一在此渲染。
+	// 动态加载 mermaid：仅在页面出现待渲染图时才 import，避免进入首屏初始包。
+	let mermaidMod = null;
+
+	async function renderMermaid() {
+		const nodes = Array.from(document.querySelectorAll('.mermaid:not([data-processed])'));
+		if (nodes.length === 0) return;
+
+		if (!mermaidMod) mermaidMod = (await import('mermaid')).default;
+		const mermaid = mermaidMod;
+
+		nodes.forEach((el) => {
+			if (!el.hasAttribute('data-source')) {
+				el.setAttribute('data-source', el.textContent || '');
+			}
+		});
+
+		// 每次 render 重新 initialize 以跟随当前明暗主题（主题切换时由 observer 触发）
+		mermaid.initialize({
+			startOnLoad: false,
+			theme: document.documentElement.dataset.theme === 'dark' ? 'dark' : 'default',
+			securityLevel: 'loose',
+			themeVariables: { fontFamily: 'var(--sl-font)' },
+		});
+
+		// 动态加载期间页面可能已导航，重新确认仍有待渲染节点
+		if (document.querySelectorAll('.mermaid:not([data-processed])').length === 0) return;
+
+		mermaid
+			.run({ querySelector: '.mermaid:not([data-processed])', suppressErrors: true })
+			.then(() => nodes.forEach((el) => el.setAttribute('data-processed', 'true')))
+			.catch((err) => console.error('[mermaid] render error:', err));
+	}
+
+	renderMermaid();
+
+	// 跨页导航后渲染新页面的 mermaid 图（首次加载也触发，由 :not([data-processed]) 过滤避免重复）。
+	document.addEventListener('astro:page-load', renderMermaid);
+
+	// 主题切换：恢复源码、清除已渲染标记、重新渲染
+	const observer = new MutationObserver(() => {
+		document.querySelectorAll('.mermaid[data-processed]').forEach((el) => {
+			const source = el.getAttribute('data-source');
+			if (source) {
+				el.removeAttribute('data-processed');
+				el.textContent = source;
+			}
+		});
+		renderMermaid();
+	});
+	observer.observe(document.documentElement, {
+		attributes: true,
+		attributeFilter: ['data-theme'],
+	});
+</script>
