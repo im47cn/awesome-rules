@@ -39,6 +39,8 @@ scenario: 设计表结构/编写 SQL
 
 说明：主键可用自增或雪花 ID。日期时间建议由前端传入而非数据库生成。
 
+> **日志/流水表豁免**：仅追加不更新的日志/流水类表（表名含 `_log` / `_flow` / `_journal`）可豁免 `creator_id` / `last_updater_id` / `last_update_time`，但必须保留 `id` 与 `create_time`。
+
 ## 四、字段
 
 ### 命名
@@ -48,6 +50,7 @@ scenario: 设计表结构/编写 SQL
 - 【强制】字段命名细化到属性级别，不得用主体名充当属性名；以「内容含义」而非「业务功能」视角命名。
 - 【强制】避免「关联」「业务」等泛化词；"方/人"区分：专指人用 `er`（中文名「xx人」），含机构用 `pty`（中文名「xx方」）。
 - 【推荐】字段名不使用名词复数形式。
+- 【推荐】字段名避免使用无主体区分的泛化单一名词（如 `name`、`code`、`status`、`type`、`remark`、`content`），应加所属主体前缀以明确归属（如 `merchant_name`、`order_status`、`secret_remark`）。
 
 ### 类型与属性
 
@@ -130,3 +133,24 @@ del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]'
 **索引**：uk_/ix_ 命名 ≤ 64 / 已避开低区分度单字段索引 / id 不重复建索引。
 
 **SQL**：无 `SELECT *` / 有 WHERE / 多表带别名 / INSERT 列字段。
+
+---
+
+## 附录：常用缩写字典
+
+字段名/表名中的常见词应使用下表标准缩写，避免「未规范化写法」。
+
+| 常见词 | 标准缩写 | 未规范化写法（避免） |
+| --- | --- | --- |
+| 方向 | `dir` | direction |
+| 消息 | `msg` | message |
+| 配置 | `cfg` | config |
+| 描述 | `desc` | description |
+| 信息 | `info` | information |
+| 编号 | `no` | number |
+| 数量 | `cnt` | count |
+| 图片 | `img` | image |
+| 电话 | `tel` | telephone |
+| 地址 | `addr` | address |
+| 密码 | `pwd` | password |
+| 方法 | `mtd` | method |

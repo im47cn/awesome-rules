@@ -137,6 +137,40 @@ REQUIRED_FIELDS = {
     "last_update_time": {"type_pattern": r"datetime", "desc": "最后更新时间"},
 }
 
+# ── 泛化字段名（缺乏主体区分的单一名词，应加前缀）──────────────────────
+GENERIC_FIELD_NAMES = {
+    "name", "code", "status", "type", "title", "content", "value", "remark", "count",
+}
+
+# ── 缩写字典：未规范化写法 → 标准缩写（与规范附录同步）──────────────────
+ABBREVIATION_DICT = {
+    "direction": "dir", "message": "msg", "config": "cfg", "description": "desc",
+    "information": "info", "number": "no", "count": "cnt", "image": "img",
+    "telephone": "tel", "address": "addr", "password": "pwd", "method": "mtd",
+}
+
+# ── 日志/流水表标识（表名含此子串者豁免更新人字段）─────────────────────
+LOG_TABLE_TAGS = ("_log", "_flow", "_journal")
+
+
+def _is_log_table(name: str) -> bool:
+    """判断是否为日志/流水类表（按表名子串标识）。"""
+    low = name.lower()
+    return any(tag in low for tag in LOG_TABLE_TAGS)
+
+
+def _check_abbreviation(name: str, owner: str, issues: list, kind: str = "字段"):
+    """检测名称分词是否命中缩写字典的未规范化写法，提示改用标准缩写。"""
+    for part in name.lower().split("_"):
+        if part in ABBREVIATION_DICT:
+            std = ABBREVIATION_DICT[part]
+            issues.append(Issue(
+                table=owner, severity=Severity.RECOMMENDED, rule="缩写未规范化",
+                location=f"{kind}:{name}", description=f"{kind} '{name}' 含未规范化写法 '{part}'",
+                suggestion=f"建议使用标准缩写 '{part}' → '{std}'",
+            ))
+
+
 # ── 全角字符范围检测 ────────────────────────────────────────────────────
 FULLWIDTH_RE = re.compile(r"[\uff00-\uffef\u3000-\u303f\u2018-\u201f\u2026\u00b7]")
 
@@ -429,6 +463,25 @@ def check_forbidden_clauses(text: str, issues: list, file_path: str):
             ))
 
 
+def _find_bad_dash_dash(line: str) -> bool:
+    """检测行内是否存在「字符串外、-- 后缺空格」的注释标记。
+
+    引号感知：跳过 COMMENT '...--...' 字符串内的 --；仅当字符串外的
+    -- 后紧跟非空白、非连字符字符时判定为违规（如 '--xxx' / 'code --xxx'）。
+    """
+    in_quote = False
+    i, n = 0, len(line)
+    while i < n:
+        ch = line[i]
+        if ch == "'" and (i == 0 or line[i - 1] != "\\"):
+            in_quote = not in_quote
+        elif not in_quote and ch == "-" and i + 1 < n and line[i + 1] == "-":
+            after = line[i + 2] if i + 2 < n else ""
+            return after not in ("", " ", "\t", "-")
+        i += 1
+    return False
+
+
 def check_comment_style(text: str, issues: list, file_path: str):
     """Check comment style (# or /* */ instead of -- ).
 
@@ -446,17 +499,13 @@ def check_comment_style(text: str, issues: list, file_path: str):
                 location=f"{file_path}:{i}", description="使用了 # 注释",
                 suggestion="注释统一使用 '-- '(注意 -- 后有一个空格)",
             ))
-        # 检查 -- 注释但 -- 后没有空格（常见错误）
-        # 需要排除 SQL 关键字中的 --（如 column name 包含 -- 的情况）
-        # 匹配行首或括号后的 -- 注释，且 -- 后紧跟非空格字符
-        if re.search(r"(?<![\w\x27\x60])(--)(?![\s\-\x27\x60])", stripped, re.IGNORECASE):
-            # 排除 COMMENT 定义中的 --（如 COMMENT 'xxx--yyy'）
-            if not re.search(r"(?i)comment\s*['\"]", stripped):
-                issues.append(Issue(
-                    table="(文件级)", severity=Severity.MANDATORY, rule="注释格式",
-                    location=f"{file_path}:{i}", description="-- 注释后缺少空格（应为 '-- '）",
-                    suggestion="-- 后必须跟一个空格，如 '-- 注释内容'，否则可能被误解析",
-                ))
+        # 检查 -- 注释但 -- 后没有空格（引号感知，排除 COMMENT '...--...' 内的 --）
+        if _find_bad_dash_dash(stripped):
+            issues.append(Issue(
+                table="(文件级)", severity=Severity.MANDATORY, rule="注释格式",
+                location=f"{file_path}:{i}", description="-- 注释后缺少空格（应为 '-- '）",
+                suggestion="-- 后必须跟一个空格，如 '-- 注释内容'，否则可能被误解析",
+            ))
 
 
 def check_partition(text: str, issues: list, file_path: str):
@@ -530,6 +579,9 @@ def check_table_name(table: TableInfo, issues: list):
             suggestion="避免使用数据库保留字作为表名",
         ))
 
+    # 缩写字典：未规范化写法提示（NAM002）
+    _check_abbreviation(name, name, issues, kind="表名")
+
 
 def check_table_comment(table: TableInfo, issues: list):
     """Check table comment."""
@@ -568,7 +620,9 @@ def check_required_fields(table: TableInfo, issues: list):
     """Check for required system fields."""
     field_names = {f.name.lower() for f in table.fields}
 
-    for req_name, _req_info in REQUIRED_FIELDS.items():
+    # 日志/流水表仅强制 id 与 create_time，豁免更新人字段
+    required = {"id", "create_time"} if _is_log_table(table.name) else set(REQUIRED_FIELDS.keys())
+    for req_name in required:
         if req_name not in field_names:
             issues.append(Issue(
                 table=table.name, severity=Severity.MANDATORY, rule="必含字段缺失",
@@ -631,6 +685,17 @@ def check_field_name(field: FieldInfo, table_name: str, issues: list):
             suggestion="避免使用数据库保留字作为字段名",
         ))
 
+    # 泛化单一名词需加主体前缀（COL018）
+    if name.lower() in GENERIC_FIELD_NAMES and name.lower() not in MYSQL_RESERVED:
+        issues.append(Issue(
+            table=table_name, severity=Severity.RECOMMENDED, rule="泛化字段名",
+            location=f"表:{table_name} 字段:{name}", description=f"字段名 '{name}' 为泛化单一名词，缺乏主体区分",
+            suggestion="加所属主体前缀，如 merchant_remark / order_status",
+        ))
+
+    # 缩写字典：未规范化写法提示（NAM002）
+    _check_abbreviation(name, table_name, issues, kind="字段")
+
 
 def check_field_comment(field: FieldInfo, table_name: str, issues: list):
     """Check field comment."""
@@ -657,9 +722,18 @@ def check_field_comment(field: FieldInfo, table_name: str, issues: list):
     if fw_matches:
         issues.append(Issue(
             table=table_name, severity=Severity.MANDATORY, rule="全角字符",
-            location=f"表:{table_name} 字段:{field.name}", 
+            location=f"表:{table_name} 字段:{field.name}",
             description=f"字段注释含全角字符: {''.join(set(fw_matches))}",
             suggestion="注释中不应包含全角字符，中文标点改英文标点",
+        ))
+
+    # 补充信息闭合后不得用逗号追加（COL032）
+    if re.search(r"\([^()]*\)[,，]", comment):
+        issues.append(Issue(
+            table=table_name, severity=Severity.MANDATORY, rule="注释补充信息格式",
+            location=f"表:{table_name} 字段:{field.name}",
+            description="补充信息闭合圆括号后用逗号追加，应全部放入圆括号",
+            suggestion="格式：中文名(补充信息)[枚举信息]，如 '父参数id(0=根,支持嵌套)'",
         ))
 
 
@@ -757,9 +831,25 @@ def check_index_naming(table: TableInfo, issues: list):
         if not idx.is_unique and not idx.name.lower().startswith("ix_"):
             issues.append(Issue(
                 table=table.name, severity=Severity.MANDATORY, rule="普通索引命名",
-                location=f"表:{table.name} 索引:{idx.name}", 
+                location=f"表:{table.name} 索引:{idx.name}",
                 description=f"普通索引 '{idx.name}' 未以 ix_ 开头",
                 suggestion="普通索引命名规则: ix_字段列表",
+            ))
+
+
+def check_unique_hint(table: TableInfo, issues: list):
+    """启发式提示：字段注释含「唯一」却未被任何 UNIQUE 索引覆盖。"""
+    unique_cols = set()
+    for idx in table.indexes:
+        if idx.is_unique:
+            unique_cols.update(c.lower() for c in idx.columns)
+    for f in table.fields:
+        if f.comment and "唯一" in f.comment and f.name.lower() not in unique_cols:
+            issues.append(Issue(
+                table=table.name, severity=Severity.RECOMMENDED, rule="建议唯一索引",
+                location=f"表:{table.name} 字段:{f.name}",
+                description=f"字段 {f.name} 注释标注「唯一」但未建唯一索引",
+                suggestion="若业务唯一，改 UNIQUE KEY uk_字段名",
             ))
 
 
@@ -868,6 +958,7 @@ def check_file(file_path: str) -> list:
             check_varchar_length(field, table.name, issues)
 
         check_index_naming(table, issues)
+        check_unique_hint(table, issues)
         check_index_on_id(table, issues)
         check_index_count(table, issues)
 
@@ -894,8 +985,6 @@ def format_report_text(file_path: str, issues: list) -> str:
     tables = sorted(set(i.table for i in issues))
     for table_name in tables:
         table_issues = [i for i in issues if i.table == table_name]
-        if not table_issues:
-            continue
         lines.append(f"  ── {table_name} ──")
         for idx, issue in enumerate(table_issues, 1):
             severity_tag = f"[{issue.severity.value}]"
@@ -987,5 +1076,5 @@ def main():
     return 1 if total_mandatory > 0 else 0
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     sys.exit(main())
