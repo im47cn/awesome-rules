@@ -344,3 +344,262 @@ def test_find_mybatis_files_dir_filters_non_mapper(tmp_path):
     found = sql_check.find_mybatis_files(str(tmp_path))
     assert any("m.xml" in p for p in found)
     assert not any("plain.xml" in p for p in found)
+
+
+# ── strip_dynamic_tags 各动态标签分支 ──────────────────────────────────────
+
+def _strip(xml_str):
+    import xml.etree.ElementTree as ET
+    return sql_check.strip_dynamic_tags(ET.fromstring(xml_str))
+
+
+def test_strip_set_tag():
+    sql = _strip("<update id='u'><set><if test='x'>a=1,</if></set></update>")
+    assert "SET" in sql.upper() and "a=1" in sql
+
+
+def test_strip_foreach_tag():
+    sql = _strip("<select id='q'><foreach collection='c' item='i'>#{i}</foreach></select>")
+    assert "(" in sql and ")" in sql
+
+
+def test_strip_choose_when_otherwise():
+    sql = _strip(
+        "<select id='q'><choose><when test='x'>a=1</when>"
+        "<otherwise>b=2</otherwise></choose></select>")
+    assert "a=1" in sql
+
+
+def test_strip_trim_tag():
+    sql = _strip("<select id='q'><trim prefix='WHERE'><if test='x'>a=1</if></trim></select>")
+    assert "a=1" in sql
+
+
+def test_strip_when_otherwise_direct():
+    sql = _strip("<select id='q'><when test='x'>a=1</when></select>")
+    assert "a=1" in sql
+
+
+def test_strip_unknown_tag_passthrough():
+    sql = _strip("<select id='q'><custom>x = 1</custom></select>")
+    assert "x = 1" in sql
+
+
+# ── parse_po_class 注解各形式 ─────────────────────────────────────────────
+
+def test_parse_po_class_value_form_tableid():
+    """TableId value='id' 形式（覆盖 658-660 分支）。"""
+    java = '''@TableName("t_user")
+public class UserPO {
+    @TableId(value = "user_id")
+    private Long id;
+}'''
+    po = sql_check.parse_po_class(java, "x.java")
+    assert po.fields[0].column_name == "user_id"
+    assert po.fields[0].is_id is True
+
+
+def test_parse_po_class_tablefield_value_and_plain():
+    """TableField value= 与 plain 两种形式。"""
+    java = '''@TableName("t_user")
+public class UserPO {
+    @TableField(value = "nick_name")
+    private String name;
+    @TableField("age_val")
+    private Integer age;
+}'''
+    po = sql_check.parse_po_class(java, "x.java")
+    cols = {f.column_name for f in po.fields}
+    assert "nick_name" in cols and "age_val" in cols
+
+
+def test_parse_po_class_tablefield_exist_false_skipped():
+    """@TableField(exist = false) 字段不入列。"""
+    java = '''@TableName("t_user")
+public class UserPO {
+    @TableField(exist = false)
+    private String transientField;
+    @TableId("id")
+    private Long id;
+}'''
+    po = sql_check.parse_po_class(java, "x.java")
+    cols = {f.column_name for f in po.fields}
+    assert "transient_field" not in cols
+
+
+def test_parse_po_class_extends_base_detected():
+    """继承 Base/Entity/Model 基类的 PO → extends_base=True。"""
+    java = '''@TableName("t_user")
+public class UserPO extends BaseEntity {
+    @TableId("id")
+    private Long id;
+}'''
+    po = sql_check.parse_po_class(java, "x.java")
+    assert po.extends_base is True
+
+
+def test_parse_po_class_static_field_skipped():
+    """static 字段不入列（覆盖 646 分支）。"""
+    java = '''@TableName("t_user")
+public class UserPO {
+    public static final String CONST = "x";
+    @TableId("id")
+    private Long id;
+}'''
+    po = sql_check.parse_po_class(java, "x.java")
+    cols = {f.column_name for f in po.fields}
+    assert "const" not in cols
+
+
+# ── check_po_table_name / field_names / required_fields 各规则 ─────────────
+
+def _po(table="t_user", fields=None, extends_base=False):
+    flds = fields or [sql_check.PoFieldInfo("id", "id", "Long", True)]
+    return sql_check.PoClassInfo(table, "XPO", "x.java", flds, extends_base)
+
+
+def test_check_po_table_name_prefix_and_underscore():
+    issues = []
+    sql_check.check_po_table_name(_po(table="Desc__Order"), issues)
+    rules = {i.rule for i in issues}
+    assert "PO表名开头" in rules
+    assert "PO表名连续下划线" in rules
+
+
+def test_check_po_table_name_reserved():
+    """表名恰为保留字（lower 后精确匹配）。"""
+    issues = []
+    sql_check.check_po_table_name(_po(table="desc"), issues)
+    assert any(i.rule == "PO表名保留字" for i in issues)
+
+
+def test_check_po_table_name_bad_chars():
+    issues = []
+    sql_check.check_po_table_name(_po(table="t-user"), issues)  # 含连字符
+    assert any(i.rule == "PO表名字符" for i in issues)
+
+
+def test_check_po_field_names_prefix_underscore_dup():
+    issues = []
+    sql_check.check_po_field_names(_po(fields=[
+        sql_check.PoFieldInfo("id", "id", "Long", True),
+        sql_check.PoFieldInfo("x", "Desc__Col", "String"),  # 大写开头 + 连续下划线
+        sql_check.PoFieldInfo("dup", "id", "int"),  # 与 id 重复
+    ]), issues)
+    rules = {i.rule for i in issues}
+    assert "PO字段名开头" in rules
+    assert "PO字段名连续下划线" in rules
+    assert "PO字段重复" in rules
+
+
+def test_check_po_field_names_reserved():
+    """列名恰为保留字（lower 后精确匹配）。"""
+    bad = sql_check.PoFieldInfo("x", "desc", "String")
+    issues = []
+    sql_check.check_po_field_names(_po(fields=[bad]), issues)
+    assert any(i.rule == "PO字段名保留字" for i in issues)
+
+
+def test_check_po_required_fields_missing():
+    """未继承基类且缺必含字段 → 报缺失。"""
+    issues = []
+    sql_check.check_po_required_fields(_po(extends_base=False), issues)
+    rules = {i.rule for i in issues}
+    assert "PO必含字段缺失" in rules
+    assert "PO缺少del_flag" in rules
+
+
+def test_check_po_required_fields_extends_base_skipped():
+    """继承基类 → 跳过必含字段检查。"""
+    issues = []
+    sql_check.check_po_required_fields(_po(extends_base=True), issues)
+    assert issues == []
+
+
+# ── find_po_files / check_po_file 异常 ─────────────────────────────────────
+
+def test_find_po_files_single_file(tmp_path):
+    f = tmp_path / "A.java"
+    f.write_text('@TableName("t_a")\npublic class APO {}')
+    assert sql_check.find_po_files(str(f)) == [str(f)]
+
+
+def test_find_po_files_dir(tmp_path):
+    (tmp_path / "A.java").write_text('@TableName("t_a") class APO {}')
+    (tmp_path / "B.java").write_text('class B {}')  # 非 PO
+    found = sql_check.find_po_files(str(tmp_path))
+    assert any("A.java" in p for p in found)
+    assert not any("B.java" in p for p in found)
+
+
+def test_find_po_files_nonexistent_path():
+    assert sql_check.find_po_files("/nonexistent/path_xyz") == []
+
+
+def test_check_po_file_read_error_returns_none(tmp_path):
+    """文件不可读（目录）→ 返回 None。"""
+    assert sql_check.check_po_file(str(tmp_path)) is None
+
+
+# ── format_report_text / format_report_json ────────────────────────────────
+
+def test_format_report_text_clean():
+    assert "检查通过" in sql_check.format_report_text("f.xml", [])
+
+
+def test_format_report_text_with_issues():
+    issues = [sql_check.Issue("f.xml", "q", "select", Severity.MANDATORY,
+                              "禁止SELECT *", "loc", "desc", "sug")]
+    text = sql_check.format_report_text("f.xml", issues)
+    assert "强制" in text
+    assert "禁止SELECT *" in text
+    assert "建议" in text
+
+
+def test_format_report_json_structure():
+    issues = [sql_check.Issue("f.xml", "q", "select", Severity.RECOMMENDED,
+                              "避免RIGHT JOIN", "loc", "desc", "sug")]
+    import json
+    data = json.loads(sql_check.format_report_json("f.xml", issues))
+    assert data["summary"]["total"] == 1
+    assert data["summary"]["recommended"] == 1
+    assert data["issues"][0]["rule"] == "避免RIGHT JOIN"
+
+
+# ── main() CLI 全分支 ──────────────────────────────────────────────────────
+
+def test_main_no_targets_exit2(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["sql_check.py", str(tmp_path)])
+    assert sql_check.main() == 2
+
+
+def test_main_text_output_with_violations(tmp_path, monkeypatch, capsys):
+    (tmp_path / "m.xml").write_text(
+        '<mapper><select id="q">SELECT * FROM t_user</select></mapper>')
+    monkeypatch.setattr(sys, "argv", ["sql_check.py", str(tmp_path)])
+    code = sql_check.main()
+    out = capsys.readouterr().out
+    assert code == 1  # 有强制问题
+    assert "总计" in out
+
+
+def test_main_json_output(tmp_path, monkeypatch, capsys):
+    (tmp_path / "m.xml").write_text(
+        '<mapper><select id="q">SELECT id FROM t_user</select></mapper>')
+    monkeypatch.setattr(sys, "argv", ["sql_check.py", str(tmp_path), "--format", "json"])
+    code = sql_check.main()
+    import json
+    out = capsys.readouterr().out
+    data = json.loads(out)
+    assert code == 1  # 缺 WHERE 强制
+    assert isinstance(data, list)
+
+
+def test_main_clean_po_dir_exit0(tmp_path, monkeypatch, capsys):
+    """合规 PO 类目录 → exit 0。"""
+    (tmp_path / "User.java").write_text(
+        '@TableName("t_user")\n'
+        'public class UserPO extends BaseEntity {\n'
+        '    @TableId("id")\n    private Long id;\n}')
+    monkeypatch.setattr(sys, "argv", ["sql_check.py", str(tmp_path)])
+    assert sql_check.main() == 0
