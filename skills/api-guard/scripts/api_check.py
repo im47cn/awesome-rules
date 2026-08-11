@@ -194,8 +194,22 @@ def check_path_variable(ep: ApiEndpoint, issues: list):
             suggestion="禁止在 path 中传递唯一标识，改用请求体"))
 
 
+def _not_converged_issue(ctx: dict, ep: ApiEndpoint, last: str) -> Issue:
+    """末段不在收敛动词集 → 推荐级 issue。"""
+    return Issue(**ctx, severity=Severity.RECOMMENDED, rule="动作收敛",
+        location=f"路径:{ep.path}",
+        description=f"末段 '{last}' 不在收敛动词集中",
+        suggestion=f"动作收敛为: {', '.join(sorted(ALLOWED_ACTIONS))}")
+
+
 def check_action_verb(ep: ApiEndpoint, issues: list):
-    """末段（action）须使用收敛动词集。"""
+    """末段（action）须使用收敛动词集，且动词后置（名词-动词序）。
+
+    判定规则（camelCase 末段按大写边界拆词）：
+    - 单字：在收敛动词集中即合规。
+    - 多字：首个收敛动词位于首位 → 动词前置（违规）；
+      位于非首位 → 名词-动词序（合规）；无收敛动词 → 动作不收敛。
+    """
     ctx = _ctx(ep)
     segments = [s for s in ep.path.split("/") if s]
     if len(segments) < 2:
@@ -204,40 +218,32 @@ def check_action_verb(ep: ApiEndpoint, issues: list):
     if PATH_VAR_PATTERN.fullmatch(last):
         return
 
-    # 检查是否动词前置（如 syncWaybill、getWaybillList）
-    # 将 camelCase 拆分为 [词1, 词2, ...]，查找第一个动词
     camel_parts = re.sub(r'([a-z])([A-Z])', r'\1 \2', last).split()
 
-    # 单字有效动词（如 'sync'）不是动词前置，直接通过
+    # 单字：直接判断是否在收敛动词集
     if len(camel_parts) == 1:
         if last not in ALLOWED_ACTIONS:
-            issues.append(Issue(**ctx, severity=Severity.RECOMMENDED, rule="动作收敛",
-                location=f"路径:{ep.path}",
-                description=f"末段 '{last}' 不在收敛动词集中",
-                suggestion=f"动作收敛为: {', '.join(sorted(ALLOWED_ACTIONS))}"))
+            issues.append(_not_converged_issue(ctx, ep, last))
         return
 
-    for i, part in enumerate(camel_parts):
-        part_lower = part.lower()
-        if part_lower in ALLOWED_ACTIONS:
-            # 找到动词，名词为动词之后的部分（若动词是第一个词，名词为剩余词）
-            noun_parts = camel_parts[i + 1:]
-            if noun_parts:
-                noun = ''.join(noun_parts).lower()
-            else:
-                # 动词是最后一个词（如 'syncWaybill'，动词在前，无后续名词）
-                noun = camel_parts[0].lower()
-            issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="动词后置",
-                location=f"路径:{ep.path}",
-                description=f"动作 '{last}' 动词前置，应为名词-动词序",
-                suggestion=f"动词后置：/{noun}/{part_lower}"))
-            return
+    # 多字：定位首个收敛动词的位置
+    verb_idx = next(
+        (i for i, p in enumerate(camel_parts) if p.lower() in ALLOWED_ACTIONS),
+        None,
+    )
+    if verb_idx is None:
+        issues.append(_not_converged_issue(ctx, ep, last))
+        return
 
-    if last not in ALLOWED_ACTIONS:
-        issues.append(Issue(**ctx, severity=Severity.RECOMMENDED, rule="动作收敛",
+    if verb_idx == 0:
+        # 动词在首位 → 动词前置，应为名词-动词序
+        noun = ''.join(camel_parts[1:]).lower()
+        verb = camel_parts[0].lower()
+        issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="动词后置",
             location=f"路径:{ep.path}",
-            description=f"末段 '{last}' 不在收敛动词集中",
-            suggestion=f"动作收敛为: {', '.join(sorted(ALLOWED_ACTIONS))}"))
+            description=f"动作 '{last}' 动词前置，应为名词-动词序",
+            suggestion=f"动词后置：/{noun}/{verb}"))
+    # verb_idx >= 1：动词后置（名词在前），合规
 
 
 def _ctx(ep: ApiEndpoint) -> dict:
@@ -512,5 +518,5 @@ def main():
     return 1 if total_mandatory > 0 else 0
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     sys.exit(main())

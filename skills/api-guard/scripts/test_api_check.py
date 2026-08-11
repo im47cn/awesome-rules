@@ -607,6 +607,287 @@ class TestContractAndMain(unittest.TestCase):
         self.assertEqual(code, 0)
 
 
+# ── 端点提取边界 ──────────────────────────────────────────────────────────
+
+class TestExtractEndpointsEdge(unittest.TestCase):
+    """端点提取的边界与分支覆盖。"""
+
+    def test_no_class_declaration(self):
+        """文件无 class 声明：class_mapping 为空，方法级映射仍可提取。"""
+        java = '@PostMapping("/sync")\npublic Result sync() { return null; }'
+        endpoints = extract_endpoints(java, "X.java")
+        self.assertEqual(len(endpoints), 1)
+        self.assertEqual(endpoints[0].path, "/sync")
+
+    def test_class_without_mapping(self):
+        """有 class 但无类级 @RequestMapping：class_mapping 为空。"""
+        java = """
+@RestController
+public class WaybillController {
+    @PostMapping("sync")
+    public Result sync() { return null; }
+}
+"""
+        endpoints = extract_endpoints(java, "X.java")
+        self.assertEqual(len(endpoints), 1)
+        self.assertEqual(endpoints[0].path, "/sync")
+
+    def test_path_without_leading_slash(self):
+        """类级与方法级路径均无前导斜杠：自动补 /。"""
+        java = """
+@RestController
+@RequestMapping("logistics")
+public class C {
+    @PostMapping("sync")
+    public Result sync() { return null; }
+}
+"""
+        endpoints = extract_endpoints(java, "X.java")
+        self.assertEqual(endpoints[0].path, "/logisticssync")
+
+    def test_request_mapping_method_post(self):
+        """方法级 @RequestMapping 带 method=RequestMethod.POST：识别为 POST。"""
+        java = """
+@RestController
+@RequestMapping("/api")
+public class C {
+    @RequestMapping(value = "/sync", method = RequestMethod.POST)
+    public Result sync() { return null; }
+}
+"""
+        endpoints = extract_endpoints(java, "X.java")
+        self.assertEqual(endpoints[0].http_method, "POST")
+
+    def test_request_mapping_method_unknown(self):
+        """方法级 @RequestMapping 的 method 非标准动词：保持 REQUESTMAPPING。"""
+        java = """
+@RestController
+@RequestMapping("/api")
+public class C {
+    @RequestMapping(value = "/sync", method = RequestMethod.TRACE)
+    public Result sync() { return null; }
+}
+"""
+        endpoints = extract_endpoints(java, "X.java")
+        self.assertEqual(endpoints[0].http_method, "REQUESTMAPPING")
+
+    def test_class_level_mapping_skipped(self):
+        """类级 @RequestMapping(value=...) 不应被当作方法端点。"""
+        java = """
+@RestController
+@RequestMapping(value = "/api")
+public class C {
+    @PostMapping("/sync")
+    public Result sync() { return null; }
+}
+"""
+        endpoints = extract_endpoints(java, "X.java")
+        self.assertEqual(len(endpoints), 1)
+        self.assertTrue(endpoints[0].path.endswith("/sync"))
+
+    def test_request_mapping_without_method(self):
+        """方法级 @RequestMapping 无 method：http_method 保持 REQUESTMAPPING。"""
+        java = """
+@RestController
+@RequestMapping("/api")
+public class C {
+    @RequestMapping(value = "/sync")
+    public Result sync() { return null; }
+}
+"""
+        endpoints = extract_endpoints(java, "X.java")
+        self.assertEqual(endpoints[0].http_method, "REQUESTMAPPING")
+
+
+# ── 动词后置边界 ──────────────────────────────────────────────────────────
+
+class TestCheckActionVerbEdge(unittest.TestCase):
+    """check_action_verb 的边界分支。"""
+
+    def test_single_segment_path(self):
+        """单段路径（len(segments)<2）：不检查动作收敛。"""
+        issues = []
+        check_action_verb(_ep(path="/sync"), issues)
+        self.assertEqual(len(issues), 0)
+
+    def test_noun_verb_order_passes(self):
+        """末段名词-动词序（如 WaybillSync）：动词后置，合规放行。"""
+        issues = []
+        check_action_verb(_ep(path="/logistics/v1/waybill/WaybillSync"), issues)
+        self.assertEqual(len(issues), 0)
+
+    def test_noun_verb_with_suffix_passes(self):
+        """动词位于非首位且带后缀（如 WaybillSyncList）：动词后置，合规放行。"""
+        issues = []
+        check_action_verb(_ep(path="/logistics/v1/waybill/WaybillSyncList"), issues)
+        self.assertEqual(len(issues), 0)
+
+
+# ── 异常分支 ──────────────────────────────────────────────────────────────
+
+class TestExceptionBranches(unittest.TestCase):
+    """文件读取异常分支：捕获 UnicodeDecodeError / OSError。"""
+
+    def test_is_controller_os_error(self):
+        with patch("builtins.open", side_effect=OSError("boom")):
+            self.assertFalse(is_controller("X.java"))
+
+    def test_is_controller_unicode_error(self):
+        err = UnicodeDecodeError("utf-8", b"", 0, 1, "reason")
+        with patch("builtins.open", side_effect=err):
+            self.assertFalse(is_controller("X.java"))
+
+    def test_is_contract_file_os_error(self):
+        with patch("builtins.open", side_effect=OSError("boom")):
+            self.assertFalse(is_contract_file("X.java"))
+
+    def test_is_contract_file_unicode_error(self):
+        err = UnicodeDecodeError("utf-8", b"", 0, 1, "reason")
+        with patch("builtins.open", side_effect=err):
+            self.assertFalse(is_contract_file("X.java"))
+
+    def test_check_file_read_error(self):
+        with patch("builtins.open", side_effect=OSError("boom")):
+            issues = api_check.check_file("X.java")
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].rule, "文件读取错误")
+
+    def test_check_contract_file_read_error(self):
+        with patch("builtins.open", side_effect=OSError("boom")):
+            issues = api_check.check_contract_file("X.java")
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].rule, "文件读取错误")
+
+
+# ── 文件发现边界 ──────────────────────────────────────────────────────────
+
+class TestFileDiscoveryEdge(unittest.TestCase):
+    """文件发现的单文件、跳过目录、非 java 分支。"""
+
+    def _tmpdir(self):
+        import tempfile
+        return tempfile.mkdtemp()
+
+    def _write(self, path, content):
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+    def test_find_controller_files_single_file(self):
+        d = self._tmpdir()
+        p = os.path.join(d, "C.java")
+        self._write(p, '@RestController\npublic class C {\n'
+                       '  @PostMapping("/sync")\n'
+                       '  public String s() { return ""; }\n}')
+        self.assertEqual(api_check.find_controller_files(p), [p])
+
+    def test_find_controller_files_single_non_controller(self):
+        d = self._tmpdir()
+        p = os.path.join(d, "Service.java")
+        self._write(p, '@Service\npublic class Service {}')
+        self.assertEqual(api_check.find_controller_files(p), [])
+
+    def test_find_controller_files_non_java_file(self):
+        d = self._tmpdir()
+        p = os.path.join(d, "readme.txt")
+        self._write(p, '@RestController')
+        self.assertEqual(api_check.find_controller_files(p), [])
+
+    def test_find_controller_files_skips_build_dirs(self):
+        d = self._tmpdir()
+        target = os.path.join(d, "target")
+        os.makedirs(target)
+        self._write(os.path.join(target, "C.java"), '@RestController\npublic class C {}')
+        self.assertEqual(api_check.find_controller_files(d), [])
+
+    def test_find_contract_files_skips_test_dirs(self):
+        d = self._tmpdir()
+        test_dir = os.path.join(d, "test")
+        os.makedirs(test_dir)
+        self._write(os.path.join(test_dir, "X.java"), 'public class XDTO {}')
+        self.assertEqual(api_check.find_contract_files(d), [])
+
+    def test_find_contract_files_non_java_file(self):
+        d = self._tmpdir()
+        p = os.path.join(d, "x.txt")
+        self._write(p, 'public class XDTO {}')
+        self.assertEqual(api_check.find_contract_files(p), [])
+
+    def test_find_controller_files_nonexistent_path(self):
+        """路径既非文件也非目录（不存在）：返回空。"""
+        self.assertEqual(api_check.find_controller_files("/no/such/path/abc"), [])
+
+    def test_find_controller_files_mixed_dir(self):
+        """目录含 controller + 非 controller + 非 java 文件：仅命中 controller。"""
+        d = self._tmpdir()
+        self._write(os.path.join(d, "Ctrl.java"), '@RestController\npublic class Ctrl {}')
+        self._write(os.path.join(d, "Svc.java"), '@Service\npublic class Svc {}')
+        self._write(os.path.join(d, "readme.md"), '# readme')
+        found = api_check.find_controller_files(d)
+        self.assertEqual(len(found), 1)
+        self.assertTrue(found[0].endswith("Ctrl.java"))
+
+    def test_find_contract_files_nonexistent_path(self):
+        self.assertEqual(api_check.find_contract_files("/no/such/path/abc"), [])
+
+    def test_find_contract_files_mixed_dir(self):
+        """目录含契约 + 非契约 + 非 java 文件：仅命中契约对象。"""
+        d = self._tmpdir()
+        self._write(os.path.join(d, "ADTO.java"), 'public class ADTO {}')
+        self._write(os.path.join(d, "Svc.java"), 'public class Svc {}')
+        self._write(os.path.join(d, "readme.md"), '# readme')
+        found = api_check.find_contract_files(d)
+        self.assertEqual(len(found), 1)
+        self.assertTrue(found[0].endswith("ADTO.java"))
+
+
+# ── check_file 边界 ───────────────────────────────────────────────────────
+
+class TestCheckFileEdge(unittest.TestCase):
+    """check_file 的无端点早退分支。"""
+
+    def test_check_file_no_endpoints(self):
+        """Controller 文件但无方法映射注解：无 issue。"""
+        import tempfile
+        d = tempfile.mkdtemp()
+        p = os.path.join(d, "C.java")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write('@RestController\npublic class C {\n'
+                    '  public String s() { return ""; }\n}')
+        self.assertEqual(api_check.check_file(p), [])
+
+
+# ── 报告格式边界 ──────────────────────────────────────────────────────────
+
+class TestFormatReportEdge(unittest.TestCase):
+    """报告格式边界。"""
+
+    def test_text_issue_without_suggestion(self):
+        """Issue 无建议（suggestion 默认空）时省略建议行。"""
+        issues = [
+            Issue(file="X.java", endpoint="/x", http_method="POST",
+                  severity=Severity.MANDATORY, rule="R",
+                  location="L", description="D")
+        ]
+        result = format_report_text("X.java", issues)
+        self.assertIn("R", result)
+        self.assertNotIn("建议:", result)
+
+
+# ── 模块入口 ──────────────────────────────────────────────────────────────
+
+class TestModuleEntry(unittest.TestCase):
+    """覆盖 `if __name__ == "__main__"` 模块入口（subprocess）。"""
+
+    def test_script_entry_returns_two_for_empty_dir(self):
+        import subprocess
+        import tempfile
+        d = tempfile.mkdtemp()
+        script = os.path.join(os.path.dirname(__file__), "api_check.py")
+        r = subprocess.run([sys.executable, script, d],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2)
+
+
 # ── 运行 ──────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
