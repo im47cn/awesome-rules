@@ -52,6 +52,8 @@ if [ "$TEAM" -eq 1 ] && [ -z "$AUTHOR" ]; then
 fi
 
 # 将扫描目录下所有 git 仓库收集到 REPOS
+# 注：find 对无读权限的子目录会返回非0，但管道位于进程替换 < <(...) 中，
+# 其退出码不传播到主 shell（即便开启 pipefail），故不会导致脚本中断
 collect_scan() {
   local d
   while IFS= read -r d; do

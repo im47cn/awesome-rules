@@ -5,14 +5,13 @@ scenario: 提交校验/生成 changelog/发版
 
 # Git 自动化工具
 
-对齐 [`steering/git-conventions.md`](../../steering/git-conventions.md) 的三个工程化工具，基于 [Conventional Commits](https://www.conventionalcommits.org/)：
+对齐 [`steering/git-conventions.md`](../../steering/git-conventions.md) 的三类工程化能力，基于 [Conventional Commits](https://www.conventionalcommits.org/)：
 
 | 工具 | 作用 | 技术方案 |
 |---|---|---|
 | commit 模板 | 提交前预填格式提示（IDE / 编辑器） | `.gitmessage` + `commit.template` |
 | commitlint | 提交时校验 message 格式 | `@commitlint/cli` + `config-conventional` |
-| 自动 changelog | 按 type 聚合生成 CHANGELOG | `commit-and-tag-version` |
-| 自动版本号 | 按 `feat` / `!` 语义化 bump | `commit-and-tag-version` |
+| commit-and-tag-version | 自动生成 changelog + 按语义 bump 版本号 | `commit-and-tag-version` |
 
 > **选型说明**：`standard-version` 自 2022 年起 archived，本工具采用其活跃 fork [`commit-and-tag-version`](https://github.com/absolute-version/commit-and-tag-version)，配置完全兼容。
 
@@ -31,6 +30,21 @@ bash /path/to/awesome-rules/tools/git/install.sh .
 3. **全局**安装工具（`@commitlint/cli`、`@commitlint/config-conventional`、`commit-and-tag-version`，检测已装则跳过）
 4. 写入 `.git/hooks/commit-msg`（调全局 commitlint，**无需 husky**）
 5. 在 `package.json` 注入 `release` / `release:dry` 脚本（调全局 commit-and-tag-version）
+
+### 更新已装项目
+
+awesome-rules 的配置是「拷贝」到各业务项目的，后续规范演进不会自动触达已装项目。先拉取本仓库最新版，再对每个已装项目执行刷新：
+
+```bash
+cd /path/to/awesome-rules && git pull          # 先更新本仓库
+bash /path/to/awesome-rules/tools/git/install.sh --update /path/to/业务项目
+```
+
+`--update` 与首次安装的区别：
+
+- 配置文件（`commitlint.config.js` / `.versionrc.js`）与 commit 模板：**无条件覆盖**（首次安装遇已存在会询问）
+- `commit-msg` hook：仅覆盖「本工具生成的」；非本工具生成的（husky/lefthook）**一律跳过**，避免破坏既有方案
+- 全局工具、`package.json` scripts：与首次相同（检测补装 / 幂等注入）
 
 ## 使用
 

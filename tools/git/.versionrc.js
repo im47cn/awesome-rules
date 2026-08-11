@@ -14,7 +14,9 @@ module.exports = {
   types: [
     { type: 'feat', section: '✨ 新功能' },
     { type: 'fix', section: '🐛 Bug 修复' },
+    { type: 'perf', section: '⚡ 性能' },
     { type: 'refactor', section: '♻️ 重构' },
+    { type: 'revert', section: '⏪ 回退', hidden: true },
     { type: 'docs', section: '📝 文档' },
     { type: 'test', section: '✅ 测试' },
     { type: 'style', section: '💄 格式', hidden: true },

@@ -19,14 +19,16 @@ inclusion: always
 ### type（必选）
 
 | 类型 | 说明 |
-| --- | --- |
+|---|---|
 | feat | 新功能 |
 | fix | Bug 修复 |
 | docs | 文档变更 |
 | style | 代码格式（无逻辑变更） |
 | refactor | 重构（无功能变更） |
+| perf | 性能优化 |
 | test | 测试相关 |
 | chore | 构建、依赖、配置 |
+| revert | 回退之前的提交 |
 
 ### scope（可选）
 
@@ -46,7 +48,7 @@ inclusion: always
 footer 用于关联工单与记录元数据，每行一条：
 
 | 关键字 | 用途 | 示例 |
-| --- | --- | --- |
+|---|---|---|
 | `Closes #N` | 关闭 issue | `Closes #456` |
 | `Fixes #N` | 修复 issue（同 Closes） | `Fixes #789` |
 | `Refs #N` | 关联但不关闭 | `Refs #101` |
@@ -91,7 +93,7 @@ Refs #321
 ## 分支命名
 
 | 前缀 | 用途 | 示例 |
-| --- | --- | --- |
+|---|---|---|
 | `feature/` | 新功能 | `feature/order-export` |
 | `fix/` | Bug 修复 | `fix/login-timeout` |
 | `hotfix/` | 紧急生产修复 | `hotfix/sql-injection` |
