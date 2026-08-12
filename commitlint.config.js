@@ -19,7 +19,7 @@ module.exports = {
     //    新增技能时同步追加（技能名 = skills/ 下的目录名）
     'scope-enum': [1, 'always', [
       'api', 'db', 'ui', 'ci',          // 业务域
-      'api-guard', 'arch-guard', 'ddl-guard', 'doc-gen', 'work-report',  // 技能
+      'alibabacloud-devops', 'api-guard', 'arch-guard', 'ddl-guard', 'doc-gen', 'work-report',  // 技能
       'tools', 'docs', 'deps', 'release',  // 工程
     ]],
 
