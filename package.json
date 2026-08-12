@@ -1,0 +1,9 @@
+{
+  "name": "awesome-rules",
+  "version": "0.1.1",
+  "private": true,
+  "scripts": {
+    "release": "commit-and-tag-version",
+    "release:dry": "commit-and-tag-version --dry-run"
+  }
+}

@@ -32,7 +32,15 @@ inclusion: always
 
 ### scope（可选）
 
-按模块填写，如 `api`、`db`、`ui`、`ci`、`<xx业务域>`。
+按模块/技能填写，推荐值（须与 `commitlint.config.js` 的 `scope-enum` 保持一致）：
+
+| 类别 | scope |
+|---|---|
+| 业务域 | `api`、`db`、`ui`、`ci` |
+| 技能（`skills/`） | `api-guard`、`arch-guard`、`ddl-guard`、`doc-gen`、`work-report` |
+| 工程 | `tools`、`docs`、`deps`、`release` |
+
+新增技能时同步追加到两处。
 
 ### 破坏性变更（强制标记）
 
