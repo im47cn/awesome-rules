@@ -16,11 +16,15 @@ awesome-rules/
 │   ├── ddl-guard/                     # DDL 设计与审查
 │   ├── api-guard/                     # API 设计与审查
 │   ├── arch-guard/                    # DDD 架构分层审查
-│   └── doc-gen/                       # DDD 技术文档自动生成
+│   ├── doc-gen/                       # DDD 技术文档自动生成
+│   ├── impact-guard/                  # 变更影响分析（blast radius）
+│   ├── work-report/                   # 跨仓库工作日报/周报
+│   └── alibabacloud-devops/           # 云效 DevOps 工具集
 ├── scripts/                           # 工具脚本
 │   └── badcase_runner.py              # Badcase 回归测试
 ├── docs/                              # 文档
-│   └── ai-coding-tools-setup.md       # 插件安装指南
+│   ├── ai-coding-tools-setup.md       # 插件安装指南
+│   └── design/                        # 技能设计文档（doc-gen 可信化 / impact-guard）
 ├── CONTRIBUTING.md                    # 贡献指南
 ├── .claude-plugin/                    # Claude Code 插件清单
 ├── .codex-plugin/                     # Codex CLI 插件清单
@@ -59,8 +63,18 @@ Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分�
 | [api-guard](skills/api-guard/README.md) | 业务接口规范审查 |
 | [arch-guard](skills/arch-guard/README.md) | DDD 架构分层规范审查 |
 | [doc-gen](skills/doc-gen/README.md) | DDD 技术文档自动生成（交互式静态站点） |
+| [impact-guard](skills/impact-guard/README.md) | 变更影响分析（blast radius），按直接/间接 + GTSP 5 通道分级 |
+| [work-report](skills/work-report/README.md) | 跨仓库工作日报/周报自动生成（3 种受众模板） |
+| [alibabacloud-devops](skills/alibabacloud-devops/SKILL.md) | 阿里云云效 DevOps 工具集（Codeup/流水线/工作项，mcporter 代理） |
 
 各技能的详细文档、用法和检查规则见各自目录下的 README。
+
+## 设计文档（docs/design/）
+
+| 文档 | 说明 |
+| --- | --- |
+| [doc-gen 可信化改造](docs/design/doc-gen-contract-design.md) | Manifest Schema 契约 + 诚实退出码/receipt + revision-pinned evidence（已落地） |
+| [impact-guard 技术设计](docs/design/impact-guard-design.md) | 变更影响分析（blast radius）完整论证与 grill 决策（评审稿） |
 
 ## 安装
 

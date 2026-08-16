@@ -139,10 +139,73 @@ Cypher 查询 (Tier 2)    → 可选深度分析 (Phase 3+)
   └── 方法级依赖图        → 聚合边界自动识别
 ```
 
+## Manifest Schema 契约
+
+分片结构与 `schemas/*.json` 锁定（JSON Schema 子集，`schema_version: 1` const 锁定，破坏性变更才 bump 2）：
+
+- 生成端：`ManifestWriter.write()` 写入后自检，未通过契约 = 生成器 bug，直接失败
+- 消费端：`--from-manifest` 构建前强制校验；旧版 manifest（无 `schema_version`）warn 跳过，不硬失败
+- drift 防线：`tests/test_schema_validator.py` 的 COLA golden test——生成器改字段而 schema 未同步即测试红
+- 校验器 `scripts/validator.py` 为内置子集实现，零第三方依赖
+
+## Revision-pinned Evidence
+
+`meta.json` 携带生成时刻的证据锚点（借鉴 archify 的钉版本语义，代码即真相故无需二次校验）：
+
+```json
+"evidence": { "repo_url": "...", "revision": "<40位SHA>",
+              "generatedAt": "...", "dirty": false }
+```
+
+- 组件页/聚合页的类名渲染为**钉定版本的源码链接**（指向生成时刻 commit，代码演进不漂移）；无 `revision`/`repo_url` 时降级为纯 tooltip，不渲染链接
+- `--from-manifest` 重建时会计算 `staleCommits`（文档落后当前 HEAD 的提交数）并警告
+- 无 git / 非 git 目录降级为 `revision: null`，不阻断
+
+**`project_repo` 配置格式**（`.doc-gen.json`）：
+
+```jsonc
+// 推荐：完整链接模板，{revision}/{path} 占位符 —— 各平台 URL 形态全覆盖
+"project_repo": "https://codeup.aliyun.com/{orgId}/{repo}/blob/{revision}/{path}"
+"project_repo": "https://gitlab.com/group/repo/-/blob/{revision}"          // 无 {path} 自动追加
+
+// 兼容：裸仓库 URL —— 默认 GitHub/Gitea 风格 {repo}/blob/{revision}/{path}
+"project_repo": "https://github.com/user/repo"
+```
+
+## 退出码与验收契约（强制）
+
+- **退出码 0 = 成功；1 = 阶段失败（manifest 校验失败 / npm 缺失或 install/build 失败）；2 = 用法错误。非零退出码绝不可描述为成功**
+- 每次运行产出 `doc-manifest/receipt.json`（`ok` 当且仅当无 `fail`；`warn` 是事实降级不阻断）。交付时必须引用 receipt 检查项，不得声称未执行的检查
+- 风险扫描的 `critical` 数量必须如实转述给用户，不得省略
+- npm 构建失败从静默跳过改为 `exit 1`（breaking）：依赖旧行为的脚本需显式降级
+
+## 架构演进 diff（delta）
+
+```bash
+python3 scripts/doc_gen.py diff <base快照目录> <head快照目录> \
+  --output delta.json --markdown delta.md
+```
+
+- 对比两份 `doc-manifest/` 快照，六维度 receipt：组件（含 moved 分级）/聚合/数据表/状态机/跨域依赖/API 端点
+- 锚定 `base.revision → head.revision`（来自 evidence）；退出码 0 = 对比完成（不代表无变化）；schema_version 不相等 → `exit 2` 拒绝
+- **站点渲染**：`--output <站点>/doc-manifest/delta.json` 后 `--build` 自动生成「🔀 架构演进」页面（统计卡 + 六维度表 + 变更明细），sidebar 带变化总数徽标
+- 信噪比契约：字段分组（semantic/lifecycle/position/behavior），`description` 等 Javadoc 噪声归 `presentation-changed` 不计入 summary；包重命名经 className 恒等启发式判 `moved` 并标注 `inferred: true`（多对一时保守回退 added/removed）
+- 典型场景："这次重构只动了 adapter 层、domain 层零变化"的机器验证（治理三角：arch-guard 规则 → impact-guard 预测 → delta 实证）
+
+**CI 归档约定**（delta 的流程前置，样例见 [`ci/archive-manifests.example.yml`](ci/archive-manifests.example.yml)）：
+- master push 时 `scan --manifest-only --output archive/<SHA>` 归档到独立分支 `doc-gen-archive`（不污染主分支）
+- PR 门禁：merge-base 归档快照 vs PR 当前快照 → `delta.md` 贴 PR；Codeup Flow 按相同步骤翻译
+
+## 相关文件
+
 ## 相关文件
 
 - 技能定义：[`SKILL.md`](SKILL.md)
 - 技术设计：[`DESIGN.md`](DESIGN.md)
+- 可信化改造设计（schema 契约 + 退出码 + evidence，已落地）：[`../../docs/design/doc-gen-contract-design.md`](../../docs/design/doc-gen-contract-design.md)
 - CLI 工具：[`scripts/doc_gen.py`](scripts/doc_gen.py)
+- Schema 契约：[`schemas/`](schemas/)（7 个 JSON Schema）
+- 契约校验器：[`scripts/validator.py`](scripts/validator.py)（零依赖内置子集实现）
+- 演进对比引擎：[`scripts/delta.py`](scripts/delta.py) + CI 归档样例 [`ci/archive-manifests.example.yml`](ci/archive-manifests.example.yml)
 - Astro 模板：[`template/`](template/)
 - DDD/架构规范：[`../../steering/gtsp/01-project-structure.md`](../../steering/gtsp/01-project-structure.md)（架构与分层）

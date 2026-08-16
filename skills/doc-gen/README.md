@@ -9,6 +9,9 @@
 - **交互式架构图**：Mermaid 渲染，节点可点击导航到详情页
 - **AI 架构助手**：页面内嵌 RAG 检索 + 自然语言问答
 - **纯静态产物**：构建输出为静态文件，GitHub Pages / Vercel 零成本部署
+- **Schema 契约**：manifest 分片由 JSON Schema 锁定（`schema_version: 1`），生成端自检 + 消费端门禁，零依赖校验器
+- **诚实退出码**：非零退出绝不代表成功；每次运行产出 `receipt.json` 验收清单；npm 构建失败不再静默跳过
+- **Revision-pinned evidence**：manifest 钉定生成时刻的 git SHA，`--from-manifest` 重建时警告文档过期（staleCommits）
 
 ## 快速开始
 
@@ -27,8 +30,9 @@ npm run dev      # http://localhost:4321
 
 ## 文档
 
-- [技能定义](SKILL.md) — 完整使用文档
+- [技能定义](SKILL.md) — 完整使用文档（含退出码与验收契约）
 - [技术设计](DESIGN.md) — 架构设计与数据流
+- [Schema 契约](schemas/) — manifest 分片 JSON Schema（v1）
 - [Astro 模板](template/) — 静态站点模板源码
 
 ## 技术栈
