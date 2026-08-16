@@ -137,6 +137,13 @@ class ManifestWriter:
                        ensure_ascii=False, indent=2),
             encoding="utf-8")
 
+        # 3.2 business-context.json（可选扩展分片：业务维度，None 则不写出）
+        if manifest.businessContext is not None:
+            (self.manifest_dir / "business-context.json").write_text(
+                json.dumps(self._serialize_business_context(manifest.businessContext),
+                           ensure_ascii=False, indent=2),
+                encoding="utf-8")
+
         # 4. cross-domain.json
         cross = []
         for cd in manifest.crossDomainDependencies:
@@ -260,6 +267,45 @@ class ManifestWriter:
             "componentCount": total_comps,
             "layers": list(domain_data["layers"].keys()),
             "file": f"domains/{domain.name}.json",
+        }
+
+    @staticmethod
+    def _serialize_business_context(ctx) -> dict[str, Any]:
+        """业务上下文分片序列化（契约：business-context.schema.json）"""
+        def _item(i) -> dict[str, Any]:
+            d = {"name": i.name, "source": i.source}
+            if i.description:
+                d["description"] = i.description
+            if getattr(i, "domain", ""):
+                d["domain"] = i.domain
+            if i.anchors:
+                d["anchors"] = i.anchors
+            return d
+
+        def _step(s) -> dict[str, Any]:
+            d = {"name": s.name}
+            if s.description:
+                d["description"] = s.description
+            if s.anchors:
+                d["anchors"] = s.anchors
+            return d
+
+        def _flow(f) -> dict[str, Any]:
+            d = {"name": f.name, "source": f.source}
+            if f.description:
+                d["description"] = f.description
+            if f.anchors:
+                d["anchors"] = f.anchors
+            if f.steps:
+                d["steps"] = [_step(s) for s in f.steps]
+            return d
+
+        return {
+            "schema_version": 1,
+            "customers": [_item(i) for i in ctx.customers],
+            "roles": [_item(i) for i in ctx.roles],
+            "scenarios": [_item(i) for i in ctx.scenarios],
+            "flows": [_flow(f) for f in ctx.flows],
         }
 
     @staticmethod

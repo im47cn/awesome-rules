@@ -63,7 +63,8 @@ python3 scripts/doc_gen.py --from-manifest manifest.json --build --output docs-s
 | 架构风险扫描          | 复用 arch-guard 规则检测 DDD 违规                         | ✅   |
 | 状态转换图            | 扫描状态枚举/Spring/Cola 状态机 → stateDiagram + 质量审查 | ✅   |
 | ADR 扫描              | 架构决策记录提取与展示                                    | ✅   |
-| 多项目聚合            | 多个 Maven 项目合并到一个站点                             | ✅   |
+| 业务全景              | 客户/角色/场景/流程：人工 `business-context.md` + 代码弱信号（`@PreAuthorize`/状态机） | ✅ |
+| 多项目聚合            | 已迁移至**架构鹰眼**（`arch-hawkeye/`），doc-gen 专注单项目 | ➡️   |
 | CI 集成               | GitHub Actions 自动构建部署                               | 📋   |
 
 > ✅ = 已实现 🚧 = 模板就绪，CLI 集成中 📋 = 计划中
@@ -81,6 +82,7 @@ python3 scripts/doc_gen.py --from-manifest manifest.json --build --output docs-s
 /domains/{domain}/infrastructure/ 基础设施层 — 仓储实现 + 网关
 /database/                     数据库 — ER 图 + 逐表结构说明
 /state-machines/               状态机 — stateDiagram 转换图 + 死状态/不可达审查
+/business/                     业务全景 — 客户/角色/场景/流程（可选，有 business-context 时生成）
 /api/                          OpenAPI — 交互式 API 文档（Scalar）
 ```
 
@@ -124,6 +126,21 @@ python3 scripts/doc_gen.py --from-manifest manifest.json --build --output docs-s
 | `project_group_id`    | Maven groupId（自动推断）    |
 | `project_repo`        | GitHub 链接（用于 EditLink） |
 | `domain_names`        | 域名英文 → 中文映射          |
+| `business_context_file` | 业务上下文 md 路径（默认查根目录/`docs/` 下 `business-context.md`）|
+
+## 与架构鹰眼的关系（职责边界）
+
+doc-gen 专注**单项目**入门文档（初衷 1：新人 5 分钟看懂一个项目）；多项目聚合、跨项目
+真实链路、治理闭环等全局能力归**架构鹰眼**（初衷 2），以 `doc-manifest/` 为唯一交接物
+（契约见 [`../../arch-hawkeye/AH-MANIFEST.md`](../../arch-hawkeye/AH-MANIFEST.md)）：
+
+```
+doc-gen（生产者）                       架构鹰眼（消费者）
+scan → doc-manifest/ ──── AH-MANIFEST 契约 ────▶ hawkeye.py aggregate
+（单项目文档站渲染复用 doc-gen 的 Astro 模板，单一真相源）
+```
+
+原 `doc_gen.py aggregate` 子命令已迁移至 `arch-hawkeye/scripts/hawkeye.py`。
 
 ## 与 arch-guard 的关系
 

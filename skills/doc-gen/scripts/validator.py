@@ -30,6 +30,11 @@ SHARD_SCHEMAS = {
     # diagrams.json 为 Mermaid 自由文本，本期只校验 JSON 可解析，不锁结构
 }
 
+# 可选扩展分片：缺失合法（跳过），存在则按契约强校验（AH-MANIFEST §2）
+OPTIONAL_SHARD_SCHEMAS = {
+    "business-context.json": "business-context.schema.json",
+}
+
 _schema_cache: dict = {}
 
 
@@ -162,6 +167,20 @@ def validate_manifest_dir(manifest_dir: Path) -> list[str]:
         schema = _load_schema(schema_name)
         shard_errors = validate_shard(schema, data, schema_name)
         errors.extend(f"{shard_name}{msg}" for msg in shard_errors)
+
+    # 可选扩展分片：存在才校验，缺失不报错
+    for shard_name, schema_name in OPTIONAL_SHARD_SCHEMAS.items():
+        shard_path = manifest_dir / shard_name
+        if not shard_path.exists():
+            continue
+        try:
+            data = json.loads(shard_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            errors.append(f"{shard_name}: JSON 解析失败: {e}")
+            continue
+        schema = _load_schema(schema_name)
+        opt_errors = validate_shard(schema, data, schema_name)
+        errors.extend(f"{shard_name}{msg}" for msg in opt_errors)
 
     # 域分片：index.json 引用的每个 domains/*.json 用 domain.schema.json
     domains_dir = manifest_dir / "domains"

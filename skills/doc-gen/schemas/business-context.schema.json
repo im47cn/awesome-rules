@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://awesome-rules/skills/doc-gen/schemas/business-context.schema.json",
+  "title": "doc-manifest/business-context.json 契约（可选扩展分片）",
+  "description": "业务维度扩展块：客户/角色/业务场景/业务流程。人工 business-context.md 叙事为主 + 代码弱信号锚定为辅，source 标注每条来源。行为/动作不独立建模，由 anchors 关联 component.methods/endpoints 承载。分片整体可选——缺失时校验器跳过，存在时按本契约校验。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version"],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "customers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "source"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "description": { "type": "string" },
+          "source": { "$ref": "#/$defs/sourceType" },
+          "anchors": { "$ref": "#/$defs/anchorList" }
+        }
+      }
+    },
+    "roles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "source"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "description": { "type": "string" },
+          "source": { "$ref": "#/$defs/sourceType" },
+          "anchors": { "$ref": "#/$defs/anchorList" }
+        }
+      }
+    },
+    "scenarios": {
+      "type": "array",
+      "description": "业务场景：一类用户在特定情境下使用系统完成的事情",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "source"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "description": { "type": "string" },
+          "domain": { "type": "string", "description": "归属域名，须能对应 index.json domains[].name" },
+          "source": { "$ref": "#/$defs/sourceType" },
+          "anchors": { "$ref": "#/$defs/anchorList" }
+        }
+      }
+    },
+    "flows": {
+      "type": "array",
+      "description": "业务流程：跨场景/跨域的有序步骤序列",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "source"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "description": { "type": "string" },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name"],
+              "properties": {
+                "name": { "type": "string", "minLength": 1 },
+                "description": { "type": "string" },
+                "anchors": { "$ref": "#/$defs/anchorList" }
+              }
+            }
+          },
+          "source": { "$ref": "#/$defs/sourceType" },
+          "anchors": { "$ref": "#/$defs/anchorList" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sourceType": {
+      "type": "string",
+      "enum": ["manual", "code", "hybrid"],
+      "description": "manual=人工 business-context.md；code=扫描器弱信号（@PreAuthorize/状态机/executor）；hybrid=人工提供+代码锚定"
+    },
+    "anchorList": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "锚定表达式：qualifiedName / 'METHOD /path' 端点 / 表名。关联 manifest 其他分片实体，供鹰眼图谱与文档站交叉引用"
+    }
+  }
+}

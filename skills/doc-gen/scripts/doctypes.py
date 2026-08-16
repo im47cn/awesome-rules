@@ -305,6 +305,46 @@ class CrossDomainDep:
     evidence: str = ""
 
 
+# ── 业务上下文（business-context.json 可选扩展分片，AH-MANIFEST §5）─────────
+
+
+@dataclass
+class BusinessItemDoc:
+    """客户/角色/业务场景条目（人工 md 叙事为主 + 代码弱信号锚定为辅）"""
+    name: str
+    description: str = ""
+    source: str = "manual"           # manual / code / hybrid
+    domain: str = ""                 # 场景归属域（仅 scenarios）
+    anchors: list = field(default_factory=list)  # 锚定 qn / METHOD /path / 表名
+
+
+@dataclass
+class BusinessFlowStepDoc:
+    """流程步骤：步骤名 → 锚点表达式（锚定 qualifiedName / METHOD /path / 表名）"""
+    name: str
+    description: str = ""
+    anchors: list = field(default_factory=list)
+
+
+@dataclass
+class BusinessFlowDoc:
+    """业务流程：人工 md（### 流程名 + 有序步骤）或状态机弱信号"""
+    name: str
+    description: str = ""
+    steps: list = field(default_factory=list)   # list[BusinessFlowStepDoc]
+    source: str = "manual"
+    anchors: list = field(default_factory=list)
+
+
+@dataclass
+class BusinessContextDoc:
+    """业务维度扩展块（business-context.json 可选分片，全空时不产出）"""
+    customers: list = field(default_factory=list)  # list[BusinessItemDoc]
+    roles: list = field(default_factory=list)
+    scenarios: list = field(default_factory=list)
+    flows: list = field(default_factory=list)      # list[BusinessFlowDoc]
+
+
 @dataclass
 class DocManifest:
     meta: dict = field(default_factory=dict)
@@ -312,5 +352,6 @@ class DocManifest:
     diagrams: DiagramSet = field(default_factory=DiagramSet)
     openapiSpecs: dict = field(default_factory=dict)
     database: dict = field(default_factory=lambda: {"tables": []})
+    businessContext: BusinessContextDoc = None  # 可选扩展分片；None 则不写出
     crossDomainDependencies: list = field(default_factory=list)
     stateMachines: list = field(default_factory=list)    # list[StateMachineDoc]
