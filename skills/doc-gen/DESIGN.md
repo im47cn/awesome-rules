@@ -254,8 +254,8 @@ python3 scripts/doc_gen.py scan /path/to/java-project --init
 # 使用已有 manifest 直接构建站点
 python3 scripts/doc_gen.py scan --from-manifest doc-manifest/ --build
 
-# 多项目聚合到架构镄眼站点
-python3 scripts/doc_gen.py aggregate projects.json --output site/ --build
+# 多项目聚合已迁移至架构鹰眼：
+python3 arch-hawkeye/scripts/hawkeye.py aggregate projects.json --output site/ --build
 ```
 
 ### 4.2 模块划分
@@ -267,7 +267,8 @@ doc_gen.py                  入口 + CLI 参数解析
   │   ├── java.py            Java 文件解析（注解、类、方法提取）
   │   ├── ddl.py             DDL SQL 解析
   │   ├── infra_db.py        Infrastructure 层代码推断表结构（JPA @Table/@Column + DO）
-  │   └── po_scanner.py      MyBatis-Plus PO 类推断表结构（@TableName/@TableField）
+  │   ├── po_scanner.py      MyBatis-Plus PO 类推断表结构（@TableName/@TableField）
+  │   └── business_context.py 业务上下文（md 解析 + @PreAuthorize/状态机弱信号）
   ├── generator/
   │   ├── manifest.py        DocManifest JSON 生成 + Mermaid 图表生成
   │   ├── layers.py          DDD 分层识别
@@ -276,8 +277,9 @@ doc_gen.py                  入口 + CLI 参数解析
   │   └── adr.py             ADR（架构决策记录）扫描
   └── builder/
       ├── writer.py          Manifest 分片写入（支持域级并友）
-      ├── astro.py           Astro 构建触发
-      └── aggregate.py       多项目聚合
+      └── astro.py           Astro 构建触发
+
+# 多项目聚合（原 builder/aggregate.py）已迁移至 arch-hawkeye/scripts/aggregate.py
 ```
 
 ## 5. Architecture AI Agent 设计

@@ -1,4 +1,4 @@
-"""builder.aggregate 测试。
+"""架构鹰眼聚合模块测试（自 skills/doc-gen/scripts/tests/ 迁移）。
 
 覆盖：find_project_for_domain、generate_er_diagram、generate_panorama_diagram、
 aggregate_projects 端到端（多项目 manifest 合并 / api-spec 合并 / 域文件复制）、
@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from builder.aggregate import (
+from aggregate import (
     aggregate_projects,
     generate_er_diagram,
     generate_panorama_diagram,
@@ -151,7 +151,7 @@ def test_aggregate_build_invokes_astro(tmp_path, monkeypatch):
         called["ok"] = True
         return True
 
-    monkeypatch.setattr("builder.aggregate.build_astro", fake_build)
+    monkeypatch.setattr("aggregate.build_astro", fake_build)
     aggregate_projects(pj, str(tmp_path / "site"), build=True, verbose=False)
     assert called.get("ok")
 

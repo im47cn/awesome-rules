@@ -20,7 +20,7 @@ module.exports = {
     'scope-enum': [1, 'always', [
       'api', 'db', 'ui', 'ci',          // 业务域
       'alibabacloud-devops', 'api-guard', 'arch-guard', 'ddl-guard', 'doc-gen', 'impact-guard', 'work-report',  // 技能
-      'tools', 'docs', 'deps', 'release',  // 工程
+      'arch-hawkeye', 'tools', 'docs', 'deps', 'release',  // 工程
     ]],
 
     // ── 主题行长度（git 经典 50/72 规则，对应规范"主题行 ≤50 字符"）──

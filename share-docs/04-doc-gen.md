@@ -75,12 +75,12 @@ cd docs-site/ && npm run dev      # http://localhost:4321
 
 打开站点即可看到：可点击的全景架构图、分层依赖图（违规边标红）、聚合类图、ER 图、Scalar API 文档、状态机图，右下角内嵌 AI 架构助手。
 
-### 案例 2：多项目聚合到公司架构全景
+### 案例 2：多项目聚合到公司架构全景（架构鹰眼）
 
-当团队有多个 DDD 项目，可聚合到一个"公司架构鹰眼"站点：
+当团队有多个 DDD 项目，由**架构鹰眼**（`arch-hawkeye/`，消费 doc-gen 产出的 manifest）聚合到公司级全景站点：
 
 ```bash
-python3 skills/doc-gen/scripts/doc_gen.py aggregate projects.json --output hawkeye-site/ --build
+python3 arch-hawkeye/scripts/hawkeye.py aggregate projects.json --output hawkeye-site/ --build
 ```
 
 `projects.json` 声明各项目 manifest 路径，聚合后生成公司级全景拓扑图 + 跨项目依赖矩阵 + 合并的 ER 图与 API 规范。

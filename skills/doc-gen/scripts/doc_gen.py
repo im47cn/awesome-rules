@@ -8,7 +8,8 @@ DDD 技术文档自动生成工具 (doc-gen) — CLI 入口
   python3 doc_gen.py scan /path/to/project --manifest-only
   python3 doc_gen.py scan --from-manifest manifest.json --build
   python3 doc_gen.py scan /path/to/project --init
-  python3 doc_gen.py aggregate projects.json --output site/
+
+多项目聚合已迁移至架构鹰眼: arch-hawkeye/scripts/hawkeye.py aggregate
 """
 
 import argparse
@@ -28,6 +29,7 @@ from scanner.ddl import DDLScanner
 from scanner.infra_db import InfrastructureDBExtractor
 from scanner.po_scanner import POScanner
 from scanner.state_machine import StateMachineScanner
+from scanner.business_context import BusinessContextScanner
 
 from generator.manifest import ManifestGenerator
 from generator.openapi import OpenAPIGenerator
@@ -37,7 +39,6 @@ from generator.article import ArticleScanner
 
 from builder.writer import ManifestWriter, collect_evidence
 from builder.astro import build_astro
-from builder.aggregate import aggregate_projects
 from validator import validate_manifest_dir
 
 
@@ -76,7 +77,7 @@ def _finish(receipt: dict, manifest_dir, summary: str) -> None:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="架构鹰眼 — DDD 技术文档自动生成工具",
+        description="doc-gen — DDD 技术文档自动生成工具（单项目）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command", help="子命令")
@@ -93,14 +94,6 @@ def main():
     scan_parser.add_argument("--verbose", "-v", action="store_true", help="详细输出")
     scan_parser.add_argument("--from-manifest", help="从已有 manifest 构建站点")
 
-    # aggregate — 多项目聚合
-    agg_parser = sub.add_parser("aggregate", help="聚合多个项目到架构鹰眼站点",
-        epilog="示例: doc_gen.py aggregate hawkeye-projects.json --output site/")
-    agg_parser.add_argument("projects_json", help="项目列表 JSON 文件路径")
-    agg_parser.add_argument("--output", "-o", default="./hawkeye-site", help="站点输出目录")
-    agg_parser.add_argument("--build", action="store_true", help="聚合后立即构建站点")
-    agg_parser.add_argument("--verbose", "-v", action="store_true", help="详细输出")
-
     # diff — 架构演进对比（delta）
     diff_parser = sub.add_parser("diff", help="对比两份 DocManifest 快照的架构演进",
         epilog="示例: doc_gen.py diff archive/a1b2c3d/doc-manifest ./doc-manifest"
@@ -111,7 +104,7 @@ def main():
     diff_parser.add_argument("--markdown", "-m", help="Markdown 摘要输出路径（可选）")
 
     # 兼容旧版无子命令调用
-    if len(sys.argv) > 1 and not sys.argv[1].startswith("-") and sys.argv[1] not in ("scan", "aggregate", "diff"):
+    if len(sys.argv) > 1 and not sys.argv[1].startswith("-") and sys.argv[1] not in ("scan", "diff"):
         sys.argv.insert(1, "scan")
 
     args = parser.parse_args()
@@ -119,10 +112,6 @@ def main():
     if args.command is None:
         parser.print_help()
         sys.exit(0)
-
-    if args.command == "aggregate":
-        aggregate_projects(args.projects_json, args.output, args.build, args.verbose)
-        return
 
     if args.command == "diff":
         _diff_manifests(args)
@@ -162,7 +151,7 @@ def _scan_project(args):
 
     config = _load_config(project_root)
 
-    print(f"🔍 架构鹰眼 扫描: {project_root}")
+    print(f"🔍 doc-gen 扫描: {project_root}")
     print()
 
     checks: dict = {}
@@ -228,12 +217,26 @@ def _scan_project(args):
     print(f"  ✓ 识别 {len(state_machines)} 个状态机")
     checks["stateMachines"] = {"status": "ok", "count": len(state_machines)}
 
+    # Phase 3.6: 业务上下文扫描（可选扩展分片：business-context.md 人工叙事
+    #            + @PreAuthorize 角色/状态机流程弱信号；全空不产出分片）
+    print("🏢 扫描业务上下文...")
+    biz_ctx = BusinessContextScanner(str(project_root), config).scan(java_files, state_machines)
+    if biz_ctx is not None:
+        biz_total = sum(len(x) for x in (biz_ctx.customers, biz_ctx.roles,
+                                         biz_ctx.scenarios, biz_ctx.flows))
+        checks["businessContext"] = {"status": "ok", "total": biz_total}
+        print(f"  ✓ 业务上下文 {biz_total} 条（客户/角色/场景/流程）")
+    else:
+        checks["businessContext"] = {"status": "skipped"}
+        print("  ℹ 无 business-context.md 且无弱信号，跳过")
+
     # Phase 4: 生成 manifest
     print()
     print("📋 生成 DocManifest（分片）...")
     gen = ManifestGenerator(str(project_root), config)
     manifest = gen.generate(java_files, maven_info, tables,
                             state_machines=state_machines, db_inferred=db_inferred)
+    manifest.businessContext = biz_ctx
 
     domains_count = len(manifest.domains)
     components_count = sum(

@@ -1,6 +1,8 @@
-"""多项目聚合模块 — 将多个 doc-manifest/ 合并到架构鹰眼站点。
+"""架构鹰眼 — 多项目联邦聚合模块，将多个 doc-manifest/ 合并到架构鹰眼站点。
 
-从 doc_gen.py 提取，逻辑保持不变。
+从 skills/doc-gen/scripts/builder/aggregate.py 迁移（doc-gen 收缩为单项目文档站，
+聚合职责归架构鹰眼，见 arch-hawkeye/requirements.md §6 职责边界）。
+站点渲染复用 doc-gen 的 Astro 模板渲染器（单一真相源，不复制）。
 """
 
 import json
@@ -10,7 +12,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from .astro import build_astro
+# 跨项目依赖：doc-gen scripts（builder.astro 站点渲染）
+DOC_GEN_SCRIPTS = (Path(__file__).resolve().parent.parent.parent
+                   / "skills" / "doc-gen" / "scripts")
+if str(DOC_GEN_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(DOC_GEN_SCRIPTS))
+
+from builder.astro import build_astro  # noqa: E402
 
 
 def aggregate_projects(projects_json: str, output_dir: str, build: bool, verbose: bool):

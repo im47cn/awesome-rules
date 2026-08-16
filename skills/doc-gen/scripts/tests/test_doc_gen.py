@@ -122,14 +122,7 @@ def test_main_no_command_exits_zero(monkeypatch, capsys):
     assert "子命令" in capsys.readouterr().out or True
 
 
-def test_main_aggregate_routes(tmp_path, monkeypatch):
-    cfg = tmp_path / "p.json"
-    cfg.write_text(json.dumps({"projects": [
-        {"id": "x", "name": "X", "manifest": str(tmp_path)}]}), encoding="utf-8")
-    monkeypatch.setattr(sys, "argv",
-                        ["doc_gen.py", "aggregate", str(cfg), "--output", str(tmp_path / "out")])
-    main()                                                  # 聚合空 manifest，不抛
-    assert (tmp_path / "out" / "doc-manifest" / "index.json").exists()
+# aggregate 子命令已迁移至架构鹰眼（arch-hawkeye/scripts/tests/test_hawkeye.py）
 
 
 def test_scan_legacy_compat(tmp_path, monkeypatch):
