@@ -3,3 +3,5 @@ dist
 .astro
 doc-manifest.json
 doc-manifest/
+openapi.json
+scalar.js
