@@ -141,6 +141,19 @@ function buildSidebar() {
     { label: "🎯 变更影响分析", link: "/impact" },
   ];
 
+  // 业务全景（business-context.json 可选扩展分片，存在才展示）
+  const bizFile = path.join(MANIFEST_DIR, "business-context.json");
+  if (fs.existsSync(bizFile)) {
+    try {
+      const bc = JSON.parse(fs.readFileSync(bizFile, "utf-8"));
+      const total = (bc.customers?.length || 0) + (bc.roles?.length || 0)
+        + (bc.scenarios?.length || 0) + (bc.flows?.length || 0);
+      if (total > 0) {
+        sidebar.push({ label: `📖 业务全景 (${total})`, link: "/business" });
+      }
+    } catch { /* ignore */ }
+  }
+
   // ① 领域模型：总览入口 link + 每个业务域作顶级 group（聚合扁平展开）。
   //    严格两级，对齐 dockit 扁平设计 —— 不再出现「领域模型 > 业务域 > 聚合」三级嵌套。
   const domains = collectSidebarDomains();

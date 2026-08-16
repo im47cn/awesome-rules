@@ -20,7 +20,7 @@ import {
   generateDomainOverview, generateLayerPage,
   generateDatabase, generateApiDocs,
   generateDomainModelPages,
-  generateRisks, generateAdrPage, generateStateMachines,
+  generateRisks, generateAdrPage, generateStateMachines, generateBusinessPage,
   generateProjectPanorama, generateDeltaPage, generateImpactPage,
   DOCS_DIR, MANIFEST_DIR,
 } from './lib/generators.mjs';
@@ -142,6 +142,10 @@ async function main() {
   // ── 状态机 ──
   const smCount = generateStateMachines();
   if (smCount > 0) { console.log('  ✓ state-machine.mdx'); totalPages += smCount; }
+
+  // ── 业务全景（business-context.json 可选扩展分片）──
+  const bizCount = generateBusinessPage();
+  if (bizCount > 0) { console.log('  ✓ business.mdx'); totalPages += bizCount; }
 
   // ── 架构演进（delta.json 存在时生成）──
   const deltaCount = generateDeltaPage();

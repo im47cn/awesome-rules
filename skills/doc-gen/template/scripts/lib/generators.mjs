@@ -690,6 +690,91 @@ export function generateAdrPage() {
   return 1;
 }
 
+// ── 业务全景页面（business-context.json 可选扩展分片）──
+
+export function generateBusinessPage() {
+  const bcFile = path.join(MANIFEST_DIR, 'business-context.json');
+  if (!fs.existsSync(bcFile)) return 0;
+  const bc = readJSONMaybe(bcFile);
+  if (!bc) return 0;
+  const customers = bc.customers || [];
+  const roles = bc.roles || [];
+  const scenarios = bc.scenarios || [];
+  const flows = bc.flows || [];
+  const total = customers.length + roles.length + scenarios.length + flows.length;
+  if (total === 0) return 0;
+
+  const srcBadge = (s) =>
+    s === 'code' ? '\u{1F916} 代码提取' : s === 'hybrid' ? '\u{1F91D} 人工+锚定' : '\u270D\uFE0F 人工';
+  const anchorsInline = (anchors) =>
+    (anchors || []).map((a) => '<code>' + a + '</code>').join(' ');
+
+  let content = '> 业务全景 — 客户、角色、业务场景与流程（人工 business-context.md + 代码弱信号）\n\n';
+
+  if (customers.length) {
+    content += '## 客户\n\n';
+    content += mdTable(
+      ['客户', '说明', '代码锚点'],
+      customers.map((it) => [
+        '**' + it.name + '**',
+        it.description || '-',
+        anchorsInline(it.anchors) || '-',
+      ]),
+    ) + '\n\n';
+  }
+
+  if (roles.length) {
+    content += '## 角色\n\n';
+    content += mdTable(
+      ['角色', '说明', '来源', '代码锚点'],
+      roles.map((it) => [
+        '**' + it.name + '**',
+        it.description || '-',
+        srcBadge(it.source),
+        anchorsInline(it.anchors) || '-',
+      ]),
+    ) + '\n\n';
+  }
+
+  if (scenarios.length) {
+    content += '## 业务场景\n\n';
+    for (const s of scenarios) {
+      const domainTag = s.domain ? ' \u00B7 `' + s.domain + '` 域' : '';
+      content += '### ' + s.name + domainTag + ' ' + srcBadge(s.source) + '\n\n';
+      if (s.description) content += s.description + '\n\n';
+      if (s.anchors?.length) content += '代码锚点: ' + anchorsInline(s.anchors) + '\n\n';
+    }
+  }
+
+  if (flows.length) {
+    content += '## 业务流程\n\n';
+    for (const f of flows) {
+      content += '### ' + f.name + ' ' + srcBadge(f.source) + '\n\n';
+      if (f.description) content += f.description + '\n\n';
+      if (f.steps?.length) {
+        const lines = f.steps.map((st, i) => {
+          let line = (i + 1) + '. **' + st.name + '**';
+          if (st.description) line += '：' + st.description;
+          if (st.anchors?.length) {
+            line += ' → `' + st.anchors.join('` `') + '`';
+          }
+          return line;
+        });
+        content += lines.join('\n') + '\n\n';
+      }
+      if (f.anchors?.length) {
+        content += '代码锚点: ' + anchorsInline(f.anchors) + '\n\n';
+      }
+    }
+  }
+
+  writeMDX(path.join(DOCS_DIR, 'business.mdx'), {
+    title: '业务全景',
+    description: '客户、角色、业务场景与业务流程',
+  }, content);
+  return 1;
+}
+
 // ── 状态机页面 ──
 
 export function generateStateMachines() {
