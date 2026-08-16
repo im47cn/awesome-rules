@@ -211,8 +211,8 @@ scripts/
 
 | 场景 | 形态 | v1 状态 |
 |---|---|---|
-| PR 描述 | `--format mermaid` 输出贴入 | 📋 v1 |
-| CI 门禁 | `--strict`，触及 🔴 直接 fail + json 证据 | 📋 v1 |
+| PR 描述 | `--format mermaid` 输出贴入 | ✅ 已实现（renderer mermaid 三态） |
+| CI 门禁 | `--strict`，触及 🔴 直接 fail + json 证据 | ✅ 已实现（CLI 退出码 0/1/2） |
 | doc-gen 站点 | `/impact/` 交互页输入变更点 → 实时渲染 | 📋 v1.1 |
 
 ---
