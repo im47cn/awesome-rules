@@ -175,7 +175,7 @@ Cypher 查询 (Tier 2)    → 可选深度分析 (Phase 3+)
               "generatedAt": "...", "dirty": false }
 ```
 
-- 组件页/聚合页的类名渲染为**钉定版本的源码链接**（指向生成时刻 commit，代码演进不漂移）；无 `revision`/`repo_url` 时降级为纯 tooltip，不渲染链接
+- 组件页/聚合页的类名渲染为**钉定版本的源码链接**（指向生成时刻 commit，代码演进不漂移），`sourceLine` 使链接带 `#L` 锚点直达类声明行（L2 行级 evidence，等长注释剥离保证行号精确）；无 `revision`/`repo_url` 时降级为纯 tooltip，不渲染链接
 - `--from-manifest` 重建时会计算 `staleCommits`（文档落后当前 HEAD 的提交数）并警告
 - 无 git / 非 git 目录降级为 `revision: null`，不阻断
 

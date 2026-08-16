@@ -10,8 +10,9 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..');
-const DOCS_DIR = path.join(ROOT, 'src', 'content', 'docs');
-const MANIFEST_DIR = path.join(ROOT, 'doc-manifest');
+// 环境变量覆盖：供 pytest 冒烟（test_smoke_pages.py）与 CI 在临时目录运行，不污染模板
+const DOCS_DIR = process.env.DOCGEN_DOCS_DIR || path.join(ROOT, 'src', 'content', 'docs');
+const MANIFEST_DIR = process.env.DOCGEN_MANIFEST_DIR || path.join(ROOT, 'doc-manifest');
 const LEGACY_MANIFEST = path.join(ROOT, 'doc-manifest.json');
 
 // ── 工具函数 ──
@@ -74,8 +75,9 @@ function loadEvidence() {
   return _evidence;
 }
 
-export function sourceLinkUrl(sourcePath, evidence) {
-  // evidence 参数可显式传入（测试用），默认读 meta.json
+export function sourceLinkUrl(sourcePath, evidence, line) {
+  // evidence 参数可显式传入（测试用），默认读 meta.json；
+  // line（L2 行级 evidence）>0 时追加 #L 锚点，直达类声明行
   const ev = evidence !== undefined ? evidence : loadEvidence();
   if (!ev || !ev.revision || !ev.repo_url || !sourcePath) return null;
   const p = String(sourcePath).replace(/^\/+/, '').replace(/"/g, '&quot;');
@@ -90,13 +92,14 @@ export function sourceLinkUrl(sourcePath, evidence) {
     // 裸仓库 URL（旧配置兼容）：默认 GitHub/Gitea 风格 blob 路径
     url = `${ev.repo_url.replace(/\/+$/, '')}/blob/${ev.revision}/${p}`;
   }
+  if (line > 0) url += `#L${line}`;
   return url;
 }
 
-export function srcAbbr(text, sourcePath) {
+export function srcAbbr(text, sourcePath, line) {
   const p = (sourcePath || '').replace(/"/g, '&quot;');
   if (!p) return text || '-';
-  const url = sourceLinkUrl(sourcePath);
+  const url = sourceLinkUrl(sourcePath, undefined, line);
   return url
     ? `<a href="${url}" title="${p}" target="_blank" rel="noopener noreferrer">${text}</a>`
     : `<abbr title="${p}">${text}</abbr>`;

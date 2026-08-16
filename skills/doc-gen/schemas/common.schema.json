@@ -25,6 +25,8 @@
         "className": { "type": "string", "minLength": 1 },
         "qualifiedName": { "type": "string" },
         "sourcePath": { "type": "string" },
+        "sourceLine": { "type": "integer", "minimum": 1,
+                        "description": "类声明起始行（L2 行级 evidence 锚点）" },
         "description": { "type": "string" },
         "deprecated": { "type": "boolean" },
         "annotations": { "type": "array", "items": { "type": "string" } },

@@ -156,7 +156,7 @@ Golden test 首跑即抓到 **3 处 schema 与生成器的真实 drift**：
 ## 7. 后续可选
 
 - **#4 delta 快照对比**：D1 已实施（见 §8）；剩余可选：D2 站点「架构演进」页（+0.5 天）、D3 Mermaid 着色 delta 图（YAGNI 暂缓）
-- **L2 行级 evidence**：`JavaScanner` 记录类声明/字段/方法行号；等真实需求出现再做
+- **L2 行级 evidence**：✅ 已实施（2026-08-16）——v2a 的 `_strip_comments` 等长化基石使成本从评估的 ~2 天降至极低：`classLine`/`methods[].line` → `ComponentDoc.sourceLine` → 模板 `#L` 锚点直达类声明行
 - **risks/adrs/articles 分片纳入 schema**：结构稳定后按需锁定
 - **模板端 receipt 可视化**：站点首页显示构建 checks 与 staleCommits
 

@@ -223,6 +223,7 @@ class ManifestGenerator:
             className=file_info.get("className", ""),
             qualifiedName=qn,
             sourcePath=file_info.get("filePath", ""),
+            sourceLine=file_info.get("classLine", 0),
             annotations=file_info.get("annotations", []),
             methods=[m["name"] for m in file_info.get("methods", [])],
             fields=[

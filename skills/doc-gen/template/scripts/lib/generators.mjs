@@ -111,7 +111,7 @@ export function generateDomainOverview(manifest, domain, project = null) {
       content += `### [${title}](${prefix}/${layerName}/) (${comps.length} 个组件)\n\n`;
       content += mdTable(
         ['类名', '类型'],
-        comps.slice(0, 15).map(c => [srcAbbr(c.className, c.sourcePath), c.type])
+        comps.slice(0, 15).map(c => [srcAbbr(c.className, c.sourcePath, c.sourceLine), c.type])
       );
       if (comps.length > 15) content += `\n> ... 还有 ${comps.length - 15} 个组件\n`;
       content += '\n';
@@ -170,7 +170,7 @@ export function generateLayerPage(manifest, domain, layerName, project = null) {
     content += `## ${compType}\n\n`;
     content += mdTable(
       ['类名'],
-      items.map(c => [dep(srcAbbr(c.className, c.sourcePath), c.deprecated)])
+      items.map(c => [dep(srcAbbr(c.className, c.sourcePath, c.sourceLine), c.deprecated)])
     );
     content += '\n';
 
@@ -179,7 +179,7 @@ export function generateLayerPage(manifest, domain, layerName, project = null) {
       content += mdTable(
         ['属性', '值'],
         [
-          ['类型', c.type], ['限定名', srcAbbr(c.qualifiedName || '-', c.sourcePath)],
+          ['类型', c.type], ['限定名', srcAbbr(c.qualifiedName || '-', c.sourcePath, c.sourceLine)],
         ].concat(
           c.methods?.length ? [['方法', c.methods.map(m => `\`${m}()\``).join(', ')]] : [],
           c.fields?.length ? [['字段', c.fields.map(f => dep(`\`${f.name}: ${f.type}\``, f.deprecated)).join(', ')]] : [],
@@ -433,7 +433,7 @@ export function generateDomainModelPages(manifest) {
       dmContent += `<div class="aggregate-card">\n\n${title}\n\n`;
       const re = agg.rootEntity;
       if (re) {
-        dmContent += `- **聚合根**: ${srcAbbr(re.className, re.sourcePath)} <span class="aggregate-root">Root</span>\n`;
+        dmContent += `- **聚合根**: ${srcAbbr(re.className, re.sourcePath, re.sourceLine)} <span class="aggregate-root">Root</span>\n`;
         if (re.methods?.length) dmContent += `- **方法**: ${re.methods.map(m => `\`${m}()\``).join(', ')}\n`;
       }
       if (agg.entities?.length) dmContent += `- **实体**: ${agg.entities.map(e => `\`${e.className}\``).join(', ')}\n`;

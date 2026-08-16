@@ -162,6 +162,7 @@ class ComponentDoc:
     className: str
     qualifiedName: str = ""
     sourcePath: str = ""
+    sourceLine: int = 0              # 类声明起始行（L2 行级 evidence 锚点，0=未知）
     description: str = ""
     annotations: list = field(default_factory=list)
     endpoints: list = field(default_factory=list)

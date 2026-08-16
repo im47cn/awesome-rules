@@ -317,6 +317,8 @@ class ManifestWriter:
             "sourcePath": c.sourcePath,
             "description": c.description,
         }
+        if getattr(c, "sourceLine", 0):
+            d["sourceLine"] = c.sourceLine
         if c.deprecated:
             d["deprecated"] = True
         if c.annotations:

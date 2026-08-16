@@ -91,6 +91,8 @@ class JavaScanner:
 
         class_type = class_match.group(1)
         class_name = class_match.group(2)
+        # 类声明起始行（等长保证下 offset 直接映射原文行号；L2 行级 evidence 锚点）
+        class_line = content_clean[:class_match.start()].count('\n') + 1
 
         # 类级废弃：仅看类声明前的注解段（含 _strip_comments 转写的 @deprecated Javadoc），
         # 避免全文件 annotations 误把字段/方法上的 @Deprecated 算作类级废弃
@@ -168,6 +170,7 @@ class JavaScanner:
             "qualifiedName": qualified_name,
             "className": class_name,
             "classType": class_type,
+            "classLine": class_line,
             "annotations": annotations,
             "imports": imports,
             "methods": methods,
