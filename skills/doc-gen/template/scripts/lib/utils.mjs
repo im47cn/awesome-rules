@@ -60,12 +60,46 @@ export function dep(text, isDeprecated) {
   return isDeprecated ? `<del>${text}</del>${DEP_BADGE}` : text;
 }
 
-// 类路径 tooltip：页面只显示类名/限定名，hover 显示源代码完整路径
-// （源代码路径不单独成列，合并到类名/限定名的 abbr title，减少页面噪音）
+// 类路径 tooltip + revision-pinned 源码链接：
+// - 页面只显示类名/限定名，hover 显示源代码完整路径（减少页面噪音）
+// - meta.json 含 evidence{repo_url, revision} 时渲染钉定版本的源码链接，
+//   指向生成时刻的 commit，代码后续演进不会让链接漂移（archify 钉版本语义）
+// - 无 evidence / 无 revision → 不渲染链接，维持纯 tooltip（诚实降级）
+let _evidence = undefined; // undefined=未加载, null=无 evidence
+function loadEvidence() {
+  if (_evidence === undefined) {
+    const meta = readJSONMaybe(path.join(MANIFEST_DIR, 'meta.json')) || {};
+    _evidence = meta.evidence || null;
+  }
+  return _evidence;
+}
+
+export function sourceLinkUrl(sourcePath, evidence) {
+  // evidence 参数可显式传入（测试用），默认读 meta.json
+  const ev = evidence !== undefined ? evidence : loadEvidence();
+  if (!ev || !ev.revision || !ev.repo_url || !sourcePath) return null;
+  const p = String(sourcePath).replace(/^\/+/, '').replace(/"/g, '&quot;');
+  let url;
+  if (ev.repo_url.includes('{revision}')) {
+    // 完整链接模板（推荐）：兼容 Codeup/GitLab/GitHub 各自的 URL 形态
+    //   "https://codeup.aliyun.com/x/y/blob/{revision}/{path}"
+    url = ev.repo_url.replaceAll('{revision}', ev.revision);
+    url = url.includes('{path}') ? url.replaceAll('{path}', p)
+                                 : `${url.replace(/\/+$/, '')}/${p}`;
+  } else {
+    // 裸仓库 URL（旧配置兼容）：默认 GitHub/Gitea 风格 blob 路径
+    url = `${ev.repo_url.replace(/\/+$/, '')}/blob/${ev.revision}/${p}`;
+  }
+  return url;
+}
+
 export function srcAbbr(text, sourcePath) {
   const p = (sourcePath || '').replace(/"/g, '&quot;');
   if (!p) return text || '-';
-  return `<abbr title="${p}">${text}</abbr>`;
+  const url = sourceLinkUrl(sourcePath);
+  return url
+    ? `<a href="${url}" title="${p}" target="_blank" rel="noopener noreferrer">${text}</a>`
+    : `<abbr title="${p}">${text}</abbr>`;
 }
 
 // 域缓存（懒加载）

@@ -21,7 +21,7 @@ import {
   generateDatabase, generateApiDocs,
   generateDomainModelPages,
   generateRisks, generateAdrPage, generateStateMachines,
-  generateProjectPanorama,
+  generateProjectPanorama, generateDeltaPage,
   DOCS_DIR, MANIFEST_DIR,
 } from './lib/generators.mjs';
 
@@ -141,6 +141,10 @@ async function main() {
   // ── 状态机 ──
   const smCount = generateStateMachines();
   if (smCount > 0) { console.log('  ✓ state-machine.mdx'); totalPages += smCount; }
+
+  // ── 架构演进（delta.json 存在时生成）──
+  const deltaCount = generateDeltaPage();
+  if (deltaCount > 0) { console.log('  ✓ evolution.mdx'); totalPages += deltaCount; }
 
   // ── 数据库 ──
   const db = readJSONMaybe(path.join(MANIFEST_DIR, 'database.json'))

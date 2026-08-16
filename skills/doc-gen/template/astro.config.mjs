@@ -200,6 +200,17 @@ function buildSidebar() {
     } catch { /* ignore */ }
   }
 
+  const deltaFile = path.join(MANIFEST_DIR, "delta.json");
+  if (fs.existsSync(deltaFile)) {
+    try {
+      const delta = JSON.parse(fs.readFileSync(deltaFile, "utf-8"));
+      const s = delta?.summary || {};
+      const total = Object.values(s).reduce(
+        (sum, d) => sum + Object.values(d || {}).reduce((a, v) => a + (v || 0), 0), 0);
+      sidebar.push({ label: `🔀 架构演进 (${total})`, link: "/evolution" });
+    } catch { /* ignore */ }
+  }
+
   // 手写深度文档：按 category 分组，子组默认折叠
   const articlesFile = path.join(MANIFEST_DIR, "articles.json");
   if (fs.existsSync(articlesFile)) {

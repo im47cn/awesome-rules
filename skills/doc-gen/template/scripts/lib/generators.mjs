@@ -829,3 +829,98 @@ export function generateProjectPanorama(manifest) {
     title: '🏢 公司架构全景', description: project.description || '',
   }, content);
 }
+
+// ── 架构演进（delta）──────────────────────────────────────────────────────────
+// 数据来源：doc_gen.py diff 生成 delta.json 后放入 doc-manifest/。
+// 信噪比契约与 Python 端 render_markdown 一致：presentation-changed 不计入
+// summary、不列入明细（Javadoc 措辞噪声不进演进报告）。
+
+const DELTA_STATUS_LABELS = {
+  added: '新增', removed: '移除', changed: '变更', moved: '迁移',
+  'presentation-changed': '文档措辞',
+};
+const DELTA_DIM_TITLES = {
+  components: '组件', aggregates: '聚合', tables: '数据表',
+  stateMachines: '状态机', crossDomain: '跨域依赖', openapi: 'API 端点',
+};
+
+function _deltaStatusBadge(status) {
+  const cls = { added: 'ok', removed: 'critical', changed: 'warning',
+                moved: 'info' }[status] || 'info';
+  return `<span class="layer-badge ${cls}">${DELTA_STATUS_LABELS[status] || status}</span>`;
+}
+
+function _shortSha(revision) {
+  return revision ? revision.slice(0, 12) : '?';
+}
+
+export function generateDeltaPage() {
+  const deltaFile = path.join(MANIFEST_DIR, 'delta.json');
+  if (!fs.existsSync(deltaFile)) return 0;
+  let delta;
+  try { delta = readJSON(deltaFile); } catch { return 0; }
+  if (!delta?.summary) return 0;
+
+  const s = delta.summary;
+  const totals = { added: 0, removed: 0, changed: 0, moved: 0 };
+  for (const [, d] of Object.entries(s)) {
+    for (const k of Object.keys(totals)) totals[k] += d[k] || 0;
+  }
+
+  let content = `> 架构演进实证 · \`${_shortSha(delta.base?.revision)}\` → \`${_shortSha(delta.head?.revision)}\`（revision-pinned，代码演进不漂移）\n\n`;
+
+  content += '<div class="risk-summary">\n';
+  content += `  <div class="risk-stat risk-info"><span class="risk-count">${totals.added}</span> 新增</div>\n`;
+  content += `  <div class="risk-stat risk-critical"><span class="risk-count">${totals.removed}</span> 移除</div>\n`;
+  content += `  <div class="risk-stat risk-warning"><span class="risk-count">${totals.changed}</span> 变更</div>\n`;
+  content += `  <div class="risk-stat risk-ok"><span class="risk-count">${totals.moved}</span> 迁移</div>\n`;
+  content += '</div>\n\n';
+
+  content += '| 维度 | 新增 | 移除 | 变更 | 迁移 |\n| --- | --- | --- | --- | --- |\n';
+  for (const [dim, title] of Object.entries(DELTA_DIM_TITLES)) {
+    const d = s[dim] || {};
+    if (dim === 'openapi') {
+      content += `| ${title} | ${d.added || 0} | ${d.removed || 0} | - | - |\n`;
+    } else {
+      content += `| ${title} | ${d.added || 0} | ${d.removed || 0} | ${d.changed || 0} | ${d.moved || 0} |\n`;
+    }
+  }
+  content += '\n';
+
+  const dimOrder = ['components', 'aggregates', 'tables', 'stateMachines', 'crossDomain'];
+  for (const dim of dimOrder) {
+    const entries = (delta.changes?.[dim] || []).filter(c => c.status !== 'presentation-changed');
+    if (!entries.length) continue;
+    content += `## ${DELTA_DIM_TITLES[dim]}（${entries.length}）\n\n`;
+    for (const c of entries) {
+      const inferred = c.inferred ? ' <em>(推断)</em>' : '';
+      let detail = '';
+      if (c.status === 'moved' && c.changedFields?.length) {
+        detail = ` — <code>${c.changedFields[0].replace(/</g, '&lt;')}</code>`;
+      } else if (c.status === 'changed' && c.changedFields?.length) {
+        detail = ` — ${c.changedFields.map(f => `<code>${f.slice(1)}</code>`).join(', ')}`;
+      }
+      const loc = c.location || c.wasLocation || '';
+      content += `- ${_deltaStatusBadge(c.status)} <code>${c.className || c.id}</code>${inferred}${loc ? `（${loc}）` : ''}${detail}\n`;
+    }
+    content += '\n';
+  }
+
+  const oa = delta.openapi || { added: [], removed: [] };
+  if (oa.added?.length || oa.removed?.length) {
+    content += '## API 端点\n\n';
+    for (const [m, p] of oa.added || []) content += `- ${_deltaStatusBadge('added')} <code>${m} ${p}</code>\n`;
+    for (const [m, p] of oa.removed || []) content += `- ${_deltaStatusBadge('removed')} <code>${m} ${p}</code>\n`;
+    content += '\n';
+  }
+
+  const grand = totals.added + totals.removed + totals.changed + totals.moved;
+  content += grand === 0
+    ? '> ✅ 该区间架构零变化。\n'
+    : `> 共 ${grand} 处架构变化；文档措辞变化（presentation-changed）未计入。\n`;
+
+  writeMDX(path.join(DOCS_DIR, 'evolution.mdx'), {
+    title: '🔀 架构演进', description: '两份 manifest 快照的架构演进 delta',
+  }, content);
+  return 1;
+}
