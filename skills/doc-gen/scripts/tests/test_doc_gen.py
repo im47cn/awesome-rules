@@ -189,6 +189,7 @@ def test_build_from_manifest_shards(tmp_path, monkeypatch):
     def spy(out, md):
         called["out"] = out
         called["md"] = md
+        return True
 
     monkeypatch.setattr(doc_gen, "build_astro", spy)
     site = tmp_path / "site"
@@ -205,11 +206,11 @@ def test_build_from_manifest_legacy_single_file(tmp_path, monkeypatch):
     legacy = {
         "meta": {"project": {"name": "L"}},
         "openapiSpecs": {"default": {"paths": {"/x": {"get": {}}}}},
-        "domains": [{"name": "d", "layers": {}}],
+        "domains": [{"name": "d", "layers": {"domain": {"components": [{"type": "entity", "className": "E"}]}}}],
     }
     legacy_file = tmp_path / "old.json"
     legacy_file.write_text(json.dumps(legacy), encoding="utf-8")
-    monkeypatch.setattr(doc_gen, "build_astro", lambda o, m: None)
+    monkeypatch.setattr(doc_gen, "build_astro", lambda o, m: True)
     site = tmp_path / "site"
     monkeypatch.setattr(sys, "argv", [
         "doc_gen.py", "scan", "dummy", "--from-manifest", str(legacy_file),

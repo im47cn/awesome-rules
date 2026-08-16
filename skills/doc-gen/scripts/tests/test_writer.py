@@ -25,8 +25,8 @@ def _rich_manifest() -> DocManifest:
     adapter.components.append(ComponentDoc(
         type="controller", className="OrderController", qualifiedName="q",
         sourcePath="s", description="desc", deprecated=True, annotations=["@Rest"],
-        methods=[{"name": "m"}],
-        fields=[FieldDoc(name="f", type="String", kind="k", comment="c", deprecated=True)],
+        methods=["m"],
+        fields=[FieldDoc(name="f", type="String", kind="identifier", comment="c", deprecated=True)],
         endpoints=[EndpointDoc(method="GET", path="/o", summary="s",
                                requestBody="Req", responseBody="Resp", deprecated=True)],
         interfaces=["I"],
@@ -43,9 +43,9 @@ def _rich_manifest() -> DocManifest:
     m.domains.append(domain)
     m.diagrams = DiagramSet(architectureOverview="graph",
                             domainAggregates={"order": "x"}, stateMachines={"sm": "g"})
-    m.database = {"tables": [{"name": "t"}]}
+    m.database = {"tables": [{"name": "t", "columns": []}]}
     m.crossDomainDependencies.append(
-        CrossDomainDep(fromDomain="a", toDomain="b", type="t", description="d", evidence="e"))
+        CrossDomainDep(fromDomain="a", toDomain="b", type="client-api", description="d", evidence="e"))
     m.stateMachines.append(StateMachineDoc(name="SM", states=["A", "B"]))
     m.openapiSpecs = {"default": {}}              # 触发 hasOpenApi
     return m
@@ -70,7 +70,7 @@ def test_write_full(tmp_path):
     assert comp["className"] == "OrderController"
     assert comp["deprecated"] is True
     assert comp["annotations"] == ["@Rest"]
-    assert comp["methods"] == [{"name": "m"}]
+    assert comp["methods"] == ["m"]
     assert comp["fields"][0]["name"] == "f"
     assert comp["endpoints"][0]["method"] == "GET"
     assert comp["interfaces"] == ["I"]
@@ -91,14 +91,18 @@ def test_write_full(tmp_path):
 
 
 def test_write_empty_domain_skips_layers(tmp_path):
-    """所有层均无组件/聚合 → layers 为空，但仍写域文件。"""
+    """无组件/聚合的层被跳过；域至少保留一层非空（schema minProperties=1，
+    完全空域由自检拒绝——空域文件无信息价值，视为生成器 bug）。"""
     m = DocManifest()
-    m.domains.append(DomainDoc(name="empty"))
+    d = DomainDoc(name="sparse")
+    d.layers["domain"].aggregates.append(AggregateDoc(
+        name="Order", kind="aggregate",
+        rootEntity=ComponentDoc(type="entity", className="OrderEntity")))
+    m.domains.append(d)  # adapter 层空 → 应被跳过
     ManifestWriter(tmp_path).write(m)
-    idx = json.loads((tmp_path / "doc-manifest" / "index.json").read_text(encoding="utf-8"))
-    assert idx["componentCount"] == 0
-    dom = json.loads((tmp_path / "doc-manifest" / "domains" / "empty.json").read_text(encoding="utf-8"))
-    assert dom["layers"] == {}
+    dom = json.loads((tmp_path / "doc-manifest" / "domains" / "sparse.json").read_text(encoding="utf-8"))
+    assert "adapter" not in dom["layers"]
+    assert list(dom["layers"]) == ["domain"]
 
 
 def test_serialize_component_minimal():

@@ -13,6 +13,7 @@ DDD 技术文档自动生成工具 (doc-gen) — CLI 入口
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -34,9 +35,40 @@ from generator.risks import RiskScanner
 from generator.adr import AdrScanner
 from generator.article import ArticleScanner
 
-from builder.writer import ManifestWriter
+from builder.writer import ManifestWriter, collect_evidence
 from builder.astro import build_astro
 from builder.aggregate import aggregate_projects
+from validator import validate_manifest_dir
+
+
+# ── Receipt 契约 ────────────────────────────────────────────────────────────────
+
+
+def build_receipt(checks: dict) -> dict:
+    """组装验收 receipt。ok 当且仅当无 fail（warn 是事实降级，不阻断）。"""
+    ok = all(c.get("status") != "fail" for c in checks.values())
+    return {"schema_version": 1, "ok": ok, "checks": checks}
+
+
+def write_receipt(manifest_dir, receipt: dict) -> None:
+    """写入 doc-manifest/receipt.json（诚实契约的唯一机器可读载体）"""
+    manifest_dir = Path(manifest_dir)
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    (manifest_dir / "receipt.json").write_text(
+        json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _finish(receipt: dict, manifest_dir, summary: str) -> None:
+    """统一收尾：写 receipt，按 ok 决定退出码与结束语。"""
+    write_receipt(manifest_dir, receipt)
+    if receipt["ok"]:
+        print(f"\n✅ {summary}")
+    else:
+        failed = [k for k, c in receipt["checks"].items()
+                  if c.get("status") == "fail"]
+        print(f"\n❌ 阶段失败: {', '.join(failed)}（详见 receipt.json）",
+              file=sys.stderr)
+        sys.exit(1)
 
 
 # ── CLI 入口 ──────────────────────────────────────────────────────────────────
@@ -69,8 +101,17 @@ def main():
     agg_parser.add_argument("--build", action="store_true", help="聚合后立即构建站点")
     agg_parser.add_argument("--verbose", "-v", action="store_true", help="详细输出")
 
+    # diff — 架构演进对比（delta）
+    diff_parser = sub.add_parser("diff", help="对比两份 DocManifest 快照的架构演进",
+        epilog="示例: doc_gen.py diff archive/a1b2c3d/doc-manifest ./doc-manifest"
+               " --output delta.json --markdown delta.md")
+    diff_parser.add_argument("base_manifest", help="基准快照目录（doc-manifest/）")
+    diff_parser.add_argument("head_manifest", help="对比快照目录（doc-manifest/）")
+    diff_parser.add_argument("--output", "-o", default="delta.json", help="JSON receipt 输出路径")
+    diff_parser.add_argument("--markdown", "-m", help="Markdown 摘要输出路径（可选）")
+
     # 兼容旧版无子命令调用
-    if len(sys.argv) > 1 and not sys.argv[1].startswith("-") and sys.argv[1] not in ("scan", "aggregate"):
+    if len(sys.argv) > 1 and not sys.argv[1].startswith("-") and sys.argv[1] not in ("scan", "aggregate", "diff"):
         sys.argv.insert(1, "scan")
 
     args = parser.parse_args()
@@ -81,6 +122,10 @@ def main():
 
     if args.command == "aggregate":
         aggregate_projects(args.projects_json, args.output, args.build, args.verbose)
+        return
+
+    if args.command == "diff":
+        _diff_manifests(args)
         return
 
     if args.command == "scan":
@@ -120,20 +165,25 @@ def _scan_project(args):
     print(f"🔍 架构鹰眼 扫描: {project_root}")
     print()
 
+    checks: dict = {}
+
     # Phase 1: Maven 模块扫描
     print("📦 扫描 Maven 模块结构...")
     maven = MavenScanner(str(project_root))
     maven_info = maven.scan()
     if "error" in maven_info:
         print(f"  ⚠ {maven_info['error']}")
+        checks["maven"] = {"status": "warn", "error": maven_info["error"]}
     else:
         print(f"  ✓ groupId={maven_info.get('groupId')}, 模块数={len(maven_info.get('modules', {}))}")
+        checks["maven"] = {"status": "ok", "modules": len(maven_info.get("modules", {}))}
 
     # Phase 2: Java 源码扫描
     print("☕ 扫描 Java 源码...")
     java = JavaScanner(str(project_root))
     java_files = java.scan_java_files()
     print(f"  ✓ 找到 {len(java_files)} 个 Java 类")
+    checks["java"] = {"status": "ok", "classes": len(java_files)}
     if java_files:
         print()
         print("  ⚠ 注意：Java 源码扫描基于正则表达式，以下情况可能导致信息不完整：")
@@ -169,11 +219,14 @@ def _scan_project(args):
         if infra_tables:
             tables.extend(infra_tables)
     print(f"  ✓ 共 {len(tables)} 张数据库表")
+    checks["database"] = {"status": "ok", "tables": len(tables),
+                          "inferred": db_inferred}
 
     # Phase 3.5: 状态机扫描
     print("🔀 扫描状态机...")
     state_machines = StateMachineScanner(str(project_root)).scan(java_files)
     print(f"  ✓ 识别 {len(state_machines)} 个状态机")
+    checks["stateMachines"] = {"status": "ok", "count": len(state_machines)}
 
     # Phase 4: 生成 manifest
     print()
@@ -207,17 +260,33 @@ def _scan_project(args):
     if path_count > 0:
         manifest.openapiSpecs["default"] = oapi_spec
         print(f"  ✓ {path_count} 个 API 路径")
+        checks["openapi"] = {"status": "ok", "paths": path_count}
     elif has_controllers:
         manifest.openapiSpecs["default"] = oapi_spec
         print(f"  ⚠ 检测到 Controller 但未能提取端点，生成空 API 规范")
+        checks["openapi"] = {"status": "warn", "paths": 0}
     else:
         print("  ℹ 未检测到 Controller")
+        checks["openapi"] = {"status": "skipped"}
 
-    # Phase 4.6: 写入 manifest（此时 openapiSpecs 已填充）
+    # Phase 4.6: 写入 manifest（此时 openapiSpecs 已填充；附 evidence）
     print()
     print("📋 写入 DocManifest（分片）...")
-    writer = ManifestWriter(output_dir)
-    writer.write(manifest)
+    evidence = collect_evidence(project_root, config)
+    if evidence.get("dirty"):
+        print("  ⚠ 工作区有未提交变更（evidence.dirty=true），"
+              "revision 与扫描内容可能不一致")
+    if evidence.get("revision"):
+        print(f"  ✓ evidence 钉定 revision {evidence['revision'][:12]}")
+    else:
+        print("  ⚠ 无 git 仓库或获取 SHA 失败，evidence.revision=null")
+    writer = ManifestWriter(output_dir, evidence=evidence)
+    try:
+        writer.write(manifest)
+        checks["manifest"] = {"status": "ok"}
+    except RuntimeError as e:
+        print(f"  ❌ {e}", file=sys.stderr)
+        checks["manifest"] = {"status": "fail"}
 
     if manifest.openapiSpecs:
         (output_dir / "doc-manifest" / "api-spec.json").write_text(
@@ -225,6 +294,7 @@ def _scan_project(args):
 
     shard_count = sum(1 for _ in (output_dir / "doc-manifest").rglob("*.json"))
     print(f"  ✓ 分片已写入: {output_dir / 'doc-manifest/'} ({shard_count} 个文件)")
+    checks["manifest"]["shards"] = shard_count
 
     # Phase 4.7: 架构风险扫描
     print()
@@ -233,12 +303,16 @@ def _scan_project(args):
     risks = risk_scanner.scan()
     if "error" in risks:
         print(f"  ⚠ {risks['error']}")
+        checks["risks"] = {"status": "warn", "error": risks["error"]}
     else:
         (output_dir / "doc-manifest" / "risks.json").write_text(
             json.dumps(risks, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"  ✓ {risks.get('totalIssues', 0)} 个风险 "
               f"(高危: {risks.get('criticalCount', 0)}, "
               f"警告: {risks.get('warningCount', 0)})")
+        checks["risks"] = {"status": "ok",
+                           "critical": risks.get("criticalCount", 0),
+                           "warning": risks.get("warningCount", 0)}
 
     # Phase 4.8: ADR 扫描
     print("📋 扫描架构决策记录（ADR）...")
@@ -247,6 +321,7 @@ def _scan_project(args):
     (output_dir / "doc-manifest" / "adrs.json").write_text(
         json.dumps(adrs, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"  ✓ {adrs.get('total', 0)} 个 ADR")
+    checks["adrs"] = {"status": "ok", "total": adrs.get("total", 0)}
 
     # Phase 4.9: 手写深度文档扫描
     print("📝 扫描手写深度文档...")
@@ -256,18 +331,22 @@ def _scan_project(args):
     cats = articles.get("categories", {})
     cat_summary = ", ".join(f"{k}:{v}" for k, v in cats.items())
     print(f"  ✓ {articles.get('total', 0)} 篇深度文档 ({cat_summary})")
+    checks["articles"] = {"status": "ok", "total": articles.get("total", 0)}
 
     manifest_dir = output_dir / "doc-manifest"
 
     if args.build:
         print()
         print("🏗️  构建 Astro 静态站点...")
-        build_astro(output_dir, manifest_dir)
-    elif args.manifest_only:
-        print(f"\n✅ 完成！Manifest 分片 → {manifest_dir}")
+        checks["build"] = {"status": "ok"} if build_astro(output_dir, manifest_dir) \
+            else {"status": "fail"}
     else:
-        print(f"\n✅ 完成！Manifest 分片 → {manifest_dir}")
-        print("💡 使用 --build 生成静态站点")
+        checks["build"] = {"status": "skipped"}
+
+    receipt = build_receipt(checks)
+    _finish(receipt, manifest_dir,
+            f"完成！Manifest 分片 → {manifest_dir}"
+            + ("" if args.build else "（使用 --build 生成静态站点）"))
 
 
 # ── 辅助函数 ──────────────────────────────────────────────────────────────────
@@ -315,6 +394,57 @@ def _load_config(project_root: Path) -> dict:
     return {}
 
 
+def _check_manifest_contract(manifest_dir: Path) -> dict:
+    """消费端 schema 门禁。
+
+    - index.json 含 schema_version:1 → 严格校验全部分片，失败 exit 1
+    - 无 schema_version（旧版）→ warn 跳过（additive 兼容，不把旧文件变硬失败）
+    返回 receipt 的 manifest check。
+    """
+    index_path = manifest_dir / "index.json"
+    if not index_path.exists():
+        print(f"❌ 缺少 index.json: {manifest_dir}", file=sys.stderr)
+        sys.exit(2)
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    if index.get("schema_version") != 1:
+        print("  ⚠ 旧版 manifest（无 schema_version），跳过 schema 校验")
+        return {"status": "warn", "reason": "legacy manifest"}
+    errors = validate_manifest_dir(manifest_dir)
+    if errors:
+        print(f"❌ manifest 分片未通过 schema 契约:", file=sys.stderr)
+        for e in errors[:20]:
+            print(f"  {e}", file=sys.stderr)
+        sys.exit(1)
+    print(f"  ✓ manifest 通过 schema 契约校验（schema_version=1）")
+    return {"status": "ok", "schemaVersion": 1}
+
+
+def _stale_commits(manifest_dir: Path) -> int | None:
+    """文档新鲜度：meta.json 钉定的 revision 落后当前 HEAD 多少 commit。
+
+    无 git / 无 revision / 向上未找到 .git 时返回 None（无法判定）。
+    """
+    meta_path = manifest_dir / "meta.json"
+    if not meta_path.exists():
+        return None
+    try:
+        evidence = json.loads(meta_path.read_text(encoding="utf-8")).get("evidence", {})
+        revision = evidence.get("revision")
+        if not revision:
+            return None
+        root = manifest_dir
+        while root != root.parent and not (root / ".git").exists():
+            root = root.parent
+        if not (root / ".git").exists():
+            return None
+        out = subprocess.run(
+            ["git", "-C", str(root), "rev-list", "--count", f"{revision}..HEAD"],
+            capture_output=True, text=True, timeout=10, check=True).stdout.strip()
+        return int(out)
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return None
+
+
 def _build_from_manifest(manifest_path: str, output_dir: str):
     """从已有 manifest 构建站点（支持单文件或分片目录）"""
     manifest_src = Path(manifest_path)
@@ -332,7 +462,12 @@ def _build_from_manifest(manifest_path: str, output_dir: str):
         manifest_data = json.loads(manifest_src.read_text(encoding="utf-8"))
         manifest = _dict_to_manifest(manifest_data)
         writer = ManifestWriter(out)
-        writer.write(manifest)
+        try:
+            writer.write(manifest)
+        except RuntimeError as e:
+            print(f"❌ 旧版 manifest 转换后未通过 schema 契约: {e}",
+                  file=sys.stderr)
+            sys.exit(1)
         manifest_dir = out / "doc-manifest"
         # 修复：旧版 manifest 中的 openapiSpecs 丢失 → 写入 api-spec.json
         if manifest_data.get("openapiSpecs"):
@@ -346,7 +481,68 @@ def _build_from_manifest(manifest_path: str, output_dir: str):
         print(f"❌ 无效的 manifest: {manifest_path}", file=sys.stderr)
         sys.exit(2)
 
-    build_astro(out, manifest_dir)
+    manifest_check = _check_manifest_contract(manifest_dir)
+    stale = _stale_commits(manifest_dir)
+    if stale is not None and stale > 0:
+        print(f"  ⚠ 文档已落后当前 HEAD {stale} 个提交（evidence 钉定的版本可能过期）")
+        manifest_check["staleCommits"] = stale
+
+    ok = build_astro(out, manifest_dir)
+    receipt = build_receipt({
+        "manifest": manifest_check,
+        "build": {"status": "ok"} if ok else {"status": "fail"},
+    })
+    _finish(receipt, manifest_dir, f"站点构建完成 → {out / 'dist'}")
+
+
+def _diff_manifests(args):
+    """架构演进对比：两份快照 → delta receipt（JSON + 可选 Markdown）。
+
+    退出码语义（诚实契约）：0 = 对比成功完成（不代表无变化）；
+    2 = 输入无效（缺 index.json / schema_version 不相等）。
+    """
+    from delta import diff_snapshots, load_snapshot, render_markdown
+
+    try:
+        base = load_snapshot(args.base_manifest)
+        head = load_snapshot(args.head_manifest)
+    except FileNotFoundError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        sys.exit(2)
+
+    if base["schema_version"] != head["schema_version"]:
+        print(f"❌ schema_version 不相等: base={base['schema_version']!r} "
+              f"head={head['schema_version']!r}，拒绝对比（契约门禁）",
+              file=sys.stderr)
+        sys.exit(2)
+    if base["schema_version"] != 1:
+        print(f"❌ 旧版 manifest（schema_version={base['schema_version']!r}），"
+              f"无法对比", file=sys.stderr)
+        sys.exit(2)
+
+    receipt = diff_snapshots(base, head)
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(receipt, ensure_ascii=False, indent=2),
+                      encoding="utf-8")
+
+    s = receipt["summary"]
+    total = sum(sum(v.values()) for v in s.values())
+    print(f"🔀 架构演进 delta:")
+    print(f"  基准 {_short_sha(receipt['base']['revision'])} → "
+          f"当前 {_short_sha(receipt['head']['revision'])}")
+    for dim, counts in s.items():
+        parts = ", ".join(f"{k}={v}" for k, v in counts.items() if v)
+        print(f"  {dim}: {parts or '无变化'}")
+    print(f"  ✓ receipt → {output}（共 {total} 处变化）")
+
+    if args.markdown:
+        Path(args.markdown).write_text(render_markdown(receipt), encoding="utf-8")
+        print(f"  ✓ markdown → {args.markdown}")
+
+
+def _short_sha(revision) -> str:
+    return revision[:12] if revision else "?"
 
 
 def _dict_to_manifest(data: dict) -> DocManifest:

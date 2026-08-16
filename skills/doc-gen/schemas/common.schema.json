@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://awesome-rules/skills/doc-gen/schemas/common.schema.json",
+  "title": "doc-gen 共享定义",
+  "description": "DocManifest 分片共享 $defs。契约约定：schema_version const 1，破坏性变更才 bump 2（archify 式版本锁定）。",
+  "$defs": {
+    "componentType": {
+      "type": "string",
+      "minLength": 1,
+      "description": "开放集合：SUFFIX_TYPE_MAP_ORDERED 第三列 ∪ 层名兜底(start/adapter/...) ∪ 路径识别时的类名小写（layers.py classify 三级兜底），故不锁 enum"
+    },
+    "fieldKind": {
+      "enum": ["", "identifier", "valueObject", "enum", "entityCollection"]
+    },
+    "httpMethod": {
+      "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "REQUEST", "*"],
+      "description": "* = @RequestMapping 未指定 method 属性"
+    },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "className"],
+      "properties": {
+        "type": { "$ref": "#/$defs/componentType" },
+        "className": { "type": "string", "minLength": 1 },
+        "qualifiedName": { "type": "string" },
+        "sourcePath": { "type": "string" },
+        "description": { "type": "string" },
+        "deprecated": { "type": "boolean" },
+        "annotations": { "type": "array", "items": { "type": "string" } },
+        "methods": { "type": "array", "items": { "type": "string" } },
+        "interfaces": { "type": "array", "items": { "type": "string" } },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "type"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "type": { "type": "string" },
+              "kind": { "$ref": "#/$defs/fieldKind" },
+              "comment": { "type": "string" },
+              "deprecated": { "type": "boolean" }
+            }
+          }
+        },
+        "endpoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["method", "path"],
+            "properties": {
+              "method": { "$ref": "#/$defs/httpMethod" },
+              "path": { "type": "string", "minLength": 1 },
+              "summary": { "type": "string" },
+              "requestBody": { "type": "string" },
+              "responseBody": { "type": "string" },
+              "deprecated": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "aggregate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["aggregate", "behavior"] },
+        "rootEntity": { "$ref": "#/$defs/component" },
+        "entities": { "type": "array", "items": { "$ref": "#/$defs/component" } },
+        "valueObjects": { "type": "array", "items": { "$ref": "#/$defs/component" } },
+        "domainServices": { "type": "array", "items": { "$ref": "#/$defs/component" } },
+        "domainEvents": { "type": "array", "items": { "$ref": "#/$defs/component" } }
+      }
+    },
+    "layer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["components"],
+      "properties": {
+        "javaPackage": { "type": "string" },
+        "mavenModule": { "type": "string" },
+        "components": { "type": "array", "items": { "$ref": "#/$defs/component" } },
+        "aggregates": { "type": "array", "items": { "$ref": "#/$defs/aggregate" } }
+      }
+    },
+    "table": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "columns"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "comment": { "type": "string" },
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "type"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "type": { "type": "string" },
+              "comment": { "type": "string" },
+              "primaryKey": { "type": "boolean" },
+              "nullable": { "type": "boolean" },
+              "unique": { "type": "boolean" },
+              "defaultValue": { "type": "string" }
+            }
+          }
+        },
+        "indexes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "columns"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "columns": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+              "unique": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "relationship": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "fk"],
+      "properties": {
+        "from": { "type": "string", "minLength": 1 },
+        "to": { "type": "string", "minLength": 1 },
+        "fk": { "type": "string", "minLength": 1 },
+        "cardinality": { "type": "string" }
+      }
+    },
+    "stateMachineIssueType": {
+      "enum": ["dead_state", "unreachable", "missing_transition", "no_initial", "no_end", "multi_initial"]
+    },
+    "stateMachineSeverity": {
+      "enum": ["critical", "warning", "info"]
+    },
+    "stateMachine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "framework": { "enum": ["spring", "cola", "raw"] },
+        "detection": { "enum": ["explicit", "heuristic"] },
+        "sourceClass": { "type": "string" },
+        "sourcePath": { "type": "string" },
+        "managedEnum": { "type": "string" },
+        "states": { "type": "array", "items": { "type": "string" } },
+        "initialState": { "type": "string" },
+        "endStates": { "type": "array", "items": { "type": "string" } },
+        "transitions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "source": { "type": "string" },
+              "target": { "type": "string" },
+              "event": { "type": "string" },
+              "guard": { "type": "string" }
+            }
+          }
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "severity", "message"],
+            "properties": {
+              "type": { "$ref": "#/$defs/stateMachineIssueType" },
+              "severity": { "$ref": "#/$defs/stateMachineSeverity" },
+              "message": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "crossDomainDep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fromDomain", "toDomain", "type"],
+      "properties": {
+        "fromDomain": { "type": "string", "minLength": 1 },
+        "toDomain": { "type": "string", "minLength": 1 },
+        "type": { "enum": ["client-api", "domain-event", "shared-valueobject", "domain-coupling"] },
+        "description": { "type": "string" },
+        "evidence": { "type": "string" }
+      }
+    }
+  }
+}

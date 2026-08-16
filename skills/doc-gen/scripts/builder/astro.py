@@ -10,7 +10,12 @@ import sys
 from pathlib import Path
 
 
-def build_astro(output_dir: Path, manifest_dir: Path | None = None):
+def build_astro(output_dir: Path, manifest_dir: Path | None = None) -> bool:
+    """构建 Astro 站点（使用模板中的 generate-pages.mjs）
+
+    返回 False 表示构建失败（依赖缺失 / npm install / build 失败 / 无产物），
+    调用方必须据此以非零退出码结束——非零退出绝不可描述为成功。
+    """
     """构建 Astro 站点（使用模板中的 generate-pages.mjs）"""
     # 1. 同步模板到输出目录（始终覆盖源码，确保 template 更新生效；
     #    node_modules/dist/.astro 等运行时产物由 copy_astro_template 跳过，不影响）
@@ -52,11 +57,11 @@ def build_astro(output_dir: Path, manifest_dir: Path | None = None):
         )
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode() if e.stderr else str(e)
-        print(f"  ⚠ npm install 失败: {stderr[:500]}", file=sys.stderr)
-        return
+        print(f"  ❌ npm install 失败: {stderr[:500]}", file=sys.stderr)
+        return False
     except FileNotFoundError:
-        print("  ⚠ 未找到 npm，跳过构建", file=sys.stderr)
-        return
+        print("  ❌ 未找到 npm，构建失败（--build 需要 Node.js 环境）", file=sys.stderr)
+        return False
 
     # 4. 执行完整构建（prebuild → astro build → postbuild/pagefind）
     print("  🔨 构建静态站点（generate-pages → astro build → pagefind）...")
@@ -76,14 +81,18 @@ def build_astro(output_dir: Path, manifest_dir: Path | None = None):
                     print(f"  ⚠ {line}", file=sys.stderr)
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode() if e.stderr else str(e)
-        print(f"  ⚠ 构建失败: {stderr[-1000:]}", file=sys.stderr)
-        return
+        print(f"  ❌ 构建失败: {stderr[-1000:]}", file=sys.stderr)
+        return False
 
     dist_dir = output_dir / "dist"
-    if dist_dir.exists():
-        file_count = sum(1 for _ in dist_dir.rglob("*") if _.is_file())
-        print(f"  ✅ 站点已构建: {dist_dir} ({file_count} 个文件)")
-        print(f"  💡 本地预览: cd {output_dir} && npm run preview")
+    if not dist_dir.exists():
+        print("  ❌ 构建退出码为 0 但未产生 dist/ 目录", file=sys.stderr)
+        return False
+
+    file_count = sum(1 for _ in dist_dir.rglob("*") if _.is_file())
+    print(f"  ✅ 站点已构建: {dist_dir} ({file_count} 个文件)")
+    print(f"  💡 本地预览: cd {output_dir} && npm run preview")
+    return True
 
 
 def _write_article_pages(output_dir: Path):

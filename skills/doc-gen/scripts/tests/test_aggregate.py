@@ -149,6 +149,7 @@ def test_aggregate_build_invokes_astro(tmp_path, monkeypatch):
 
     def fake_build(out, md):
         called["ok"] = True
+        return True
 
     monkeypatch.setattr("builder.aggregate.build_astro", fake_build)
     aggregate_projects(pj, str(tmp_path / "site"), build=True, verbose=False)

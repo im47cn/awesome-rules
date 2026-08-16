@@ -281,11 +281,15 @@ def aggregate_projects(projects_json: str, output_dir: str, build: bool, verbose
     print()
     print(f"  ✓ 聚合 manifest → {agg_dir}")
 
-    # Phase 3: 可选构建
+    # Phase 3: 可选构建（失败传播：非零退出绝不可描述为成功）
     if build:
         print()
         print("🏗️  构建架构鹰眼站点...")
-        build_astro(out, agg_dir)
+        if not build_astro(out, agg_dir):
+            print("❌ 聚合站点构建失败", file=sys.stderr)
+            sys.exit(1)
+        print(f"\n🦅 架构鹰眼站点构建完成!")
+        print(f"  📁 {out / 'dist'}")
     else:
         print(f"\n🦅 架构鹰眼聚合完成!")
         print(f"  📁 {agg_dir}")

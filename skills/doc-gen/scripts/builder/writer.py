@@ -4,11 +4,15 @@
 """
 
 import json
+import subprocess
 import sys
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
+
+from validator import validate_manifest_dir
 
 from doctypes import (
     AggregateDoc,
@@ -24,6 +28,43 @@ from doctypes import (
     TableColumnDoc,
     TableIndexDoc,
 )
+
+
+def collect_evidence(project_root: Path, config: dict) -> dict:
+    """采集 revision-pinned evidence（借鉴 archify 的钉版本语义）。
+
+    - revision: 生成时刻的 HEAD SHA（40 位），无 git 时为 None（降级不阻断）
+    - dirty: 工作区是否有未提交变更（脏工作区的 SHA 对不上扫描内容，必须如实标注）
+    - repo_url: 来自项目配置 project_repo，未配置为 None
+    """
+    revision = None
+    dirty = False
+    try:
+        revision = subprocess.run(
+            ["git", "-C", str(project_root), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10, check=True,
+        ).stdout.strip()
+        status = subprocess.run(
+            ["git", "-C", str(project_root), "status", "--porcelain"],
+            capture_output=True, text=True, timeout=10, check=True,
+        ).stdout.strip()
+        dirty = bool(status)
+    except (subprocess.SubprocessError, OSError):
+        pass  # 无 git / 浅克隆 / 非 git 目录：降级为 revision=None
+
+    return {
+        "repo_url": config.get("project_repo") or None,
+        "revision": revision if re_sha(revision) else None,
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "dirty": dirty,
+    }
+
+
+def re_sha(value) -> bool:
+    """校验 40 位十六进制 SHA"""
+    if not isinstance(value, str) or len(value) != 40:
+        return False
+    return all(c in "0123456789abcdefABCDEF" for c in value)
 
 
 def _custom_serializer(obj):
@@ -56,10 +97,12 @@ class ManifestWriter:
                    "hasOpenApi", "hasDeepAnalysis", "hasCrossDomain",
                    "domains"}
 
-    def __init__(self, output_dir: Path, max_workers: int = 4):
+    def __init__(self, output_dir: Path, max_workers: int = 4,
+                 evidence: dict | None = None):
         self.output_dir = output_dir
         self.manifest_dir = output_dir / "doc-manifest"
         self.max_workers = max_workers
+        self.evidence = evidence
 
     def write(self, manifest: DocManifest):
         """写入分片文件"""
@@ -69,10 +112,12 @@ class ManifestWriter:
         meta = manifest.meta
         domains = manifest.domains
 
-        # 1. meta.json
+        # 1. meta.json（含 revision-pinned evidence）
+        meta_payload = {"project": meta.get("project", {})}
+        if self.evidence:
+            meta_payload["evidence"] = self.evidence
         (self.manifest_dir / "meta.json").write_text(
-            json.dumps({"project": meta.get("project", {})},
-                       ensure_ascii=False, indent=2),
+            json.dumps(meta_payload, ensure_ascii=False, indent=2),
             encoding="utf-8")
 
         # 2. diagrams.json
@@ -106,8 +151,9 @@ class ManifestWriter:
             json.dumps(cross, ensure_ascii=False, indent=2),
             encoding="utf-8")
 
-        # 5. 并发写各域文件（I/O 密集，多线程有效）
+        # 5. 并发写各域文件（I/O 密集，多线程有效；失败即记录，写入后统一裁决）
         domain_entries = []
+        failed_domains: list[str] = []
         with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
             futures = {
                 pool.submit(self._write_domain_file, d): d
@@ -120,9 +166,12 @@ class ManifestWriter:
                     domain_entries.append(entry)
                 except Exception as e:
                     print(f"  ⚠ 写入域 {d.name} 失败: {e}", file=sys.stderr)
+                    failed_domains.append(d.name)
 
-        # 6. index.json
+        # 6. index.json（schema_version: 1 为契约版本，与 generator 的
+        #    schemaVersion 字符串字段语义不同：前者锁定分片结构，后者记录格式历史）
         index = {
+            "schema_version": 1,
             "schemaVersion": meta.get("schemaVersion", "1.0"),
             "generatedAt": meta.get("generatedAt", ""),
             "generator": meta.get("generator", "doc-gen v0.1.0"),
@@ -138,6 +187,17 @@ class ManifestWriter:
         (self.manifest_dir / "index.json").write_text(
             json.dumps(index, ensure_ascii=False, indent=2),
             encoding="utf-8")
+
+        # 7. 生成端自检（archify "validate after every edit" 的等价物）：
+        #    写出的分片必须通过 schema 契约，否则视为生成器 bug，不静默出劣质产物
+        errors = []
+        if failed_domains:
+            errors.append(f"以下域分片写入失败: {', '.join(sorted(failed_domains))}")
+        errors.extend(validate_manifest_dir(self.manifest_dir))
+        if errors:
+            raise RuntimeError(
+                "DocManifest 分片 schema 自检失败（生成器 bug，请检查 "
+                "doctypes.py 与 schemas/ 是否同步）:\n  " + "\n  ".join(errors[:20]))
 
     def _write_domain_file(self, domain: DomainDoc) -> dict:
         """写入单个域文件，返回 index 条目"""
