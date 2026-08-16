@@ -207,3 +207,39 @@ delta 依赖"两份 manifest 都被保留"的使用习惯（CI 按 commit 归档
 ### 8.5 价值定位：治理三角收口
 
 与 arch-guard（静态规则）、impact-guard（预测影响）形成三角：**规则 → 预测 → 实证**。"这次重构只动了 adapter 层"从口头承诺变成 receipt 事实。
+
+---
+
+## 9. 再对比 archify（2026-08-16，基于双方最新实现）
+
+> **背景**：初次对比（本文档 §1，2026-08-14）驱动了 #1–#4 全部改造。两天后双方均大幅演进（doc-gen 四件套 + impact v1/v1.1/v2 + 联邦化起步；archify v2.13→v2.14 + DeepSeek Harness 集成 + 25 commit），重验当初判断。
+
+### 9.1 初次借鉴点收口状态：5/5 全部落地，无一后悔
+
+| 借鉴点 | 当初判断 | 收口状态 |
+|---|---|---|
+| #1 schema 契约 + 版本锁定 | 🟢 强烈建议 | 超越：13 分片（5 必选 + 8 可选）vs archify 7 schema，同为 const 锁定 |
+| #2 诚实退出码 + receipt | 🟢 强烈建议 | 更广：archify receipt 仅 validate/deliver；doc-gen 贯穿 11 阶段 + 首页可视化 |
+| #3 evidence 钉版本 | 🟡 文件级先做 | L1+L2 完整（#L 行锚点）；archify blob 校验防伪造——doc-gen 扫描即真相不需要，判断经住检验 |
+| #4 delta | 🟡 评估后做 | D1–D3 全落地；SVG 三视图 vs Mermaid 焦点图是渲染栈约束下的合理分叉（§8.3 已留痕） |
+| #5 不做清单 | 🔴 | 维持不做，无一后悔 |
+
+"schema 对现实建模而非愿望建模"等决策原则在 13 分片扩展中零翻车。
+
+### 9.2 演进方向分道扬镳：竞品定性彻底失效
+
+- **archify 纵深**：视觉打磨（viewport/图例）、分发（DSH bundle）、发布稳定性——把"单张图精雕"做到极致
+- **doc-gen 横向**：治理生态（arch-guard/impact-guard/delta 三角）、联邦化（arch-hawkeye）、业务维度（business-context）——把"项目→组织级架构治理"铺开
+
+**终局定性**：archify 是仪器（instrument），doc-gen+鹰眼是观测站（observatory）。§1.2 的"互补范式"判断是整个改造的种子，两天后双方背向演进证实了它。
+
+### 9.3 archify 新演化的两个可借鉴点（按需，未立项）
+
+1. **zero-regression 发布物锁定**：测试锁定 FIXED_POINT commit + git blob SHA（tarball/package 双 blob），发布产物字节级可复现。doc-gen golden test 锁 schema 结构不锁发布物；若 awesome-rules 插件包（7 工具清单）需要防漂移，可加"清单 blob 锁定"测试。属 CI 加固项。
+2. **DSH 集成的边界声明风格**：Skill-only 最小 bundle + 明确声明"不注册原生工具/网络/凭证/hooks"。awesome-rules 多工具插件目录是同命题更完整的解，但其"声明不做什么"的边界文档风格值得借鉴。
+
+### 9.4 维持不可借鉴
+
+自研 SVG 渲染器、几何校验引擎（archify 核心资产，服务"作者手写 IR"范式）——doc-gen 无此问题域；Mermaid 着色天花板已由 D3 焦点图形态消化。
+
+> **一句话**：archify 教会 doc-gen"可信"（契约/退出码/钉版本），doc-gen 用它建了 archify 没有的东西（治理三角 + 联邦观测）。师承已消化，赛道已分岔，后续仅跟踪 zero-regression 式工程加固技巧。
