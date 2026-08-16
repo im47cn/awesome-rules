@@ -180,6 +180,50 @@
               }
             }
           }
+        },
+        "cacheKeys": {
+          "type": "array",
+          "description": "Redis key 声明（读写共享），鹰眼跨项目共享缓存耦合边对齐（additive）",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key",
+              "via"
+            ],
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "via": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "schedules": {
+          "type": "array",
+          "description": "定时任务资产（@XxlJob/@Scheduled），无跨项目边语义，仅资产清单（additive）",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "handler"
+            ],
+            "properties": {
+              "handler": {
+                "type": "string",
+                "minLength": 1
+              },
+              "cron": {
+                "type": "string"
+              },
+              "via": {
+                "type": "string"
+              }
+            }
+          }
         }
       }
     },

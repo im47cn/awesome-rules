@@ -348,6 +348,15 @@ class ManifestWriter:
                  "framework": m.framework, "via": m.via}
                 for m in c.mqChannels
             ]
+        if c.cacheKeys:
+            d["cacheKeys"] = [
+                {"key": k.key, "via": k.via} for k in c.cacheKeys
+            ]
+        if c.schedules:
+            d["schedules"] = [
+                {"handler": j.handler, "cron": j.cron, "via": j.via}
+                for j in c.schedules
+            ]
         return d
 
     @staticmethod

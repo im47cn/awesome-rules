@@ -72,7 +72,13 @@ doc-manifest/ 分片目录 ──── 交换物 ────────▶ �
   channel 精确匹配（topic 全局命名空间）；依赖方向与 HTTP 统一（订阅者 → 发布者）
 - DB `confirmed`（`type: "db"`）：同名表出现在 ≥2 个项目的 `database.json` →
   共享存储耦合边（from/to 字典序稳定，无向单边；evidence 含双方来源 DDL/PO）
-- `inferred`（AH-C04）：HTTP 路由未命中、`@FeignClient(name)` 近似项目 id 的推断边——不进入阻断级结论
+- 缓存：`component.cacheKeys` 的 key 字面量**相等** → `confirmed` 共享 key 边；
+  以 `:` 分段**前缀包含**（运行时拼接 key 的静态证据本就是模式）→ `inferred`
+  同 key 空间边。`type: "cache"`，无向单边（字典序）
+- 定时：`component.schedules`（`@XxlJob` handler / `@Scheduled` cron）仅资产
+  统计（`stats.jobAssets`），**无跨项目边**——跨项目任务链配置在 xxl-job 调度
+  中心，代码不可见，不造假边
+- `inferred`（AH-C04）：HTTP 路由未命中、`@FeignClient(name)` 近似项目 id 的推断边（及缓存前缀边）——不进入阻断级结论
 - 项目内调用（from == to）排除并计入 `internalCalls`
 
 ## 5. businessContext 扩展块（业务维度）

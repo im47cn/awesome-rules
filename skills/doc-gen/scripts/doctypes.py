@@ -33,6 +33,7 @@ SUFFIX_TYPE_MAP_ORDERED = [
     ("Controller",      "adapter",      "controller"),
     ("Consumer",        "adapter",      "consumer"),
     ("Scheduler",       "adapter",      "scheduler"),
+    ("Job",             "adapter",      "scheduler"),  # xxl-job handler 类
     # ── Client 层 ──（COLA: ServiceI/CO/Cmd + GTSP: Inter/DTO/Command）
     ("ServiceI",        "client",       "serviceInterface"),
     ("Inter",           "client",       "feignInterface"),
@@ -166,6 +167,25 @@ class MqChannelDoc:
 
 
 @dataclass
+class CacheKeyDoc:
+    """缓存 key 声明（读写共享），供鹰眼跨项目共享缓存耦合边对齐"""
+    key: str           # key 字面量/前缀模式（运行时拼接的静态证据本就是模式）
+    via: str           # redisTemplate.get / @Cacheable / ...
+
+
+@dataclass
+class ScheduleDoc:
+    """定时任务资产（xxl-job handler / Spring @Scheduled）。
+
+    注：定时任务无强跨项目边语义（跨项目任务链配置在调度中心，代码不可见），
+    仅作资产清单供全景观测（C02 站点）与项目内影响链（deps BFS 已覆盖）。
+    """
+    handler: str       # handler 名或方法名
+    cron: str = ""     # @Scheduled cron（@XxlJob 的 cron 在调度中心配置，为空）
+    via: str = ""      # XxlJob / Scheduled
+
+
+@dataclass
 class ComponentDoc:
     type: str                        # controller, executor, entity, repository, etc.
     className: str
@@ -184,6 +204,8 @@ class ComponentDoc:
     deprecated: bool = False            # 类级 @Deprecated（整个组件废弃）
     deps: list = field(default_factory=list)  # 项目内依赖边（import 的本项目 qn），供 /impact/ 前端 BFS
     mqChannels: list = field(default_factory=list)  # list[MqChannelDoc]，MQ producer/consumer 声明
+    cacheKeys: list = field(default_factory=list)   # list[CacheKeyDoc]，Redis key 声明
+    schedules: list = field(default_factory=list)   # list[ScheduleDoc]，定时任务资产
 
 
 

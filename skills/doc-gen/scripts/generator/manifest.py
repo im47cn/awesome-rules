@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from doctypes import (
-    DocManifest, DomainDoc, LayerDoc, ComponentDoc, FieldDoc, EndpointDoc, MqChannelDoc,
+    DocManifest, DomainDoc, LayerDoc, ComponentDoc, FieldDoc, EndpointDoc, MqChannelDoc, CacheKeyDoc, ScheduleDoc,
     AggregateDoc, DiagramSet, CrossDomainDep, TableDoc, TableColumnDoc, TableIndexDoc,
     FileInfo,
     SUFFIX_TYPE_MAP_ORDERED, LAYER_PATTERNS, CONTROLLER_ANNOTATIONS, HTTP_MAPPING_ANNOTATIONS,
@@ -241,15 +241,17 @@ class ManifestGenerator:
         if comp_type in ("controller", "feignInterface") and "annotations" in file_info:
             comp.endpoints = self._extract_endpoints(file_info)
 
-        # 提取 MQ 通道声明（consumer 订阅注解 + producer 发送调用，鹰眼 MQ 边对齐）
-        if comp_type in self.MQ_CHANNEL_TYPES:
+        # 提取运行时证据（MQ 通道 / Redis key / 定时任务，鹰眼跨项目链路与资产观测）
+        if comp_type in self.EVIDENCE_TYPES:
             comp.mqChannels = self._extract_mq_channels(file_info)
+            comp.cacheKeys = self._extract_cache_keys(file_info)
+            comp.schedules = self._extract_schedules(file_info)
 
         return comp
 
-    # MQ 通道声明的提取范围：订阅在 adapter/consumer，发送在应用编排与防腐层
-    MQ_CHANNEL_TYPES = frozenset({
-        "consumer", "executor", "appService", "gateway", "gatewayImpl",
+    # 运行时证据提取范围（MQ/缓存/定时）：订阅在 adapter/consumer，发送与缓存在应用编排/防腐层
+    EVIDENCE_TYPES = frozenset({
+        "consumer", "scheduler", "executor", "appService", "gateway", "gatewayImpl",
         "domainService", "handler", "manager",
     })
 
@@ -304,6 +306,69 @@ class ManifestGenerator:
                     role="producer", channel=m.group(3),
                     framework=framework, via=m.group(2)))
         return channels
+
+    # Redis key：redisTemplate 系调用字面量 + Spring Cache 注解
+    CACHE_KEY_CALL_RE = re.compile(
+        r'\b(?:redisTemplate|stringRedisTemplate)\s*\.\s*'
+        r'(?:opsFor\w+\(\)\s*\.\s*)?'
+        r'(?:get|set|put|delete|hasKey|increment|expire|boundValueOps)\s*'
+        r'\(\s*"([^"]+)"'
+    )
+    CACHE_ANNO_RE = re.compile(
+        r'@Cache(?:able|Evict|Put|AllEntries)\s*\([^)]*?'
+        r'(?:cacheNames|value)\s*=\s*(?:\{\s*)?"([^"]+)"'
+    )
+
+    def _extract_cache_keys(self, file_info: FileInfo) -> list[CacheKeyDoc]:
+        """提取 Redis key 声明（跨项目共享缓存耦合证据，鹰眼 cache 边对齐）"""
+        source_path = file_info.get("filePath", "")
+        java_file = self.root_path / source_path
+        if not java_file.exists():
+            return []
+        try:
+            raw = java_file.read_text(encoding="utf-8")
+        except Exception:
+            return []
+        keys, seen = [], set()
+        for rx, via in ((self.CACHE_KEY_CALL_RE, "redisTemplate"),
+                        (self.CACHE_ANNO_RE, "@Cacheable")):
+            for m in rx.finditer(raw):
+                key = m.group(1)
+                if key and key not in seen:
+                    seen.add(key)
+                    keys.append(CacheKeyDoc(key=key, via=via))
+        return keys
+
+    # 定时任务：@XxlJob("handler") + @Scheduled(cron="...")
+    XXL_JOB_RE = re.compile(r'@XxlJob\s*\(\s*"([^"]+)"')
+    SCHEDULED_RE = re.compile(
+        r'@Scheduled\s*\([^)]*?\bcron\s*=\s*"([^"]+)"')
+
+    def _extract_schedules(self, file_info: FileInfo) -> list[ScheduleDoc]:
+        """提取定时任务资产（无跨项目边语义，仅资产清单，见 ScheduleDoc 注释）"""
+        source_path = file_info.get("filePath", "")
+        java_file = self.root_path / source_path
+        if not java_file.exists():
+            return []
+        try:
+            raw = java_file.read_text(encoding="utf-8")
+        except Exception:
+            return []
+        jobs, seen = [], set()
+        for m in self.XXL_JOB_RE.finditer(raw):
+            if m.group(1) not in seen:
+                seen.add(m.group(1))
+                jobs.append(ScheduleDoc(handler=m.group(1), via="XxlJob"))
+        for m in self.SCHEDULED_RE.finditer(raw):
+            # @Scheduled 无 name 属性，handler 取注解后首个方法签名的方法名
+            after = raw[m.end():m.end() + 200]
+            sig = re.search(r'(?:public|protected|private)\s+[\w<>\[\], ]+?\s+(\w+)\s*\(', after)
+            handler = sig.group(1) if sig else m.group(1)
+            if handler not in seen:
+                seen.add(handler)
+                jobs.append(ScheduleDoc(handler=handler, cron=m.group(1),
+                                        via="Scheduled"))
+        return jobs
 
     def _extract_endpoints(self, file_info: FileInfo) -> list[EndpointDoc]:
         """从 Controller 文件中提取 REST 端点 — 解析方法级 HTTP 注解"""

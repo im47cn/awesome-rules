@@ -40,8 +40,14 @@ Feign 调用签名 × Controller 路由签名对齐（不靠域名猜测），�
   发布调用（`xxxTemplate.syncSend/send/convertAndSend`），topic 精确匹配
 - DB 边（`type: "db"`）：同名表跨项目交集 = 共享存储耦合（最隐蔽的耦合——
   无接口签名可对齐）；impact 支持表名输入（`--entity t_order` → 共享方列表）
+- 缓存边（`type: "cache"`）：`cacheKeys` 声明对齐——key 字面量相等 confirmed /
+  `:` 分段前缀包含 inferred（同 key 空间），Redis 共享缓存耦合
+- 定时资产：`schedules`（`@XxlJob`/`@Scheduled`）统计入 `stats.jobAssets`，
+  不造假跨项目边（调度中心依赖代码不可见）
 - `inferred`：路由未命中但 `@FeignClient(name)` 近似项目 id 的推断边（低置信度）
 - 项目内调用自动排除；`diagrams.json.crossProjectEdges` 同步供前端渲染
+
+> GTSP 5 通道全覆盖：HTTP ✅ MQ ✅ DB ✅ 缓存 ✅ 定时（资产形态）✅
 
 **跨项目变更影响分析（Phase 2 ✅，AH-C03）**：
 

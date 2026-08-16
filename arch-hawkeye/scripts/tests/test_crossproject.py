@@ -289,3 +289,69 @@ def test_db_no_overlap_no_edge(tmp_path):
     ]
     result = build_cross_project_edges(projects)
     assert [e for e in result["edges"] if e["type"] == "db"] == []
+
+
+# ── 缓存边 / 定时资产 ─────────────────────────────────────────────────────────
+
+
+def _rt_project(tmp_path, pid, cache_keys, schedules=None):
+    mdir = tmp_path / pid / "doc-manifest"
+    (mdir / "domains").mkdir(parents=True)
+    comp = {"type": "executor", "className": "Exe", "qualifiedName": f"com.{pid}.Exe"}
+    if cache_keys:
+        comp["cacheKeys"] = [{"key": k, "via": "redisTemplate"} for k in cache_keys]
+    if schedules:
+        comp["schedules"] = [{"handler": h, "cron": "", "via": "XxlJob"}
+                             for h in schedules]
+    (mdir / "domains" / "demo.json").write_text(json.dumps(
+        {"name": "demo", "layers": {"application": {"components": [comp]}}}),
+        encoding="utf-8")
+    (mdir / "index.json").write_text('{"domains": [{"name": "demo", "componentCount": 1, "layers": ["application"], "file": "domains/demo.json"}]}', encoding="utf-8")
+    return (pid, mdir)
+
+
+def test_cache_equal_key_confirmed_edge(tmp_path):
+    """同 key 字面量 → confirmed cache 边（字典序无向单边）"""
+    projects = [
+        _rt_project(tmp_path, "pa", ["order:detail:v2"]),
+        _rt_project(tmp_path, "pb", ["order:detail:v2"]),
+    ]
+    result = build_cross_project_edges(projects)
+    cache = [e for e in result["edges"] if e["type"] == "cache"]
+    assert len(cache) == 1
+    assert cache[0]["confidence"] == "confirmed"
+    assert cache[0]["from"] == "pa" and cache[0]["to"] == "pb"
+    assert result["stats"]["cacheEdges"] == 1
+
+
+def test_cache_prefix_space_inferred_edge(tmp_path):
+    """前缀空间共享（运行时拼接 key 的模式证据）→ inferred cache 边"""
+    projects = [
+        _rt_project(tmp_path, "pa", ["order:detail:"]),
+        _rt_project(tmp_path, "pb", ["order:detail:v2"]),
+    ]
+    result = build_cross_project_edges(projects)
+    cache = [e for e in result["edges"] if e["type"] == "cache"]
+    assert len(cache) == 1
+    assert cache[0]["confidence"] == "inferred"
+    assert result["stats"]["cacheInferred"] == 1
+
+
+def test_cache_no_overlap_no_edge(tmp_path):
+    projects = [
+        _rt_project(tmp_path, "pa", ["order:"]),
+        _rt_project(tmp_path, "pb", ["user:"]),
+    ]
+    result = build_cross_project_edges(projects)
+    assert [e for e in result["edges"] if e["type"] == "cache"] == []
+
+
+def test_job_assets_counted_no_edge(tmp_path):
+    """定时任务只统计资产（无跨项目边，调度中心依赖代码不可见不造假边）"""
+    projects = [
+        _rt_project(tmp_path, "pa", [], schedules=["syncJob", "cleanJob"]),
+        _rt_project(tmp_path, "pb", ["k"]),
+    ]
+    result = build_cross_project_edges(projects)
+    assert result["stats"]["jobAssets"] == {"pa": 2}
+    assert not any(e["type"] == "job" for e in result["edges"])

@@ -16,6 +16,11 @@
   DB   confirmed — 同名表出现在 ≥2 个项目的 database.json → 共享存储耦合边
               （type "db"，from/to 字典序稳定，无向语义单边；改表结构双方互相
               影响，是最隐蔽的耦合——无接口签名可对齐）
+  缓存 — component.cacheKeys：key 字面量相等 → confirmed 共享 key 边；
+              以 ":" 分段的前缀包含（运行时拼接 key 的静态证据本就是模式）→
+              inferred（同一 key 空间）。type "cache"，无向单边（字典序）。
+  定时 — component.schedules 仅资产统计（jobAssets），无跨项目边语义
+              （跨项目任务链配置在 xxl-job 调度中心，代码不可见，不造假边）。
   项目内调用（from == to）不算跨项目边，计入 internalCalls。
 """
 
@@ -222,6 +227,13 @@ def build_cross_project_edges(projects: list) -> dict:
     db_edges, shared_tables = _build_db_edges(projects)
     edges.extend(db_edges)
 
+    # ── 缓存边：key 相等 confirmed / 前缀空间共享 inferred ──
+    cache_edges, cache_inferred = _build_cache_edges(projects)
+    edges.extend(cache_edges)
+
+    # ── 定时任务资产统计（无跨项目边，见模块 docstring）──
+    job_assets = _count_job_assets(projects)
+
     edges.sort(key=lambda e: (e["confidence"] != "confirmed", e["from"], e["to"]))
     confirmed = sum(1 for e in edges if e["confidence"] == "confirmed")
     return {
@@ -230,14 +242,108 @@ def build_cross_project_edges(projects: list) -> dict:
         "stats": {
             "confirmed": confirmed,
             "inferred": len(edges) - confirmed,
-            "httpEdges": confirmed - mq_edges - len(db_edges),
+            "httpEdges": confirmed - mq_edges - len(db_edges) - (len(cache_edges) - cache_inferred),
             "mqEdges": mq_edges,
             "dbEdges": len(db_edges),
+            "cacheEdges": len(cache_edges),
+            "cacheInferred": cache_inferred,
             "sharedTables": shared_tables,
+            "jobAssets": job_assets,
             "internalCalls": internal_calls,
             "unmatchedConsumers": unmatched,
         },
     }
+
+
+def _key_prefix_overlap(a: str, b: str) -> bool:
+    """同 key 空间：以 ':' 分段的一方是另一方的前缀（order:detail: 是 order:detail:v2 的模式）
+
+    尾冒号先规范化（"order:" 分段会产生空段，直接拼接会得出 "::" 假阴性）。
+    相等 key 由 confirmed 分支处理，此处只判「不同 key 的前缀包含」。
+    """
+    a, b = a.rstrip(":"), b.rstrip(":")
+    sa, sb = a.split(":"), b.split(":")
+    n = min(len(sa), len(sb))
+    return n < max(len(sa), len(sb)) and sa[:n] == sb[:n]
+
+
+def _build_cache_edges(projects: list) -> tuple:
+    """Redis key 跨项目共享：字面量相等 confirmed / 前缀空间共享 inferred
+
+    key 无读写方向（双方对同一 key get/set 互见），无向单边（字典序稳定）。
+    """
+    key_owners: dict = {}   # key -> [(pid, comp_qn, via)]
+    for pid, mdir in projects:
+        for domain in _load_domains(mdir):
+            for lname, layer in (domain.get("layers") or {}).items():
+                for comp in layer.get("components", []):
+                    for ck in comp.get("cacheKeys", []):
+                        key = ck.get("key", "")
+                        if key:
+                            key_owners.setdefault(key, []).append(
+                                (pid, comp.get("qualifiedName")
+                                        or comp.get("className", ""), ck.get("via", "")))
+
+    edges = []
+    seen_pairs = set()
+
+    def _edge(lo, hi, confidence, ka, kb, pa, pb, va, vb):
+        edges.append({
+            "from": lo, "to": hi,
+            "type": "cache",
+            "confidence": confidence,
+            "evidence": {
+                "keys": [ka, kb],
+                "via": {pa: va, pb: vb},
+            },
+        })
+
+    # 1. 同 key 跨项目 → confirmed（owners 同列表内配对）
+    for k, owners in key_owners.items():
+        pids = sorted({p for p, _, _ in owners})
+        for i in range(len(pids)):
+            for j in range(i + 1, len(pids)):
+                pa, pb = pids[i], pids[j]
+                pair = (pa, pb, k, k)
+                if pair in seen_pairs:
+                    continue
+                seen_pairs.add(pair)
+                _edge(pa, pb, "confirmed", k, k, pa, pb,
+                      key_owners[k][0][2], key_owners[k][-1][2])
+
+    # 2. 前缀空间重叠的不同 key → inferred（跨列表配对）
+    keys = sorted(key_owners)
+    for i, ka in enumerate(keys):
+        for kb in keys[i + 1:]:
+            if not _key_prefix_overlap(ka, kb):
+                continue
+            for pa, _, va in key_owners[ka]:
+                for pb, _, vb in key_owners[kb]:
+                    if pa == pb:
+                        continue
+                    lo, hi = sorted((pa, pb))
+                    pair = (lo, hi, ka, kb)
+                    if pair in seen_pairs:
+                        continue
+                    seen_pairs.add(pair)
+                    _edge(lo, hi, "inferred", ka, kb, pa, pb, va, vb)
+
+    inferred = sum(1 for e in edges if e["confidence"] == "inferred")
+    return edges, inferred
+
+
+def _count_job_assets(projects: list) -> dict:
+    """统计各项目定时任务资产（@XxlJob/@Scheduled 清单）"""
+    assets: dict = {}
+    for pid, mdir in projects:
+        n = 0
+        for domain in _load_domains(mdir):
+            for lname, layer in (domain.get("layers") or {}).items():
+                for comp in layer.get("components", []):
+                    n += len(comp.get("schedules", []))
+        if n:
+            assets[pid] = n
+    return assets
 
 
 def _build_db_edges(projects: list) -> tuple:
