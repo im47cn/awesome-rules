@@ -10,7 +10,7 @@ description: >
 
 # 变更影响分析 (impact-guard)
 
-> **状态**：✅ v1 已实现（quick/graph 双模式 + 5 通道边界 + 四级分级，43 测试 / 覆盖率 95%）。技术设计见 [`DESIGN.md`](DESIGN.md)、完整论证见[评审稿](../../docs/design/impact-guard-design.md)。
+> **状态**：✅ v1 + v2 已实现（v2：方法级 diff + 跨服务契约传播，56 测试 / 覆盖率 94%）。技术设计见 [`DESIGN.md`](DESIGN.md)、完整论证见[评审稿](../../docs/design/impact-guard-design.md)。
 
 ## 定位
 

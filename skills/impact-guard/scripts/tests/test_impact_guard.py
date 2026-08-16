@@ -77,6 +77,37 @@ class TestPropagation:
 # ── 变更点提取 ────────────────────────────────────────────────────────────────
 
 
+class TestDiffHunks:
+    def test_parse_hunks_head_side(self):
+        from change_extractor import parse_diff_hunks
+        d = parse_diff_hunks(
+            "diff --git a/A.java b/A.java\n"
+            "@@ -5,2 +6,3 @@\n+new line\n"
+            "@@ -20 +25,0 @@\n")
+        assert d["A.java"]["hunks"] == [(6, 8)]  # count=0 的纯删除锚点不计
+
+    def test_parse_change_types(self):
+        from change_extractor import parse_diff_hunks
+        d = parse_diff_hunks(
+            "diff --git a/N.java b/N.java\nnew file mode 100644\n@@ -0,0 +1,2 @@\n+x\n"
+            "diff --git a/D.java b/D.java\ndeleted file mode 100644\n@@ -1,2 +0,0 @@\n")
+        assert d["N.java"]["change_type"] == "added"
+        assert d["D.java"]["change_type"] == "deleted"
+
+    def test_match_methods_interval_approx(self):
+        from change_extractor import match_changed_methods
+        methods = [{"name": "a", "line": 10}, {"name": "b", "line": 20}]
+        assert match_changed_methods([(12, 15)], methods) == ["a"]
+        assert match_changed_methods([(25, 99)], methods) == ["b"]  # 尾方法到文件尾
+        # 跨区间边界（a 尾行 19 / b 首行 20）→ 区间近似的固有重叠，两方法都命中
+        assert match_changed_methods([(19, 21)], methods) == ["a", "b"]
+        assert match_changed_methods([(5, 8)], methods) == []
+
+    def test_match_methods_ignores_no_line(self):
+        from change_extractor import match_changed_methods
+        assert match_changed_methods([(1, 99)], [{"name": "x"}]) == []
+
+
 class TestChangeExtractor:
     def test_explicit_qualified_name(self, ddd_sample, scanned):
         ex = ChangeExtractor(str(ddd_sample), {})
@@ -102,16 +133,40 @@ class TestChangeExtractor:
         assert pts == []
 
     def test_extract_from_diff_via_git(self, ddd_sample, scanned, monkeypatch):
-        """git diff 路径（monkeypatch _git_lines，不依赖真实 git）"""
+        """git diff -U0 路径：hunk 解析 + 方法级变更（v2）"""
         import change_extractor as ce
-        monkeypatch.setattr(ce, "_git_lines", lambda *a: [
-            "M\tsrc/main/java/com/acme/demo/domain/order/OrderAgg.java",
-            "D\tsrc/main/java/com/acme/demo/infra/util/RedisUtil.java",
-            "M\tpom.xml",
-        ])
+        # OrderController.java 的 create() 在第 18 行 → hunk +18,3 命中 create
+        diff = """diff --git a/src/main/java/com/acme/demo/adapter/web/OrderController.java b/src/main/java/com/acme/demo/adapter/web/OrderController.java
+--- a/src/.../OrderController.java
++++ b/src/.../OrderController.java
+@@ -17,3 +18,3 @@
+     public OrderCreateCO create() {
+-        return null;
++        return orderCreateCmdExe.execute();
+diff --git a/src/main/java/com/acme/demo/infra/util/RedisUtil.java b/src/main/java/com/acme/demo/infra/util/RedisUtil.java
+deleted file mode 100644
+@@ -10,2 +0,0 @@
+-public class RedisUtil {
+diff --git a/pom.xml b/pom.xml
+@@ -1 +1 @@
+-<old>
++<new>
+"""
+        monkeypatch.setattr(ce, "_git_text", lambda *a: diff)
         pts = ChangeExtractor(str(ddd_sample), {}).extract_from_diff(
             "origin/master...HEAD", scanned.infos)
-        assert [p.change_type for p in pts] == ["modified", "deleted"]
+        by_qn = {p.qualified_name: p for p in pts}
+        ctrl = by_qn[QN["ctrl"]]
+        assert ctrl.change_type == "modified"
+        assert "create" in ctrl.changed_methods          # hunk +18,3 命中 create()
+        assert by_qn["com.acme.demo.infra.util.RedisUtil"].change_type == "deleted"
+        assert all(p.file_path != "pom.xml" for p in pts)
+
+    def test_git_failure_returns_none_no_crash(self, ddd_sample, monkeypatch):
+        """git 命令失败 → _git_text 返回 None → 空列表不误报"""
+        import change_extractor as ce
+        monkeypatch.setattr(ce, "_git_text", lambda *a: None)
+        assert ChangeExtractor(str(ddd_sample), {}).extract_from_diff("x", {}) == []
 
     def test_git_failure_returns_empty(self, ddd_sample, monkeypatch):
         """git 命令失败（CalledProcessError）→ _git_lines 捕获返回 []"""
@@ -250,6 +305,14 @@ class TestGraphTracer:
         cy = build_cypher([QN["agg"]], depth=3)
         assert QN["agg"] in cy and "*1..3" in cy and "CALLS" in cy
 
+    def test_cypher_method_level_v2(self):
+        cy = build_cypher([QN["ctrl"]], depth=2,
+                          changed_methods={QN["ctrl"]: ["create"]})
+        assert f"{QN['ctrl']}.create" in cy      # Class.method 形态
+        assert "v2 方法级" in cy
+        # 不传 methods 时不生成方法级段
+        assert "v2 方法级" not in build_cypher([QN["ctrl"]])
+
     def test_head_sha(self, ddd_sample):
         # fixture 非 git 目录 → None（诚实降级）
         assert current_head(str(ddd_sample)) is None or isinstance(
@@ -259,6 +322,50 @@ class TestGraphTracer:
         from graph_tracer import render_graph_mode
         out = render_graph_mode(str(ddd_sample), [QN["agg"]], 3, False)
         assert "index_status" in out and "query_graph" in out
+
+
+# ── 跨服务契约（v2b）────────────────────────────────────────────────────────
+
+
+class TestCrossService:
+    def test_extract_feign_contract(self, ddd_sample, scanned):
+        from cross_service import extract_feign_contracts
+        info = scanned.infos[QN["feign"]]
+        c = extract_feign_contracts(str(ddd_sample), info)
+        assert c["service"] == "gtsp-pay"
+        assert c["endpoints"] == [{"http_method": "POST",
+                                   "path": "/api/pay/create",
+                                   "java_method": "createPay"}]
+
+    def test_extract_method_level_filter(self, ddd_sample, scanned):
+        from cross_service import extract_feign_contracts
+        info = scanned.infos[QN["feign"]]
+        c = extract_feign_contracts(str(ddd_sample), info, only_methods=["other"])
+        assert c["endpoints"] == []  # 变更方法未命中端点 → 空清单+note
+
+    def test_non_feign_returns_none(self, ddd_sample, scanned):
+        from cross_service import extract_feign_contracts
+        assert extract_feign_contracts(
+            str(ddd_sample), scanned.infos[QN["agg"]]) is None
+
+    def test_cross_service_cypher(self):
+        from cross_service import build_cross_service_cypher
+        cy = build_cross_service_cypher([
+            {"service": "gtsp-pay",
+             "endpoints": [{"http_method": "POST", "path": "/api/pay/create",
+                            "java_method": "x"}]}])
+        assert "/api/pay/create" in cy and "Route" in cy
+        assert build_cross_service_cypher(
+            [{"service": "x", "endpoints": []}]) is None
+
+    def test_cli_json_contains_contracts(self, ddd_sample):
+        import subprocess
+        r = subprocess.run(
+            ["python3", str(Path(__file__).parent.parent / "impact_check.py"),
+             str(ddd_sample), "--changed", QN["feign"], "--format", "json"],
+            capture_output=True, text=True, timeout=120)
+        data = json.loads(r.stdout)
+        assert data["cross_service_contracts"][QN["feign"]]["service"] == "gtsp-pay"
 
 
 # ── CLI 端到端 ────────────────────────────────────────────────────────────────
@@ -332,3 +439,17 @@ class TestCli:
 
     def test_no_input_in_process(self, ddd_sample, monkeypatch):
         assert self._main(monkeypatch, str(ddd_sample)) == 2
+
+    def test_graph_mode_cross_service_in_process(self, ddd_sample, monkeypatch,
+                                                 capsys):
+        """graph 模式：Feign 变更点 → 输出含跨服务 Cypher 段（v2b）"""
+        self._main(monkeypatch, str(ddd_sample), "--changed", QN["feign"],
+                   "--mode", "graph")
+        out = capsys.readouterr().out
+        assert "跨服务传播" in out and "/api/pay/create" in out
+
+    def test_graph_mode_no_feign_omits_cross_section(self, ddd_sample,
+                                                     monkeypatch, capsys):
+        self._main(monkeypatch, str(ddd_sample), "--changed", QN["agg"],
+                   "--mode", "graph")
+        assert "跨服务传播" not in capsys.readouterr().out

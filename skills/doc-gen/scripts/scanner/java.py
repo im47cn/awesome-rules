@@ -102,13 +102,15 @@ class JavaScanner:
         # 提取 import
         imports = [m.group(1) for m in self.IMPORT_RE.finditer(content_clean)]
 
-        # 提取方法（仅 public/protected）
+        # 提取方法（仅 public/protected；line 为原文行号——_strip_comments
+        # 等长替换保证 content_clean 的 offset 可直接换算行号）
         methods = []
         for m in self.METHOD_RE.finditer(content_clean):
             methods.append({
                 "returnType": m.group(1),
                 "name": m.group(2),
                 "params": m.group(3),
+                "line": content_clean[:m.start()].count('\n') + 1,
                 "deprecated": self._deprecated_above(content_clean, m.start()),
             })
 
@@ -177,36 +179,49 @@ class JavaScanner:
 
     @staticmethod
     def _strip_comments(content: str) -> str:
-        """移除 Java 注释，保留字符串字面量内的注释标记。
+        """移除 Java 注释语义，保留字符串字面量内的注释标记。
 
-        采用状态机方式：在双引号字符串内部跳过注释匹配，
-        避免将字符串内容误判为注释。同时保留废弃语义：
-        含 @deprecated 的 Javadoc/块注释转写为 @Deprecated 标记，
-        使注解提取与回看检测能统一识别 @Deprecated 注解与
-        @deprecated Javadoc 标签两种写法。
+        **等长替换**：注释字符原地替换为空格（换行保留），保证
+        len(result) == len(content) 且换行位置不变——正则匹配的 offset
+        可直接映射回原文行号（v2 方法级 diff / 行级 evidence 的基石）。
+        同时保留废弃语义：块注释内的 @deprecated（11 字符）原地等长
+        转写为 @Deprecated（恰好 11 字符），使注解提取与回看检测能统一
+        识别 @Deprecated 注解与 @deprecated Javadoc 标签两种写法。
         """
         result: list[str] = []
         i = 0
         n = len(content)
         while i < n:
-            # 块注释 /* ... */
+            # 块注释 /* ... */ → 空格（保留 \n；@deprecated 等长转写）
             if i + 1 < n and content[i] == '/' and content[i + 1] == '*':
                 end = content.find('*/', i + 2)
                 if end >= 0:
                     block = content[i + 2:end]
-                    # 含 @deprecated 标签的转写为 @Deprecated（保留废弃语义）
-                    if re.search(r'@deprecated\b', block, re.IGNORECASE):
-                        result.append('@Deprecated ')
+                    replaced = re.sub(r'@deprecated\b', '@Deprecated',
+                                      block, flags=re.IGNORECASE)
+                    # 等长：边界 /* 与 */ → 2 空格；块内 \n 保留、其余→空格，
+                    # 唯独转写出的 @Deprecated 标记（与 @deprecated 等长）原样保留
+                    result.append('  ')
+                    for part in re.split(r'(@Deprecated)', replaced):
+                        if part == '@Deprecated':
+                            result.append(part)
+                        else:
+                            result.append(''.join('\n' if c == '\n' else ' '
+                                                   for c in part))
+                    result.append('  ')
                     i = end + 2
                 else:
-                    i = n  # 未闭合，跳过剩余
-            # 行注释 // ... 到行尾
+                    # 未闭合：剩余全部视为注释（等长空格化）
+                    while i < n:
+                        result.append('\n' if content[i] == '\n' else ' ')
+                        i += 1
+            # 行注释 // ... 到行尾 → 空格（不含 \n）
             elif i + 1 < n and content[i] == '/' and content[i + 1] == '/':
-                end = content.find('\n', i)
-                if end >= 0:
-                    i = end
-                else:
-                    i = n  # 未闭合，跳过剩余
+                result.append('  ')
+                i += 2
+                while i < n and content[i] != '\n':
+                    result.append(' ')
+                    i += 1
             # 字符串字面量：保留内容（不处理内部注释标记）
             elif content[i] == '"':
                 result.append('"')

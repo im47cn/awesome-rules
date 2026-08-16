@@ -19,6 +19,7 @@ def render_json(report, tier: int = 1) -> str:
         "tier": tier,
         "level": report.level,
         "cross_service": report.cross_service,
+        "cross_service_contracts": report.cross_service_contracts,
         "warnings": report.warnings,
         "changes": [{
             "qualified_name": rc.change.qualified_name,
@@ -26,6 +27,7 @@ def render_json(report, tier: int = 1) -> str:
             "layer": rc.change.layer,
             "component_type": rc.change.component_type,
             "change_type": rc.change.change_type,
+            "changed_methods": rc.change.changed_methods,
             "is_entry": rc.is_entry,
             "level": rc.level,
             "reasons": rc.reasons,
@@ -50,8 +52,9 @@ def render_text(report, tier: int = 1) -> str:
         c = rc.change
         icon = LEVEL_ICONS[rc.level]
         entry_mark = " · 入口组件" if rc.is_entry else ""
+        methods_mark = f" · 方法: {', '.join(c.changed_methods)}" if c.changed_methods else ""
         lines.append(f"{icon} {c.qualified_name}"
-                     f"（{c.layer}/{c.component_type} · {c.change_type}{entry_mark}）")
+                     f"（{c.layer}/{c.component_type} · {c.change_type}{entry_mark}{methods_mark}）")
         for r in rc.reasons:
             lines.append(f"    - {r}")
         if rc.impacts:
@@ -70,6 +73,11 @@ def render_text(report, tier: int = 1) -> str:
         lines.append("")
     for w in report.warnings:
         lines.append(w)
+    for qn, c in report.cross_service_contracts.items():
+        eps = ", ".join(f"{e['http_method']} {e['path']}"
+                        for e in c.get("endpoints", []))
+        lines.append(f"🔗 跨服务契约: {_short(qn)} → {c['service']}"
+                     + (f"（{eps}）" if eps else ""))
     return "\n".join(lines) + "\n"
 
 

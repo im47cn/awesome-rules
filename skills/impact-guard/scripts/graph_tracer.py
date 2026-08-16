@@ -20,11 +20,33 @@ def current_head(project_root: str) -> str | None:
         return None
 
 
-def build_cypher(change_qns: list[str], depth: int = 3) -> str:
-    """生成 inbound caller 链查询（变更点 ← 调用方，1..depth 跳）。"""
+def build_cypher(change_qns: list[str], depth: int = 3,
+                 changed_methods: dict[str, list[str]] | None = None) -> str:
+    """生成 inbound caller 链查询（变更点 ← 调用方，1..depth 跳）。
+
+    v2 方法级：变更点含 changed_methods 时，生成 Class.method 形态的
+    方法级查询（图谱 Function 节点），证据链精确到调用行。
+    """
     qn_list = ", ".join(f'"{q}"' for q in change_qns)
-    return f"""// impact-guard Tier 2：变更点 inbound caller 链（方法级证据）
-// 变更点: {qn_list}
+    method_qns = []
+    for qn, methods in (changed_methods or {}).items():
+        method_qns.extend(f"{qn}.{m}" for m in methods)
+    method_clause = ""
+    if method_qns:
+        mq = ", ".join(f'"{m}"' for m in method_qns)
+        method_clause = f"""
+// ── v2 方法级（变更方法 → 精确 caller）──
+MATCH (mf {{qualified_name: {mq}}})
+MATCH (mf)<-[mc:CALLS*1..{depth}]-(mcaller)
+RETURN mf.qualified_name            AS changed_method,
+       mcaller.qualified_name       AS caller,
+       length(mc)                   AS hops,
+       [r IN mc | r.line]           AS call_lines
+ORDER BY changed_method, hops, caller
+LIMIT 500;
+"""
+    return f"""// impact-guard Tier 2：变更点 inbound caller 链
+// 变更点（类级）: {qn_list}
 MATCH (changed {{qualified_name: {qn_list}}})
 MATCH (changed)<-[c:CALLS*1..{depth}]-(caller)
 RETURN caller.qualified_name        AS caller,
@@ -32,7 +54,8 @@ RETURN caller.qualified_name        AS caller,
        length(c)                    AS hops,
        [r IN c | r.line]            AS call_lines
 ORDER BY hops, caller
-LIMIT 500;"""
+LIMIT 500;
+{method_clause}"""
 
 
 def build_entry_check_cypher() -> str:
@@ -45,7 +68,8 @@ ORDER BY f.qualified_name;"""
 
 
 def render_graph_mode(project_root: str, change_qns: list[str],
-                      depth: int = 3, skip_reindex: bool = False) -> str:
+                      depth: int = 3, skip_reindex: bool = False,
+                      changed_methods: dict[str, list[str]] | None = None) -> str:
     """--mode graph 输出：新鲜度指引 + Cypher 清单（Agent 执行编排）。"""
     head = current_head(project_root)
     lines = ["## impact-guard Tier 2（graph 模式）", ""]
@@ -61,7 +85,7 @@ def render_graph_mode(project_root: str, change_qns: list[str],
     lines.append("### 2. inbound caller 链（粘贴到 query_graph 执行）")
     lines.append("")
     lines.append("```cypher")
-    lines.append(build_cypher(change_qns, depth))
+    lines.append(build_cypher(change_qns, depth, changed_methods))
     lines.append("```")
     lines.append("")
     lines.append("### 3. 回归范围核查（把第 2 步 caller 列表填入 $AFFECTED）")

@@ -257,8 +257,8 @@ cola-sample 风格  ──对齐──► fixtures/ddd-sample
 | text / json / mermaid 输出 | ✅ |
 | PR + CI `--strict` 门禁（只拦直接） | ✅ |
 | doc-gen `/impact/` 站点内嵌 | ✅ v1.1 |
-| 方法级 git diff 解析 | 📋 v2 |
-| 跨服务传播（cross-repo-intelligence） | 📋 v2 |
+| 方法级 git diff 解析 | ✅ v2（diff -U0 hunk × 方法区间求交；JavaScanner._strip_comments 等长化提供行号基石，区间近似：方法起始行到下一方法前） |
+| 跨服务传播（cross-repo-intelligence） | ✅ v2（Feign 契约提取 → quick 附契约明细 / graph 生成下游 Route 匹配 Cypher） |
 | ~~baseline 噪声冻结~~ | ❌ 放弃（语义不通） |
 
 **实施注记**：

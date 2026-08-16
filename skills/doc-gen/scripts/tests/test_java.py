@@ -112,7 +112,25 @@ def test_strip_char_literal_preserved():
 
 
 def test_strip_unclosed_block():
-    assert JavaScanner._strip_comments("/* 未闭合") == ""
+    # 等长空格化（v2）：未闭合块注释 → 等长空白，长度与换行位置不变
+    assert JavaScanner._strip_comments("/* 未闭合") == " " * len("/* 未闭合")
+
+
+def test_strip_length_preserved():
+    """等长契约：任意输入下 len 与换行位置不变（方法行号的正确性根基）"""
+    src = """package p; // 注释
+/**
+ * @deprecated 旧
+ */
+class A { /* b */ int x; }
+String s = "a // not c";
+// 尾注释
+"""
+    out = JavaScanner._strip_comments(src)
+    assert len(out) == len(src)
+    assert [i for i, c in enumerate(out) if c == "\n"] == \
+           [i for i, c in enumerate(src) if c == "\n"]
+    assert "@Deprecated" in out and "not c" in out
 
 
 def test_strip_line_comment():

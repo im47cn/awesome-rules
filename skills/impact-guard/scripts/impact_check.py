@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from boundary_scanner import CHANNEL_TITLES, init_config
 from change_extractor import ChangeExtractor, load_config
+from cross_service import build_cross_service_cypher, extract_feign_contracts
 from critical_ranker import CriticalRanker, RankedChange
 from graph_tracer import render_graph_mode
 from impact_scanner import ImpactScanner
@@ -98,7 +99,25 @@ def main():
 
     # graph 模式：输出 Tier 2 Cypher（Agent 编排执行），不在此做影响计算
     if args.mode == "graph":
-        print(render_graph_mode(str(root), qns, args.depth, args.skip_reindex))
+        changed_methods = {p.qualified_name: p.changed_methods
+                           for p in points if p.qualified_name and p.changed_methods}
+        print(render_graph_mode(str(root), qns, args.depth, args.skip_reindex,
+                                changed_methods))
+        # 跨服务段（v2b）：变更点中的 Feign 契约 → 下游 Route 匹配 Cypher
+        contracts = []
+        for p in points:
+            info = infos.get(p.qualified_name)
+            if info and any("FeignClient" in a for a in info.get("annotations", [])):
+                c = extract_feign_contracts(str(root), info,
+                                            p.changed_methods or None)
+                if c:
+                    contracts.append(c)
+        if contracts:
+            cypher = build_cross_service_cypher(contracts)
+            if cypher:
+                print("\n```cypher")
+                print(cypher)
+                print("```")
         sys.exit(0)
 
     # quick 模式（Tier 1）：影响方向 + 分级
@@ -116,6 +135,16 @@ def main():
         ranked.append(ranker.rank_change(p, impacts, outbound))
 
     report = ranker.rank(ranked)
+
+    # v2b 跨服务契约提取：DIRECT 跨服务变更点 → 契约明细（评估范围明确化）
+    for qn in report.cross_service:
+        info = infos.get(qn)
+        p = next((x for x in points if x.qualified_name == qn), None)
+        if info:
+            contract = extract_feign_contracts(str(root), info,
+                                               p.changed_methods if p else None)
+            if contract:
+                report.cross_service_contracts[qn] = contract
 
     if args.format == "json":
         out = render_json(report, tier=1)
