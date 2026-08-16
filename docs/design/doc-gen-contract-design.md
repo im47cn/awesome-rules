@@ -1,8 +1,8 @@
 # doc-gen 可信化改造设计文档（已落地）
 
-> **状态**：已实施 ✅（§3–§6 + §8 D1/D2）· 284 测试全过 · 真实 CLI 端到端冒烟通过（含站点演进页构建）
-> **范围**：#1 Manifest Schema 契约 + #2 诚实退出码/receipt + #3-L1 revision-pinned evidence（数据层 + 模板展示层）+ #4 delta 引擎与站点演进页（D1/D2 已实施，含 CI 归档策略）
-> **作者**：— · **日期**：2026-08-14（§8 实施为 2026-08-15）
+> **状态**：已实施 ✅（§3–§6 + §8 D1/D2/D3）· 284 测试全过 · 真实 CLI 端到端冒烟通过（含站点演进页与着色图构建）
+> **范围**：#1 Manifest Schema 契约 + #2 诚实退出码/receipt + #3-L1 revision-pinned evidence（数据层 + 模板展示层）+ #4 delta 引擎与站点演进页（D1/D2/D3 已实施，含 CI 归档策略）
+> **作者**：— · **日期**：2026-08-14（§8 实施为 2026-08-15/16）
 
 ---
 
@@ -198,6 +198,7 @@ Golden test 首跑即抓到 **3 处 schema 与生成器的真实 drift**：
 - **成本 D1（引擎+CLI+测试）约 250+120+150 行，1–1.5 天**；基础设施复用度极高（#1/#2/#3 全部现成）
 - **风险**：包重构 ID 漂移（对策：className 恒等启发式 + 置信标注）；description 噪声（对策：presentation 分组隔离）
 - **不做（YAGNI）**：SVG/Mermaid 着色 delta 图（archify `buildDeltaSvg` 等价物）——+1 天、锦上添花、Mermaid 着色表达力弱；若要做，D3 独立立项。D2 站点「架构演进」页 +0.5 天可选
+  - **2026-08-16 修订**：D3 已按变化焦点图形态实施（放弃全景图——delta.json 不含完整快照，全景数据不支持）。组件图用 `classDef` 四色（绿新增/红移除/黄变更/蓝迁移）+ `domain/layer` subgraph，moved 节点标注来源位置；跨域依赖变化图用 `linkStyle` 边着色（图形态天然契合）。不做 Before/After 双图（同样受数据约束），这是与 archify `buildDeltaSvg` 的本质取舍：archify 有自研 SVG 渲染器可三视图并存，doc-gen 的 Mermaid 路线只做单焦点图
 
 ### 8.4 最大风险不在技术：归档流程前置依赖
 

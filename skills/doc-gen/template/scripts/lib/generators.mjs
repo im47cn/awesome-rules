@@ -854,6 +854,80 @@ function _shortSha(revision) {
   return revision ? revision.slice(0, 12) : '?';
 }
 
+// Mermaid 节点 id 必须去除点号/特殊字符（qualifiedName 含点），用索引 id + label 展示
+const DELTA_STATUS_EMOJI = {
+  added: '✨', removed: '🗑️', changed: '✏️', moved: '🚚',
+};
+
+function _mermaidId(s) {
+  return String(s).replace(/[^a-zA-Z0-9_]/g, '_');
+}
+
+function _mermaidEsc(s) {
+  return String(s).replace(/["<>{}|]/g, ' ');
+}
+
+// 组件变化焦点图：只画变化实体（delta.json 不含完整快照，全景图数据不支持）。
+// subgraph = domain/layer，classDef 按状态着色；moved 节点置于新位置并标注来源。
+function _deltaComponentGraph(entries) {
+  const sig = ['added', 'removed', 'changed', 'moved'];
+  const relevant = entries.filter(c => sig.includes(c.status));
+  if (!relevant.length) return null;
+
+  const lines = ['flowchart LR'];
+  for (const [status, color] of Object.entries({
+    added: 'fill:#16a34a,color:#fff',
+    removed: 'fill:#dc2626,color:#fff',
+    changed: 'fill:#d97706,color:#fff',
+    moved: 'fill:#2563eb,color:#fff',
+  })) {
+    lines.push(`  classDef ${status} ${color}`);
+  }
+
+  const groups = new Map();  // location -> [{node, cls}]
+  relevant.forEach((c, i) => {
+    const loc = c.location || c.wasLocation || 'unknown';
+    if (!groups.has(loc)) groups.set(loc, []);
+    let label = `${DELTA_STATUS_EMOJI[c.status] || ''} ${_mermaidEsc(c.className || c.id)}`;
+    if (c.status === 'moved' && c.changedFields?.length) {
+      // moved: 标注迁移路径（changedFields[0] 为 "原位置 → 新位置"）
+      label += `<br/>from ${_mermaidEsc(c.changedFields[0].split('→')[0].trim())}`;
+      if (c.inferred) label += ' (推断)';
+    }
+    groups.get(loc).push(`    n${i}["${label}"]:::${c.status}`);
+  });
+
+  let g = 0;
+  for (const [loc, nodes] of groups) {
+    lines.push(`  subgraph SG${g++}["${_mermaidEsc(loc)}"]`);
+    lines.push(...nodes);
+    lines.push('  end');
+  }
+  return lines.join('\n');
+}
+
+// 跨域依赖变化图：域为节点、依赖为边，边按增删着色（天然图形态）。
+function _deltaCrossDomainGraph(entries) {
+  const relevant = entries.filter(c => c.status === 'added' || c.status === 'removed');
+  if (!relevant.length) return null;
+
+  const lines = ['flowchart LR'];
+  for (const c of relevant) {
+    // id 形如 "order→logistics:client-api"
+    const [pair, type] = c.id.split(':');
+    const [from, to] = pair.split('→');
+    lines.push(`  ${_mermaidId(from)}["${_mermaidEsc(from)}"]`);
+    lines.push(`  ${_mermaidId(to)}["${_mermaidEsc(to)}"]`);
+    const emoji = c.status === 'added' ? '✨' : '🗑️';
+    const style = c.status === 'added'
+      ? 'stroke:#16a34a,stroke-width:2px' : 'stroke:#dc2626,stroke-width:2px';
+    const idx = lines.filter(l => l.includes('-->')).length;
+    lines.push(`  ${_mermaidId(from)} -->|"${emoji} ${_mermaidEsc(type || 'dep')}"| ${_mermaidId(to)}`);
+    lines.push(`  linkStyle ${idx} ${style}`);
+  }
+  return lines.join('\n');
+}
+
 export function generateDeltaPage() {
   const deltaFile = path.join(MANIFEST_DIR, 'delta.json');
   if (!fs.existsSync(deltaFile)) return 0;
@@ -886,6 +960,16 @@ export function generateDeltaPage() {
     }
   }
   content += '\n';
+
+  // 变化焦点图（只画变化实体；颜色即状态：绿=新增 红=移除 黄=变更 蓝=迁移）
+  const compGraph = _deltaComponentGraph(delta.changes?.components || []);
+  if (compGraph) {
+    content += '## 组件变化图\n\n```mermaid\n' + compGraph + '\n```\n\n';
+  }
+  const cdGraph = _deltaCrossDomainGraph(delta.changes?.crossDomain || []);
+  if (cdGraph) {
+    content += '## 跨域依赖变化图\n\n```mermaid\n' + cdGraph + '\n```\n\n';
+  }
 
   const dimOrder = ['components', 'aggregates', 'tables', 'stateMachines', 'crossDomain'];
   for (const dim of dimOrder) {
