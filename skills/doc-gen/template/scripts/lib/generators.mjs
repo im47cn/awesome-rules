@@ -830,6 +830,31 @@ export function generateProjectPanorama(manifest) {
   }, content);
 }
 
+// ── 影响分析（/impact/ 交互页）───────────────────────────────────────────────
+// 客户端 BFS：manifest 组件 deps 边 + 注解边界匹配，分级语义与
+// impact-guard CLI（critical_ranker.py）对齐。纯静态站点的"实时"=
+// 前端计算，依赖 dist/doc-manifest/ 的可 fetch 分片。
+
+export function generateImpactPage() {
+  const content = `> 输入变更组件（qualified_name 或类名，支持模糊匹配），实时计算影响链与回归范围。
+> 分级语义与 \`impact-guard\` CLI 对齐：🔴直接（出站/落点）· 🟠间接（链抵达入口）· 🟡入口/领域层 · 🟢内部实现。
+> 数据为构建时快照（类级 Tier 1 精度）；精确门禁请用 \`impact_check.py --strict\`。
+
+<div id="impact-tool">
+  <input id="impact-input" list="impact-datalist" placeholder="如 OrderCreateCmdExe 或完整限定名"
+         style="width:60%;padding:0.5rem 0.75rem;border:1px solid var(--sl-color-gray-5);border-radius:0.5rem;background:var(--sl-color-black);color:var(--sl-color-white)" />
+  <datalist id="impact-datalist"></datalist>
+  <button id="impact-run" class="sl-button" style="padding:0.5rem 1rem">分析</button>
+</div>
+<div id="impact-result" style="margin-top:1.5rem"><p><small>正在加载 manifest 依赖图…</small></p></div>
+<script src="/impact.js"></script>
+`;
+  writeMDX(path.join(DOCS_DIR, 'impact.mdx'), {
+    title: '🎯 变更影响分析', description: '输入变更组件，实时计算影响链与回归范围',
+  }, content);
+  return 1;
+}
+
 // ── 架构演进（delta）──────────────────────────────────────────────────────────
 // 数据来源：doc_gen.py diff 生成 delta.json 后放入 doc-manifest/。
 // 信噪比契约与 Python 端 render_markdown 一致：presentation-changed 不计入

@@ -21,7 +21,7 @@ import {
   generateDatabase, generateApiDocs,
   generateDomainModelPages,
   generateRisks, generateAdrPage, generateStateMachines,
-  generateProjectPanorama, generateDeltaPage,
+  generateProjectPanorama, generateDeltaPage, generateImpactPage,
   DOCS_DIR, MANIFEST_DIR,
 } from './lib/generators.mjs';
 
@@ -51,6 +51,7 @@ async function main() {
   // ── 通用页面 ──
   generateIndex(manifest); console.log('  ✓ index.mdx'); totalPages++;
   generateArchitecture(manifest); console.log('  ✓ architecture.mdx'); totalPages++;
+  generateImpactPage(); console.log('  ✓ impact.mdx'); totalPages++;
 
   // ── 🧠 领域模型 ──
   const dmCount = generateDomainModelPages(manifest);

@@ -98,6 +98,9 @@ class ManifestGenerator:
 
         layers = LayerIdentifier()
         modules = maven_info.get("modules", {})
+        # 项目内 qn 集合：deps 依赖边过滤（只保留项目内 import，供 /impact/ 前端 BFS）
+        internal_qns = {f.get("qualifiedName") for f in java_files
+                        if f.get("qualifiedName")}
 
         for file_info in java_files:
             result = layers.classify(file_info)
@@ -108,7 +111,7 @@ class ManifestGenerator:
             # 确定域
             domain_name = self._find_domain(file_info, modules)
 
-            comp = self._build_component(file_info, comp_type, layer)
+            comp = self._build_component(file_info, comp_type, layer, internal_qns)
             domain_groups[domain_name][layer].append(comp)
 
         # 组装 DomainDoc
@@ -207,12 +210,18 @@ class ManifestGenerator:
             return parts[2]
         return "shared-kernel" if parts[layer_idx] == "domain" else "common"
 
-    def _build_component(self, file_info: FileInfo, comp_type: str, layer: str) -> ComponentDoc:
+    def _build_component(self, file_info: FileInfo, comp_type: str, layer: str,
+                         internal_qns: set | None = None) -> ComponentDoc:
         """构建组件文档"""
+        qn = file_info.get("qualifiedName", "")
+        deps = []
+        if internal_qns and qn:
+            deps = sorted({imp.strip().rstrip(";") for imp in file_info.get("imports", [])}
+                          & internal_qns)
         comp = ComponentDoc(
             type=comp_type,
             className=file_info.get("className", ""),
-            qualifiedName=file_info.get("qualifiedName", ""),
+            qualifiedName=qn,
             sourcePath=file_info.get("filePath", ""),
             annotations=file_info.get("annotations", []),
             methods=[m["name"] for m in file_info.get("methods", [])],
@@ -223,6 +232,7 @@ class ManifestGenerator:
             classType=file_info.get("classType", ""),
             enumValues=file_info.get("enumValues", []),
             deprecated=file_info.get("deprecated", False),
+            deps=deps,
         )
 
         # 提取 HTTP 端点（仅 Controller）

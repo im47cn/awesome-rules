@@ -172,6 +172,7 @@ class ComponentDoc:
     classType: str = ""                # class, interface, enum, @interface
     enumValues: list = field(default_factory=list)  # 枚举常量（仅 enum）
     deprecated: bool = False            # 类级 @Deprecated（整个组件废弃）
+    deps: list = field(default_factory=list)  # 项目内依赖边（import 的本项目 qn），供 /impact/ 前端 BFS
 
 
 @dataclass

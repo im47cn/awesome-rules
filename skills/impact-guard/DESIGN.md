@@ -213,7 +213,7 @@ scripts/
 |---|---|---|
 | PR 描述 | `--format mermaid` 输出贴入 | ✅ 已实现（renderer mermaid 三态） |
 | CI 门禁 | `--strict`，触及 🔴 直接 fail + json 证据 | ✅ 已实现（CLI 退出码 0/1/2） |
-| doc-gen 站点 | `/impact/` 交互页输入变更点 → 实时渲染 | 📋 v1.1 |
+| doc-gen 站点 | `/impact/` 交互页输入变更点 → 实时渲染 | ✅ 已实现（2026-08-16，v1.1 提前落地；前端 BFS 分级语义与本技能 CLI 对齐） |
 
 ---
 
@@ -256,7 +256,7 @@ cola-sample 风格  ──对齐──► fixtures/ddd-sample
 | 跨服务契约识别为 🔴 直接 + 强制告警 | ✅ |
 | text / json / mermaid 输出 | ✅ |
 | PR + CI `--strict` 门禁（只拦直接） | ✅ |
-| doc-gen `/impact/` 站点内嵌 | 📋 v1.1 |
+| doc-gen `/impact/` 站点内嵌 | ✅ v1.1 |
 | 方法级 git diff 解析 | 📋 v2 |
 | 跨服务传播（cross-repo-intelligence） | 📋 v2 |
 | ~~baseline 噪声冻结~~ | ❌ 放弃（语义不通） |

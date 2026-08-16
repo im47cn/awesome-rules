@@ -30,6 +30,8 @@
         "annotations": { "type": "array", "items": { "type": "string" } },
         "methods": { "type": "array", "items": { "type": "string" } },
         "interfaces": { "type": "array", "items": { "type": "string" } },
+        "deps": { "type": "array", "items": { "type": "string", "minLength": 1 },
+                  "description": "项目内依赖边（import 的本项目 qn），供 /impact/ 前端 BFS" },
         "fields": {
           "type": "array",
           "items": {

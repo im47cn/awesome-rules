@@ -292,6 +292,8 @@ class ManifestWriter:
             ]
         if c.interfaces:
             d["interfaces"] = c.interfaces
+        if c.deps:
+            d["deps"] = c.deps
         return d
 
     @staticmethod

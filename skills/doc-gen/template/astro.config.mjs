@@ -138,6 +138,7 @@ function buildSidebar() {
   // 「首页」入口已移除：首页 / 本身即着陆页，侧边栏不再重复列出（避免冗余）。
   const sidebar = [
     { label: "架构全景图", link: "/architecture" },
+    { label: "🎯 变更影响分析", link: "/impact" },
   ];
 
   // ① 领域模型：总览入口 link + 每个业务域作顶级 group（聚合扁平展开）。

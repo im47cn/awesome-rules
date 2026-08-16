@@ -72,6 +72,7 @@ python3 scripts/doc_gen.py --from-manifest manifest.json --build --output docs-s
 
 ```
 /                              首页 — 项目全景架构大图
+/impact/                       变更影响分析 — 输入组件实时计算影响链（客户端 BFS，语义对齐 impact-guard）
 /architecture/                 架构总览 — 分层依赖图 + 图例
 /domains/{domain}/             域概览 — 域内分层图 + 聚合列表
 /domains/{domain}/adapter/     接口层 — Controller 表格 + 端点详情
