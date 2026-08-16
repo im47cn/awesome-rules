@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [0.3.0](https://github.com/im47cn/awesome-rules/compare/v0.2.0...v0.3.0) (2026-08-16)
+
+### ⚠ BREAKING CHANGES
+
+* **arch-hawkeye:** doc_gen.py aggregate 子命令移除，改用
+  arch-hawkeye/scripts/hawkeye.py aggregate（参数兼容）
+
+### ✨ 新功能
+
+* **doc-gen:** business-context 可选扩展分片 ([8970fe7](https://github.com/im47cn/awesome-rules/commit/8970fe7f90ae0a2c89b44ea4f8bab102bd449586))
+
+### 🐛 Bug 修复
+
+* **doc-gen:** 补齐业务全景站点渲染（8970fe7 前端遗漏部分） ([e1919ce](https://github.com/im47cn/awesome-rules/commit/e1919cec47c14fd3b341aca60ab42c9b90225439))
+
+### ♻️ 重构
+
+* **arch-hawkeye:** 多项目聚合迁移至架构鹰眼独立工程 ([051c06e](https://github.com/im47cn/awesome-rules/commit/051c06ee4fa87605d4c349ce0397771f51356718))
 ## 0.2.0 (2026-08-16)
 
 ### ⚠ BREAKING CHANGES
