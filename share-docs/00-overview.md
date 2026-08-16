@@ -60,7 +60,10 @@
 | `ddl-guard` | 数据库设计与审查（DDL + MyBatis SQL + PO 类） | "审查这个建表语句" |
 | `api-guard` | API 设计与审查（Java Controller） | "审查这个 Controller" |
 | `arch-guard` | DDD 架构分层守护（依赖方向 + 领域层纯净度） | "检查架构分层" |
-| `doc-gen` | DDD 技术文档生成（架构图/API/ER/聚合 + AI 助手） | "生成项目文档" |
+| `doc-gen` | DDD 技术文档生成（架构图/API/ER/聚合/业务全景 + AI 助手） | "生成项目文档" |
+| `impact-guard` | 变更影响分析（直接/间接 + 5 通道分级） | "改这个会影响谁" |
+
+另有独立工程 **架构鹰眼**（`arch-hawkeye/`）：消费各项目 doc-gen 产出的 manifest，做**全局**架构观测与治理（多项目联邦聚合 → 跨项目真实链路 → 治理闭环）。doc-gen 管"一个人看懂一个项目"，架构鹰眼管"一群人看清所有项目"。
 
 三个 `*-guard` 技能遵循同一个工作流：**脚本自动检查（粗筛）→ AI 补充人工判断（精审）→ 输出完整报告**；`doc-gen` 则是生成类：**源码扫描 → DocManifest → 交互式静态站点**。
 

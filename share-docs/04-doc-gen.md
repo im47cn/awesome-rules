@@ -23,7 +23,7 @@ doc-gen 把"读代码"这件事交给机器：扫描 Java DDD 项目，自动生
 | REST API 文档 | OpenAPI 3.0 + Scalar | 交互式 Try-It，从 Controller 端点提取 |
 | 状态机图 | `stateDiagram-v2` | Spring/Cola/裸 enum，含死状态/不可达审查 |
 | ADR 架构决策 | `docs/adr/*.md` | 自动收录团队的架构决策记录 |
-| 多项目聚合 | 公司级全景站 | 多个 Maven 项目合并到一个站点 |
+| 多项目聚合 | 公司级全景站 | 已迁移至架构鹰眼（`arch-hawkeye/`），doc-gen 专注单项目 |
 | AI 架构助手 | 页面内嵌 RAG | 自然语言问答，免 API Key 本地运行 |
 | 全文搜索 | Pagefind | 构建后索引，支持中文检索 |
 

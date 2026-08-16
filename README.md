@@ -16,10 +16,11 @@ awesome-rules/
 │   ├── ddl-guard/                     # DDL 设计与审查
 │   ├── api-guard/                     # API 设计与审查
 │   ├── arch-guard/                    # DDD 架构分层审查
-│   ├── doc-gen/                       # DDD 技术文档自动生成
+│   ├── doc-gen/                       # DDD 技术文档自动生成（单项目）
 │   ├── impact-guard/                  # 变更影响分析（blast radius）
 │   ├── work-report/                   # 跨仓库工作日报/周报
 │   └── alibabacloud-devops/           # 云效 DevOps 工具集
+├── arch-hawkeye/                      # 架构鹰眼：全局架构观测与治理（消费 doc-gen manifest）
 ├── scripts/                           # 工具脚本
 │   └── badcase_runner.py              # Badcase 回归测试
 ├── docs/                              # 文档
@@ -65,6 +66,12 @@ Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分�
 | [doc-gen](skills/doc-gen/README.md) | DDD 技术文档自动生成（交互式静态站点） |
 | [impact-guard](skills/impact-guard/README.md) | 变更影响分析（blast radius），按直接/间接 + GTSP 5 通道分级 |
 | [work-report](skills/work-report/README.md) | 跨仓库工作日报/周报自动生成（3 种受众模板） |
+
+**独立工程**（非技能，随仓库发布）：
+
+| 工程 | 说明 |
+|------|------|
+| [arch-hawkeye](arch-hawkeye/README.md) | 架构鹰眼：全局架构观测与治理 — 消费各项目 doc-gen 产出的 manifest，联邦聚合 + 跨项目链路（规划中）|
 | [alibabacloud-devops](skills/alibabacloud-devops/SKILL.md) | 阿里云云效 DevOps 工具集（Codeup/流水线/工作项，mcporter 代理） |
 
 各技能的详细文档、用法和检查规则见各自目录下的 README。

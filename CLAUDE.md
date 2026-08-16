@@ -16,6 +16,7 @@
 - `/api-guard` — 业务接口自动审查（脚本 + 人工判断）
 - `/arch-guard` — DDD 架构分层守护（脚本 + 人工判断）
 - `/impact-guard` — 变更影响分析（改码前预估 + PR/CI 门禁，🔴直接/🟠间接分级）
+- `doc-gen` — DDD 单项目文档站生成；多项目聚合归 `arch-hawkeye/`（全局观测与治理独立工程，契约见 `arch-hawkeye/AH-MANIFEST.md`）
 
 ## 使用原则
 
