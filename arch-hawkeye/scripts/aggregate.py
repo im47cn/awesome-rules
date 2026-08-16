@@ -20,6 +20,8 @@ if str(DOC_GEN_SCRIPTS) not in sys.path:
 
 from builder.astro import build_astro  # noqa: E402
 
+from crossproject import build_cross_project_edges  # noqa: E402 — 同目录模块
+
 
 def aggregate_projects(projects_json: str, output_dir: str, build: bool, verbose: bool):
     """多项目聚合 — 将多个 doc-manifest/ 合并到架构鹰眼站点
@@ -57,6 +59,7 @@ def aggregate_projects(projects_json: str, output_dir: str, build: bool, verbose
 
     # Phase 1: 验证 & 读取各项目 manifest
     project_data = []
+    valid_manifests = []      # [(proj_id, manifest_path)] 跨项目边构建输入
     total_domains = 0
     total_components = 0
     total_tables = 0
@@ -170,6 +173,8 @@ def aggregate_projects(projects_json: str, output_dir: str, build: bool, verbose
             "tableCount": len(db_tables) if db_file.exists() else 0,
             "layers": list(set(l for d in domains for l in (d.get("layers", []) or []))),
         })
+        # 记录成功读取的 manifest（跨项目边构建输入，AH-C01）
+        valid_manifests.append((proj_id, manifest_path))
 
         print(f"  ✓ {proj_name}: {domain_count} 域, {comp_count} 组件")
 
@@ -278,8 +283,22 @@ def aggregate_projects(projects_json: str, output_dir: str, build: bool, verbose
     (agg_dir / "cross-domain.json").write_text(
         json.dumps(unique_cd, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    # cross-project.json — 跨项目真实链路（Phase 2，AH-C01/C04）
+    # Feign 调用签名 ↔ Controller 路由签名对齐，confirmed/inferred 双置信度
+    cross_project = build_cross_project_edges(valid_manifests)
+    (agg_dir / "cross-project.json").write_text(
+        json.dumps(cross_project, ensure_ascii=False, indent=2),
+        encoding="utf-8")
+    cp_stats = cross_project["stats"]
+    print(f"  ✓ 跨项目链路: confirmed={cp_stats['confirmed']}, "
+          f"inferred={cp_stats['inferred']}, "
+          f"项目内调用={cp_stats['internalCalls']}, "
+          f"未匹配={cp_stats['unmatchedConsumers']}")
+
     # diagrams.json — 公司级全景架构图 + 聚合全景 ER 图
+    # 跨项目依赖图优先用真实边（confirmed/inferred 视觉区分），无真实边时回退域名猜测
     diagrams = generate_panorama_diagram(project_data, all_cross_deps)
+    diagrams["crossProjectEdges"] = cross_project["edges"]
     diagrams["erDiagram"] = generate_er_diagram(all_tables, all_relationships)
     diagrams["domainAggregates"] = all_domain_aggregates
     diagrams["stateMachines"] = all_state_diagrams

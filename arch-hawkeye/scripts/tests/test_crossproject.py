@@ -1,0 +1,188 @@
+"""跨项目真实链路构建器测试（AH-C01/C04）。
+
+覆盖：路径归一化、provider 索引、confirmed 边（签名对齐 + 双侧证据）、
+项目内调用排除、inferred 边（@FeignClient name 近似项目 id）、
+无匹配计数、跨域依赖聚合端到端（真实 doc-gen fixture → 鹰眼）。
+"""
+
+import json
+from pathlib import Path
+
+from crossproject import (
+    build_cross_project_edges,
+    build_provider_index,
+    normalize_path,
+)
+
+# ── 路径归一化 ────────────────────────────────────────────────────────────────
+
+
+def test_normalize_path():
+    assert normalize_path("/a/{id}") == normalize_path("/a/{userId}") == "/a/{}"
+    assert normalize_path("a//b/") == "/a/b"
+    assert normalize_path("") == "/"
+    assert normalize_path("/{x}/y/{z}") == "/{}/y/{}"
+
+
+# ── 测试数据构造 ──────────────────────────────────────────────────────────────
+
+
+def _domain(provider_path=None, provider_route=("GET", "/demo/v1/orders/{id}"),
+            feign_name=None, consumer_path=None):
+    """构造单域 manifest：adapter(controller) + client(feignInterface)"""
+    layers = {}
+    if provider_path is not None:
+        layers["adapter"] = {"components": [{
+            "type": "controller", "className": "DemoController",
+            "qualifiedName": f"com.x.{provider_path}.DemoController",
+            "sourcePath": f"src/{provider_path}/DemoController.java",
+            "endpoints": [{"method": provider_route[0], "path": provider_route[1]}],
+        }]}
+    if consumer_path is not None:
+        annotations = []
+        if feign_name:
+            annotations = [f'@FeignClient(url="${{x.url}}", name="{feign_name}", '
+                           f'contextId="i", path="/prefix")']
+        layers["client"] = {"components": [{
+            "type": "feignInterface", "className": "DemoInter",
+            "qualifiedName": "com.x.DemoInter",
+            "sourcePath": "src/DemoInter.java",
+            "annotations": annotations,
+            "endpoints": [{"method": "GET", "path": consumer_path}],
+        }]}
+    return {"name": "demo", "layers": layers}
+
+
+def _project(tmp_path, pid, domains):
+    mdir = tmp_path / pid / "doc-manifest"
+    (mdir / "domains").mkdir(parents=True)
+    for d in domains:
+        (mdir / "domains" / f"{d['name']}.json").write_text(
+            json.dumps(d), encoding="utf-8")
+    # aggregate_projects 入口要求 index.json（缺失即跳过项目）
+    (mdir / "index.json").write_text(json.dumps({
+        "domains": [{"name": d["name"], "componentCount": 0,
+                     "layers": list(d["layers"]),
+                     "file": f"domains/{d['name']}.json"} for d in domains],
+    }), encoding="utf-8")
+    return (pid, mdir)
+
+
+# ── provider 索引 ─────────────────────────────────────────────────────────────
+
+
+def test_provider_index(tmp_path):
+    projects = [_project(tmp_path, "a", [_domain(provider_path="a")])]
+    idx = build_provider_index(projects)
+    assert ("GET", "/demo/v1/orders/{}") in idx
+    prov = idx[("GET", "/demo/v1/orders/{}")][0]
+    assert prov["project"] == "a"
+    assert prov["route"] == "GET /demo/v1/orders/{id}"
+
+
+# ── confirmed 边 ──────────────────────────────────────────────────────────────
+
+
+def test_confirmed_edge_with_evidence(tmp_path):
+    """B 项目 Feign 调用签名与 A 项目 Controller 路由对齐 → confirmed 边 + 双侧证据"""
+    projects = [
+        _project(tmp_path, "a", [_domain(provider_path="a")]),
+        _project(tmp_path, "b", [_domain(consumer_path="/demo/v1/orders/{orderId}",
+                                         feign_name="a-service")]),
+    ]
+    result = build_cross_project_edges(projects)
+    confirmed = [e for e in result["edges"] if e["confidence"] == "confirmed"]
+    assert len(confirmed) == 1
+    edge = confirmed[0]
+    assert edge["from"] == "b" and edge["to"] == "a"
+    # 双侧证据（AH-C01 验收）
+    assert edge["evidence"]["consumer"]["qualifiedName"] == "com.x.DemoInter"
+    assert "GET" in edge["evidence"]["consumer"]["call"]
+    assert edge["evidence"]["provider"]["qualifiedName"].endswith("DemoController")
+    assert edge["evidence"]["provider"]["route"] == "GET /demo/v1/orders/{id}"
+
+
+def test_internal_call_not_cross_project(tmp_path):
+    """项目内 Feign 调用（from == to）不算跨项目边，计入 internalCalls"""
+    projects = [_project(tmp_path, "a", [
+        _domain(provider_path="a", consumer_path="/demo/v1/orders/{id}",
+                feign_name="a-service"),
+    ])]
+    result = build_cross_project_edges(projects)
+    confirmed = [e for e in result["edges"] if e["confidence"] == "confirmed"]
+    assert confirmed == []
+    assert result["stats"]["internalCalls"] == 1
+
+
+def test_method_mismatch_no_edge(tmp_path):
+    """路径一致但 method 不同 → 不构成 confirmed"""
+    projects = [
+        _project(tmp_path, "a", [_domain(provider_path="a",
+                                         provider_route=("POST", "/demo/v1/orders"))]),
+        _project(tmp_path, "b", [_domain(consumer_path="/demo/v1/orders",
+                                         feign_name="zz-unknown")]),
+    ]
+    result = build_cross_project_edges(projects)
+    assert [e for e in result["edges"] if e["confidence"] == "confirmed"] == []
+    assert result["stats"]["unmatchedConsumers"] == 1
+
+
+# ── inferred 边（AH-C04）──────────────────────────────────────────────────────
+
+
+def test_inferred_edge_by_feign_name(tmp_path):
+    """路由未命中但 @FeignClient name 近似项目 id → inferred 低置信度边"""
+    projects = [
+        _project(tmp_path, "a", [_domain(provider_path="a",
+                                         provider_route=("GET", "/other/path"))]),
+        _project(tmp_path, "b", [_domain(consumer_path="/absent/route",
+                                         feign_name="a-service")]),
+    ]
+    result = build_cross_project_edges(projects)
+    inferred = [e for e in result["edges"] if e["confidence"] == "inferred"]
+    assert len(inferred) == 1
+    assert inferred[0]["from"] == "b" and inferred[0]["to"] == "a"
+    assert inferred[0]["evidence"]["provider"]["route"] is None
+    assert inferred[0]["evidence"]["provider"]["service"] == "a-service"
+
+
+def test_no_match_no_infer(tmp_path):
+    """Feign name 无法近似任何项目 → unmatched 计数，无边"""
+    projects = [
+        _project(tmp_path, "a", [_domain(provider_path="a")]),
+        _project(tmp_path, "b", [_domain(consumer_path="/absent/route",
+                                         feign_name="ghost-service")]),
+    ]
+    result = build_cross_project_edges(projects)
+    assert result["edges"] == []
+    assert result["stats"]["unmatchedConsumers"] == 1
+
+
+# ── 聚合端到端 ────────────────────────────────────────────────────────────────
+
+
+def test_aggregate_writes_cross_project_shard(tmp_path, monkeypatch):
+    """aggregate_projects 端到端产出 cross-project.json 分片"""
+    import aggregate as agg_mod
+    from aggregate import aggregate_projects
+
+    # 双项目：a 提供 provider，b 的 Feign 与真实 fixture 路径对齐
+    projects = [
+        _project(tmp_path, "pa", [_domain(provider_path="pa")]),
+        _project(tmp_path, "pb", [_domain(consumer_path="/demo/v1/orders/{id}",
+                                          feign_name="pa-svc")]),
+    ]
+    pj = tmp_path / "projects.json"
+    pj.write_text(json.dumps({"title": "t", "projects": [
+        {"id": pid, "name": pid, "manifest": str(mdir)} for pid, mdir in projects
+    ]}), encoding="utf-8")
+    # 不触发真实 astro 构建
+    monkeypatch.setattr(agg_mod, "build_astro", lambda out, md: True)
+
+    aggregate_projects(str(pj), str(tmp_path / "site"), build=False, verbose=False)
+    cp = json.loads((tmp_path / "site" / "doc-manifest" / "cross-project.json")
+                    .read_text(encoding="utf-8"))
+    assert cp["stats"]["confirmed"] == 1
+    diagrams = json.loads((tmp_path / "site" / "doc-manifest" / "diagrams.json")
+                          .read_text(encoding="utf-8"))
+    assert len(diagrams["crossProjectEdges"]) == 1

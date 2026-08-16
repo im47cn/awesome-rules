@@ -72,6 +72,28 @@ def test_extract_endpoints_full(tmp_path):
     assert by["DELETE"].deprecated is True
 
 
+FEIGN_JAVA = """package com.x;
+@FeignClient(url = "${demo.service.url}", name = "demo-service",
+             contextId = "demoInter", path = "/demo")
+public interface DemoInter {
+    @GetMapping("/v1/orders/{id}")
+    DemoCO queryOrder(@PathVariable("id") Long id);
+}
+"""
+
+
+def test_extract_endpoints_feign_client_prefix(tmp_path):
+    """Feign 接口（consumer 调用声明）：@FeignClient(path) 作类级前缀（GTSP 四属性）"""
+    (tmp_path / "DemoInter.java").write_text(FEIGN_JAVA, encoding="utf-8")
+    g = ManifestGenerator(str(tmp_path))
+    eps = g._extract_endpoints(
+        {"filePath": "DemoInter.java", "className": "DemoInter",
+         "annotations": ["FeignClient"]})
+    assert len(eps) == 1
+    assert eps[0].method == "GET"
+    assert eps[0].path == "/demo/v1/orders/{id}"
+
+
 def test_extract_endpoints_no_file(tmp_path):
     g = ManifestGenerator(str(tmp_path))
     assert g._extract_endpoints(

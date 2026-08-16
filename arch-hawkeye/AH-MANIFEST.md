@@ -31,6 +31,11 @@ doc-manifest/ 分片目录 ──── 交换物 ────────▶ �
 | `api-spec.json` | OpenAPI 3.0 上游规范 | 可选 | REST API |
 | `risks.json` / `adrs.json` 等 | 本期范围外 | 可选 | 鹰眼 Phase 1+ 定义 |
 
+**契约要点（跨项目链路，Phase 2 已落地）**：`feignInterface` 组件的 `endpoints` 字段
+承载**消费侧调用声明**（`@FeignClient(path)` 类级前缀 + 方法级 mapping 拼接的完整路径），
+与 `controller` 组件的 `endpoints`（provider 路由声明）同构——鹰眼据此做签名对齐，
+产出 `cross-project.json` 聚合分片（confirmed/inferred 双置信度 + 双侧证据，见 §4.1）。
+
 ## 3. 版本规则
 
 - 各分片 `schema_version` 为 **const 锁定**（当前 `1`），`additionalProperties: false` 拒绝未知字段——契约演进不靠宽容，靠显式 bump（archify 式版本锁定）。
@@ -46,6 +51,24 @@ doc-manifest/ 分片目录 ──── 交换物 ────────▶ �
 | 采集容错（AH-A05） | 校验失败的 manifest 被生成端拦截；聚合侧单项目失败仅告警不阻塞（消费者义务，§6） | ✅ |
 | 项目身份标识 | `index.json` → `project` 为开放对象，**联邦注册时项目 ID 由注册方（CI 配置）显式提供**，manifest 不内嵌唯一 ID | ⚠️ 约定俗成，鹰眼侧注册表负责唯一性 |
 | 脏工作区标注 | `meta.json` → `evidence.dirty=true` 的 manifest 不可作为联邦快照（SHA 与扫描内容对不上） | ✅ |
+| 跨项目真实链路（AH-C01） | `controller.endpoints`（provider 路由）× `feignInterface.endpoints`（consumer 调用）签名对齐，无需读源码 | ✅ |
+
+### 4.1 鹰眼聚合产物分片（`cross-project.json`）
+
+由 `aggregate` 子命令产出（非 doc-gen 生产分片）：
+
+```json
+{"schema_version": 1,
+ "edges": [{"from": "projB", "to": "projA", "type": "http",
+            "confidence": "confirmed | inferred",
+            "evidence": {"consumer": {"qualifiedName", "sourcePath", "call"},
+                          "provider": {"project", "qualifiedName", "route"}}}],
+ "stats": {"confirmed": n, "inferred": n, "internalCalls": n, "unmatchedConsumers": n}}
+```
+
+- `confirmed`：method + 归一化路径完全一致（`{var}` 统一为 `{}`）
+- `inferred`（AH-C04）：路由未命中、`@FeignClient(name)` 近似项目 id 的推断边——不进入阻断级结论
+- 项目内调用（from == to）排除并计入 `internalCalls`
 
 ## 5. businessContext 扩展块（业务维度）
 

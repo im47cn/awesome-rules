@@ -236,8 +236,9 @@ class ManifestGenerator:
             deps=deps,
         )
 
-        # 提取 HTTP 端点（仅 Controller）
-        if comp_type == "controller" and "annotations" in file_info:
+        # 提取 HTTP 端点（Controller=provider 路由声明；Feign 接口=consumer 调用声明，
+        # 供架构鹰眼跨项目边匹配，见 arch-hawkeye REQ-C01）
+        if comp_type in ("controller", "feignInterface") and "annotations" in file_info:
             comp.endpoints = self._extract_endpoints(file_info)
 
         return comp
@@ -254,18 +255,29 @@ class ManifestGenerator:
         except Exception:
             return []
 
-        # 1. 提取类级 @RequestMapping 前缀（兼容 value/path 关键字和裸字符串）
+        # 1. 提取类级路径前缀：
+        #    Controller: @RequestMapping(value/path) — 兼容裸字符串
+        #    Feign 接口: @FeignClient(path="...")（GTSP 规范四属性之一，服务根路径）
+        #    两者并存时依次拼接（@RequestMapping 前缀 + Feign path 前缀）
         class_prefix = ""
-        class_header = raw.split("class ")[0] if "class " in raw else ""
-        class_req_map = re.search(
+        class_header = raw.split("class ")[0] if "class " in raw else raw
+        class_header = class_header.split("interface ")[0] if "interface " in class_header else class_header
+        for prefix_re in (
             r'@RequestMapping\s*\(\s*(?:(?:value|path)\s*=\s*)?"([^"]*)"',
-            class_header,
-        )
-        if class_req_map:
-            class_prefix = class_req_map.group(1)
+            r'@FeignClient\s*\([^)]*?\bpath\s*=\s*"([^"]*)"',
+        ):
+            prefix_m = re.search(prefix_re, class_header)
+            if prefix_m:
+                seg = prefix_m.group(1).strip("/")
+                if seg and seg not in class_prefix:
+                    class_prefix = (class_prefix.rstrip("/") + "/" + seg).rstrip("/")
+        if class_prefix and not class_prefix.startswith("/"):
+            class_prefix = "/" + class_prefix
 
-        # 2. 提取类体（从 "class Xxx {" 到最后的 "}"）
-        class_body_start = raw.find("{", raw.find("class "))
+        # 2. 提取类体（"class Xxx {" / "interface Xxx {" 到最后的 "}"）
+        decl_pos = min((p for p in (raw.find("class "), raw.find("interface ")) if p >= 0),
+                       default=-1)
+        class_body_start = raw.find("{", decl_pos)
         if class_body_start < 0:
             return []
         class_body = raw[class_body_start:]

@@ -11,7 +11,7 @@
 | 范围 | 单项目入门文档（业务+技术全维度） | 多项目聚合 / 跨项目链路 / 治理闭环 |
 | 交接物 | `doc-manifest/`（AH-MANIFEST 契约） | — |
 
-## 当前能力（Phase 1 起步）
+## 当前能力（Phase 1–2）
 
 ```bash
 # 聚合多个项目 manifest 到架构鹰眼站点（渲染复用 doc-gen 的 Astro 模板）
@@ -29,16 +29,23 @@ python3 scripts/hawkeye.py aggregate projects.json --output site/ --build
 }
 ```
 
-产出：公司级全景拓扑图、跨项目依赖矩阵、合并 ER 图与 API 规范的静态站点。
+产出：公司级全景拓扑图、合并 ER 图与 API 规范的静态站点，以及——
+
+**跨项目真实链路（Phase 2 ✅，AH-C01/C04）**：`cross-project.json` 分片——
+Feign 调用签名 × Controller 路由签名对齐（不靠域名猜测），每条边附双侧证据：
+
+- `confirmed`：method+路径完全匹配（路径变量归一化），consumer/provider 证据齐全
+- `inferred`：路由未命中但 `@FeignClient(name)` 近似项目 id 的推断边（低置信度）
+- 项目内调用自动排除；`diagrams.json.crossProjectEdges` 同步供前端渲染
 
 ## 路线图（EARS 需求见 [requirements.md](requirements.md)）
 
-| 阶段 | 能力 | 关键需求 |
-|---|---|---|
-| Phase 1 | 联邦聚合：CI 自注册 + 增量聚合（`evidence.revision` 指纹） | AH-A02/A03 · D01/D02 |
-| Phase 2 | 跨项目真实链路：跨仓库知识图谱 + 可查询架构图 + 变更影响分析 | AH-C01–C04 |
-| Phase 3 | 治理闭环：责任归属 / 债务登记 / 超期告警 / 增量零容忍门禁 | AH-D03–D07 |
-| Phase 4 | 双模式：本地运行（零 LLM token）+ 集中处理 | AH-B01–B03 |
+| 阶段 | 能力 | 关键需求 | 状态 |
+|---|---|---|---|
+| Phase 1 | 联邦聚合：多项目 manifest 聚合（`evidence.revision` 指纹就绪，CI 自注册待接入） | AH-A02/A03 · D01/D02 | 🚧 |
+| Phase 2 | 跨项目真实链路：confirmed/inferred 边构建 ✅；可查询架构图 + 变更影响分析待做 | AH-C01–C04 | 🚧 |
+| Phase 3 | 治理闭环：责任归属 / 债务登记 / 超期告警 / 增量零容忍门禁 | AH-D03–D07 | 📋 |
+| Phase 4 | 双模式：本地运行（零 LLM token）+ 集中处理 | AH-B01–B03 | 📋 |
 
 ## 目录结构
 
