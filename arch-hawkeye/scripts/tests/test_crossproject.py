@@ -186,3 +186,66 @@ def test_aggregate_writes_cross_project_shard(tmp_path, monkeypatch):
     diagrams = json.loads((tmp_path / "site" / "doc-manifest" / "diagrams.json")
                           .read_text(encoding="utf-8"))
     assert len(diagrams["crossProjectEdges"]) == 1
+
+
+# ── MQ 边（domain-event 签名对齐）─────────────────────────────────────────────
+
+
+def _mq_domain(mq_channels):
+    """构造含 mqChannels 的组件域（application=producer, adapter=consumer）"""
+    return {"name": "demo", "layers": {
+        "application": {"components": [{
+            "type": "executor", "className": "PubExe",
+            "qualifiedName": "com.p.PubExe",
+            "sourcePath": "p/PubExe.java",
+            "mqChannels": mq_channels,
+        }]},
+    }}
+
+
+def test_mq_confirmed_edge(tmp_path):
+    """跨项目同 topic 的 producer×consumer → confirmed MQ 边（依赖方向：订阅者→发布者）"""
+    projects = [
+        _project(tmp_path, "pub", [_mq_domain([
+            {"role": "producer", "channel": "order-created",
+             "framework": "rocketmq", "via": "syncSend"}])]),
+        _project(tmp_path, "sub", [_mq_domain([
+            {"role": "consumer", "channel": "order-created",
+             "framework": "rocketmq", "via": "RocketMQMessageListener"}])]),
+    ]
+    result = build_cross_project_edges(projects)
+    mq = [e for e in result["edges"] if e["type"] == "mq"]
+    assert len(mq) == 1
+    edge = mq[0]
+    assert edge["from"] == "sub" and edge["to"] == "pub"
+    assert edge["confidence"] == "confirmed"
+    assert edge["evidence"]["provider"]["route"].startswith("publish order-created")
+    assert "subscribe" in edge["evidence"]["consumer"]["call"]
+    assert result["stats"]["mqEdges"] == 1
+    assert result["stats"]["httpEdges"] == 0
+
+
+def test_mq_channel_mismatch_no_edge(tmp_path):
+    """topic 名不一致 → 无 MQ 边（channel 全局精确匹配，不做模糊）"""
+    projects = [
+        _project(tmp_path, "a", [_mq_domain([
+            {"role": "producer", "channel": "topic-a",
+             "framework": "rocketmq", "via": "syncSend"}])]),
+        _project(tmp_path, "b", [_mq_domain([
+            {"role": "consumer", "channel": "topic-b",
+             "framework": "rocketmq", "via": "RocketMQMessageListener"}])]),
+    ]
+    result = build_cross_project_edges(projects)
+    assert [e for e in result["edges"] if e["type"] == "mq"] == []
+
+
+def test_mq_internal_excluded(tmp_path):
+    """同项目内 producer→consumer 不算跨项目边，计入 internalCalls"""
+    projects = [_project(tmp_path, "solo", [_mq_domain([
+        {"role": "producer", "channel": "t", "framework": "rocketmq", "via": "syncSend"},
+        {"role": "consumer", "channel": "t",
+         "framework": "rocketmq", "via": "RocketMQMessageListener"},
+    ])])]
+    result = build_cross_project_edges(projects)
+    assert [e for e in result["edges"] if e["type"] == "mq"] == []
+    assert result["stats"]["internalCalls"] == 1

@@ -342,6 +342,12 @@ class ManifestWriter:
             d["interfaces"] = c.interfaces
         if c.deps:
             d["deps"] = c.deps
+        if c.mqChannels:
+            d["mqChannels"] = [
+                {"role": m.role, "channel": m.channel,
+                 "framework": m.framework, "via": m.via}
+                for m in c.mqChannels
+            ]
         return d
 
     @staticmethod

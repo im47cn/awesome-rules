@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from doctypes import (
-    DocManifest, DomainDoc, LayerDoc, ComponentDoc, FieldDoc, EndpointDoc,
+    DocManifest, DomainDoc, LayerDoc, ComponentDoc, FieldDoc, EndpointDoc, MqChannelDoc,
     AggregateDoc, DiagramSet, CrossDomainDep, TableDoc, TableColumnDoc, TableIndexDoc,
     FileInfo,
     SUFFIX_TYPE_MAP_ORDERED, LAYER_PATTERNS, CONTROLLER_ANNOTATIONS, HTTP_MAPPING_ANNOTATIONS,
@@ -241,7 +241,69 @@ class ManifestGenerator:
         if comp_type in ("controller", "feignInterface") and "annotations" in file_info:
             comp.endpoints = self._extract_endpoints(file_info)
 
+        # 提取 MQ 通道声明（consumer 订阅注解 + producer 发送调用，鹰眼 MQ 边对齐）
+        if comp_type in self.MQ_CHANNEL_TYPES:
+            comp.mqChannels = self._extract_mq_channels(file_info)
+
         return comp
+
+    # MQ 通道声明的提取范围：订阅在 adapter/consumer，发送在应用编排与防腐层
+    MQ_CHANNEL_TYPES = frozenset({
+        "consumer", "executor", "appService", "gateway", "gatewayImpl",
+        "domainService", "handler", "manager",
+    })
+
+    # 订阅注解：@RocketMQMessageListener(topic="x") / @KafkaListener(topics=...) / @RabbitListener(queues=...)
+    MQ_SUBSCRIBE_RES = [
+        (re.compile(r'@RocketMQMessageListener\s*\([^)]*?\btopic\s*=\s*"([^"]+)"'), "rocketmq"),
+        (re.compile(r'@KafkaListener\s*\([^)]*?\btopics\s*=\s*(?:\{\s*)?"([^"]+)"'), "kafka"),
+        (re.compile(r'@RabbitListener\s*\([^)]*?\b(?:queues?|queueNames)\s*=\s*(?:\{\s*)?"([^"]+)"'), "rabbit"),
+    ]
+    # 发送调用：xxxTemplate.syncSend/asyncSend/sendOneWay/convertAndSend/send("x", ...)
+    MQ_PUBLISH_RE = re.compile(
+        r'\b(rocketMQTemplate|kafkaTemplate|rabbitTemplate|amqpTemplate)'
+        r'\s*\.\s*(syncSend|asyncSend|sendOneWay|convertAndSend|send)'
+        r'\s*\(\s*"([^"]+)"'
+    )
+    MQ_TEMPLATE_FRAMEWORK = {
+        "rocketMQTemplate": "rocketmq", "kafkaTemplate": "kafka",
+        "rabbitTemplate": "rabbit", "amqpTemplate": "rabbit",
+    }
+
+    def _extract_mq_channels(self, file_info: FileInfo) -> list[MqChannelDoc]:
+        """从源文件提取 MQ 通道声明（consumer 订阅注解 + producer 发送调用）
+
+        注解参数不在 JavaScanner 的 annotations 里（仅注解名），故读源文件文本。
+        """
+        source_path = file_info.get("filePath", "")
+        java_file = self.root_path / source_path
+        if not java_file.exists():
+            return []
+        try:
+            raw = java_file.read_text(encoding="utf-8")
+        except Exception:
+            return []
+
+        channels: list[MqChannelDoc] = []
+        seen = set()
+        for anno_re, framework in self.MQ_SUBSCRIBE_RES:
+            for m in anno_re.finditer(raw):
+                anno_name = anno_re.pattern.split("\\")[0].lstrip("@")
+                key = ("consumer", m.group(1))
+                if key not in seen:
+                    seen.add(key)
+                    channels.append(MqChannelDoc(
+                        role="consumer", channel=m.group(1),
+                        framework=framework, via=anno_name))
+        for m in self.MQ_PUBLISH_RE.finditer(raw):
+            framework = self.MQ_TEMPLATE_FRAMEWORK.get(m.group(1), "")
+            key = ("producer", m.group(3))
+            if key not in seen:
+                seen.add(key)
+                channels.append(MqChannelDoc(
+                    role="producer", channel=m.group(3),
+                    framework=framework, via=m.group(2)))
+        return channels
 
     def _extract_endpoints(self, file_info: FileInfo) -> list[EndpointDoc]:
         """从 Controller 文件中提取 REST 端点 — 解析方法级 HTTP 注解"""

@@ -6,11 +6,14 @@
             含 @FeignClient(path) 类级前缀拼接，doc-gen Phase2-A 产出）
 
 匹配与置信度：
-  confirmed — method + 归一化路径完全一致（路径变量段 {var} 统一为 {}），
+  HTTP confirmed — method + 归一化路径完全一致（路径变量段 {var} 统一为 {}），
               双侧证据齐全（consumer qn/调用签名 + provider controller/路由）
-  inferred  — 路由未命中，但 @FeignClient name 近似某项目 id → 项目级推断边
+  HTTP inferred — 路由未命中，但 @FeignClient name 近似某项目 id → 项目级推断边
               （低置信度，AH-C04：不进入阻断级结论）
-  项目内 Feign 调用（from == to）不算跨项目边，计入 internalCalls。
+  MQ   confirmed — producer.channel == consumer.channel 精确匹配（topic 全局
+              命名空间）；依赖方向与 HTTP 统一：订阅者(consumer)依赖发布者
+              (producer)，evidence.provider=发布组件
+  项目内调用（from == to）不算跨项目边，计入 internalCalls。
 """
 
 import json
@@ -159,6 +162,59 @@ def build_cross_project_edges(projects: list) -> dict:
                     else:
                         unmatched += 1
 
+    # ── MQ 边：producer.channel × consumer.channel 精确匹配（全局命名空间）──
+    mq_consumers: dict = {}   # channel -> [(pid, comp)]
+    for pid, mdir in projects:
+        for domain in _load_domains(mdir):
+            for lname, layer in (domain.get("layers") or {}).items():
+                for comp in layer.get("components", []):
+                    for ch in comp.get("mqChannels", []):
+                        if ch.get("role") == "consumer":
+                            mq_consumers.setdefault(ch.get("channel", ""), []).append(
+                                (pid, comp, ch))
+
+    mq_edges = 0
+    mq_seen = set()
+    for pid, mdir in projects:
+        for domain in _load_domains(mdir):
+            for lname, layer in (domain.get("layers") or {}).items():
+                for comp in layer.get("components", []):
+                    for ch in comp.get("mqChannels", []):
+                        if ch.get("role") != "producer":
+                            continue
+                        channel = ch.get("channel", "")
+                        for cpid, ccomp, cch in mq_consumers.get(channel, []):
+                            if cpid == pid:
+                                internal_calls += 1
+                                continue
+                            ekey = (cpid, pid, "mq", channel)
+                            if ekey in mq_seen:
+                                continue
+                            mq_seen.add(ekey)
+                            mq_edges += 1
+                            # 依赖方向与 HTTP 统一：订阅者(consumer)依赖发布者(provider)
+                            edges.append({
+                                "from": cpid,
+                                "to": pid,
+                                "type": "mq",
+                                "confidence": "confirmed",
+                                "evidence": {
+                                    "consumer": {
+                                        "qualifiedName": ccomp.get("qualifiedName")
+                                                         or ccomp.get("className", ""),
+                                        "sourcePath": ccomp.get("sourcePath", ""),
+                                        "call": f"subscribe {channel} ({cch.get('via', '')})",
+                                    },
+                                    "provider": {
+                                        "project": pid,
+                                        "qualifiedName": comp.get("qualifiedName")
+                                                         or comp.get("className", ""),
+                                        "sourcePath": comp.get("sourcePath", ""),
+                                        "route": f"publish {channel} ({ch.get('via', '')})",
+                                    },
+                                },
+                            })
+
     edges.sort(key=lambda e: (e["confidence"] != "confirmed", e["from"], e["to"]))
     confirmed = sum(1 for e in edges if e["confidence"] == "confirmed")
     return {
@@ -167,6 +223,8 @@ def build_cross_project_edges(projects: list) -> dict:
         "stats": {
             "confirmed": confirmed,
             "inferred": len(edges) - confirmed,
+            "httpEdges": confirmed - mq_edges,
+            "mqEdges": mq_edges,
             "internalCalls": internal_calls,
             "unmatchedConsumers": unmatched,
         },

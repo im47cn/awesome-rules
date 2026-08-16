@@ -66,8 +66,11 @@ doc-manifest/ 分片目录 ──── 交换物 ────────▶ �
  "stats": {"confirmed": n, "inferred": n, "internalCalls": n, "unmatchedConsumers": n}}
 ```
 
-- `confirmed`：method + 归一化路径完全一致（`{var}` 统一为 `{}`）
-- `inferred`（AH-C04）：路由未命中、`@FeignClient(name)` 近似项目 id 的推断边——不进入阻断级结论
+- HTTP `confirmed`：method + 归一化路径完全一致（`{var}` 统一为 `{}`）
+- MQ `confirmed`（`type: "mq"`）：`component.mqChannels` 的 producer/consumer 声明
+  （`@RocketMQMessageListener` 等订阅注解 + `xxxTemplate.send/syncSend` 发布调用），
+  channel 精确匹配（topic 全局命名空间）；依赖方向与 HTTP 统一（订阅者 → 发布者）
+- `inferred`（AH-C04）：HTTP 路由未命中、`@FeignClient(name)` 近似项目 id 的推断边——不进入阻断级结论
 - 项目内调用（from == to）排除并计入 `internalCalls`
 
 ## 5. businessContext 扩展块（业务维度）

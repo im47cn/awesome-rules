@@ -157,6 +157,15 @@ class EndpointDoc:
 
 
 @dataclass
+class MqChannelDoc:
+    """MQ 通道声明（producer 发布 / consumer 订阅），供鹰眼跨项目 MQ 边对齐"""
+    role: str          # producer / consumer
+    channel: str       # topic/queue 名（全局命名空间，跨项目精确匹配）
+    framework: str     # rocketmq / kafka / rabbit
+    via: str           # 触发注解或调用（RocketMQMessageListener / syncSend / ...）
+
+
+@dataclass
 class ComponentDoc:
     type: str                        # controller, executor, entity, repository, etc.
     className: str
@@ -174,6 +183,8 @@ class ComponentDoc:
     enumValues: list = field(default_factory=list)  # 枚举常量（仅 enum）
     deprecated: bool = False            # 类级 @Deprecated（整个组件废弃）
     deps: list = field(default_factory=list)  # 项目内依赖边（import 的本项目 qn），供 /impact/ 前端 BFS
+    mqChannels: list = field(default_factory=list)  # list[MqChannelDoc]，MQ producer/consumer 声明
+
 
 
 @dataclass
