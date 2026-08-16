@@ -38,12 +38,24 @@ Feign 调用签名 × Controller 路由签名对齐（不靠域名猜测），�
 - `inferred`：路由未命中但 `@FeignClient(name)` 近似项目 id 的推断边（低置信度）
 - 项目内调用自动排除；`diagrams.json.crossProjectEdges` 同步供前端渲染
 
+**跨项目变更影响分析（Phase 2 ✅，AH-C03）**：
+
+```bash
+# 变更实体支持：类名 / 限定名 / 路由；🔴直接（跨项目边）/ 🟠间接（项目内依赖 BFS）
+python3 scripts/hawkeye.py impact ./site --entity DemoController
+python3 scripts/hawkeye.py impact ./site --entity "GET /demo/v1/orders/{id}" --max-hops 3
+python3 scripts/hawkeye.py impact ./site --entity DemoController --json   # CI 消费
+```
+
+影响面与图谱实际可达边一致（无虚构）：direct 仅来自跨项目边 provider 侧命中，
+indirect 沿 `component.deps` 反向 BFS（跳数裁剪、环安全）。
+
 ## 路线图（EARS 需求见 [requirements.md](requirements.md)）
 
 | 阶段 | 能力 | 关键需求 | 状态 |
 |---|---|---|---|
 | Phase 1 | 联邦聚合：多项目 manifest 聚合（`evidence.revision` 指纹就绪，CI 自注册待接入） | AH-A02/A03 · D01/D02 | 🚧 |
-| Phase 2 | 跨项目真实链路：confirmed/inferred 边构建 ✅；可查询架构图 + 变更影响分析待做 | AH-C01–C04 | 🚧 |
+| Phase 2 | 跨项目真实链路：confirmed/inferred 边构建 ✅；变更影响分析 ✅；可查询架构图待做 | AH-C01–C04 | 🚧 |
 | Phase 3 | 治理闭环：责任归属 / 债务登记 / 超期告警 / 增量零容忍门禁 | AH-D03–D07 | 📋 |
 | Phase 4 | 双模式：本地运行（零 LLM token）+ 集中处理 | AH-B01–B03 | 📋 |
 
