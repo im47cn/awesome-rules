@@ -90,3 +90,8 @@ Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分�
 ## 贡献
 
 欢迎贡献规范文件、AI 技能和反例用例。详见 [贡献指南](CONTRIBUTING.md)。
+
+> 各 AI 工具的插件安装入口清单（`.claude-plugin` 等 + `hooks/hooks.json`）受
+> blob 锁定保护（zero-regression 模式）：有意变更后运行
+> `python3 scripts/plugin_lock.py --update` 并随变更一起提交；校验命令
+> `python3 scripts/plugin_lock.py`（非零退出 = 漂移或新增未锁定入口）。

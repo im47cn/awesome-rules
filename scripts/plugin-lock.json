@@ -1,0 +1,16 @@
+{
+  "description": "安装入口清单 blob 锁定（zero-regression 模式）；有意变更后运行 scripts/plugin_lock.py --update 刷新",
+  "files": {
+    ".claude-plugin/marketplace.json": "feaf1660fec29031a75cea314e9ed34e410fccb7",
+    ".claude-plugin/plugin.json": "3241dfa48776ee4847dffe5e67ba2ba94af9e6ae",
+    ".codex-plugin/plugin.json": "3a07edf6fca866fcbdba8b2756465083b01d5fa8",
+    ".cursor-plugin/marketplace.json": "0fc36d6667f3e1d1258bff2e073b82995b049ef9",
+    ".cursor-plugin/plugin.json": "cf18ff6a8b450b47f1cc257ede65e3df85b3686d",
+    ".grok-plugin/marketplace.json": "6d5ef7b967582f307b1ce5371b1ca0cd76f9c123",
+    ".grok-plugin/plugin.json": "cf18ff6a8b450b47f1cc257ede65e3df85b3686d",
+    ".kimi-plugin/marketplace.json": "aed63413c75c8b94f8dcd907c1096372bae3bec1",
+    ".kimi-plugin/plugin.json": "b2939090907fbce478ab80218077fa8c1888258f",
+    ".opencode/opencode.json": "4421c914f068a6fad64c8608f21a41ce70e64542",
+    "hooks/hooks.json": "6644851e1e68579d4c06d96a443f82a1305e8f37"
+  }
+}
