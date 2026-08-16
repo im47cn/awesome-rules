@@ -70,6 +70,8 @@ doc-manifest/ 分片目录 ──── 交换物 ────────▶ �
 - MQ `confirmed`（`type: "mq"`）：`component.mqChannels` 的 producer/consumer 声明
   （`@RocketMQMessageListener` 等订阅注解 + `xxxTemplate.send/syncSend` 发布调用），
   channel 精确匹配（topic 全局命名空间）；依赖方向与 HTTP 统一（订阅者 → 发布者）
+- DB `confirmed`（`type: "db"`）：同名表出现在 ≥2 个项目的 `database.json` →
+  共享存储耦合边（from/to 字典序稳定，无向单边；evidence 含双方来源 DDL/PO）
 - `inferred`（AH-C04）：HTTP 路由未命中、`@FeignClient(name)` 近似项目 id 的推断边——不进入阻断级结论
 - 项目内调用（from == to）排除并计入 `internalCalls`
 

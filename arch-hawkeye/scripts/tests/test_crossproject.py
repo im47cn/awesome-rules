@@ -249,3 +249,43 @@ def test_mq_internal_excluded(tmp_path):
     result = build_cross_project_edges(projects)
     assert [e for e in result["edges"] if e["type"] == "mq"] == []
     assert result["stats"]["internalCalls"] == 1
+
+
+# ── DB 边（共享表耦合）────────────────────────────────────────────────────────
+
+
+def _db_project(tmp_path, pid, tables, source="DDL (.sql)"):
+    mdir = tmp_path / pid / "doc-manifest"
+    (mdir / "domains").mkdir(parents=True)
+    (mdir / "domains" / "demo.json").write_text('{"name": "demo", "layers": {}}',
+                                                encoding="utf-8")
+    (mdir / "index.json").write_text('{"domains": [{"name": "demo", "componentCount": 0, "layers": [], "file": "domains/demo.json"}]}', encoding="utf-8")
+    (mdir / "database.json").write_text(json.dumps(
+        {"tables": [{"name": t, "columns": []} for t in tables],
+         "relationships": [], "source": source}), encoding="utf-8")
+    return (pid, mdir)
+
+
+def test_db_shared_table_edge(tmp_path):
+    """同名表跨项目 → db 边（字典序稳定，证据含双方来源）"""
+    projects = [
+        _db_project(tmp_path, "pb", ["t_order", "t_only_b"]),
+        _db_project(tmp_path, "pa", ["t_order", "t_only_a"], source="MyBatis-Plus @TableName"),
+    ]
+    result = build_cross_project_edges(projects)
+    db = [e for e in result["edges"] if e["type"] == "db"]
+    assert len(db) == 1
+    assert db[0]["from"] == "pa" and db[0]["to"] == "pb"   # 字典序
+    assert db[0]["evidence"]["table"] == "t_order"
+    assert db[0]["evidence"]["via"]["pa"] == "MyBatis-Plus @TableName"
+    assert result["stats"]["dbEdges"] == 1
+    assert result["stats"]["sharedTables"] == 1
+
+
+def test_db_no_overlap_no_edge(tmp_path):
+    projects = [
+        _db_project(tmp_path, "a", ["t_a"]),
+        _db_project(tmp_path, "b", ["t_b"]),
+    ]
+    result = build_cross_project_edges(projects)
+    assert [e for e in result["edges"] if e["type"] == "db"] == []

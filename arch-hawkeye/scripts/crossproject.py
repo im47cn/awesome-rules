@@ -13,6 +13,9 @@
   MQ   confirmed — producer.channel == consumer.channel 精确匹配（topic 全局
               命名空间）；依赖方向与 HTTP 统一：订阅者(consumer)依赖发布者
               (producer)，evidence.provider=发布组件
+  DB   confirmed — 同名表出现在 ≥2 个项目的 database.json → 共享存储耦合边
+              （type "db"，from/to 字典序稳定，无向语义单边；改表结构双方互相
+              影响，是最隐蔽的耦合——无接口签名可对齐）
   项目内调用（from == to）不算跨项目边，计入 internalCalls。
 """
 
@@ -215,6 +218,10 @@ def build_cross_project_edges(projects: list) -> dict:
                                 },
                             })
 
+    # ── DB 边：同名表跨项目交集 = 共享存储耦合（database.json 现成，零扫描器改动）──
+    db_edges, shared_tables = _build_db_edges(projects)
+    edges.extend(db_edges)
+
     edges.sort(key=lambda e: (e["confidence"] != "confirmed", e["from"], e["to"]))
     confirmed = sum(1 for e in edges if e["confidence"] == "confirmed")
     return {
@@ -223,9 +230,50 @@ def build_cross_project_edges(projects: list) -> dict:
         "stats": {
             "confirmed": confirmed,
             "inferred": len(edges) - confirmed,
-            "httpEdges": confirmed - mq_edges,
+            "httpEdges": confirmed - mq_edges - len(db_edges),
             "mqEdges": mq_edges,
+            "dbEdges": len(db_edges),
+            "sharedTables": shared_tables,
             "internalCalls": internal_calls,
             "unmatchedConsumers": unmatched,
         },
     }
+
+
+def _build_db_edges(projects: list) -> tuple:
+    """同名表出现在 ≥2 项目 → 每对项目一条 db 边（字典序稳定，无向单边）"""
+    table_owners: dict = {}   # table -> {pid: db_source}
+    for pid, mdir in projects:
+        db_file = Path(mdir) / "database.json"
+        if not db_file.exists():
+            continue
+        try:
+            db = json.loads(db_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        source = db.get("source", "unknown")
+        for t in db.get("tables", []):
+            name = t.get("name", "")
+            if name:
+                table_owners.setdefault(name, {})[pid] = source
+
+    edges = []
+    shared = 0
+    for name, owners in sorted(table_owners.items()):
+        if len(owners) < 2:
+            continue
+        shared += 1
+        pids = sorted(owners)
+        for i in range(len(pids)):
+            for j in range(i + 1, len(pids)):
+                edges.append({
+                    "from": pids[i],
+                    "to": pids[j],
+                    "type": "db",
+                    "confidence": "confirmed",
+                    "evidence": {
+                        "table": name,
+                        "via": {p: owners[p] for p in (pids[i], pids[j])},
+                    },
+                })
+    return edges, shared

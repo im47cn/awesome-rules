@@ -43,6 +43,7 @@ def load_graph(agg_dir) -> dict:
         "by_class": {},     # className -> [qn...]
         "rev_deps": {},     # 被依赖 qn -> [依赖者 qn...]（component.deps 反向）
         "routes": {},       # (METHOD, norm_path) -> provider qn
+        "tables": {},       # 表名 -> [pid...]（共享存储耦合索引）
         "cross_edges": [],  # cross-project.json edges
     }
 
@@ -82,6 +83,17 @@ def load_graph(agg_dir) -> dict:
                 cp_file.read_text(encoding="utf-8")).get("edges", [])
         except (json.JSONDecodeError, OSError):
             pass
+
+    # 共享表索引：同名表 → 聚合 database.json 中带 _project_id 的表
+    db_file = dm / "database.json"
+    if db_file.exists():
+        try:
+            for t in json.loads(db_file.read_text(encoding="utf-8")).get("tables", []):
+                pid = t.get("_project_id")
+                if pid and t.get("name"):
+                    g["tables"].setdefault(t["name"], []).append(pid)
+        except (json.JSONDecodeError, OSError):
+            pass
     return g
 
 
@@ -115,7 +127,27 @@ def locate_entity(g: dict, entity: str):
 
 
 def analyze_impact(g: dict, entity: str, max_hops: int = 3) -> dict:
-    """变更实体的影响面：🔴 direct（跨项目边）+ 🟠 indirect（项目内反向依赖 BFS）"""
+    """变更实体的影响面：🔴 direct（跨项目边）+ 🟠 indirect（项目内反向依赖 BFS）
+
+    表名输入走 DB 通道分支：direct = 共享该表的其他项目（共享存储耦合）。
+    """
+    if entity.strip() in g.get("tables", {}):
+        pids = sorted(set(g["tables"][entity.strip()]))
+        return {
+            "ok": True,
+            "entity": {"qualifiedName": entity.strip(), "type": "table",
+                       "matchedBy": "tableName", "sharedBy": pids},
+            "direct": [{
+                "project": p,
+                "entity": entity.strip(),
+                "via": "shared-table",
+                "confidence": "confirmed",
+            } for p in pids],
+            "indirect": [],
+            "stats": {"direct": len(pids), "directConfirmed": len(pids),
+                      "indirect": 0},
+        }
+
     qn, how = locate_entity(g, entity)
     if qn is None:
         return {"ok": False, "error": how}
@@ -174,9 +206,14 @@ def render_text(result: dict) -> str:
         return f"❌ {result.get('error', '定位失败')}"
     e = result["entity"]
     s = result["stats"]
-    lines = [f"🎯 变更实体: {e['qualifiedName']}",
-             f"   {e.get('project')} / {e.get('domain')} 域 / {e.get('layer')} 层"
-             f"（匹配方式: {e.get('matchedBy')}）", ""]
+    if e.get("matchedBy") == "tableName":
+        head = [f"🎯 变更表: {e['qualifiedName']}（共享存储耦合，"
+                f"{len(e.get('sharedBy', []))} 个项目声明）", ""]
+    else:
+        head = [f"🎯 变更实体: {e['qualifiedName']}",
+                f"   {e.get('project')} / {e.get('domain')} 域 / {e.get('layer')} 层"
+                f"（匹配方式: {e.get('matchedBy')}）", ""]
+    lines = head
     lines.append(f"🔴 直接影响（跨项目）: {s['direct']}"
                  f"（confirmed {s['directConfirmed']} / inferred {s['direct'] - s['directConfirmed']}）")
     for d in result["direct"]:

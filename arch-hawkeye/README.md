@@ -38,6 +38,8 @@ Feign 调用签名 × Controller 路由签名对齐（不靠域名猜测），�
 - MQ 边（`type: "mq"`）：`mqChannels` 声明对齐——订阅注解
   （`@RocketMQMessageListener`/`@KafkaListener`/`@RabbitListener`）×
   发布调用（`xxxTemplate.syncSend/send/convertAndSend`），topic 精确匹配
+- DB 边（`type: "db"`）：同名表跨项目交集 = 共享存储耦合（最隐蔽的耦合——
+  无接口签名可对齐）；impact 支持表名输入（`--entity t_order` → 共享方列表）
 - `inferred`：路由未命中但 `@FeignClient(name)` 近似项目 id 的推断边（低置信度）
 - 项目内调用自动排除；`diagrams.json.crossProjectEdges` 同步供前端渲染
 

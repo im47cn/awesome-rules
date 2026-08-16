@@ -164,3 +164,28 @@ def test_render_text(tmp_path):
     assert "🔴" in text and "🟠" in text
     assert "com.pb.BizInter" in text
     assert "✅" in text                            # confirmed 标记
+
+
+# ── 表名影响分析（DB 通道）─────────────────────────────────────────────────────
+
+
+def test_impact_shared_table(tmp_path):
+    """表名输入 → direct = 共享该表的项目（共享存储耦合）"""
+    site = _write_agg(tmp_path)
+    dm = site / "doc-manifest"
+    (dm / "database.json").write_text(json.dumps(
+        {"tables": [
+            {"name": "t_order", "_project_id": "projA"},
+            {"name": "t_order", "_project_id": "projB"},
+            {"name": "t_solo", "_project_id": "projA"},
+        ]}), encoding="utf-8")
+    g = load_graph(site)
+    result = analyze_impact(g, "t_order")
+    assert result["ok"]
+    assert result["entity"]["matchedBy"] == "tableName"
+    assert {d["project"] for d in result["direct"]} == {"projA", "projB"}
+    assert all(d["via"] == "shared-table" for d in result["direct"])
+    # 独占表：仅返回唯一使用方（无跨项目共享）
+    solo = analyze_impact(g, "t_solo")
+    assert solo["ok"]
+    assert [d["project"] for d in solo["direct"]] == ["projA"]
