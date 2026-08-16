@@ -271,6 +271,75 @@ class TestLegacyConversionContract:
         assert e.value.code == 1
 
 
+class TestOptionalReportShards:
+    """risks/adrs/articles 可选分片：含数据正例 + 篡改反例 + 缺失合法"""
+
+    def _manifest_dir(self, tmp_path):
+        from doctypes import DocManifest
+        ManifestWriter(tmp_path).write(DocManifest(meta={"project": {}}))
+        return tmp_path / "doc-manifest"
+
+    def test_risks_with_data_passes(self, tmp_path):
+        md = self._manifest_dir(tmp_path)
+        (md / "risks.json").write_text(json.dumps({
+            "passed": False, "totalIssues": 1, "criticalCount": 1,
+            "warningCount": 0, "infoCount": 0, "summary": {},
+            "issues": [{"file": "src/A.java", "line": 10, "severity": "BLOCKER",
+                        "level": "critical", "rule": "layer-purity",
+                        "ruleCode": "G001", "description": "x", "suggestion": "y"}],
+        }), encoding="utf-8")
+        assert validate_manifest_dir(md) == []
+
+    def test_risks_error_branch_passes(self, tmp_path):
+        md = self._manifest_dir(tmp_path)
+        (md / "risks.json").write_text(json.dumps(
+            {"error": "arch_check.py 执行超时", "issues": [], "summary": {}}),
+            encoding="utf-8")
+        assert validate_manifest_dir(md) == []
+
+    def test_risks_bad_level_rejected(self, tmp_path):
+        md = self._manifest_dir(tmp_path)
+        (md / "risks.json").write_text(json.dumps(
+            {"issues": [{"file": "a", "level": "fatal"}]}), encoding="utf-8")
+        assert any("risks.json" in e for e in validate_manifest_dir(md))
+
+    def test_adrs_with_data_passes(self, tmp_path):
+        md = self._manifest_dir(tmp_path)
+        (md / "adrs.json").write_text(json.dumps({
+            "total": 1, "adrs": [{"number": 1, "title": "用云效",
+                                  "status": "accepted", "date": "2026-08-16",
+                                  "filename": "adr/001.md", "sourcePath": "adr/001.md"}],
+        }), encoding="utf-8")
+        assert validate_manifest_dir(md) == []
+
+    def test_adrs_missing_status_rejected(self, tmp_path):
+        md = self._manifest_dir(tmp_path)
+        (md / "adrs.json").write_text(json.dumps(
+            {"adrs": [{"title": "x"}]}), encoding="utf-8")
+        assert any("adrs.json" in e for e in validate_manifest_dir(md))
+
+    def test_articles_with_data_passes(self, tmp_path):
+        md = self._manifest_dir(tmp_path)
+        (md / "articles.json").write_text(json.dumps({
+            "total": 1, "categories": {"guide": 1},
+            "articles": [{"slug": "intro", "title": "入门", "summary": "s",
+                          "category": "guide", "wordCount": 100,
+                          "sourcePath": "docs/intro.md", "link": "/articles/intro",
+                          "body": "---\n---\n正文", "searchText": "正文"}],
+        }), encoding="utf-8")
+        assert validate_manifest_dir(md) == []
+
+    def test_articles_unknown_field_rejected(self, tmp_path):
+        md = self._manifest_dir(tmp_path)
+        (md / "articles.json").write_text(json.dumps(
+            {"articles": [{"slug": "x", "title": "y", "bogus": 1}]}),
+            encoding="utf-8")
+        assert any("articles.json" in e for e in validate_manifest_dir(md))
+
+    def test_all_missing_still_valid(self, tmp_path):
+        assert validate_manifest_dir(self._manifest_dir(tmp_path)) == []
+
+
 class TestStaleCommits:
     def test_no_meta_returns_none(self, tmp_path):
         assert _stale_commits(tmp_path) is None

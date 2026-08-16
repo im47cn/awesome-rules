@@ -46,6 +46,36 @@ export function generateIndex(manifest) {
   }
   content += `</div>\n`;
 
+  // ── 构建验收面板（receipt.json 存在才渲染；旧 manifest 诚实降级不显示）──
+  const receipt = readJSONMaybe(path.join(MANIFEST_DIR, 'receipt.json'));
+  if (receipt && receipt.checks) {
+    const statusMark = { ok: '✅', warn: '⚠️', fail: '❌', skipped: '⏭️' };
+    const overall = receipt.ok ? '✅ 全部通过' : '❌ 存在失败阶段';
+    content += `## 构建验收\n\n`;
+    content += `> 本文档由 doc-gen 于生成时刻产出，验收状态：**${overall}**\n\n`;
+    content += `| 阶段 | 状态 | 明细 |\n| --- | --- | --- |\n`;
+    for (const [phase, c] of Object.entries(receipt.checks)) {
+      const mark = statusMark[c.status] || c.status;
+      const detail = Object.entries(c)
+        .filter(([k]) => k !== 'status' && k !== 'error')
+        .map(([k, v]) => `${k}=${v}`).join(', ')
+        || (c.error ? String(c.error).slice(0, 60) : '');
+      content += `| ${phase} | ${mark} ${c.status} | ${detail} |\n`;
+    }
+    const metaFile = readJSONMaybe(path.join(MANIFEST_DIR, 'meta.json')) || {};
+    const ev = metaFile.evidence;
+    if (ev) {
+      const sha = ev.revision ? ev.revision.slice(0, 12) : '未钉定';
+      const dirty = ev.dirty ? ' ⚠️ **生成时工作区有未提交变更，revision 可能与内容不一致**' : '';
+      content += `\n<small>证据锚点：revision \`${sha}\`（生成时刻钉定，代码演进不漂移）${dirty}</small>\n`;
+    }
+    const stale = receipt.checks?.manifest?.staleCommits;
+    if (stale > 0) {
+      content += `\n> ⚠️ **文档已落后当前代码 ${stale} 个提交**，建议重新生成。\n`;
+    }
+    content += `\n`;
+  }
+
   writeMDX(path.join(DOCS_DIR, 'index.mdx'), {
     title: project.name || '技术文档',
     description: project.description || 'DDD 架构技术文档',

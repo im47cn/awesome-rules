@@ -33,6 +33,9 @@ SHARD_SCHEMAS = {
 # 可选扩展分片：缺失合法（跳过），存在则按契约强校验（AH-MANIFEST §2）
 OPTIONAL_SHARD_SCHEMAS = {
     "business-context.json": "business-context.schema.json",
+    "risks.json": "risks.schema.json",
+    "adrs.json": "adrs.schema.json",
+    "articles.json": "articles.schema.json",
 }
 
 _schema_cache: dict = {}
