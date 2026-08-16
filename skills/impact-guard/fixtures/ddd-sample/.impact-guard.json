@@ -1,0 +1,57 @@
+{
+  "project_package_prefix": "com.acme",
+  "boundaries": {
+    "http_entry": [
+      "RestController",
+      "Controller"
+    ],
+    "mq_entry": [
+      "RocketMQMessageListener",
+      "KafkaListener"
+    ],
+    "job_entry": [
+      "XxlJob"
+    ],
+    "http_exit": [
+      "FeignClient"
+    ],
+    "mq_exit": [
+      "rocketMQTemplate",
+      "kafkaTemplate"
+    ],
+    "db_sink": [
+      "Mapper"
+    ],
+    "cache_sink": [
+      "RedisUtil",
+      "@CachePut",
+      "@CacheEvict"
+    ]
+  },
+  "boundary_hits": {
+    "http_entry": [
+      "com.acme.demo.adapter.web.OrderController"
+    ],
+    "mq_entry": [
+      "com.acme.demo.adapter.listener.PayResultListener"
+    ],
+    "job_entry": [
+      "com.acme.demo.job.SyncJob"
+    ],
+    "http_exit": [
+      "com.acme.demo.client.PayClient"
+    ],
+    "db_sink": [
+      "com.acme.demo.infra.mapper.OrderMapper"
+    ]
+  },
+  "highways": [
+    "**Util",
+    "**Assembler"
+  ],
+  "ignore": [
+    "**/test/**",
+    "**/dto/**",
+    "**/query/**"
+  ]
+}

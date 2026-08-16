@@ -37,7 +37,7 @@ inclusion: always
 | 类别 | scope |
 |---|---|
 | 业务域 | `api`、`db`、`ui`、`ci` |
-| 技能（`skills/`） | `alibabacloud-devops`、`api-guard`、`arch-guard`、`ddl-guard`、`doc-gen`、`work-report` |
+| 技能（`skills/`） | `alibabacloud-devops`、`api-guard`、`arch-guard`、`ddl-guard`、`doc-gen`、`impact-guard`、`work-report` |
 | 工程 | `tools`、`docs`、`deps`、`release` |
 
 新增技能时同步追加到两处。
