@@ -189,3 +189,59 @@ def test_not_found_hint_variants(tmp_path):
     ext._arch_check_env = ""
     ext._config_path = str(cfg)
     assert ".doc-gen.json" in ext._not_found_hint()             # config 触发
+
+
+# ── D03 blame：按文件批量归属（性能优化后的正确性锁定）──────────────────────
+
+import subprocess as _sp
+from pathlib import Path
+
+
+def _git_repo_with_file(tmp_path):
+    """tmp 内建真实 git 仓库，两行文件、已知作者，供 blame 断言"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    f = repo / "Svc.java"
+    f.write_text("line one\nline two\n", encoding="utf-8")
+    env_cmd = ["-c", "user.email=t@t", "-c", "user.name=alice"]
+    for cmd in (["git", "init", "-q"], ["git", "add", "-A"],
+                ["git"] + env_cmd + ["commit", "-qm", "c"]):
+        _sp.run(cmd, cwd=repo, check=True, timeout=30)
+    return repo, "Svc.java"
+
+
+def test_blame_file_batch_parses_full_file(tmp_path):
+    repo, rel = _git_repo_with_file(tmp_path)
+    blame = RiskScanner(str(repo))._blame_file(rel)
+    assert blame[1][0] == "alice" and blame[2][0] == "alice"
+    assert blame[1][1] and blame[1][1].startswith("20")   # ISO 时间戳
+
+
+def test_blame_uses_file_level_cache(tmp_path, monkeypatch):
+    """同文件多行违规只触发一次批量 blame（子进程计数）"""
+    repo, rel = _git_repo_with_file(tmp_path)
+    scanner = RiskScanner(str(repo))
+    calls = {"n": 0}
+    real = scanner._blame_file
+
+    def counting(fp):
+        calls["n"] += 1
+        return real(fp)
+
+    monkeypatch.setattr(scanner, "_blame_file", counting)
+    cache = {}
+    assert scanner._blame(rel, 1, cache)[0] == "alice"
+    assert scanner._blame(rel, 2, cache)[0] == "alice"
+    assert calls["n"] == 1                       # 文件级缓存命中
+    assert scanner._blame(rel, 99, cache) == (None, None)   # 行越界降级
+    assert calls["n"] == 1                       # 未再触发子进程
+
+
+def test_blame_degrades_outside_git(tmp_path):
+    """非 git 目录 → {} → (None, None)，不抛异常"""
+    d = tmp_path / "plain"
+    d.mkdir()
+    (d / "f.txt").write_text("x", encoding="utf-8")
+    scanner = RiskScanner(str(d))
+    assert scanner._blame_file("f.txt") == {}
+    assert scanner._blame("f.txt", 1, {}) == (None, None)

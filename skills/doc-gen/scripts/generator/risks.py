@@ -82,36 +82,61 @@ class RiskScanner:
             return " 请在 .doc-gen.json 中配置 arch_check_path 字段，或设置 ARCH_CHECK_PATH 环境变量。"
         return " 请通过 --arch-check-path 参数或 ARCH_CHECK_PATH 环境变量指定 arch_check.py 路径。"
 
+    _BLAME_HEADER_RE = re.compile(r"^([0-9a-f]{40}) (\d+) (\d+)(?: (\d+))?$")
+
+    def _blame_file(self, file_path: str) -> dict:
+        """整文件 porcelain blame 一次 → {行号: (author, iso_ts)}。
+
+        每文件一次子进程（替代逐行 N 次——大仓库逐条违规 blame 是
+        273 条最坏 45 分钟的根因）；失败/超时返回 {}（调用方逐行降级）。
+        """
+        try:
+            proc = subprocess.run(
+                ["git", "blame", "--porcelain", "--", file_path],
+                cwd=self.root_path, capture_output=True, text=True, timeout=30,
+            )
+        except (subprocess.SubprocessError, OSError):
+            return {}
+        if proc.returncode != 0:
+            return {}
+        blame = {}
+        author = ts = None
+        base = count = None
+        for ln in proc.stdout.split("\n"):
+            m = self._BLAME_HEADER_RE.match(ln)
+            if m:
+                # 头行 "<sha> <orig> <final>[ <count>]"：count 行连续同归属；
+                # 同 commit 的续组头行不重复元数据——继承上一组
+                base, count = int(m.group(3)), int(m.group(4) or 1)
+                continue
+            if base is None:
+                continue
+            if ln.startswith("author "):
+                author = ln[7:].strip() or None
+            elif ln.startswith("author-time "):
+                try:
+                    ts = datetime.fromtimestamp(
+                        int(ln[12:].strip()), tz=timezone.utc).isoformat()
+                except ValueError:
+                    ts = None
+            elif ln.startswith("\t"):
+                # 文件内容行（TAB 前缀）= 本组元数据结束，落盘 count 行归属
+                for i in range(count):
+                    blame[base + i] = (author, ts)
+                base = None
+        return blame
+
     def _blame(self, file_path: str, line: int, cache: dict) -> tuple:
         """git blame 定位违规行最近修改人与引入时间（D03 责任归属）。
 
-        失败一律降级 (None, None) 不阻断（无 git / 二进制文件 / 行越界）；
-        结果缓存（同点重复违规只查一次）。
+        按文件批量 blame + 文件级缓存（同文件多条违规只查一次）；
+        失败降级 (None, None) 不阻断（无 git / 二进制文件 / 行越界）。
         """
         if not file_path or line <= 0:
             return None, None
-        key = (file_path, line)
-        if key in cache:
-            return cache[key]
-        result = (None, None)
-        try:
-            proc = subprocess.run(
-                ["git", "blame", "-L", f"{line},{line}", "--porcelain",
-                 "--", file_path],
-                cwd=self.root_path, capture_output=True, text=True, timeout=10,
-            )
-            if proc.returncode == 0:
-                m = re.search(r"author (.+)", proc.stdout)
-                tm = re.search(r"author-time (\d+)", proc.stdout)
-                ts = None
-                if tm:
-                    ts = datetime.fromtimestamp(
-                        int(tm.group(1)), tz=timezone.utc).isoformat()
-                result = (m.group(1) if m else None, ts)
-        except (subprocess.SubprocessError, OSError, ValueError):
-            pass
-        cache[key] = result
-        return result
+        if file_path not in cache:
+            cache[file_path] = self._blame_file(file_path)
+        return cache[file_path].get(line, (None, None))
 
     def scan(self) -> dict:
         """运行 arch_check.py 返回结构化风险数据。
@@ -136,7 +161,7 @@ class RiskScanner:
             issues = data.get("issues", [])
 
             # 丰富风险信息（含 D03 责任归属：git blame 最近修改人 + 引入时间）
-            blame_cache: dict = {}   # (file, line) → (author, ts)，同点多次违规去重
+            blame_cache: dict = {}   # file → {line: (author, ts)}，每文件一次批量 blame
             enriched = []
             for iss in issues:
                 rule_code = iss.get("rule_code", "")
