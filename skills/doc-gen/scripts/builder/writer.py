@@ -344,6 +344,11 @@ class ManifestWriter:
             d["interfaces"] = c.interfaces
         if c.deps:
             d["deps"] = c.deps
+        if c.feignClient is not None:
+            d["feignClient"] = {
+                "name": c.feignClient.name, "path": c.feignClient.path,
+                "contextId": c.feignClient.contextId, "url": c.feignClient.url,
+            }
         if c.mqChannels:
             d["mqChannels"] = [
                 {"role": m.role, "channel": m.channel,

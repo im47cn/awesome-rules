@@ -159,6 +159,15 @@ class EndpointDoc:
 
 
 @dataclass
+class FeignClientMetaDoc:
+    """@FeignClient 注解元数据（GTSP 四属性），鹰眼 inferred 边的服务名匹配依赖"""
+    name: str = ""        # 服务名（如 paycenter-trade）
+    path: str = ""        # 服务根路径
+    contextId: str = ""
+    url: str = ""
+
+
+@dataclass
 class MqChannelDoc:
     """MQ 通道声明（producer 发布 / consumer 订阅），供鹰眼跨项目 MQ 边对齐"""
     role: str          # producer / consumer
@@ -205,6 +214,7 @@ class ComponentDoc:
     deprecated: bool = False            # 类级 @Deprecated（整个组件废弃）
     deps: list = field(default_factory=list)  # 项目内依赖边（import 的本项目 qn），供 /impact/ 前端 BFS
     mqChannels: list = field(default_factory=list)  # list[MqChannelDoc]，MQ producer/consumer 声明
+    feignClient: Optional[FeignClientMetaDoc] = None  # @FeignClient 元数据（仅 feignInterface）
     cacheKeys: list = field(default_factory=list)   # list[CacheKeyDoc]，Redis key 声明
     schedules: list = field(default_factory=list)   # list[ScheduleDoc]，定时任务资产
 

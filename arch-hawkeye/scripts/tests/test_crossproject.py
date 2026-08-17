@@ -368,3 +368,24 @@ def test_job_assets_counted_no_edge(tmp_path):
     result = build_cross_project_edges(projects)
     assert result["stats"]["jobAssets"] == {"pa": 2}
     assert not any(e["type"] == "job" for e in result["edges"])
+
+
+def test_unmatched_grouped_by_structured_feign_name(tmp_path):
+    """结构化 feignClient.name 驱动 unmatchedByService 分组（8 仓库实测修复：
+    annotations 只存注解名，947 unmatched 曾全落"无 name"桶）"""
+    projects = [
+        _project(tmp_path, "pa", [_domain(provider_path="pa")]),
+        _project(tmp_path, "pb", [_domain(consumer_path="/absent/1")]),
+        _project(tmp_path, "pc", [_domain(consumer_path="/absent/2")]),
+    ]
+    # 给 pb/pc 的 Feign 组件加结构化元数据（doc-gen Phase2 产出形态）
+    for pid in ("pb", "pc"):
+        f = tmp_path / pid / "doc-manifest" / "domains" / "demo.json"
+        d = json.loads(f.read_text(encoding="utf-8"))
+        comp = d["layers"]["client"]["components"][0]
+        comp["feignClient"] = {"name": "gtsp-admin-mdm", "path": "",
+                               "contextId": "", "url": ""}
+        f.write_text(json.dumps(d), encoding="utf-8")
+    result = build_cross_project_edges(projects)
+    assert result["stats"]["unmatchedConsumers"] == 2
+    assert result["stats"]["unmatchedByService"] == {"gtsp-admin-mdm": 2}

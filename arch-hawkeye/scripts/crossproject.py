@@ -65,7 +65,10 @@ def build_provider_index(projects: list) -> dict:
                 if comp.get("type") != "controller":
                     continue
                 for ep in comp.get("endpoints", []):
-                    key = (ep.get("method", "").upper(), normalize_path(ep.get("path", "")))
+                    norm = normalize_path(ep.get("path", ""))
+                    if norm == "/":
+                        continue   # 根路径路由不进索引（实测噪声：必然误命中无路径的 Feign 声明）
+                    key = (ep.get("method", "").upper(), norm)
                     index.setdefault(key, []).append({
                         "project": pid,
                         "qualifiedName": comp.get("qualifiedName") or comp.get("className", ""),
@@ -75,9 +78,13 @@ def build_provider_index(projects: list) -> dict:
     return index
 
 
-def _feign_name(annotations: list) -> str:
-    """从类注解原文提取 @FeignClient(name="...")（GTSP 四属性之一）"""
-    for a in annotations or []:
+def _feign_name(comp: dict) -> str:
+    """Feign 服务名：优先结构化 feignClient.name（doc-gen 提取），
+    fallback 兼容注解原文（annotations 只存注解名，旧 manifest 无参数）"""
+    meta = comp.get("feignClient") or {}
+    if meta.get("name"):
+        return meta["name"]
+    for a in comp.get("annotations") or []:
         m = re.search(r'@FeignClient\b[^(]*\([^)]*?\bname\s*=\s*"([^"]+)"', a)
         if m:
             return m.group(1)
@@ -108,6 +115,7 @@ def build_cross_project_edges(projects: list) -> dict:
     seen, inferred_seen = set(), set()
     internal_calls = 0
     unmatched = 0
+    unmatched_by_service: dict = {}   # 池外目标服务 → 未命中调用数（实测：总数无解读性）
 
     for pid, mdir in projects:
         for domain in _load_domains(mdir):
@@ -115,7 +123,7 @@ def build_cross_project_edges(projects: list) -> dict:
             for comp in client.get("components", []):
                 if comp.get("type") != "feignInterface":
                     continue
-                feign_name = _feign_name(comp.get("annotations"))
+                feign_name = _feign_name(comp)
                 consumer = {
                     "qualifiedName": comp.get("qualifiedName") or comp.get("className", ""),
                     "sourcePath": comp.get("sourcePath", ""),
@@ -169,6 +177,8 @@ def build_cross_project_edges(projects: list) -> dict:
                             })
                     else:
                         unmatched += 1
+                        svc = feign_name or "（无 @FeignClient name）"
+                        unmatched_by_service[svc] = unmatched_by_service.get(svc, 0) + 1
 
     # ── MQ 边：producer.channel × consumer.channel 精确匹配（全局命名空间）──
     mq_consumers: dict = {}   # channel -> [(pid, comp)]
@@ -251,6 +261,8 @@ def build_cross_project_edges(projects: list) -> dict:
             "jobAssets": job_assets,
             "internalCalls": internal_calls,
             "unmatchedConsumers": unmatched,
+            "unmatchedByService": dict(sorted(unmatched_by_service.items(),
+                                              key=lambda kv: -kv[1])),
         },
     }
 

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Optional
 
 from doctypes import (
-    DocManifest, DomainDoc, LayerDoc, ComponentDoc, FieldDoc, EndpointDoc, MqChannelDoc, CacheKeyDoc, ScheduleDoc,
+    DocManifest, DomainDoc, LayerDoc, ComponentDoc, FieldDoc, EndpointDoc, MqChannelDoc, CacheKeyDoc, ScheduleDoc, FeignClientMetaDoc,
     AggregateDoc, DiagramSet, CrossDomainDep, TableDoc, TableColumnDoc, TableIndexDoc,
     FileInfo,
     SUFFIX_TYPE_MAP_ORDERED, LAYER_PATTERNS, CONTROLLER_ANNOTATIONS, HTTP_MAPPING_ANNOTATIONS,
@@ -243,6 +243,11 @@ class ManifestGenerator:
         if comp_type in ("controller", "feignInterface") and "annotations" in file_info:
             comp.endpoints = self._extract_endpoints(file_info)
 
+        # @FeignClient 元数据（name/path 等）——annotations 只存注解名，
+        # 鹰眼 inferred 边的服务名匹配需结构化参数（yp 实测：947 unmatched 全因无 name）
+        if comp_type == "feignInterface" and "annotations" in file_info:
+            comp.feignClient = self._extract_feign_client_meta(file_info)
+
         # 提取运行时证据（MQ 通道 / Redis key / 定时任务，鹰眼跨项目链路与资产观测）
         if comp_type in self.EVIDENCE_TYPES:
             comp.mqChannels = self._extract_mq_channels(file_info)
@@ -318,6 +323,30 @@ class ManifestGenerator:
 
         self._const_index_cache = {n: resolve(n) for n in raw}
         return self._const_index_cache
+
+    def _extract_feign_client_meta(self, file_info: FileInfo) -> FeignClientMetaDoc | None:
+        """从源文件类头提取 @FeignClient 四属性（name/path/contextId/url）"""
+        source_path = file_info.get("filePath", "")
+        java_file = self.root_path / source_path
+        if not java_file.exists():
+            return None
+        try:
+            raw = java_file.read_text(encoding="utf-8")
+        except Exception:
+            return None
+        header = raw.split("interface ")[0] if "interface " in raw else raw.split("class ")[0]
+        m = re.search(r'@FeignClient\s*\(([^)]*)\)', header, re.DOTALL)
+        if not m:
+            return None
+        params = m.group(1)
+
+        def attr(key: str) -> str:
+            am = re.search(rf'\b{key}\s*=\s*"([^"]*)"', params)
+            return am.group(1) if am else ""
+
+        meta = FeignClientMetaDoc(name=attr("name"), path=attr("path"),
+                                  contextId=attr("contextId"), url=attr("url"))
+        return meta if (meta.name or meta.path) else None
 
     def _extract_mq_channels(self, file_info: FileInfo) -> list[MqChannelDoc]:
         """从源文件提取 MQ 通道声明（consumer 订阅注解 + producer 发送调用）

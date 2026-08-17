@@ -35,6 +35,8 @@ doc-manifest/ 分片目录 ──── 交换物 ────────▶ �
 承载**消费侧调用声明**（`@FeignClient(path)` 类级前缀 + 方法级 mapping 拼接的完整路径），
 与 `controller` 组件的 `endpoints`（provider 路由声明）同构——鹰眼据此做签名对齐，
 产出 `cross-project.json` 聚合分片（confirmed/inferred 双置信度 + 双侧证据，见 §4.1）。
+`feignInterface` 另携带 `feignClient` 四属性元数据（`annotations` 只存注解名，
+inferred 边服务名匹配与 `unmatchedByService` 分组依赖此结构化字段，8 仓库实测驱动）。
 
 ## 3. 版本规则
 
@@ -70,7 +72,8 @@ doc-manifest/ 分片目录 ──── 交换物 ────────▶ �
 - MQ `confirmed`（`type: "mq"`）：`component.mqChannels` 的 producer/consumer 声明
   （`@RocketMQMessageListener` 等订阅注解 + `xxxTemplate.send/syncSend` 发布调用），
   channel 精确匹配（topic 全局命名空间）；依赖方向与 HTTP 统一（订阅者 → 发布者）
-- DB `confirmed`（`type: "db"`）：同名表出现在 ≥2 个项目的 `database.json` →
+- DB `confirmed`（`type: "db"`，⚠ 同名 ≠ 同库——通用表名疑为跨库巧合，治理决策前人工核验）：
+  同名表出现在 ≥2 个项目的 `database.json` →
   共享存储耦合边（from/to 字典序稳定，无向单边；evidence 含双方来源 DDL/PO）
 - 缓存：`component.cacheKeys` 的 key 字面量**相等** → `confirmed` 共享 key 边；
   以 `:` 分段**前缀包含**（运行时拼接 key 的静态证据本就是模式）→ `inferred`

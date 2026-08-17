@@ -224,6 +224,25 @@
               }
             }
           }
+        },
+        "feignClient": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "@FeignClient 元数据（仅 feignInterface；annotations 只存注解名，结构化参数供鹰眼 inferred 边）",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "contextId": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          }
         }
       }
     },
