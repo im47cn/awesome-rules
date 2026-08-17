@@ -10,7 +10,7 @@ scenario: Feign/URL 版本/参数校验
 ## 1. Feign 接口定义
 
 - `@FeignClient` 必须声明四属性：`url`（配置占位符）、`name`（服务名）、`contextId`（唯一标识）、`path`（服务根路径，即 domain）
-- 方法路径 `/{version}/{resource}/{action}`，action 用 `create`/`query`/`update`/`remove`
+- 方法路径 `/{version}/{resource}/{action}`，action 优先用 `create`/`query`/`update`/`remove`；CRUD 无法表达业务语义时用业务动作动词（`cancel`/`sync`/`confirm`/`apply`/`push` 等，见 §2）
 - 只定义新结构路径，**禁止多路径匹配**；**禁止 `@PathVariable`**
 
 ## 2. URL 路径与版本

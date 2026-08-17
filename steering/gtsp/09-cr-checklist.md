@@ -37,8 +37,8 @@ scenario: CR 清单/公共依赖速查
 
 **API 与 Controller**
 
-- [ ]【强制】Feign 接口（client 模块）声明 url/name/contextId/path 四属性，方法路径 `/v1/{resource}/{action}`
-- [ ]【强制】action 动词统一 `create`/`query`/`update`/`remove`（与 Open API 一致，便于网关直接对外）
+- [ ]【强制】Feign 接口（client 模块）声明 url/name/contextId/path 四属性，方法路径 `/{version}/{resource}/{action}`
+- [ ]【强制】action 动词与 Open API 统一：优先 `create`/`query`/`update`/`remove`，业务动作（`cancel`/`sync` 等）仅限 CRUD 无法表达时（见 [03](03-api-feign.md) §2）
 - [ ]【强制】版本策略：仅破坏性变更递增 version，同时最多 2 个版本
 - [ ]【强制】写操作参数标注 `@Valid` 或 `@Validated`
 - [ ]【强制】Controller 使用 `@PostMapping`/`@GetMapping`，不使用 `@RequestMapping(method=...)`
@@ -73,7 +73,7 @@ scenario: CR 清单/公共依赖速查
 
 | 场景 | 依赖 | 说明 |
 | --- | --- | --- |
-| 公共框架 | `fss-common` | ResultMode、BaseException、PagingInfo、ErrorType |
+| 公共框架 | `fss-common` | ResultMode、ResponseMessage、BaseException、PagingInfo、ErrorType（跨域业务模型归 `gtsp-common-model`，见 [01](01-project-structure.md)） |
 | ORM | `mybatis-plus-boot-starter` | BaseMapper、Wrappers、PaginationInnerInterceptor |
 | 连接池 | `druid-spring-boot-starter` | 数据库连接池 |
 | 链路追踪 | `wlyd-trace-context-spring-boot-starter` | traceId 注入、Log4j2 默认配置 |
