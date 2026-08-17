@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-# pre-push 门禁：全量测试 + 安装入口 blob 锁定
-# 启用（一次性）: npm run setup:hooks  或  git config core.hooksPath .githooks
-# 跳过: git push --no-verify
-set -e
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-bash "$REPO_ROOT/scripts/run_tests.sh"
