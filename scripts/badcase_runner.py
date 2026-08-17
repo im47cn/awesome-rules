@@ -10,6 +10,12 @@ Badcase 回归测试工具
   - expected.md : 期望结果（check 脚本 + 规则列表），只写一次
   - prompts.md  : 提示词集 + 已知问题（仅记录，不影响通过/失败）
 
+expected.md 期望模型（双通道）:
+  - 「## 预期检查输出」小节存在时，只认其中的 bullet：
+      - 脚本自动检出：<规则>、<规则>…  → 拆分为期望规则，参与比对
+      - 人工补充：<说明>              → 仅记录展示，不参与比对（脚本本就检不出）
+  - 无该小节（旧式）：第一个 ## 标题前的顶层 bullet 作为期望规则
+
 用法:
   python3 scripts/badcase_runner.py                     # 运行所有 badcase
   python3 scripts/badcase_runner.py --skill ddl-guard    # 只运行指定技能
@@ -34,6 +40,7 @@ class BadcaseResult:
     path: str
     passed: bool = True
     expected_rules: list = field(default_factory=list)
+    manual_rules: list = field(default_factory=list)
     actual_rules: list = field(default_factory=list)
     missing_rules: list = field(default_factory=list)
     scripts_run: list = field(default_factory=list)
@@ -61,9 +68,13 @@ def find_check_scripts(skill_dir: Path):
 
 
 def parse_expected(expected_path: Path):
-    """解析 expected.md，返回 (check_script, expected_rules)。"""
+    """解析 expected.md，返回 (check_script, expected_rules, manual_rules)。
+
+    双通道期望模型（见模块 docstring）：脚本自动检出参与比对，
+    人工补充仅记录不比对——把人工审查项计入失败会让 runner 永远红着。
+    """
     if not expected_path.is_file():
-        return None, []
+        return None, [], []
 
     text = expected_path.read_text(encoding="utf-8")
 
@@ -72,16 +83,38 @@ def parse_expected(expected_path: Path):
     if m:
         check_script = m.group(1).strip()
 
-    expected_rules = []
-    for line in text.split("\n"):
-        line = line.strip()
-        m = re.match(r"^[-*]\s+(.+)", line)
-        if m:
-            rule = m.group(1).strip()
-            if rule and not rule.startswith("#"):
-                expected_rules.append(rule)
+    expected_rules, manual_rules = [], []
 
-    return check_script, expected_rules
+    def _split_rules(payload: str):
+        return [p.strip() for p in re.split(r"[、,，;；]", payload) if p.strip()]
+
+    section = re.search(r"##\s*预期检查输出\s*\n(.*?)(?=\n##\s|$)", text, re.DOTALL)
+    if section:
+        # 新式：只认「预期检查输出」小节的 bullet
+        for line in section.group(1).split("\n"):
+            m = re.match(r"^[-*]\s+(.+)", line.strip())
+            if not m:
+                continue
+            item = m.group(1).strip()
+            if item.startswith("脚本自动检出"):
+                expected_rules.extend(_split_rules(
+                    re.split(r"[:：]", item, 1)[-1]))
+            elif item.startswith("人工补充"):
+                manual_rules.append(re.split(r"[:：]", item, 1)[-1].strip())
+            elif item and not item.startswith("#"):
+                expected_rules.append(item)
+    else:
+        # 旧式：第一个 ## 标题前的顶层 bullet（违规语句/改进建议等
+        # 小节里的 bullet 是给人工看的叙述，不是脚本期望）
+        head = re.split(r"\n##\s", text, 1)[0]
+        for line in head.split("\n"):
+            m = re.match(r"^[-*]\s+(.+)", line.strip())
+            if m:
+                rule = m.group(1).strip()
+                if rule and not rule.startswith("#"):
+                    expected_rules.append(rule)
+
+    return check_script, expected_rules, manual_rules
 
 
 def parse_prompts(prompts_path: Path):
@@ -169,11 +202,12 @@ def run_badcase(skill_name, case_name, case_dir: Path, project_root: Path):
     prompts_path = case_dir / "prompts.md"
 
     prompts, known_issues = parse_prompts(prompts_path)
-    check_script, expected_rules = parse_expected(expected_path)
+    check_script, expected_rules, manual_rules = parse_expected(expected_path)
 
     result = BadcaseResult(
         skill=skill_name, name=case_name, path=str(case_dir),
-        expected_rules=expected_rules, prompts=prompts, known_issues=known_issues,
+        expected_rules=expected_rules, manual_rules=manual_rules,
+        prompts=prompts, known_issues=known_issues,
     )
 
     # 无 expected.md → 跳过
@@ -274,6 +308,12 @@ def print_result(result: BadcaseResult, verbose=False):
                 print(f"    {c('✗', red)} {rule} {c('(未检出)', red)}")
             else:
                 print(f"    {c('✓', green)} {rule}")
+
+    # 人工补充（双通道期望模型：不参与比对，仅提示人工审查范围）
+    if result.manual_rules:
+        print(f"  {c('人工补充（不参与脚本比对）', dim)}:")
+        for rule in result.manual_rules:
+            print(f"    {c('•', dim)} {rule}")
 
     # 实际检出
     if verbose or not result.passed:

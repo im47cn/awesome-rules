@@ -22,7 +22,7 @@ CREATE TABLE t_order_very_long_comment (
     last_update_time    datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '最后更新时间',
     del_flag            tinyint(4)      NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]',
     PRIMARY KEY (id)
-) COMMENT='这是一个非常非常非常非常非常非常非常非常非常非常非常非常非常长的表注释，超过了64个字符的限制';
+) COMMENT='这是一个非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常长的表注释，达到了七十个字符以上，超过了64个字符的限制';
 
 -- 违规 3: 字段注释缺失
 CREATE TABLE t_order_missing_field_comment (
@@ -40,7 +40,7 @@ CREATE TABLE t_order_missing_field_comment (
 -- 违规 4: 字段注释长度超过 128
 CREATE TABLE t_order_long_field_comment (
     id                  bigint(20)      NOT NULL COMMENT '主键',
-    order_no            varchar(36)     NOT NULL COMMENT '这是一个非常非常非常非常非常非常非常非常非常非常非常非常非常长的字段注释，超过了128个字符的限制',
+    order_no            varchar(36)     NOT NULL COMMENT '非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常，这是一个非常长的字段注释，达到了一百四十个字符以上，超过了128个字符的限制',
     buyer_id            bigint(20)      NOT NULL COMMENT '买家id',
     creator_id          varchar(36)     NOT NULL DEFAULT '' COMMENT '创建人id',
     create_time         datetime        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
