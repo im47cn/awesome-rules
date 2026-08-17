@@ -21,6 +21,7 @@ import {
   generateDatabase, generateApiDocs,
   generateDomainModelPages,
   generateRisks, generateAdrPage, generateStateMachines, generateBusinessPage,
+  generateCrossProjectPage, generateGovernancePage,
   generateProjectPanorama, generateDeltaPage, generateImpactPage,
   DOCS_DIR, MANIFEST_DIR,
 } from './lib/generators.mjs';
@@ -146,6 +147,12 @@ async function main() {
   // ── 业务全景（business-context.json 可选扩展分片）──
   const bizCount = generateBusinessPage();
   if (bizCount > 0) { console.log('  ✓ business.mdx'); totalPages += bizCount; }
+
+  // ── 跨项目链路 + 治理仪表盘（鹰眼聚合产物分片）──
+  const cpCount = generateCrossProjectPage();
+  if (cpCount > 0) { console.log('  ✓ cross-project.mdx'); totalPages += cpCount; }
+  const govCount = generateGovernancePage();
+  if (govCount > 0) { console.log('  ✓ governance.mdx'); totalPages += govCount; }
 
   // ── 架构演进（delta.json 存在时生成）──
   const deltaCount = generateDeltaPage();

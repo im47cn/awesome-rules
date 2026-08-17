@@ -79,6 +79,14 @@ def main():
     gt_parser.add_argument("--warn-only", action="store_true", help="灰度：仅告警不阻断")
     gt_parser.add_argument("--json", action="store_true", help="输出 JSON（exit code 语义不变）")
 
+    # local — 本地双模式（B01）：仓库路径列表 → scan → 聚合 → 治理视图
+    lc_parser = sub.add_parser("local", help="本地模式：本地仓库 scan+聚合+治理（零服务依赖）",
+        epilog="示例: hawkeye.py local ~/sources/projA ~/sources/projB --baseline 2026H2")
+    lc_parser.add_argument("repos", nargs="+", help="各项目仓库根目录路径")
+    lc_parser.add_argument("--output", "-o", default="./hawkeye-local", help="输出目录")
+    lc_parser.add_argument("--baseline", "-b", help="对含基线的项目执行 trend（治理视图）")
+    lc_parser.add_argument("--build", action="store_true", help="聚合后构建站点")
+
     # debt — 债务登记表（D04/D05：list / exempt）
     dt_parser = sub.add_parser("debt", help="技术债务登记表")
     dt_parser.add_argument("manifest_dir", help="doc-manifest/ 目录")
@@ -145,6 +153,13 @@ def main():
         else:
             print(render_gate(result))
         sys.exit(1 if result["blocked"] else 0)
+        return
+
+    if args.command == "local":
+        from local_mode import run_local
+        ok = run_local(args.repos, args.output, baseline=args.baseline,
+                       build=args.build)
+        sys.exit(0 if ok else 1)
         return
 
     if args.command == "debt":

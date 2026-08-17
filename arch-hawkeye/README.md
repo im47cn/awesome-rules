@@ -71,7 +71,7 @@ indirect 沿 `component.deps` 反向 BFS（跳数裁剪、环安全）。
 | Phase 1 | 联邦聚合：多项目 manifest 聚合（`evidence.revision` 指纹就绪，CI 自注册待接入） | AH-A02/A03 · D01/D02 | 🚧 |
 | Phase 2 | 跨项目真实链路：confirmed/inferred 边构建 ✅；变更影响分析 ✅；可查询架构图待做 | AH-C01–C04 | 🚧 |
 | Phase 3 | 治理闭环 ✅：基线/趋势/blame 归属/债务登记/超期告警/增量零容忍门禁 | AH-D01–D07 | ✅ |
-| Phase 4 | 双模式：本地运行（零 LLM token）+ 集中处理 | AH-B01–B03 | 📋 |
+| Phase 4 | 双模式 ✅：`hawkeye local` 本地一条命令（零服务依赖零 LLM）+ CI 集中聚合 | AH-B01–B03 | ✅ |
 
 ## 治理闭环（Phase 3 ✅，REQ-D 全落地）
 
@@ -96,6 +96,18 @@ python3 scripts/hawkeye.py debt ./doc-manifest overdue
   失败降级 null）；**D06 闭环**：违规消失 → 债务自动 repaid；**豁免强制理由**
 - 真实仓库验证：mc 273 违规 → 269 条带归属（liyufei/renshibo 等），
   建基线/演进/门禁阻断（exit 1）/灰度放行（exit 0）全流程通过
+- **本地双模式**（Phase 4 ✅，B01/B02/B03）：
+
+```bash
+# 员工本地一条命令：scan 全部仓库 → 聚合（接纳 dirty 工作区——那是本地
+# 分析对象）→ 含基线项目输出趋势；全链路零 LLM token（B02）
+python3 scripts/hawkeye.py local ~/sources/projA ~/sources/projB   --output ./hawkeye-local --baseline 2026H2
+```
+
+本地结论（trend/cross-project/governance 分片）标准落盘于
+`<output>/site/doc-manifest/`；上报 = 推送归档分支（CI 样例同构步骤，
+本地不做任何自动 push）。站点渲染「🔗 跨项目链路」「🚦 治理仪表盘」页
+（C02/E03）。
 - **CI 接线样例**：[`ci/governance-pipeline.example.yml`](ci/governance-pipeline.example.yml)
   ——项目侧（PR 门禁 + 归档联邦索引）与中心侧（周期聚合 + 治理报表）三段式，
   含灰度 → 强制切换路径

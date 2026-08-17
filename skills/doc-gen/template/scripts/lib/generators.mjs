@@ -781,6 +781,14 @@ export function generateBusinessPage() {
     for (const f of flows) {
       content += '### ' + f.name + ' ' + srcBadge(f.source) + '\n\n';
       if (f.description) content += f.description + '\n\n';
+      // 人工/混合流程：Mermaid 流程图（步骤序 → 节点链）；code 流程不画（状态机页已有 stateDiagram）
+      if (f.source !== 'code' && f.steps?.length > 1) {
+        const escNode = (t) =>
+          String(t).replace(/"/g, '#quot;').replace(/[\r\n]+/g, ' ').trim();
+        const nodeLines = f.steps.map((st, i) => `    s${i + 1}["${i + 1}. ${escNode(st.name)}"]`);
+        const edgeLines = f.steps.slice(1).map((_, i) => `    s${i + 1} --> s${i + 2}`);
+        content += '```mermaid\nflowchart TD\n' + nodeLines.concat(edgeLines).join('\n') + '\n```\n\n';
+      }
       if (f.steps?.length) {
         const lines = f.steps.map((st, i) => {
           let line = (i + 1) + '. **' + st.name + '**';
@@ -795,12 +803,112 @@ export function generateBusinessPage() {
       if (f.anchors?.length) {
         content += '代码锚点: ' + anchorsInline(f.anchors) + '\n\n';
       }
+      if (f.source === 'code' && fs.existsSync(path.join(MANIFEST_DIR, 'state-machines.json'))) {
+        content += '> 🤖 本流程由状态机代码提取，完整状态转换图与质量审查见[状态机](/state-machine/)。\n\n';
+      }
+    }
+    if (fs.existsSync(path.join(MANIFEST_DIR, 'state-machines.json'))) {
+      content += '> 流程中状态流转的技术细节（stateDiagram + 死状态/不可达审查）见[状态机](/state-machine/)。\n\n';
     }
   }
 
   writeMDX(path.join(DOCS_DIR, 'business.mdx'), {
     title: '业务全景',
     description: '客户、角色、业务场景与业务流程',
+  }, content);
+  return 1;
+}
+
+// ── 跨项目链路页面（cross-project.json，鹰眼聚合产物）──
+
+export function generateCrossProjectPage() {
+  const cpFile = path.join(MANIFEST_DIR, 'cross-project.json');
+  if (!fs.existsSync(cpFile)) return 0;
+  const cp = readJSONMaybe(cpFile);
+  const edges = cp?.edges || [];
+  if (edges.length === 0) return 0;
+  const st = cp.stats || {};
+
+  let content = `> 跨项目真实链路 · ${edges.length} 条边（HTTP/Feign 签名对齐 + MQ 通道 + DB 共享表 + 缓存 key；confirmed=双侧证据 / inferred=推断）\n\n`;
+  content += '<div class="risk-summary">\n';
+  content += `  <div class="risk-stat risk-critical"><span class="risk-count">${st.confirmed || 0}</span> confirmed</div>\n`;
+  content += `  <div class="risk-stat risk-warning"><span class="risk-count">${st.inferred || 0}</span> inferred</div>\n`;
+  content += `  <div class="risk-stat risk-info"><span class="risk-count">${st.sharedTables || 0}</span> 共享表</div>\n`;
+  content += `  <div class="risk-stat risk-info"><span class="risk-count">${Object.keys(st.unmatchedByService || {}).length}</span> 池外服务</div>\n`;
+  content += '</div>\n\n';
+
+  content += '## 链路边清单\n\n';
+  content += mdTable(
+    ['置信', '类型', 'from → to', '证据'],
+    edges.map((e) => [
+      e.confidence === 'confirmed' ? '✅ confirmed' : '⚠️ inferred',
+      e.type || 'http',
+      `${e.from} → ${e.to}`,
+      e.type === 'db'
+        ? `共享表 <code>${e.evidence?.table || ''}</code>`
+        : `<code>${e.evidence?.consumer?.call || (e.evidence?.keys || []).join(' ')}</code>`,
+    ]),
+  ) + '\n\n';
+
+  if (st.unmatchedByService && Object.keys(st.unmatchedByService).length) {
+    content += '## 池外服务（被调用但未接入鹰眼）\n\n';
+    content += mdTable(
+      ['服务', '未命中调用数'],
+      Object.entries(st.unmatchedByService).slice(0, 20).map(([svc, n]) => [svc, String(n)]),
+    ) + '\n\n';
+  }
+
+  writeMDX(path.join(DOCS_DIR, 'cross-project.mdx'), {
+    title: '跨项目链路',
+    description: '跨项目真实调用/共享证据（confirmed/inferred）',
+  }, content);
+  return 1;
+}
+
+// ── 治理仪表盘页面（governance.json，E03）──
+
+export function generateGovernancePage() {
+  const govFile = path.join(MANIFEST_DIR, 'governance.json');
+  if (!fs.existsSync(govFile)) return 0;
+  const gov = readJSONMaybe(govFile);
+  const projects = gov?.projects || [];
+  if (projects.length === 0) return 0;
+
+  const statusLabels = { pending: '⏳ 待处理', 'in-progress': '🔧 进行中',
+                         repaid: '✅ 已偿还', exempt: '📋 已豁免' };
+  let content = '> 治理仪表盘 — 基线趋势 / 债务归属 / 超期告警（数据源：各项目 baselines + debt-ledger）\n\n';
+
+  for (const proj of projects) {
+    content += `## ${proj.projectName || proj.projectId}\n\n`;
+    if (proj.baselines?.length) {
+      content += mdTable(
+        ['基线', '冻结时间', '违规数', 'revision'],
+        proj.baselines.map((b) => [b.name || '-', (b.createdAt || '').slice(0, 10),
+                                   String(b.totalIssues ?? '-'), (b.revision || '').slice(0, 8)]),
+      ) + '\n\n';
+    }
+    const debts = proj.debts || [];
+    if (debts.length) {
+      const byStatus = {};
+      for (const d of debts) byStatus[d.status] = (byStatus[d.status] || 0) + 1;
+      content += `**债务 ${debts.length} 条**：` + Object.entries(byStatus)
+        .map(([k, v]) => `${statusLabels[k] || k} ${v}`).join(' · ') + '\n\n';
+      content += mdTable(
+        ['fingerprint', '严重度', '文件', '归属人', '状态'],
+        debts.slice(0, 20).map((d) => [
+          `<code>${String(d.fingerprint || '').slice(0, 8)}</code>`,
+          d.severity || '-', d.file || '-', d.owner || 'unknown',
+          statusLabels[d.status] || d.status,
+        ]),
+      ) + '\n\n';
+    } else {
+      content += '_未接入治理（无债务登记）_\n\n';
+    }
+  }
+
+  writeMDX(path.join(DOCS_DIR, 'governance.mdx'), {
+    title: '治理仪表盘',
+    description: '基线 / 债务 / 超期全景（E03）',
   }, content);
   return 1;
 }
@@ -826,6 +934,9 @@ export function generateStateMachines() {
   const totalIssues = sms.reduce((s, sm) => s + (sm.issues?.length || 0), 0);
 
   let content = `> 枚举状态机全景 · ${sms.length} 个状态机（自动识别 raw/spring/cola 框架，含状态转换图与质量审查）\n\n`;
+  if (fs.existsSync(path.join(MANIFEST_DIR, 'business-context.json'))) {
+    content += '> 业务视角（客户/角色/场景/流程叙事）见[业务全景](/business/)；本页聚焦状态流转的工程审查。\n\n';
+  }
   content += '<div class="risk-summary">\n';
   content += `  <div class="risk-stat risk-info"><span class="risk-count">${sms.length}</span> 状态机</div>\n`;
   content += `  <div class="risk-stat risk-warning"><span class="risk-count">${totalStates}</span> 状态</div>\n`;
@@ -961,7 +1072,7 @@ export function generateImpactPage() {
   <datalist id="impact-datalist"></datalist>
   <button id="impact-run" class="sl-button" style="padding:0.5rem 1rem">分析</button>
 </div>
-<div id="impact-result" style="margin-top:1.5rem"><p><small>正在加载 manifest 依赖图…</small></p></div>
+<div id="impact-result" style="margin-top:1.5rem"><p><small>💡 在上方输入组件名（支持模糊匹配，输入框有候选提示），点击「分析」查看影响链与回归范围。</small></p></div>
 <script src="/impact.js"></script>
 `;
   writeMDX(path.join(DOCS_DIR, 'impact.mdx'), {

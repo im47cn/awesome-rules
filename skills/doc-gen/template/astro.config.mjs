@@ -245,6 +245,27 @@ function buildSidebar() {
     } catch { /* ignore */ }
   }
 
+  // 跨项目链路 + 治理仪表盘（鹰眼聚合产物）
+  const cpFile2 = path.join(MANIFEST_DIR, "cross-project.json");
+  if (fs.existsSync(cpFile2)) {
+    try {
+      const cp = JSON.parse(fs.readFileSync(cpFile2, "utf-8"));
+      if ((cp.edges || []).length > 0) {
+        sidebar.push({ label: `🔗 跨项目链路 (${cp.edges.length})`, link: "/cross-project" });
+      }
+    } catch { /* ignore */ }
+  }
+  const govFile2 = path.join(MANIFEST_DIR, "governance.json");
+  if (fs.existsSync(govFile2)) {
+    try {
+      const gov = JSON.parse(fs.readFileSync(govFile2, "utf-8"));
+      const debts = (gov.projects || []).reduce((s2, g) => s2 + (g.debts?.length || 0), 0);
+      if (debts > 0) {
+        sidebar.push({ label: `🚦 治理仪表盘 (${debts})`, link: "/governance" });
+      }
+    } catch { /* ignore */ }
+  }
+
   if (manifestIdx?.tableCount > 0) {
     sidebar.push({ label: "数据库设计", link: "/database" });
   }

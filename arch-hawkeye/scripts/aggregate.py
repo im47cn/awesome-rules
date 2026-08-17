@@ -24,7 +24,8 @@ from validator import validate_manifest_dir  # noqa: E402 — 契约校验器（
 from crossproject import build_cross_project_edges  # noqa: E402 — 同目录模块
 
 
-def aggregate_projects(projects_json: str, output_dir: str, build: bool, verbose: bool):
+def aggregate_projects(projects_json: str, output_dir: str, build: bool, verbose: bool,
+                       local_mode: bool = False):
     """多项目聚合 — 将多个 doc-manifest/ 合并到架构鹰眼站点
 
     projects.json 格式:
@@ -61,6 +62,7 @@ def aggregate_projects(projects_json: str, output_dir: str, build: bool, verbose
     # Phase 1: 验证 & 读取各项目 manifest
     project_data = []
     valid_manifests = []      # [(proj_id, manifest_path)] 跨项目边构建输入
+    all_governance = []       # 各项目治理分片（baselines/debts，E03 仪表盘数据源）
     total_domains = 0
     total_components = 0
     total_tables = 0
@@ -112,7 +114,9 @@ def aggregate_projects(projects_json: str, output_dir: str, build: bool, verbose
                     encoding="utf-8")).get("evidence", {})
             except json.JSONDecodeError:
                 evidence = {}
-        if evidence.get("dirty") or not evidence.get("revision"):
+        # local_mode（hawkeye local）：本地分析视角——dirty 工作区恰是本地
+        # 模式的分析对象（分析当前未提交改动），仅联邦索引要求干净快照
+        if not local_mode and (evidence.get("dirty") or not evidence.get("revision")):
             reason = ("evidence.dirty=true，SHA 与扫描内容不符"
                       if evidence.get("dirty") else "revision 缺失/null")
             print(f"  ⚠ {proj_name}: {reason}，不进入联邦索引（请重新扫描干净工作区）")
@@ -205,6 +209,30 @@ def aggregate_projects(projects_json: str, output_dir: str, build: bool, verbose
         })
         # 记录成功读取的 manifest（跨项目边构建输入，AH-C01）
         valid_manifests.append((proj_id, manifest_path))
+
+        # 收集治理分片（baselines/debt-ledger，若项目已建立治理——供
+        # 聚合站点的治理仪表盘 E03 汇总，缺省跳过）
+        gov_data = {"projectId": proj_id, "projectName": proj_name,
+                    "baselines": [], "debts": []}
+        for bf in sorted((manifest_path / "baselines").glob("*.json")) \
+                if (manifest_path / "baselines").is_dir() else []:
+            try:
+                gov_data["baselines"].append({
+                    "name": bf.stem,
+                    **{k: v for k, v in json.loads(
+                        bf.read_text(encoding="utf-8")).items()
+                        if k != "fingerprints"}})   # 指纹明细留在项目侧
+            except (json.JSONDecodeError, OSError):
+                pass
+        ledger_file = manifest_path / "debt-ledger.json"
+        if ledger_file.exists():
+            try:
+                gov_data["debts"] = json.loads(
+                    ledger_file.read_text(encoding="utf-8")).get("debts", [])
+            except (json.JSONDecodeError, OSError):
+                pass
+        if gov_data["baselines"] or gov_data["debts"]:
+            all_governance.append(gov_data)
 
         print(f"  ✓ {proj_name}: {domain_count} 域, {comp_count} 组件")
 
@@ -302,6 +330,27 @@ def aggregate_projects(projects_json: str, output_dir: str, build: bool, verbose
     (agg_dir / "state-machines.json").write_text(
         json.dumps(all_state_machines, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    # business-context.json — 合并各项目业务全景（人工 md + 代码弱信号，模板按条目 _project_name 区分来源）
+    merged_bc = {"customers": [], "roles": [], "scenarios": [], "flows": []}
+    for proj in projects:
+        bc_file = Path(proj.get("manifest", "")) / "business-context.json"
+        if not bc_file.exists():
+            continue
+        try:
+            bc = json.loads(bc_file.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        for key in ("customers", "roles", "scenarios", "flows"):
+            for item in bc.get(key, []):
+                item["_project_id"] = proj.get("id", "")
+                item["_project_name"] = proj.get("name", "")
+                merged_bc[key].append(item)
+    bc_total = sum(len(merged_bc[k]) for k in merged_bc)
+    if bc_total:
+        (agg_dir / "business-context.json").write_text(
+            json.dumps(merged_bc, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"  ✓ 业务全景: {bc_total} 条（客户/角色/场景/流程）")
+
     # cross-domain.json — 聚合（去重）
     seen_cd = set()
     unique_cd = []
@@ -324,6 +373,14 @@ def aggregate_projects(projects_json: str, output_dir: str, build: bool, verbose
           f"inferred={cp_stats['inferred']}, "
           f"项目内调用={cp_stats['internalCalls']}, "
           f"未匹配={cp_stats['unmatchedConsumers']}")
+
+    # governance.json — 治理分片汇总（E03 仪表盘数据源，项目未接入治理时为空）
+    (agg_dir / "governance.json").write_text(
+        json.dumps({"projects": all_governance}, ensure_ascii=False, indent=2),
+        encoding="utf-8")
+    total_debts = sum(len(g["debts"]) for g in all_governance)
+    if all_governance:
+        print(f"  ✓ 治理分片: {len(all_governance)} 项目, {total_debts} 条债务")
 
     # diagrams.json — 公司级全景架构图 + 聚合全景 ER 图
     # 跨项目依赖图优先用真实边（confirmed/inferred 视觉区分），无真实边时回退域名猜测
