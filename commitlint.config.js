@@ -11,7 +11,7 @@ module.exports = {
     'type-enum': [
       2,
       'always',
-      ['feat', 'fix', 'docs', 'style', 'refactor', 'test', 'chore'],
+      ['feat', 'fix', 'docs', 'style', 'refactor', 'perf', 'test', 'chore', 'revert'],
     ],
 
     // ── scope 建议在枚举内（warn，业务域靠 warn 放行，不阻断）─────
