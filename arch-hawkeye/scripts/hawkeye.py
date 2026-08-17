@@ -93,6 +93,8 @@ def main():
     dt_parser.add_argument("action", choices=["list", "overdue", "exempt"])
     dt_parser.add_argument("--fp", help="债务 fingerprint（exempt 用）")
     dt_parser.add_argument("--reason", help="豁免理由（exempt 必填）")
+    dt_parser.add_argument("--until", help="豁免到期日（ISO 日期，如 2026-12-31；"
+                                           "到期进入 overdue 复核视野，缺省永久")
 
     args = parser.parse_args()
 
@@ -199,8 +201,10 @@ def main():
                 print("❌ exempt 需要 --fp 与 --reason", file=sys.stderr)
                 sys.exit(2)
             try:
-                d = exempt_debt(args.manifest_dir, args.fp, args.reason)
-                print(f"✅ 已豁免 {d['fingerprint'][:12]}: {args.reason}")
+                d = exempt_debt(args.manifest_dir, args.fp, args.reason,
+                                until=args.until)
+                print(f"✅ 已豁免 {d['fingerprint'][:12]}: {args.reason}"
+                      + (f"（至 {args.until}）" if args.until else "（永久）"))
             except (KeyError, ValueError) as e:
                 print(f"❌ {e}", file=sys.stderr)
                 sys.exit(2)

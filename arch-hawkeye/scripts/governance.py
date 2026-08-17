@@ -61,6 +61,28 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _fps_with_occurrences(issues: list) -> dict:
+    """fp → {**首条 issue（保序代表）, lines: [行号], occurrences: n}。
+
+    fp 不含 line（行漂移容忍），同点重复违规**有意合并为一条债务**——但
+    合并不等于丢信息：记录全部行号与出现次数，计数与趋势才不失真，
+    代表 issue 取首条而非 dict 覆盖的任意末条。
+    """
+    from collections import OrderedDict
+    ordered = OrderedDict()
+    for i in issues:
+        fp = fingerprint(i)
+        if fp not in ordered:
+            ordered[fp] = dict(i)
+            ordered[fp]["lines"] = []
+            ordered[fp]["occurrences"] = 0
+        e = ordered[fp]
+        e["occurrences"] += 1
+        if i.get("line") not in e["lines"]:
+            e["lines"].append(i.get("line"))
+    return ordered
+
+
 # ── D01 基线 ──────────────────────────────────────────────────────────────────
 
 
@@ -83,9 +105,11 @@ def create_baseline(manifest_dir, name: str) -> dict:
         "name": name,
         "createdAt": _now(),
         "revision": meta.get("evidence", {}).get("revision"),
-        "totalIssues": len(issues),
-        "fingerprints": {fingerprint(i): i for i in issues},
+        "totalIssues": len(issues),               # 出现次数（真实违规条数）
+        "totalFingerprints": 0,                   # 违规类型数（下面回填）
+        "fingerprints": _fps_with_occurrences(issues),
     }
+    baseline["totalFingerprints"] = len(baseline["fingerprints"])
     bdir = manifest_dir / BASELINE_DIR
     bdir.mkdir(parents=True, exist_ok=True)
     bfile = bdir / f"{name}.json"
@@ -108,6 +132,8 @@ def create_baseline(manifest_dir, name: str) -> dict:
             "description": issue.get("description", ""),
             "owner": issue.get("author") or "unknown",   # D03 blame（risks.json 可选携带）
             "introducedAt": issue.get("introducedAt"),
+            "lines": issue.get("lines", []),              # 同点重复的全部行号
+            "occurrences": issue.get("occurrences", 1),   # 出现次数
             "dueDate": None,          # 待人工规划
             "status": "pending",      # pending / in-progress / repaid / exempt
             "exemptReason": None,
@@ -153,16 +179,29 @@ def save_ledger(manifest_dir, ledger: dict) -> None:
         json.dumps(ledger, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def exempt_debt(manifest_dir, fp: str, reason: str) -> dict:
-    """豁免债务（强制理由——无理由的豁免就是放水）"""
+def exempt_debt(manifest_dir, fp: str, reason: str, until: str = None) -> dict:
+    """豁免债务（强制理由——无理由的豁免就是放水）。
+
+    状态机约束：repaid 债务不可豁免（已闭环无需豁免，豁免混淆台账语义）。
+    until（可选，ISO 日期）：豁免到期日——到期后进入 overdue 复核视野，
+    防止"豁免即永久"；缺省为永久豁免（存量语义兼容）。
+    """
     ledger = load_ledger(manifest_dir)
     for d in ledger["debts"]:
         if d["fingerprint"] == fp:
             if not reason.strip():
                 raise ValueError("豁免必须填写理由")
+            if d["status"] == "repaid":
+                raise ValueError("债务已偿还（repaid），无需豁免")
             d["status"] = "exempt"
             d["exemptReason"] = reason
             d["exemptedAt"] = _now()
+            if until:
+                try:  # 提前校验格式，别把坏日期写进台账
+                    datetime.fromisoformat(until)
+                except ValueError:
+                    raise ValueError(f"until 日期格式非法: {until}（ISO 8601，如 2026-12-31）")
+                d["exemptUntil"] = until
             save_ledger(manifest_dir, ledger)
             return d
     raise KeyError(f"债务不存在: {fp[:12]}")
@@ -172,23 +211,27 @@ def exempt_debt(manifest_dir, fp: str, reason: str) -> dict:
 
 
 def diff_risks(baseline: dict, current_issues: list) -> dict:
-    """当前 vs 基线：added（新增，D07 门禁对象）/ removed（消除，D06 关债）/ retained"""
+    """当前 vs 基线：added（新增，D07 门禁对象）/ removed（消除，D06 关债）/ retained。
+
+    身份粒度为 fp（同点重复违规合并为一类，行漂移容忍）；added/retained
+    取各 fp 首条代表 issue（保序稳定），occurrences/lines 见 baseline 分片。
+    """
     base_fps = set(baseline.get("fingerprints", {}))
-    cur_fps = {fingerprint(i): i for i in current_issues}
-    added = [i for fp, i in cur_fps.items() if fp not in base_fps]
-    removed_fps = base_fps - set(cur_fps)
-    retained = [i for fp, i in cur_fps.items() if fp in base_fps]
+    cur = _fps_with_occurrences(current_issues)
+    added = [e for fp, e in cur.items() if fp not in base_fps]
+    removed_fps = base_fps - set(cur)
+    retained = [e for fp, e in cur.items() if fp in base_fps]
     return {
         "added": added,
         "removedFingerprints": sorted(removed_fps),
         "retained": retained,
         "stats": {
             "baseline": len(base_fps),
-            "current": len(cur_fps),
+            "current": len(cur),
             "added": len(added),
             "removed": len(removed_fps),
             "retained": len(retained),
-            "net": len(cur_fps) - len(base_fps),
+            "net": len(cur) - len(base_fps),
         },
     }
 
@@ -212,14 +255,21 @@ def sync_ledger(manifest_dir, current_issues: list) -> dict:
 
 
 def overdue_debts(manifest_dir) -> list[dict]:
-    """dueDate 已过且未偿还（pending/in-progress）的债务"""
+    """超期视野：①dueDate 已过且未偿还（pending/in-progress）的债务；
+    ②豁免到期未复核（exempt + exemptUntil 已过）——到期豁免回到待办，
+    防止"豁免即永久"。"""
     now = datetime.now(timezone.utc)
     out = []
     for d in load_ledger(manifest_dir)["debts"]:
-        if d["status"] not in ("pending", "in-progress") or not d.get("dueDate"):
+        overdue_date = None
+        if d["status"] in ("pending", "in-progress"):
+            overdue_date = d.get("dueDate")
+        elif d["status"] == "exempt":
+            overdue_date = d.get("exemptUntil")
+        if not overdue_date:
             continue
         try:
-            due = datetime.fromisoformat(d["dueDate"])
+            due = datetime.fromisoformat(overdue_date)
         except ValueError:
             continue
         if due.tzinfo is None:
@@ -258,7 +308,9 @@ def gate(manifest_dir, baseline_name: str, warn_only: bool = False) -> dict:
         }
     diff = diff_risks(baseline, current)
     added = diff["added"]
-    result = {
+    # gate 只读不写 ledger：PR 场景并发跑 gate 的 load-modify-save 会丢
+    # 豁免/关闭更新，且中心侧 trend 已承担 D06 闭环写入（CI 样例语义一致）
+    return {
         "baseline": baseline_name,
         "mode": "warn-only" if warn_only else "enforce",
         "addedCount": len(added),
@@ -266,10 +318,6 @@ def gate(manifest_dir, baseline_name: str, warn_only: bool = False) -> dict:
         "stats": diff["stats"],
         "blocked": bool(added) and not warn_only,
     }
-    if added:
-        sync = sync_ledger(manifest_dir, current)   # 顺手闭环已消除债务
-        result["repaidInThisRun"] = sync["closedCount"]
-    return result
 
 
 def render_gate(result: dict) -> str:
@@ -288,7 +336,5 @@ def render_gate(result: dict) -> str:
                      f"{issue.get('rule', issue.get('ruleCode', ''))}")
     if len(result["added"]) > 10:
         lines.append(f"   ... 共 {len(result['added'])} 条新增")
-    if result.get("repaidInThisRun"):
-        lines.append(f"   ✅ 本次自动关闭已消除债务 {result['repaidInThisRun']} 条（D06 闭环）")
     lines.append("⛔ 阻断合并（新增违规零容忍）" if result["blocked"] else "✅ 放行")
     return "\n".join(lines)

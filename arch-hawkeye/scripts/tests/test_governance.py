@@ -17,6 +17,7 @@ from governance import (
     exempt_debt,
     fingerprint,
     gate,
+    load_baseline,
     load_ledger,
     overdue_debts,
     render_gate,
@@ -247,3 +248,86 @@ def test_cli_trend_corrupt_risks_exits_2(tmp_path):
     assert r.returncode == 2
     assert "数据不可信" in r.stderr
     assert "Traceback" not in r.stderr
+
+
+# ── fingerprint 信息保全（合并为一条债务，但不丢行号与计数）────────────────
+
+def test_baseline_preserves_duplicate_occurrences(tmp_path):
+    """同点重复违规：totalIssues 按条数、fingerprints 按类型，行号全保留"""
+    md = tmp_path / "doc-manifest"
+    _write_risks(md, [_issue(desc="A", line=10), _issue(desc="A", line=99),
+                      _issue(desc="B", line=1)])
+    info = create_baseline(md, "v1")
+    assert info["totalIssues"] == 3
+    base = load_baseline(md, "v1")
+    assert base["totalFingerprints"] == 2
+    fp_a = fingerprint(_issue(desc="A"))
+    entry = base["fingerprints"][fp_a]
+    assert entry["occurrences"] == 2 and entry["lines"] == [10, 99]
+    # 债务登记带 occurrences/lines，代表 issue 为首条（line=10）
+    debt = [d for d in load_ledger(md)["debts"]
+            if d["description"] == "A"][0]
+    assert debt["occurrences"] == 2 and debt["lines"] == [10, 99]
+
+
+def test_diff_representative_issue_is_first_occurrence(tmp_path):
+    """added/retained 取 fp 首条代表（保序稳定，不受末条覆盖影响）"""
+    md = tmp_path / "doc-manifest"
+    _write_risks(md, [_issue(desc="A")])
+    create_baseline(md, "v1")
+    _write_risks(md, [_issue(desc="A", line=1), _issue(desc="A", line=50),
+                      _issue(desc="NEW", line=5), _issue(desc="NEW", line=6)])
+    diff = diff_risks(load_baseline(md, "v1"),
+                      [_issue(desc="A", line=1), _issue(desc="A", line=50),
+                       _issue(desc="NEW", line=5), _issue(desc="NEW", line=6)])
+    assert diff["stats"] == {"baseline": 1, "current": 2, "added": 1,
+                             "removed": 0, "retained": 1, "net": 1}
+    assert diff["added"][0]["line"] == 5        # 首条代表，非末条 6
+    assert diff["added"][0]["occurrences"] == 2
+
+
+# ── 豁免状态机 ───────────────────────────────────────────────────────────────
+
+def test_exempt_rejects_repaid_debt(tmp_path):
+    """已偿还债务不可豁免（已闭环，豁免混淆台账语义）"""
+    md = tmp_path / "doc-manifest"
+    _write_risks(md, [_issue(desc="A")])
+    create_baseline(md, "v1")
+    _write_risks(md, [])                         # A 消除 → 自动 repaid
+    sync_ledger(md, [])
+    fp = fingerprint(_issue(desc="A"))
+    with pytest.raises(ValueError):
+        exempt_debt(md, fp, "想豁免已还清的")
+
+
+def test_exempt_until_enters_overdue_review(tmp_path):
+    """带 until 的豁免到期后进入 overdue 复核视野（豁免不再永久免检）"""
+    md = tmp_path / "doc-manifest"
+    _write_risks(md, [_issue(desc="A")])
+    create_baseline(md, "v1")
+    fp = fingerprint(_issue(desc="A"))
+    past = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+    exempt_debt(md, fp, "临时放行", until=past)
+    overdue = overdue_debts(md)
+    assert len(overdue) == 1 and overdue[0]["status"] == "exempt"
+    assert overdue[0]["overdueDays"] >= 9
+
+
+def test_exempt_until_validates_date(tmp_path):
+    md = tmp_path / "doc-manifest"
+    _write_risks(md, [_issue(desc="A")])
+    create_baseline(md, "v1")
+    with pytest.raises(ValueError):
+        exempt_debt(md, fingerprint(_issue(desc="A")), "r", until="not-a-date")
+
+
+def test_gate_does_not_write_ledger(tmp_path):
+    """gate 只读不写：PR 并发跑 gate 无 load-modify-save 竞态（CI 样例语义）"""
+    md = tmp_path / "doc-manifest"
+    _write_risks(md, [_issue(desc="A")])
+    create_baseline(md, "v1")
+    (md / "debt-ledger.json").unlink()           # baseline 登记的 ledger 移除
+    _write_risks(md, [_issue(desc="A"), _issue(desc="X")])
+    r = gate(md, "v1")
+    assert r["blocked"] is True
+    assert not (md / "debt-ledger.json").exists()  # gate 未写回
