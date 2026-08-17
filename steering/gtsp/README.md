@@ -6,7 +6,7 @@ scenario: GTSP 工程规范总索引
 # GTSP 工程规范
 
 > GTSP 团队 Java / Spring Cloud 微服务工程规范，按维度拆分以支持按需加载。
-> 采用 COLA DDD 架构（业务域隔离；完整档 6 模块 / 轻量档包分层，见 [01](01-project-structure.md) §3）；URI 结构、版本策略与 `steering/openapi-standards.md` 统一。GTSP 编码读本目录，对外 Open API 设计读 `steering/openapi-standards.md`。
+> 采用 COLA DDD 架构（业务域隔离；完整档 6 模块 / 轻量档包分层，见 [01](01-project-structure.md) §3）；URI 结构、版本策略与 [`../openapi-standards.md`](../openapi-standards.md) 统一。GTSP 编码读本目录，对外 Open API 设计读 [`../openapi-standards.md`](../openapi-standards.md)。
 
 - 父 POM：`com.acme:gtsp-parent:2.0.0-SNAPSHOT`
 - 约束分级：维度文件（01-08）不逐条分级，阐述设计与工程规范；[09](09-cr-checklist.md) 为 CR 合并门禁清单（不通过则不予合并）

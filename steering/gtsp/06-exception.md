@@ -11,7 +11,7 @@ scenario: ResultMode/BaseException/ErrorType
 
 返回类型按模块裁决：client 模块（Feign 接口）统一 `ResponseMessage<T>`；adapter 模块（Controller）统一 `ResultMode<T>`（由 `fss-common` 提供）。禁止裸返回业务对象。
 
-`ResultMode<T>` 主要字段：`model`（业务数据）、`total`（分页总数）、`succeed`、`errMsg`、`message`、`errCode`。常用静态方法：`success(data)`、`successPageList(list, total)`、`fail(code, msg)`。对外 Open API 响应体结构（含 `details`/`timestamp`/`traceId`，见 `openapi-standards.md`）与内部 `ResultMode` 不同，两者映射由 API 网关完成，业务层无需关心。
+`ResultMode<T>` 主要字段：`model`（业务数据）、`total`（分页总数）、`succeed`、`errMsg`、`message`、`errCode`。常用静态方法：`success(data)`、`successPageList(list, total)`、`fail(code, msg)`。对外 Open API 响应体结构（含 `details`/`timestamp`/`traceId`，见 [`../openapi-standards.md`](../openapi-standards.md)）与内部 `ResultMode` 不同，两者映射由 API 网关完成，业务层无需关心。
 
 ## 2. 异常体系
 
@@ -31,7 +31,7 @@ scenario: ResultMode/BaseException/ErrorType
 - 每个业务域定义 `ExceptionEnum`（infrastructure 模块 enums 包），枚举项含 `desc`/`type`(ErrorType)/`solution` 三字段
 - 枚举常量名即错误码，**无需单独 code 字段**
 - 命名 `{系统标识}_{模块}_{序号}`，如 `LS_Q1_0001`；系统标识取服务前缀大写（`UA`/`LS`），模块 2-4 位缩写，序号 4 位从 `0001` 起，按子功能分组注释
-- 风格与对外 `steering/openapi-standards.md` 错误码统一（下划线分隔），业务异常码可直接作为对外错误码或经网关同风格映射
+- 风格与对外 [`../openapi-standards.md`](../openapi-standards.md) 错误码统一（下划线分隔），业务异常码可直接作为对外错误码或经网关同风格映射
 
 ## 4. 全局异常处理
 

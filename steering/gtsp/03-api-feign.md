@@ -5,7 +5,7 @@ scenario: Feign/URL 版本/参数校验
 
 # API 接口规范（Feign）
 
-> 适用：Feign 接口契约、URL 路径与版本、参数校验。约束 GTSP 内部微服务间 Feign 调用；URI 结构/版本/action 动词与 `steering/openapi-standards.md` 统一（`/{domain}/{version}/{resource}/{action}`，动词 `create`/`query`/`update`/`remove` 等）。URI/版本/错误码/时间格式与对外规范已统一，内部接口经网关对外时仅响应体需由网关映射适配。
+> 适用：Feign 接口契约、URL 路径与版本、参数校验。约束 GTSP 内部微服务间 Feign 调用；URI 结构/版本/action 动词与 [`../openapi-standards.md`](../openapi-standards.md) 统一（`/{domain}/{version}/{resource}/{action}`，动词 `create`/`query`/`update`/`remove` 等）。URI/版本/错误码/时间格式与对外规范已统一，内部接口经网关对外时仅响应体需由网关映射适配。
 
 ## 1. Feign 接口定义
 
