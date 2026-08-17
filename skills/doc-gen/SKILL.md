@@ -64,6 +64,8 @@ python3 scripts/doc_gen.py --from-manifest manifest.json --build --output docs-s
 | 状态转换图            | 扫描状态枚举/Spring/Cola 状态机 → stateDiagram + 质量审查 | ✅   |
 | ADR 扫描              | 架构决策记录提取与展示                                    | ✅   |
 | 业务全景              | 客户/角色/场景/流程：人工 `business-context.md` + 代码弱信号（`@PreAuthorize`/状态机） | ✅ |
+| 运行时证据提取        | 5 通道供架构鹰眼跨项目链路：Feign 调用/`@FeignClient` 元数据、MQ 订阅发布（含常量两层解析）、Redis key、`@XxlJob`/`@Scheduled` 资产（4 真实仓库实测满分） | ✅ |
+| 违规责任归属          | risks.json 逐条 `git blame`（author + introducedAt，失败降级 null），鹰眼治理闭环的数据源 | ✅ |
 | 多项目聚合            | 已迁移至**架构鹰眼**（`arch-hawkeye/`），doc-gen 专注单项目 | ➡️   |
 | CI 集成               | GitHub Actions 自动构建部署                               | 📋   |
 

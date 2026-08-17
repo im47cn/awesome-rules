@@ -268,7 +268,11 @@ doc_gen.py                  入口 + CLI 参数解析
   │   ├── ddl.py             DDL SQL 解析
   │   ├── infra_db.py        Infrastructure 层代码推断表结构（JPA @Table/@Column + DO）
   │   ├── po_scanner.py      MyBatis-Plus PO 类推断表结构（@TableName/@TableField）
-  │   └── business_context.py 业务上下文（md 解析 + @PreAuthorize/状态机弱信号）
+  │   ├── business_context.py 业务上下文（md 解析 + @PreAuthorize/状态机弱信号）
+  │   └── （generator/manifest.py 内含运行时证据提取：_extract_endpoints 复用到
+  │       Feign 接口、_extract_mq_channels/_extract_cache_keys/_extract_schedules、
+  │       _extract_feign_client_meta + _string_const_index 常量两层解析——
+  │       全部供架构鹰眼跨项目链路，见 arch-hawkeye/AH-MANIFEST.md §4）
   ├── generator/
   │   ├── manifest.py        DocManifest JSON 生成 + Mermaid 图表生成
   │   ├── layers.py          DDD 分层识别

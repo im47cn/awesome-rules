@@ -73,7 +73,7 @@ Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分�
 
 | 工程 | 说明 |
 |------|------|
-| [arch-hawkeye](arch-hawkeye/README.md) | 架构鹰眼：全局架构观测与治理 — 消费各项目 doc-gen 产出的 manifest，联邦聚合 + 跨项目链路（HTTP/MQ/DB/缓存/定时 5 通道）+ 变更影响分析 |
+| [arch-hawkeye](arch-hawkeye/README.md) | 架构鹰眼：全局架构观测与治理 — 联邦聚合 + 跨项目链路（HTTP/MQ/DB/缓存/定时 5 通道，confirmed/inferred 双置信度）+ 变更影响分析 + 治理闭环（基线/趋势/blame 归属/债务/超期告警/增量零容忍门禁）+ 本地双模式（`hawkeye local` 零依赖） |
 
 各技能的详细文档、用法和检查规则见各自目录下的 README。
 

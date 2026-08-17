@@ -23,6 +23,8 @@ doc-gen 把"读代码"这件事交给机器：扫描 Java DDD 项目，自动生
 | REST API 文档 | OpenAPI 3.0 + Scalar | 交互式 Try-It，从 Controller 端点提取 |
 | 状态机图 | `stateDiagram-v2` | Spring/Cola/裸 enum，含死状态/不可达审查 |
 | ADR 架构决策 | `docs/adr/*.md` | 自动收录团队的架构决策记录 |
+| 运行时证据提取 | 5 通道（Feign/MQ/Redis key/定时任务/@FeignClient 元数据） | 供架构鹰眼跨项目链路，真实仓库实测满分 |
+| 违规责任归属 | risks.json 逐条 git blame | 治理闭环（鹰眼）的数据源 |
 | 多项目聚合 | 公司级全景站 | 已迁移至架构鹰眼（`arch-hawkeye/`），doc-gen 专注单项目 |
 | AI 架构助手 | 页面内嵌 RAG | 自然语言问答，免 API Key 本地运行 |
 | 全文搜索 | Pagefind | 构建后索引，支持中文检索 |
