@@ -121,6 +121,11 @@ def aggregate_projects(projects_json: str, output_dir: str, build: bool, verbose
                       if evidence.get("dirty") else "revision 缺失/null")
             print(f"  ⚠ {proj_name}: {reason}，不进入联邦索引（请重新扫描干净工作区）")
             continue
+        # local_mode 仅豁免 dirty（本地分析对象）；revision 缺失仍提示——
+        # 无指纹的快照纳管后 trend/上报不可追溯
+        if local_mode and not evidence.get("revision"):
+            print(f"  ℹ {proj_name}: revision 缺失（未纳入 git？）——本地纳管，"
+                  f"但快照无指纹、上报不可追溯")
 
         try:
             idx = json.loads(index_file.read_text(encoding="utf-8"))

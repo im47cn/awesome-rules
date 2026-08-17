@@ -7,11 +7,14 @@ local_mode 跳过 §6.3 联邦卫生——那是对中心索引的约束）。
 B02 token 成本：全链路纯脚本（scan/aggregate/trend/gate），零 LLM 调用；
 鹰眼接入 LLM 时必须保持"仅集中模式且规则无法判定"的约束（README 承诺）。
 
-B03 本地结论上报：本地产出（trend.json / cross-project.json / governance.json）
-标准落盘在 <output>/doc-manifest/，上报 = 推送到归档分支（CI 样例
+B03 本地结论上报：聚合产物（cross-project.json / governance.json 等）落盘于
+<output>/site/doc-manifest/，各项目明细在 <output>/scans/<pid>/doc-manifest/
+（含 trend-<基线>.json）；上报 = 推送到归档分支（CI 样例
 ci/governance-pipeline.example.yml 的 archive job 同构步骤；本地不做任何
 自动 push——对外推送必须由人执行）。
 """
+
+from __future__ import annotations  # 兼容 Python 3.9：延迟求值 PEP 604 联合类型注解
 
 import json
 import subprocess
@@ -54,12 +57,22 @@ def run_local(repos: list, output: str, baseline: str | None = None,
 
     print(f"🏠 本地模式（B01）：{len(repos)} 个仓库 → {out}")
     projects = []
+    used_pids = set()
     for repo_path in repos:
         repo = Path(repo_path).expanduser().resolve()
         if not repo.is_dir():
             print(f"  ❌ 目录不存在: {repo}", file=sys.stderr)
             return False
         pid = repo.name
+        if pid in used_pids:
+            # 同 basename 仓库（如 ~/a/service 与 ~/b/service）聚合会互相
+            # 覆盖——编号去重并告警，保持项目可区分
+            n = 2
+            while f"{pid}-{n}" in used_pids:
+                n += 1
+            print(f"  ⚠ 项目名冲突: {repo} 与先前的 {pid} 同名 → 以 {pid}-{n} 纳入")
+            pid = f"{pid}-{n}"
+        used_pids.add(pid)
         proj_out = out / "scans" / pid
         if not _scan(repo, proj_out):
             return False
@@ -79,6 +92,20 @@ def run_local(repos: list, output: str, baseline: str | None = None,
     print()
     aggregate_projects(str(pj), str(out / "site"), build=build, verbose=False,
                        local_mode=True)
+
+    # 聚合空转检测：scan 全成功但全部被契约校验拒收时，聚合 0 项目——
+    # 输出"✅ 完成"是假成功（跨项目边/治理分片全是空的）
+    agg_index = out / "site" / "doc-manifest" / "index.json"
+    if agg_index.exists():
+        try:
+            agg_projects = json.loads(
+                agg_index.read_text(encoding="utf-8")).get("projects", [])
+        except (json.JSONDecodeError, OSError):
+            agg_projects = []
+        if not agg_projects:
+            print("❌ 聚合 0 个项目（全部被契约校验拒收？），本地视图无意义",
+                  file=sys.stderr)
+            return False
 
     # 含基线项目执行趋势（本地治理结论，B03 落盘于各项目 manifest 目录）
     if baseline:
