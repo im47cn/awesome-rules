@@ -14,9 +14,16 @@ import sys, os, re, json
 steering = sys.argv[1]
 
 def parse_meta(path):
-    """从 frontmatter 读取 title / scenario，缺失则回退到 H1 标题。"""
-    with open(path, encoding='utf-8') as f:
-        content = f.read()
+    """从 frontmatter 读取 title / scenario，缺失则回退到 H1 标题。
+
+    单文件异常（编码损坏/不可读）不阻断整个索引生成——降级为
+    文件名 + '—'，SessionStart 注入不致整体丢失。
+    """
+    try:
+        with open(path, encoding='utf-8') as f:
+            content = f.read()
+    except (OSError, UnicodeDecodeError):
+        return os.path.basename(path), '—'
     title = scenario = None
     if content.startswith('---'):
         end = content.find('\n---', 3)
