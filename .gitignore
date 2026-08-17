@@ -2,6 +2,10 @@
 __pycache__/
 *.py[cod]
 *.pyo
+.pytest_cache/
+
+# 本地工具运行时产物（crush 会话 db/日志）
+.crush/
 
 # macOS
 .DS_Store
