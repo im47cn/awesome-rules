@@ -84,6 +84,21 @@ inferred 边服务名匹配与 `unmatchedByService` 分组依赖此结构化字�
 - `inferred`（AH-C04）：HTTP 路由未命中、`@FeignClient(name)` 近似项目 id 的推断边（及缓存前缀边）——不进入阻断级结论
 - 项目内调用（from == to）排除并计入 `internalCalls`
 
+### 4.2 聚合产物格式（豁免 per-project 校验）
+
+鹰眼 `aggregate` 产出的聚合 `doc-manifest/` 是**派生分发格式**，不是 per-project
+交接物，**不适用** `validate_manifest_dir` 契约校验（§6.1 只作用于项目 → 鹰眼的
+交接边界）：
+
+- `index.json` 携带字符串 `schemaVersion: "2.0"`（联邦格式版本，区别于
+  per-project 的 const `schema_version: 1`），含 `projects` 联邦注册清单
+- 各分片的实体（domain/table/stateMachine 等）携带 `_project_id` /
+  `_project_name` 联邦归属标注字段
+- 聚合专属分片：`cross-project.json`（§4.1）、`api-spec.json`（各项目合并）
+
+聚合产物的消费者是鹰眼前端与 `impact` 命令，不是契约校验器；对其的结构
+保障由 `arch-hawkeye/scripts/tests/` 的聚合测试承担。
+
 ## 5. businessContext 扩展块（业务维度）
 
 **分片**：`business-context.json`（可选）。**输入约定**：项目仓库内 `business-context.md`（人工维护）。
