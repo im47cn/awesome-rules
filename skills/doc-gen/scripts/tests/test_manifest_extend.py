@@ -326,3 +326,47 @@ public class TplController {
     eps = g._extract_endpoints(
         {"filePath": "TplController.java", "className": "TplController"})
     assert {e.path for e in eps} == {"/page", "/create"}
+
+
+# ── Kafka/Rabbit 多形态（yp 实测 + 业界标准形态锁定）───────────────────────────
+
+KAFKA_ARRAY_JAVA = """package com.x;
+public class K {
+    @KafkaListener(topics = {"t_order", "t_pay"}, groupId = "g")
+    public void onA(String m) {}
+
+    @KafkaListener(topics = TopicConstraint.ORDER_TOPIC, groupId = "g2")
+    public void onB(String m) {}
+}
+"""
+
+RABBIT_BINDINGS_JAVA = """package com.x;
+public class R {
+    @RabbitListener(bindings = @QueueBinding(
+            value = @Queue(value = "wallet.notify", durable = "true"),
+            exchange = @Exchange(value = "wallet.ex"),
+            key = "notify"))
+    public void onMsg(String m) {}
+}
+"""
+
+
+def test_mq_kafka_topics_array_and_constant(tmp_path):
+    (tmp_path / "K.java").write_text(KAFKA_ARRAY_JAVA, encoding="utf-8")
+    (tmp_path / "TopicConstraint.java").write_text(
+        'public class TopicConstraint { public static final String ORDER_TOPIC = "t_order_c"; }',
+        encoding="utf-8")
+    g = ManifestGenerator(str(tmp_path))
+    chs = g._extract_mq_channels({"filePath": "K.java", "className": "K"})
+    by_channel = {c.channel: c for c in chs}
+    assert set(by_channel) == {"t_order", "t_pay", "t_order_c"}
+    assert all(c.role == "consumer" and c.framework == "kafka" for c in chs)
+
+
+def test_mq_rabbit_bindings_queue_name(tmp_path):
+    (tmp_path / "R.java").write_text(RABBIT_BINDINGS_JAVA, encoding="utf-8")
+    g = ManifestGenerator(str(tmp_path))
+    chs = g._extract_mq_channels({"filePath": "R.java", "className": "R"})
+    assert len(chs) == 1
+    assert chs[0].channel == "wallet.notify"
+    assert chs[0].framework == "rabbit"

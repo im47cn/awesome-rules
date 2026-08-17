@@ -44,10 +44,12 @@ class LayerIdentifier:
         }
         pkg_layer = next((PKG_LAYER[p] for p in parts if p in PKG_LAYER), None)
         if pkg_layer:
-            # comp_type 按类名后缀细化(后缀只决定类型, 不覆盖 layer)
+            # comp_type 按类名后缀细化(后缀只决定类型, 不覆盖 layer)；
+            # 后缀不中时 @FeignClient 注解兜底（yp 实测: FileClient 裸 Client 后缀，
+            # 若加 Client 后缀映射会与 FeignClient 重叠违反无重叠约束，故走注解）
             comp_type = next(
                 (ct for sx, _, ct in SUFFIX_TYPE_MAP_ORDERED if class_name.endswith(sx)),
-                pkg_layer,
+                "feignInterface" if "FeignClient" in annotations else pkg_layer,
             )
             return (pkg_layer, comp_type)
 
@@ -55,6 +57,11 @@ class LayerIdentifier:
         for suffix, layer, comp_type in SUFFIX_TYPE_MAP_ORDERED:
             if class_name.endswith(suffix):
                 return (layer, comp_type)
+
+        # 1b. @FeignClient 注解 → client 层 Feign 接口（先于路径识别，
+        #     避免 /xxx/client/ 路径把类型兜底成类名小写）
+        if "FeignClient" in annotations:
+            return ("client", "feignInterface")
 
         # 2. 通过路径关键字识别
         path_lower = file_path.lower()

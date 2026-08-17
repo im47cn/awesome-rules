@@ -262,8 +262,12 @@ class ManifestGenerator:
     # 经 _build_string_const_index 两层解析（CONST = PREFIX + "lit"）还原字面量
     MQ_SUBSCRIBE_RES = [
         (re.compile(r'@RocketMQMessageListener\s*\([^)]*?\btopic\s*=\s*("[^"]*"|[\w.]+)'), "rocketmq"),
-        (re.compile(r'@KafkaListener\s*\([^)]*?\btopics\s*=\s*(?:\{\s*)?("[^"]*"|[\w.]+)'), "kafka"),
-        (re.compile(r'@RabbitListener\s*\([^)]*?\b(?:queues?|queueNames)\s*=\s*(?:\{\s*)?("[^"]*"|[\w.]+)'), "rabbit"),
+        # Kafka topics 支持数组 topics = {"a", "b"} 与常量引用（group 级常量）
+        (re.compile(r'@KafkaListener\s*\([^)]*?\btopics\s*=\s*(\{[^}]*\}|"[^"]*"|[\w.]+)'), "kafka"),
+        (re.compile(r'@RabbitListener\s*\([^)]*?\b(?:queues?|queueNames)\s*=\s*(\{[^}]*\}|"[^"]*"|[\w.]+)'), "rabbit"),
+        # Rabbit bindings 嵌套形态：@QueueBinding(value = @Queue(value/name = "q"), ...)
+        (re.compile(r'@RabbitListener\s*\([^)]*?@QueueBinding\s*\([^)]*?@Queue'
+                    r'\s*\([^)]*?\b(?:value|name)\s*=\s*"([^"]+)"', re.DOTALL), "rabbit"),
     ]
     # 发送调用：xxxTemplate.syncSend/asyncSend/sendOneWay/convertAndSend/send("x", ...)
     MQ_PUBLISH_RE = re.compile(
@@ -338,18 +342,26 @@ class ManifestGenerator:
                 return token[1:-1]
             return const_index.get(token.split(".")[-1], token)
 
+        def _tokens(group_text: str) -> list[str]:
+            """topics/queues 段的 token 列表：数组 {"a", "b"} → 逐个字面量/常量"""
+            inner = group_text.strip()
+            if inner.startswith("{"):
+                return re.findall(r'"[^"]*"|[\w.]+', inner)
+            return [inner]
+
         channels: list[MqChannelDoc] = []
         seen = set()
         for anno_re, framework in self.MQ_SUBSCRIBE_RES:
             for m in anno_re.finditer(raw):
                 anno_name = anno_re.pattern.split("\\")[0].lstrip("@")
-                channel = _resolve_channel(m.group(1))
-                key = ("consumer", channel)
-                if key not in seen:
-                    seen.add(key)
-                    channels.append(MqChannelDoc(
-                        role="consumer", channel=channel,
-                        framework=framework, via=anno_name))
+                for token in _tokens(m.group(1)):
+                    channel = _resolve_channel(token)
+                    key = ("consumer", channel)
+                    if key not in seen:
+                        seen.add(key)
+                        channels.append(MqChannelDoc(
+                            role="consumer", channel=channel,
+                            framework=framework, via=anno_name))
         for m in self.MQ_PUBLISH_RE.finditer(raw):
             framework = self.MQ_TEMPLATE_FRAMEWORK.get(m.group(1), "")
             channel = _resolve_channel(m.group(3))
@@ -509,10 +521,11 @@ class ManifestGenerator:
             if bare_path:
                 path = bare_path.group(1)
 
-            # @RequestMapping 可能有 method 属性
+            # @RequestMapping 可能有 method 属性（兼容 RequestMethod.POST
+            # 与数组形态 method = {RequestMethod.POST}，yp 实测形态）
             if annotation == "RequestMapping":
                 method_match = re.search(
-                    r'method\s*=\s*(?:RequestMethod\.)?(\w+)',
+                    r'method\s*=\s*\{?\s*(?:RequestMethod\.)?(\w+)',
                     anno_params_raw,
                     re.IGNORECASE,
                 )
