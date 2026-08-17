@@ -53,6 +53,20 @@ def test_badcase_006_bad_comment():
     assert len(_mandatory(issues)) >= 10
 
 
+def test_composite_index_column_limit():
+    """联合索引字段数 > 5 → 推荐；≤ 5 → 不报。"""
+    def ddl_for(n):
+        fields = "\n".join(f"  c{i} VARCHAR(16) COMMENT '列{i}'," for i in range(n))
+        cols = ", ".join(f"c{i}" for i in range(n))
+        return (f"CREATE TABLE t_ix (\n  id BIGINT COMMENT '主键',\n"
+                f"{fields}\n  KEY ix_cols ({cols})\n) COMMENT='测试';\n")
+
+    assert not any(i.rule == "联合索引字段数"
+                   for i in _issues_for(ddl_for(5)))
+    hit = [i for i in _issues_for(ddl_for(6)) if i.rule == "联合索引字段数"]
+    assert len(hit) == 1 and "6" in hit[0].description
+
+
 # ── DDL 解析 ────────────────────────────────────────────────────────────────
 
 def test_strip_sql_comments_removes_inline():
