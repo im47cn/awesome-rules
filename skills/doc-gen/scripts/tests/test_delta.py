@@ -10,6 +10,7 @@
 设计依据 docs/design/doc-gen-contract-design.md §8。
 """
 
+from __future__ import annotations  # 兼容 Python 3.9：延迟求值 PEP 604 联合类型注解
 import json
 from pathlib import Path
 
