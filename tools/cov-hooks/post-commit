@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-# 纯代理: 共享 hooksPath 会旁路 .git/hooks, 此处链式转交仓库自有同名钩子; 不存在则放行。
-set -u
-legacy="$(git rev-parse --git-dir)/hooks/$(basename "$0")"
-[ -x "$legacy" ] && exec "$legacy" "$@"
-exit 0

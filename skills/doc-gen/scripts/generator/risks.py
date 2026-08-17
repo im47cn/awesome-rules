@@ -5,8 +5,10 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -80,6 +82,37 @@ class RiskScanner:
             return " 请在 .doc-gen.json 中配置 arch_check_path 字段，或设置 ARCH_CHECK_PATH 环境变量。"
         return " 请通过 --arch-check-path 参数或 ARCH_CHECK_PATH 环境变量指定 arch_check.py 路径。"
 
+    def _blame(self, file_path: str, line: int, cache: dict) -> tuple:
+        """git blame 定位违规行最近修改人与引入时间（D03 责任归属）。
+
+        失败一律降级 (None, None) 不阻断（无 git / 二进制文件 / 行越界）；
+        结果缓存（同点重复违规只查一次）。
+        """
+        if not file_path or line <= 0:
+            return None, None
+        key = (file_path, line)
+        if key in cache:
+            return cache[key]
+        result = (None, None)
+        try:
+            proc = subprocess.run(
+                ["git", "blame", "-L", f"{line},{line}", "--porcelain",
+                 "--", file_path],
+                cwd=self.root_path, capture_output=True, text=True, timeout=10,
+            )
+            if proc.returncode == 0:
+                m = re.search(r"author (.+)", proc.stdout)
+                tm = re.search(r"author-time (\d+)", proc.stdout)
+                ts = None
+                if tm:
+                    ts = datetime.fromtimestamp(
+                        int(tm.group(1)), tz=timezone.utc).isoformat()
+                result = (m.group(1) if m else None, ts)
+        except (subprocess.SubprocessError, OSError, ValueError):
+            pass
+        cache[key] = result
+        return result
+
     def scan(self) -> dict:
         """运行 arch_check.py 返回结构化风险数据。
 
@@ -102,10 +135,13 @@ class RiskScanner:
             data = json.loads(result.stdout)
             issues = data.get("issues", [])
 
-            # 丰富风险信息
+            # 丰富风险信息（含 D03 责任归属：git blame 最近修改人 + 引入时间）
+            blame_cache: dict = {}   # (file, line) → (author, ts)，同点多次违规去重
             enriched = []
             for iss in issues:
                 rule_code = iss.get("rule_code", "")
+                author, introduced_at = self._blame(
+                    iss.get("file", ""), iss.get("line", 0), blame_cache)
                 enriched.append({
                     "file": iss.get("file", ""),
                     "line": iss.get("line", 0),
@@ -115,6 +151,8 @@ class RiskScanner:
                     "ruleCode": rule_code,
                     "description": iss.get("description", ""),
                     "suggestion": iss.get("suggestion", ""),
+                    "author": author,
+                    "introducedAt": introduced_at,
                 })
 
             # 按严重性排序

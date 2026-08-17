@@ -61,6 +61,31 @@ def main():
                             help="项目内依赖链 BFS 最大跳数（默认 3）")
     imp_parser.add_argument("--json", action="store_true", help="输出 JSON（供 CI 消费）")
 
+    # baseline — 冻结违规清单为命名基线（D01，存量自动登记债务）
+    bl_parser = sub.add_parser("baseline", help="冻结当前违规清单为治理基线")
+    bl_parser.add_argument("manifest_dir", help="doc-manifest/ 目录（含 risks.json）")
+    bl_parser.add_argument("--name", "-n", required=True, help="基线名（如 2026H2）")
+
+    # trend — 趋势对比（D02：added/removed/retained + 债务闭环）
+    tr_parser = sub.add_parser("trend", help="当前违规 vs 基线趋势对比")
+    tr_parser.add_argument("manifest_dir", help="doc-manifest/ 目录")
+    tr_parser.add_argument("--baseline", "-b", required=True, help="基线名")
+    tr_parser.add_argument("--json", action="store_true", help="输出 JSON")
+
+    # gate — 增量零容忍门禁（D07，--warn-only 灰度）
+    gt_parser = sub.add_parser("gate", help="治理门禁：新增违规零容忍（CI 用）")
+    gt_parser.add_argument("manifest_dir", help="doc-manifest/ 目录")
+    gt_parser.add_argument("--baseline", "-b", required=True, help="基线名")
+    gt_parser.add_argument("--warn-only", action="store_true", help="灰度：仅告警不阻断")
+    gt_parser.add_argument("--json", action="store_true", help="输出 JSON（exit code 语义不变）")
+
+    # debt — 债务登记表（D04/D05：list / exempt）
+    dt_parser = sub.add_parser("debt", help="技术债务登记表")
+    dt_parser.add_argument("manifest_dir", help="doc-manifest/ 目录")
+    dt_parser.add_argument("action", choices=["list", "overdue", "exempt"])
+    dt_parser.add_argument("--fp", help="债务 fingerprint（exempt 用）")
+    dt_parser.add_argument("--reason", help="豁免理由（exempt 必填）")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -79,6 +104,78 @@ def main():
         else:
             print(render_text(result))
         sys.exit(0 if result.get("ok") else 2)
+        return
+
+    if args.command == "baseline":
+        from governance import create_baseline
+        try:
+            info = create_baseline(args.manifest_dir, args.name)
+        except (FileExistsError, FileNotFoundError) as e:
+            print(f"❌ {e}", file=sys.stderr)
+            sys.exit(2)
+        print(f"📍 基线 '{info['baseline']}' 已冻结: {info['totalIssues']} 条违规，"
+              f"{info['debts']} 条债务登记")
+        return
+
+    if args.command == "trend":
+        from governance import diff_risks, load_baseline, load_risks, sync_ledger
+        baseline = load_baseline(args.manifest_dir, args.baseline)
+        current = load_risks(args.manifest_dir)
+        diff = diff_risks(baseline, current)
+        closed = sync_ledger(args.manifest_dir, current)
+        diff["ledgerClosed"] = closed["closedCount"]
+        if args.json:
+            print(json.dumps(diff, ensure_ascii=False, indent=2))
+        else:
+            st = diff["stats"]
+            print(f"📈 趋势 vs 基线 {args.baseline}: "
+                  f"{st['baseline']} → {st['current']}"
+                  f"（新增 {st['added']} / 消除 {st['removed']} / 净 {st['net']:+d}）")
+            for i in diff["added"][:10]:
+                print(f"   🔴 [{i.get('severity')}] {i.get('file')}:{i.get('line')}")
+            if closed["closedCount"]:
+                print(f"   ✅ 债务自动关闭 {closed['closedCount']} 条（D06）")
+        return
+
+    if args.command == "gate":
+        from governance import gate, render_gate
+        result = gate(args.manifest_dir, args.baseline, warn_only=args.warn_only)
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            print(render_gate(result))
+        sys.exit(1 if result["blocked"] else 0)
+        return
+
+    if args.command == "debt":
+        from governance import exempt_debt, load_ledger, overdue_debts
+        if args.action == "list":
+            ledger = load_ledger(args.manifest_dir)
+            by_status = {}
+            for d in ledger["debts"]:
+                by_status.setdefault(d["status"], []).append(d)
+            for status, items in sorted(by_status.items()):
+                print(f"{status}: {len(items)}")
+                for d in items[:5]:
+                    print(f"   {d['fingerprint'][:12]} [{d['severity']}] "
+                          f"{d['file']} ← {d['owner']}"
+                          + (f" due={d['dueDate']}" if d.get("dueDate") else ""))
+        elif args.action == "overdue":
+            items = overdue_debts(args.manifest_dir)
+            print(f"⚠️ 超期未偿还: {len(items)} 条（D05）")
+            for d in items[:10]:
+                print(f"   🔴 {d['fingerprint'][:12]} [{d['severity']}] "
+                      f"{d['file']} ← {d['owner']}（超期 {d['overdueDays']} 天）")
+        elif args.action == "exempt":
+            if not args.fp or not args.reason:
+                print("❌ exempt 需要 --fp 与 --reason", file=sys.stderr)
+                sys.exit(2)
+            try:
+                d = exempt_debt(args.manifest_dir, args.fp, args.reason)
+                print(f"✅ 已豁免 {d['fingerprint'][:12]}: {args.reason}")
+            except (KeyError, ValueError) as e:
+                print(f"❌ {e}", file=sys.stderr)
+                sys.exit(2)
         return
 
 

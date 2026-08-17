@@ -1,0 +1,165 @@
+"""治理闭环引擎测试（REQ-D 全覆盖）。
+
+覆盖：基线冻结（D01 同名拒绝）、趋势三分（D02 added/removed/retained）、
+债务登记与豁免强制理由（D04）、超期告警（D05）、违规消失自动关债（D06）、
+增量零容忍门禁与灰度（D07）、blame 归属透传（D03 数据来自 risks.json）。
+"""
+
+import json
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import pytest
+
+from governance import (
+    create_baseline,
+    diff_risks,
+    exempt_debt,
+    fingerprint,
+    gate,
+    load_ledger,
+    overdue_debts,
+    sync_ledger,
+)
+
+
+def _issue(file="a/Foo.java", ruleCode="L001", desc="违规A", line=10, **kw):
+    return {"file": file, "line": line, "severity": "强制", "ruleCode": ruleCode,
+            "rule": "分层规范", "description": desc, **kw}
+
+
+def _write_risks(manifest_dir: Path, issues: list):
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    (manifest_dir / "risks.json").write_text(
+        json.dumps({"issues": issues, "totalIssues": len(issues)}),
+        encoding="utf-8")
+
+
+# ── D01 基线 ──────────────────────────────────────────────────────────────────
+
+
+def test_baseline_creates_and_registers_debts(tmp_path):
+    """基线冻结 + 存量违规自动登记债务（owner 取 blame 归属）"""
+    md = tmp_path / "doc-manifest"
+    _write_risks(md, [
+        _issue(desc="A", author="zhang", introducedAt="2026-01-01"),
+        _issue(desc="B"),
+    ])
+    info = create_baseline(md, "2026H2")
+    assert info["totalIssues"] == 2 and info["debts"] == 2
+    ledger = load_ledger(md)
+    owners = {d["description"]: d["owner"] for d in ledger["debts"]}
+    assert owners["A"] == "zhang" and owners["B"] == "unknown"
+    assert all(d["status"] == "pending" for d in ledger["debts"])
+
+
+def test_baseline_same_name_rejected(tmp_path):
+    md = tmp_path / "doc-manifest"
+    _write_risks(md, [_issue()])
+    create_baseline(md, "v1")
+    with pytest.raises(FileExistsError):
+        create_baseline(md, "v1")     # 拒绝静默覆盖
+
+
+# ── D02 趋势 ──────────────────────────────────────────────────────────────────
+
+
+def test_diff_three_way(tmp_path):
+    md = tmp_path / "doc-manifest"
+    _write_risks(md, [_issue(desc="A"), _issue(desc="B"), _issue(desc="C")])
+    create_baseline(md, "v1")
+    # 演进：B 修复消除，D 新增，A/C 存量
+    _write_risks(md, [_issue(desc="A"), _issue(desc="C", line=99), _issue(desc="D")])
+    from governance import load_baseline, load_risks
+    diff = diff_risks(load_baseline(md, "v1"), load_risks(md))
+    assert [i["description"] for i in diff["added"]] == ["D"]
+    assert len(diff["removedFingerprints"]) == 1              # B
+    assert {i["description"] for i in diff["retained"]} == {"A", "C"}
+    assert diff["stats"]["net"] == 0
+    # line 漂移（C: 10 → 99）不影响 fingerprint
+    fp_c = fingerprint(_issue(desc="C"))
+    assert fp_c in {fingerprint(i) for i in diff["retained"]}
+
+
+# ── D06 闭环 ──────────────────────────────────────────────────────────────────
+
+
+def test_sync_ledger_auto_closes_repaid(tmp_path):
+    md = tmp_path / "doc-manifest"
+    _write_risks(md, [_issue(desc="A"), _issue(desc="B")])
+    create_baseline(md, "v1")
+    # B 被修复 → 债务自动关闭；A 仍在 → 保持 pending
+    _write_risks(md, [_issue(desc="A")])
+    current = json.loads((md / "risks.json").read_text(encoding="utf-8"))["issues"]
+    result = sync_ledger(md, current)
+    assert result["closedCount"] == 1
+    ledger = load_ledger(md)
+    by_desc = {d["description"]: d for d in ledger["debts"]}
+    assert by_desc["B"]["status"] == "repaid"
+    assert by_desc["B"]["repaidAt"]
+    assert by_desc["A"]["status"] == "pending"
+
+
+# ── D04 豁免 ──────────────────────────────────────────────────────────────────
+
+
+def test_exempt_requires_reason(tmp_path):
+    md = tmp_path / "doc-manifest"
+    _write_risks(md, [_issue(desc="A")])
+    create_baseline(md, "v1")
+    fp = fingerprint(_issue(desc="A"))
+    with pytest.raises(ValueError):
+        exempt_debt(md, fp, "  ")            # 无理由拒绝
+    d = exempt_debt(md, fp, "历史遗留，下季度统一重构")
+    assert d["status"] == "exempt"
+    assert d["exemptReason"]
+
+
+# ── D05 超期 ──────────────────────────────────────────────────────────────────
+
+
+def test_overdue_detection(tmp_path):
+    md = tmp_path / "doc-manifest"
+    _write_risks(md, [_issue(desc="A"), _issue(desc="B")])
+    create_baseline(md, "v1")
+    ledger = load_ledger(md)
+    past = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+    future = (datetime.now(timezone.utc) + timedelta(days=10)).isoformat()
+    by_desc = {d["description"]: d for d in ledger["debts"]}
+    by_desc["A"]["dueDate"] = past
+    by_desc["A"]["status"] = "in-progress"
+    by_desc["B"]["dueDate"] = future
+    (md / "debt-ledger.json").write_text(json.dumps(ledger), encoding="utf-8")
+    items = overdue_debts(md)
+    assert len(items) == 1 and items[0]["description"] == "A"
+    assert items[0]["overdueDays"] >= 9
+
+
+# ── D07 门禁 ──────────────────────────────────────────────────────────────────
+
+
+def test_gate_blocks_added_violations(tmp_path):
+    md = tmp_path / "doc-manifest"
+    _write_risks(md, [_issue(desc="A")])
+    create_baseline(md, "v1")
+    _write_risks(md, [_issue(desc="A"), _issue(desc="NEW")])
+    result = gate(md, "v1")
+    assert result["blocked"] is True
+    assert result["addedCount"] == 1
+    # 门禁语义可直接映射 exit code
+    assert bool(result["blocked"]) is True
+
+
+def test_gate_allows_baseline_shrink_and_new_baseline_additions(tmp_path):
+    """存量并存 + 消除 → 放行；灰度模式新增不阻断"""
+    md = tmp_path / "doc-manifest"
+    _write_risks(md, [_issue(desc="A"), _issue(desc="B")])
+    create_baseline(md, "v1")
+    _write_risks(md, [_issue(desc="A")])                       # B 消除，无新增
+    assert gate(md, "v1")["blocked"] is False
+    assert gate(md, "v1")["stats"]["removed"] == 1
+
+    _write_risks(md, [_issue(desc="A"), _issue(desc="X")])     # X 新增
+    warn = gate(md, "v1", warn_only=True)
+    assert warn["blocked"] is False and warn["addedCount"] == 1   # 灰度放行
+    assert gate(md, "v1")["blocked"] is True                      # 强制阻断
