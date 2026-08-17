@@ -59,12 +59,25 @@ def _project(tmp_path, pid, domains):
     for d in domains:
         (mdir / "domains" / f"{d['name']}.json").write_text(
             json.dumps(d), encoding="utf-8")
-    # aggregate_projects 入口要求 index.json（缺失即跳过项目）
+    # manifest 需符合 AH-MANIFEST 契约（鹰眼 §6 校验后纳管）
     (mdir / "index.json").write_text(json.dumps({
+        "schema_version": 1,
+        "domainCount": len(domains),
+        "componentCount": 0,
+        "tableCount": 0,
         "domains": [{"name": d["name"], "componentCount": 0,
                      "layers": list(d["layers"]),
                      "file": f"domains/{d['name']}.json"} for d in domains],
     }), encoding="utf-8")
+    (mdir / "meta.json").write_text(json.dumps({
+        "project": {"name": pid},
+        "evidence": {"repo_url": None, "revision": "b" * 40,
+                     "generatedAt": "2026-08-16T00:00:00+00:00", "dirty": False},
+    }), encoding="utf-8")
+    (mdir / "database.json").write_text(
+        json.dumps({"tables": [], "relationships": []}), encoding="utf-8")
+    (mdir / "state-machines.json").write_text(json.dumps([]), encoding="utf-8")
+    (mdir / "cross-domain.json").write_text(json.dumps([]), encoding="utf-8")
     return (pid, mdir)
 
 

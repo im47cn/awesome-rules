@@ -17,25 +17,39 @@ from aggregate import (
 )
 
 
-def _make_project(base, pid, name, domains, tables=None, api_paths=None, cross=None):
-    """构造单项目 doc-manifest 目录。"""
+def _make_project(base, pid, name, domains, tables=None, api_paths=None, cross=None,
+                  dirty=False, revision="a" * 40):
+    """构造单项目 doc-manifest 目录（符合 AH-MANIFEST 契约，可通过鹰眼 §6 校验）。"""
     dm = base / pid / "doc-manifest"
     dm.mkdir(parents=True)
     (dm / "index.json").write_text(json.dumps({
-        "domains": [{"name": d, "componentCount": c, "layers": ["domain"]}
-                    for d, c in domains],
+        "schema_version": 1,
+        "domainCount": len(domains),
+        "componentCount": sum(c for _d, c in domains),
+        "tableCount": len(tables or []),
+        "domains": [{"name": d, "componentCount": c, "layers": ["domain"],
+                     "file": f"domains/{d}.json"} for d, c in domains],
     }), encoding="utf-8")
     dd = dm / "domains"
     dd.mkdir()
     for d, _c in domains:
-        (dd / f"{d}.json").write_text(json.dumps({"name": d}), encoding="utf-8")
-    if tables is not None:
-        (dm / "database.json").write_text(
-            json.dumps({"tables": tables, "relationships": []}), encoding="utf-8")
+        (dd / f"{d}.json").write_text(
+            json.dumps({"name": d, "layers": {"domain": {"components": []}}}),
+            encoding="utf-8")
+    # meta.json — revision-pinned evidence（§6.3：dirty/无 revision 不进联邦索引）
+    (dm / "meta.json").write_text(json.dumps({
+        "project": {"name": name},
+        "evidence": {"repo_url": None, "revision": revision,
+                     "generatedAt": "2026-08-16T00:00:00+00:00", "dirty": dirty},
+    }), encoding="utf-8")
+    # 其余必选分片（缺任一即契约校验失败）
+    (dm / "database.json").write_text(
+        json.dumps({"tables": tables or [], "relationships": []}), encoding="utf-8")
+    (dm / "state-machines.json").write_text(json.dumps([]), encoding="utf-8")
+    (dm / "cross-domain.json").write_text(
+        json.dumps(cross or []), encoding="utf-8")
     if api_paths is not None:
         (dm / "api-spec.json").write_text(json.dumps({"paths": api_paths}), encoding="utf-8")
-    if cross is not None:
-        (dm / "cross-domain.json").write_text(json.dumps(cross), encoding="utf-8")
     return dm
 
 
@@ -84,8 +98,10 @@ def test_aggregate_end_to_end(tmp_path):
     p1 = tmp_path / "p1"
     p2 = tmp_path / "p2"
     _make_project(p1, "order", "订单", [("order", 3)],
-                  tables=[{"name": "t_order"}], api_paths={"/order": {"get": {}}},
-                  cross=[{"fromDomain": "order", "toDomain": "logistics", "type": "x"}])
+                  tables=[{"name": "t_order", "columns": []}],
+                  api_paths={"/order": {"get": {}}},
+                  cross=[{"fromDomain": "order", "toDomain": "logistics",
+                          "type": "client-api"}])
     _make_project(p2, "logistics", "物流", [("logistics", 2)])
     pj = _config(tmp_path, [
         {"id": "order", "name": "订单", "manifest": str(p1 / "order" / "doc-manifest")},
@@ -156,20 +172,47 @@ def test_aggregate_build_invokes_astro(tmp_path, monkeypatch):
     assert called.get("ok")
 
 
-def test_aggregate_handles_corrupt_json(tmp_path):
-    """各分片 JSON 损坏 → 对应 except 静默跳过，聚合不中断。"""
-    dm = tmp_path / "p" / "x" / "doc-manifest"
-    dm.mkdir(parents=True)
-    (dm / "index.json").write_text(
-        json.dumps({"domains": [{"name": "x", "componentCount": 1, "layers": ["domain"]}]}),
-        encoding="utf-8")
-    (dm / "domains").mkdir()
-    (dm / "domains" / "x.json").write_text("{}", encoding="utf-8")
-    for fn in ("database.json", "cross-domain.json", "diagrams.json", "state-machines.json"):
+def test_aggregate_handles_corrupt_json(tmp_path, capsys):
+    """契约校验失败（分片 JSON 损坏）→ 项目跳过 + 结构化告警，聚合不中断（§6.1）。"""
+    dm = _make_project(tmp_path / "p", "x", "X", [("x", 1)])
+    for fn in ("database.json", "cross-domain.json", "state-machines.json"):
         (dm / fn).write_text("{bad", encoding="utf-8")
     pj = _config(tmp_path, [{"id": "x", "name": "X", "manifest": str(dm)}])
     aggregate_projects(pj, str(tmp_path / "out"), False, False)   # 不抛异常
-    assert (tmp_path / "out" / "doc-manifest" / "index.json").exists()
+    out = capsys.readouterr().out
+    assert "契约校验失败" in out                   # 结构化告警，非静默
+    assert "database.json" in out
+    agg_idx = json.loads(
+        (tmp_path / "out" / "doc-manifest" / "index.json").read_text(encoding="utf-8"))
+    assert agg_idx["domainCount"] == 0            # 违规项目未纳管
+
+
+def test_aggregate_rejects_dirty_snapshot(tmp_path, capsys):
+    """evidence.dirty=true 的快照不进入联邦索引（§6.3 revision 卫生）。"""
+    _make_project(tmp_path / "p", "order", "订单", [("order", 1)], dirty=True)
+    pj = _config(tmp_path, [
+        {"id": "order", "name": "订单",
+         "manifest": str(tmp_path / "p" / "order" / "doc-manifest")}])
+    aggregate_projects(pj, str(tmp_path / "out"), False, False)
+    out = capsys.readouterr().out
+    assert "evidence.dirty=true" in out
+    idx = json.loads(
+        (tmp_path / "out" / "doc-manifest" / "index.json").read_text(encoding="utf-8"))
+    assert idx["domainCount"] == 0
+
+
+def test_aggregate_rejects_missing_revision(tmp_path, capsys):
+    """revision=null（无 git 降级）的快照不进入联邦索引（§6.3）。"""
+    _make_project(tmp_path / "p", "order", "订单", [("order", 1)], revision=None)
+    pj = _config(tmp_path, [
+        {"id": "order", "name": "订单",
+         "manifest": str(tmp_path / "p" / "order" / "doc-manifest")}])
+    aggregate_projects(pj, str(tmp_path / "out"), False, False)
+    out = capsys.readouterr().out
+    assert "revision 缺失" in out
+    idx = json.loads(
+        (tmp_path / "out" / "doc-manifest" / "index.json").read_text(encoding="utf-8"))
+    assert idx["domainCount"] == 0
 
 
 def test_aggregate_legacy_single_file_manifest(tmp_path, capsys):

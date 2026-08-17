@@ -4,6 +4,8 @@
 包含分层识别、域分组、聚合构建、ER 关系推断、Mermaid 图表生成与跨域依赖分析。
 """
 
+from __future__ import annotations  # 兼容 Python 3.9：延迟求值 PEP 604 联合类型注解
+
 import json
 import re
 from collections import defaultdict
@@ -255,11 +257,13 @@ class ManifestGenerator:
         "domainService", "handler", "manager",
     })
 
-    # 订阅注解：@RocketMQMessageListener(topic="x") / @KafkaListener(topics=...) / @RabbitListener(queues=...)
+    # 订阅注解：@RocketMQMessageListener(topic="x" 或 Constraint.TOPIC 常量引用)
+    # GTSP 真实项目 topic 几乎全为常量引用（SendRocketMQConstraint.XXX_TOPIC），
+    # 经 _build_string_const_index 两层解析（CONST = PREFIX + "lit"）还原字面量
     MQ_SUBSCRIBE_RES = [
-        (re.compile(r'@RocketMQMessageListener\s*\([^)]*?\btopic\s*=\s*"([^"]+)"'), "rocketmq"),
-        (re.compile(r'@KafkaListener\s*\([^)]*?\btopics\s*=\s*(?:\{\s*)?"([^"]+)"'), "kafka"),
-        (re.compile(r'@RabbitListener\s*\([^)]*?\b(?:queues?|queueNames)\s*=\s*(?:\{\s*)?"([^"]+)"'), "rabbit"),
+        (re.compile(r'@RocketMQMessageListener\s*\([^)]*?\btopic\s*=\s*("[^"]*"|[\w.]+)'), "rocketmq"),
+        (re.compile(r'@KafkaListener\s*\([^)]*?\btopics\s*=\s*(?:\{\s*)?("[^"]*"|[\w.]+)'), "kafka"),
+        (re.compile(r'@RabbitListener\s*\([^)]*?\b(?:queues?|queueNames)\s*=\s*(?:\{\s*)?("[^"]*"|[\w.]+)'), "rabbit"),
     ]
     # 发送调用：xxxTemplate.syncSend/asyncSend/sendOneWay/convertAndSend/send("x", ...)
     MQ_PUBLISH_RE = re.compile(
@@ -271,6 +275,45 @@ class ManifestGenerator:
         "rocketMQTemplate": "rocketmq", "kafkaTemplate": "kafka",
         "rabbitTemplate": "rabbit", "amqpTemplate": "rabbit",
     }
+
+    _const_index_cache: Optional[dict] = None
+
+    def _string_const_index(self) -> dict:
+        """字符串常量索引：CONST_NAME → 字面量值（支持 CONST = PREFIX + "lit" 两层拼接）。
+
+        GTSP 项目 topic/queue 几乎全为 Constraint 类常量（如
+        SendRocketMQConstraint.SEND_TASK_DELAY_TRIGGER_TOPIC = GTSP_PREFIX + "msg_send_..."）。
+        同名常量取首个定义（跨 Constraint 类同名前缀值一致，近似可接受）。
+        """
+        if self._const_index_cache is not None:
+            return self._const_index_cache
+        raw: dict = {}
+        for f in self.root_path.rglob("*.java"):
+            try:
+                text = f.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            for m in re.finditer(r'static\s+final\s+String\s+(\w+)\s*=\s*([^;]+);', text):
+                raw.setdefault(m.group(1), m.group(2).strip())
+
+        def resolve(name: str, depth: int = 0):
+            if depth > 3 or name not in raw:
+                return None
+            out = ""
+            for part in (p.strip() for p in raw[name].split("+")):
+                if len(part) >= 2 and part[0] == '"' and part[-1] == '"':
+                    out += part[1:-1]
+                elif re.fullmatch(r'[\w.]+', part):
+                    v = resolve(part.split(".")[-1], depth + 1)
+                    if v is None:
+                        return None
+                    out += v
+                else:
+                    return None
+            return out
+
+        self._const_index_cache = {n: resolve(n) for n in raw}
+        return self._const_index_cache
 
     def _extract_mq_channels(self, file_info: FileInfo) -> list[MqChannelDoc]:
         """从源文件提取 MQ 通道声明（consumer 订阅注解 + producer 发送调用）
@@ -286,24 +329,35 @@ class ManifestGenerator:
         except Exception:
             return []
 
+        const_index = self._string_const_index()
+
+        def _resolve_channel(token: str) -> str:
+            """字面量去引号；常量引用查索引还原（查不到保留原表达式，同仓库对齐仍有效）"""
+            token = token.strip()
+            if token.startswith('"') and token.endswith('"'):
+                return token[1:-1]
+            return const_index.get(token.split(".")[-1], token)
+
         channels: list[MqChannelDoc] = []
         seen = set()
         for anno_re, framework in self.MQ_SUBSCRIBE_RES:
             for m in anno_re.finditer(raw):
                 anno_name = anno_re.pattern.split("\\")[0].lstrip("@")
-                key = ("consumer", m.group(1))
+                channel = _resolve_channel(m.group(1))
+                key = ("consumer", channel)
                 if key not in seen:
                     seen.add(key)
                     channels.append(MqChannelDoc(
-                        role="consumer", channel=m.group(1),
+                        role="consumer", channel=channel,
                         framework=framework, via=anno_name))
         for m in self.MQ_PUBLISH_RE.finditer(raw):
             framework = self.MQ_TEMPLATE_FRAMEWORK.get(m.group(1), "")
-            key = ("producer", m.group(3))
+            channel = _resolve_channel(m.group(3))
+            key = ("producer", channel)
             if key not in seen:
                 seen.add(key)
                 channels.append(MqChannelDoc(
-                    role="producer", channel=m.group(3),
+                    role="producer", channel=channel,
                     framework=framework, via=m.group(2)))
         return channels
 
@@ -423,7 +477,7 @@ class ManifestGenerator:
             r'(?:public|protected|private|\s)*'
             r'(?:static\s+)?'
             r'(?:<[^>]+>\s+)?'
-            r'(\w+(?:<[^>]+>)?)\s+'             # 返回类型
+            r'(\w+(?:<(?:[^<>]|<[^<>]*>)*>)?)\s+'  # 返回类型（支持一层嵌套泛型 ResultMode<List<X>>）
             r'(\w+)\s*\(([^)]*)\)',              # 方法名 + 参数
         )
 

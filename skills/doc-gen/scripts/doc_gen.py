@@ -12,6 +12,8 @@ DDD 技术文档自动生成工具 (doc-gen) — CLI 入口
 多项目聚合已迁移至架构鹰眼: arch-hawkeye/scripts/hawkeye.py aggregate
 """
 
+from __future__ import annotations  # 兼容 Python 3.9：延迟求值 PEP 604 联合类型注解
+
 import argparse
 import json
 import subprocess

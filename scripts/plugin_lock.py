@@ -15,6 +15,8 @@ git blob SHA）。awesome-rules 无 npm 产物，发布物 = 各 AI 工具的插
   python3 scripts/plugin_lock.py --update   # 有意变更清单后刷新锁定
 """
 
+from __future__ import annotations  # 兼容 Python 3.9：延迟求值 PEP 604 联合类型注解
+
 import hashlib
 import json
 import subprocess

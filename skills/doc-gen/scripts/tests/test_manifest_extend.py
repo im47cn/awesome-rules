@@ -273,3 +273,56 @@ def test_to_json_roundtrip():
     assert isinstance(s, str)
     assert '"d"' in s
     assert g.to_json(m, pretty=False).endswith("}") or '"d"' in g.to_json(m, pretty=False)
+
+
+# ── MQ 常量引用解析（真实 GTSP 仓库实测驱动的修复）─────────────────────────────
+
+CONST_TOPIC_JAVA = """package com.x;
+public class SendConstraint {
+    public static final String GTSP_PREFIX = "gtsp_";
+    public static final String PUSH_TOPIC = GTSP_PREFIX + "msg_push_single";
+}
+"""
+
+LISTENER_CONST_JAVA = """package com.x;
+import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
+
+@RocketMQMessageListener(
+        namespace = "${rocketmq.push-consumer.name-space:}",
+        consumerGroup = SendConstraint.GROUP,
+        topic = SendConstraint.PUSH_TOPIC)
+public interface PushListener {
+    void onMessage(String msg);
+}
+"""
+
+
+def test_mq_topic_constant_reference_resolved(tmp_path):
+    """topic = Constraint.CONST 常量引用 → 两层解析（PREFIX + 字面量）还原真实 topic"""
+    (tmp_path / "SendConstraint.java").write_text(CONST_TOPIC_JAVA, encoding="utf-8")
+    (tmp_path / "PushListener.java").write_text(LISTENER_CONST_JAVA, encoding="utf-8")
+    g = ManifestGenerator(str(tmp_path))
+    eps = g._extract_mq_channels(
+        {"filePath": "PushListener.java", "className": "PushListener"})
+    assert len(eps) == 1
+    assert eps[0].role == "consumer"
+    assert eps[0].channel == "gtsp_msg_push_single"
+
+
+def test_endpoint_nested_generic_return_type(tmp_path):
+    """返回类型嵌套泛型 ResultMode<List<XxxDTO>> 的端点提取（MsgTemplateController 实测漏检）"""
+    ctrl = """package com.x;
+@RestController
+public class TplController {
+    @PostMapping("/page")
+    public ResultMode<List<TplDTO>> page(@RequestBody Query q) { return null; }
+
+    @PostMapping("/create")
+    public ResultMode<Void> create(@RequestBody Cmd c) { return null; }
+}
+"""
+    (tmp_path / "TplController.java").write_text(ctrl, encoding="utf-8")
+    g = ManifestGenerator(str(tmp_path))
+    eps = g._extract_endpoints(
+        {"filePath": "TplController.java", "className": "TplController"})
+    assert {e.path for e in eps} == {"/page", "/create"}

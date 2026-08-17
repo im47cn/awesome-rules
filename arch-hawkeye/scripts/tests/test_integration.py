@@ -15,10 +15,22 @@ COLA_FIXTURE = REPO_ROOT / "skills" / "doc-gen" / "fixtures" / "cola-sample"
 
 
 def test_handoff_docgen_manifest_to_hawkeye(tmp_path):
+    # 0. fixture 拷贝到 tmp 并初始化为干净 git 仓库——collect_evidence 以扫描目标
+    #    所在仓库的整体工作区状态判定 dirty，直接扫仓库内 fixture 会随本仓库的
+    #    未提交修改而漂移；干净仓库使 revision/dirty 确定性通过鹰眼 §6.3 卫生检查
+    import shutil
+    fixture = tmp_path / "cola-sample"
+    shutil.copytree(COLA_FIXTURE, fixture,
+                    ignore=shutil.ignore_patterns("target", ".git"))
+    for cmd in (["git", "init", "-q"], ["git", "add", "-A"],
+                ["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                 "commit", "-qm", "fixture"]):
+        subprocess.run(cmd, cwd=fixture, check=True, timeout=30)
+
     # 1. doc-gen 生产：真实扫描 fixture（含 business-context.md）
     scan_out = tmp_path / "scan"
     r1 = subprocess.run(
-        [sys.executable, str(DOC_GEN), "scan", str(COLA_FIXTURE),
+        [sys.executable, str(DOC_GEN), "scan", str(fixture),
          "--manifest-only", "--output", str(scan_out)],
         capture_output=True, text=True, timeout=120)
     assert r1.returncode == 0, f"doc-gen scan 失败:\n{r1.stderr}"

@@ -11,6 +11,8 @@
 合并策略：md 条目优先；同名角色被代码证据补锚点时升 source=hybrid。
 """
 
+from __future__ import annotations  # 兼容 Python 3.9：延迟求值 PEP 604 联合类型注解
+
 import re
 from pathlib import Path
 

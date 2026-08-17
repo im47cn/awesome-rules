@@ -177,6 +177,40 @@ FULLWIDTH_RE = re.compile(r"[\uff00-\uffef\u3000-\u303f\u2018-\u201f\u2026\u00b7
 
 def strip_sql_comments(text: str) -> str:
     """Remove -- comments and /* */ comments but keep line structure for line number tracking."""
+    # 先剥 /* */ 块注释（引号外），内容替换为空格、保留换行，维持行号不变
+    out = []
+    i = 0
+    n = len(text)
+    in_quote = False
+    quote_char = None
+    while i < n:
+        ch = text[i]
+        if in_quote:
+            out.append(ch)
+            if ch == quote_char and (i == 0 or text[i - 1] != "\\"):
+                in_quote = False
+            i += 1
+        elif ch in ("'", '"', "`"):
+            in_quote = True
+            quote_char = ch
+            out.append(ch)
+            i += 1
+        elif ch == "/" and i + 1 < n and text[i + 1] == "*":
+            end = text.find("*/", i + 2)
+            if end == -1:
+                end = n
+                block = text[i:]
+                i = n
+            else:
+                block = text[i:end + 2]
+                i = end + 2
+            # 换行保留，其余替换为空格
+            out.append(re.sub(r"[^\n]", " ", block))
+        else:
+            out.append(ch)
+            i += 1
+    text = "".join(out)
+
     lines = text.split("\n")
     cleaned = []
     for line in lines:
@@ -926,14 +960,15 @@ def check_file(file_path: str) -> list:
     with open(file_path, "r", encoding="utf-8") as fh:
         raw_text = fh.read()
 
-    # File-level checks on raw text
-    check_forbidden_clauses(raw_text, issues, file_path)
+    # File-level checks on comment-stripped text（注释中的关键字不参与检查）
+    stripped_text = strip_sql_comments(raw_text)
+    check_forbidden_clauses(stripped_text, issues, file_path)
     check_comment_style(raw_text, issues, file_path)
-    check_partition(raw_text, issues, file_path)
-    check_change_column(raw_text, issues, file_path)
+    check_partition(stripped_text, issues, file_path)
+    check_change_column(stripped_text, issues, file_path)
 
     # Parse tables
-    tables = extract_tables(raw_text)
+    tables = extract_tables(stripped_text)
 
     if not tables:
         issues.append(Issue(

@@ -11,6 +11,7 @@ MyBatis SQL 规范检查脚本
 """
 
 import argparse
+import copy
 import json
 import os
 import re
@@ -138,10 +139,37 @@ def resolve_includes(elem: ET.Element, root: ET.Element) -> ET.Element:
                 # 属不可达 dead code。
                 if frag is not None:
                     idx = list(e).index(child)
+                    # 深拷贝片段内容：同一片段可能被多处 <include> 引用，
+                    # 直接移动元素会让后续引用拿到空片段
+                    subs = copy.deepcopy(list(frag))
+                    # 片段首个子元素前的文本（frag.text）不可丢——
+                    # 纯文本片段（如 Base_Column_List）的全部内容都在 text 中
+                    frag_text = (frag.text or "").strip()
+                    child_tail = child.tail
                     e.remove(child)
-                    for i, sub in enumerate(list(frag)):
-                        e.insert(idx + i, sub)
-                        _resolve(sub)
+                    if subs:
+                        for i, sub in enumerate(subs):
+                            e.insert(idx + i, sub)
+                            _resolve(sub)
+                        if frag_text:
+                            if idx == 0:
+                                e.text = f"{e.text or ''} {frag_text}".strip()
+                            else:
+                                prev = e[idx - 1]
+                                prev.tail = f"{prev.tail or ''} {frag_text}".strip()
+                        # 原 include 的尾随文本续到最后一个插入元素
+                        if child_tail:
+                            subs[-1].tail = f"{subs[-1].tail or ''} {child_tail}".strip()
+                    else:
+                        # 纯文本片段：文本直接并入 include 所在位置的文本流
+                        merged = f"{frag_text} {child_tail or ''}".strip()
+                        if not merged:
+                            continue
+                        if idx == 0:
+                            e.text = f"{e.text or ''} {merged}".strip()
+                        else:
+                            prev = e[idx - 1]
+                            prev.tail = f"{prev.tail or ''} {merged}".strip()
             else:
                 _resolve(child)
 

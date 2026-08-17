@@ -19,6 +19,7 @@ if str(DOC_GEN_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(DOC_GEN_SCRIPTS))
 
 from builder.astro import build_astro  # noqa: E402
+from validator import validate_manifest_dir  # noqa: E402 — 契约校验器（AH-MANIFEST 真相源）
 
 from crossproject import build_cross_project_edges  # noqa: E402 — 同目录模块
 
@@ -88,6 +89,33 @@ def aggregate_projects(projects_json: str, output_dir: str, build: bool, verbose
                 print(f"  ⚠ {proj_name}: 旧版单文件格式，请先重新扫描")
             else:
                 print(f"  ⚠ {proj_name}: index.json 不存在，跳过")
+            continue
+
+        # 消费者义务 §6.1：校验后再纳管（AH-A05）——失败跳过 + 结构化告警，
+        # 不得静默降级纳管
+        shard_errors = validate_manifest_dir(manifest_path)
+        if shard_errors:
+            print(f"  ⚠ {proj_name}: manifest 契约校验失败（{len(shard_errors)} 处），跳过")
+            for err in shard_errors[:5]:
+                print(f"      - {err}")
+            if len(shard_errors) > 5:
+                print(f"      - ... 共 {len(shard_errors)} 处")
+            continue
+
+        # 消费者义务 §6.3：revision 卫生——脏工作区 / 无 revision 的快照
+        # 不进入联邦索引（SHA 与扫描内容对不上，§4 脏工作区标注）
+        meta_file = manifest_path / "meta.json"
+        evidence = {}
+        if meta_file.exists():
+            try:
+                evidence = json.loads(meta_file.read_text(
+                    encoding="utf-8")).get("evidence", {})
+            except json.JSONDecodeError:
+                evidence = {}
+        if evidence.get("dirty") or not evidence.get("revision"):
+            reason = ("evidence.dirty=true，SHA 与扫描内容不符"
+                      if evidence.get("dirty") else "revision 缺失/null")
+            print(f"  ⚠ {proj_name}: {reason}，不进入联邦索引（请重新扫描干净工作区）")
             continue
 
         try:
@@ -172,6 +200,8 @@ def aggregate_projects(projects_json: str, output_dir: str, build: bool, verbose
             "componentCount": comp_count,
             "tableCount": len(db_tables) if db_file.exists() else 0,
             "layers": list(set(l for d in domains for l in (d.get("layers", []) or []))),
+            # 域名清单：全景图域→项目匹配依赖此键（find_project_for_domain）
+            "domains": [d.get("name", "") for d in domains if d.get("name")],
         })
         # 记录成功读取的 manifest（跨项目边构建输入，AH-C01）
         valid_manifests.append((proj_id, manifest_path))
@@ -370,22 +400,27 @@ def generate_panorama_diagram(project_data: list, cross_deps: list) -> dict:
 
         lines.append(f"    {pid}[\"{label}\"]")
 
-        # 跨项目关系
-        for cd in cross_deps:
-            from_domain = cd.get("fromDomain", cd.get("from_domain", ""))
-            to_domain = cd.get("toDomain", cd.get("to_domain", ""))
-            # 尝试匹配项目
-            from_proj = find_project_for_domain(project_data, from_domain)
-            to_proj = find_project_for_domain(project_data, to_domain)
-            if from_proj and to_proj and from_proj != to_proj:
-                from_id = from_proj.replace("-", "_")
-                to_id = to_proj.replace("-", "_")
-                dep_type = cd.get("type", "client-api")
-                style = " -.-> " if dep_type == "domain-event" else " --> "
-                lines.append(f"    {from_id}{style}|{dep_type}| {to_id}")
-
         # 项目节点可点击
         lines.append(f"    click {pid} \"/projects/{proj['id']}/\" \"查看{proj['name']}详情\"")
+
+    # 跨项目关系边：独立于项目节点循环（否则随项目数重复 N 倍），去重后追加
+    seen_edges = set()
+    for cd in cross_deps:
+        from_domain = cd.get("fromDomain", cd.get("from_domain", ""))
+        to_domain = cd.get("toDomain", cd.get("to_domain", ""))
+        # 尝试匹配项目
+        from_proj = find_project_for_domain(project_data, from_domain)
+        to_proj = find_project_for_domain(project_data, to_domain)
+        if from_proj and to_proj and from_proj != to_proj:
+            dep_type = cd.get("type", "client-api")
+            edge_key = (from_proj, to_proj, dep_type)
+            if edge_key in seen_edges:
+                continue
+            seen_edges.add(edge_key)
+            from_id = from_proj.replace("-", "_")
+            to_id = to_proj.replace("-", "_")
+            style = " -.-> " if dep_type == "domain-event" else " --> "
+            lines.append(f"    {from_id}{style}|{dep_type}| {to_id}")
 
     lines.append("  end")
     diagrams["architectureOverview"] = "\n".join(lines)
@@ -420,13 +455,15 @@ def generate_panorama_diagram(project_data: list, cross_deps: list) -> dict:
 
 def find_project_for_domain(project_data: list, domain_name: str) -> Optional[str]:
     """根据域名查找所属项目名"""
+    if not domain_name:
+        return None
     for proj in project_data:
         # 域名直接匹配或者前缀匹配
         if domain_name == proj.get("id", "") or domain_name == proj.get("name", ""):
             return proj.get("name", "")
-        # 检查域列表
-        domains = proj.get("domains", [])
-        for d in domains:
-            if isinstance(d, dict) and d.get("name") == domain_name:
+        # 检查域列表（兼容字符串清单与 {'name': ...} 字典两种形态）
+        for d in proj.get("domains", []):
+            name = d.get("name", "") if isinstance(d, dict) else str(d)
+            if name and name == domain_name:
                 return proj.get("name", "")
     return None

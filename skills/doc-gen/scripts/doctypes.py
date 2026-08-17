@@ -32,6 +32,7 @@ SUFFIX_TYPE_MAP_ORDERED = [
     # ── Adapter 层 ──
     ("Controller",      "adapter",      "controller"),
     ("Consumer",        "adapter",      "consumer"),
+    ("Listener",        "adapter",      "consumer"),  # MQ 监听器（GTSP 常用 Listener 后缀）
     ("Scheduler",       "adapter",      "scheduler"),
     ("Job",             "adapter",      "scheduler"),  # xxl-job handler 类
     # ── Client 层 ──（COLA: ServiceI/CO/Cmd + GTSP: Inter/DTO/Command）

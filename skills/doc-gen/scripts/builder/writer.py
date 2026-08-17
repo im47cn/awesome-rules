@@ -3,6 +3,8 @@
 从 doc_gen.py 提取，逻辑保持不变。
 """
 
+from __future__ import annotations  # 兼容 Python 3.9：延迟求值 PEP 604 联合类型注解
+
 import json
 import subprocess
 import sys

@@ -8,6 +8,8 @@
 - build_receipt / collect_evidence / build_astro 失败传播
 """
 
+from __future__ import annotations  # 兼容 Python 3.9：延迟求值 PEP 604 联合类型注解
+
 import json
 import subprocess
 from pathlib import Path
