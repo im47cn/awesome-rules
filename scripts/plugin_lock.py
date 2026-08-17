@@ -27,8 +27,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 LOCK_FILE = Path(__file__).resolve().parent / "plugin-lock.json"
 
 # 安装入口全集：各工具插件目录下的清单 + 共享 hooks 配置
+# （.agents 为 Codex 市场安装入口，见 docs/ai-coding-tools-setup.md）
 LOCKED_DIRS = [".claude-plugin", ".codex-plugin", ".cursor-plugin",
-               ".kimi-plugin", ".grok-plugin", ".opencode", ".pi", "hooks"]
+               ".kimi-plugin", ".grok-plugin", ".agents", ".opencode", ".pi",
+               "hooks"]
 LOCKED_FILES = [  # 显式入口（目录扫描之外的兜底）
     "hooks/hooks.json",
 ]
@@ -129,6 +131,10 @@ def check() -> int:
                           f"实际 {str(actual)[:16]}…"
                           f"（有意变更请 --update，意外漂移请排查）")
 
+    # 4. 版本一致性：插件清单版本须与 package.json（release 单源）同步，
+    #    防止发布 3 个 minor 后插件侧仍停留在旧版本的双轨漂移
+    errors.extend(check_version_sync(current_files))
+
     if errors:
         print(f"❌ 安装入口锁定校验失败（{len(errors)} 处）:", file=sys.stderr)
         for e in errors:
@@ -136,6 +142,38 @@ def check() -> int:
         return 1
     print(f"✅ {len(locked)} 个安装入口与锁定一致（zero-regression）")
     return 0
+
+
+def check_version_sync(current_files: list) -> list:
+    """插件清单版本与 package.json 不一致 → 错误。
+
+    只比对语义化版本字段：plugin.json 的 version、marketplace.json 的
+    metadata.version。marketplace.json 顶层 version 是清单 schema 版本
+    （如 kimi 的 "2"），不参与比对。
+    """
+    pkg = REPO_ROOT / "package.json"
+    try:
+        expected = json.loads(pkg.read_text(encoding="utf-8")).get("version")
+    except (OSError, json.JSONDecodeError):
+        return [f"package.json 不可读，无法校验版本同步"]
+    if not expected:
+        return []
+
+    errors = []
+    for rel in current_files:
+        try:
+            data = json.loads((REPO_ROOT / rel).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue  # 内容漂移已由 blob 锁定报告
+        actual = None
+        if rel.endswith("plugin.json"):
+            actual = data.get("version")
+        elif rel.endswith("marketplace.json"):
+            actual = (data.get("metadata") or {}).get("version")
+        if actual and actual != expected:
+            errors.append(f"版本不同步: {rel} 为 {actual}，package.json 为 "
+                          f"{expected}（发布时同步递增）")
+    return errors
 
 
 def main():
