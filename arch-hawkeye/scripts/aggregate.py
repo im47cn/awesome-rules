@@ -1,7 +1,7 @@
 """架构鹰眼 — 多项目联邦聚合模块，将多个 doc-manifest/ 合并到架构鹰眼站点。
 
 从 skills/doc-gen/scripts/builder/aggregate.py 迁移（doc-gen 收缩为单项目文档站，
-聚合职责归架构鹰眼，见 arch-hawkeye/requirements.md §6 职责边界）。
+聚合职责归架构鹰眼，见 arch-hawkeye/AH-MANIFEST.md §1 契约定位）。
 站点渲染复用 doc-gen 的 Astro 模板渲染器（单一真相源，不复制）。
 """
 

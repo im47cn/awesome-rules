@@ -61,7 +61,10 @@ python3 scripts/hawkeye.py impact ./site --entity DemoController --json   # CI �
 影响面与图谱实际可达边一致（无虚构）：direct 仅来自跨项目边 provider 侧命中，
 indirect 沿 `component.deps` 反向 BFS（跳数裁剪、环安全）。
 
-## 路线图（EARS 需求见 [requirements.md](requirements.md)）
+## 路线图
+
+> 历史需求编号（AH-A02、AH-C01 等）源自初期 EARS 需求规格，该文件已随演进移除，
+> 编号仅作阶段溯源用。
 
 | 阶段 | 能力 | 关键需求 | 状态 |
 |---|---|---|---|
@@ -74,7 +77,6 @@ indirect 沿 `component.deps` 反向 BFS（跳数裁剪、环安全）。
 
 ```
 arch-hawkeye/
-├── requirements.md      # EARS 需求规格
 ├── AH-MANIFEST.md       # 公共契约（真相源在 skills/doc-gen/schemas/）
 └── scripts/
     ├── hawkeye.py       # CLI 入口
@@ -84,6 +86,5 @@ arch-hawkeye/
 
 ## 相关文档
 
-- 需求规格：[requirements.md](requirements.md)
 - 数据契约：[AH-MANIFEST.md](AH-MANIFEST.md)
 - 数据生产者：[../skills/doc-gen/SKILL.md](../skills/doc-gen/SKILL.md)

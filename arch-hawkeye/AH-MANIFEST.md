@@ -1,7 +1,7 @@
 # AH-MANIFEST 公共契约 v1
 
 > 架构鹰眼（Arch Hawkeye）与 doc-gen 之间的数据交换契约。
-> 状态：**Active** · 契约版本：`schema_version: 1` · 关联需求：[[requirements]] REQ-A
+> 状态：**Active** · 契约版本：`schema_version: 1` · 关联需求：REQ-A（历史编号）
 
 ## 1. 契约定位与真相源
 

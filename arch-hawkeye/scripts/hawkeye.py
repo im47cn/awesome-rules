@@ -2,7 +2,7 @@
 """
 架构鹰眼 (Arch Hawkeye) — 全局架构观测与治理 CLI 入口
 
-职责（见 arch-hawkeye/requirements.md）：
+职责（见 arch-hawkeye/AH-MANIFEST.md）：
   - 多项目联邦聚合（消费各项目 CI 产出的 doc-manifest/）
   - 站点渲染复用 doc-gen 的 Astro 模板（数据归鹰眼，渲染借 doc-gen）
 
