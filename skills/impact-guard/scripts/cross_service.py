@@ -10,6 +10,7 @@
 本模块从源文件小正则提取。
 """
 
+from __future__ import annotations  # 兼容 Python 3.9：延迟求值 PEP 604 联合类型注解
 import re
 from pathlib import Path
 

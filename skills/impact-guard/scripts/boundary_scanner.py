@@ -5,6 +5,7 @@
   出站/落点（变更点=此 → 🔴 直接）: http_exit / db_sink / cache_sink / mq_exit
 """
 
+from __future__ import annotations  # 兼容 Python 3.9：延迟求值 PEP 604 联合类型注解
 import json
 import re
 from pathlib import Path

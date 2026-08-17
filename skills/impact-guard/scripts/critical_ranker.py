@@ -9,6 +9,7 @@
 跨服务契约（@FeignClient / -client）→ 🔴 直接 + 强制告警"跨服务影响未分析"。
 """
 
+from __future__ import annotations  # 兼容 Python 3.9：延迟求值 PEP 604 联合类型注解
 from dataclasses import dataclass, field
 
 from boundary_scanner import scan_boundary_hits

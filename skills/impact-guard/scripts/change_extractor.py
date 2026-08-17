@@ -1,5 +1,6 @@
 """ChangeExtractor — git diff / --changed 归一为 List[ChangePoint]"""
 
+from __future__ import annotations  # 兼容 Python 3.9：延迟求值 PEP 604 联合类型注解
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path

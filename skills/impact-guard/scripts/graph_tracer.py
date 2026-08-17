@@ -6,6 +6,7 @@
    的"动态生成、不手抄"惯例），Agent 粘贴到 query_graph 执行拿方法级证据链
 """
 
+from __future__ import annotations  # 兼容 Python 3.9：延迟求值 PEP 604 联合类型注解
 import subprocess
 from pathlib import Path
 
