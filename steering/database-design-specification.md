@@ -145,7 +145,6 @@ del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]'
 | 方向 | `dir` | direction |
 | 消息 | `msg` | message |
 | 配置 | `cfg` | config |
-| 描述 | `desc` | description |
 | 信息 | `info` | information |
 | 编号 | `no` | number |
 | 数量 | `cnt` | count |
@@ -154,3 +153,6 @@ del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]'
 | 地址 | `addr` | address |
 | 密码 | `pwd` | password |
 | 方法 | `mtd` | method |
+
+> 描述类字段**不缩写**，直接用 `description` 全称——`desc` 是 MySQL 保留字，
+> 用作标识符即触发保留字强制检查。

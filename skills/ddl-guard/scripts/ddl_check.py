@@ -108,8 +108,9 @@ GENERIC_FIELD_NAMES = {
 }
 
 # ── 缩写字典：未规范化写法 → 标准缩写（与规范附录同步）──────────────────
+# 注意：标准缩写不得为 MySQL 保留字（如 desc），否则建议本身即触发强制违规
 ABBREVIATION_DICT = {
-    "direction": "dir", "message": "msg", "config": "cfg", "description": "desc",
+    "direction": "dir", "message": "msg", "config": "cfg",
     "information": "info", "number": "no", "count": "cnt", "image": "img",
     "telephone": "tel", "address": "addr", "password": "pwd", "method": "mtd",
 }
