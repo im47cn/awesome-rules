@@ -7,7 +7,7 @@ set -eu
 # 规范路径恒为 ~/.claude/githooks (可为指向 dotfiles 仓库的符号链接),
 # 避免经链接/直连两种调用方式解析出不同文本路径, 触发"已设置不覆盖"守卫误判。
 HOOKS="$HOME/.claude/githooks"
-[ -d "$HOOKS" ] || { echo "✗ $HOOKS 不存在 (新机器: clone dotfiles 后 ln -s <dotfiles>/githooks ~/.claude/githooks)"; exit 1; }
+[ -d "$HOOKS" ] || { echo "✗ $HOOKS 不存在 (新机器: clone awesome-rules 后 ln -s ~/sources/awesome-rules/tools/cov-hooks ~/.claude/githooks)"; exit 1; }
 
 if [ "${1:-}" = "--remove" ]; then
   git config --unset core.hooksPath 2>/dev/null || true
