@@ -4,9 +4,13 @@
 """
 
 import re
+from collections import Counter, defaultdict
 from pathlib import Path
 
 from doctypes import DocManifest
+
+# 单 tag 下 operation 数超过该值 → 按 URI 前缀细分层级（Scalar 侧边栏单组可导航上限）
+MAX_OPS_PER_TAG = 20
 
 
 class OpenAPIGenerator:
@@ -128,7 +132,94 @@ class OpenAPIGenerator:
         if not spec["paths"]:
             return {"openapi": "3.0.3", "info": spec["info"], "paths": {}, "components": {}}
 
+        self._regroup_oversized_tags(spec)
+
         return spec
+
+    def _regroup_oversized_tags(self, spec: dict) -> None:
+        """单 tag 接口过多（域划分粒度过粗）或无域信息时，按 URI 前缀细分层级。
+
+        Scalar 侧边栏按 tag 单层分组，一个 tag 下平铺上百个接口无法导航。
+        细分后 tag 名保留域上下文（如 "basecont · signFlow"），组内仍超阈值
+        且路径有更深段时继续下钻（如 "msg · statistics/task-send"）。
+        """
+        items = []          # [(path, method, op)]
+        tag_of = {}         # id(op) -> 当前 tag（空串 = 无域信息）
+        for path, ops in spec["paths"].items():
+            for method, op in ops.items():
+                if not isinstance(op, dict):
+                    continue
+                items.append((path, method, op))
+                tags = op.get("tags") or []
+                tag_of[id(op)] = tags[0] if tags else ""
+
+        counts = Counter(tag_of.values())
+        tag_desc = {t.get("name", ""): t.get("description", "") for t in spec["tags"]}
+
+        new_tags = []       # 顶层 tags 数组（有序，保持原 tag 相对顺序）
+        for tag, total in counts.items():
+            entries = [(p, m, o) for p, m, o in items if tag_of[id(o)] == tag]
+            if tag and total <= MAX_OPS_PER_TAG:
+                new_tags.append({"name": tag, "description": tag_desc.get(tag, "")})
+                continue
+            # 无域信息 → 纯前缀；有域但组过大 → "域 · 前缀"
+            for label, sub in self._group_by_path_prefix(entries, depth=0):
+                name = f"{tag} · {label}" if tag else label
+                for _p, _m, op in sub:
+                    op["tags"] = [name]
+                hint = "（按 URI 前缀自动细分）"
+                new_tags.append({
+                    "name": name,
+                    "description": f"{tag_desc.get(tag, '')} {hint}".strip() if tag else hint.strip(),
+                })
+        spec["tags"] = new_tags
+
+    def _group_by_path_prefix(self, entries: list, depth: int) -> list:
+        """按路径第 depth 段分组；组内仍超阈值且下钻有价值时递归细分。
+
+        entries: [(path, method, op)]；返回 [(组名, entries)]。
+        根路径或变量段（{id}）不是稳定分组键，归入「其余」组不再下钻。
+        下钻价值：下一层段取值有重复（资源名，如 task-send）才有分类意义；
+        下钻后大半接口落入单接口组（实例 ID 层，如 /root/5）则停钻——
+        单接口组无导航价值且组名冗长。
+        """
+        if len(entries) <= MAX_OPS_PER_TAG:
+            return [("", entries)]
+
+        buckets = defaultdict(list)
+        for path, method, op in entries:
+            segs = path.strip("/").split("/")
+            seg = segs[depth] if len(segs) > depth else ""
+            if "{" in seg:
+                seg = ""
+            buckets[seg].append((path, method, op))
+
+        result = []
+        for seg, sub in sorted(buckets.items()):
+            label = seg or "其余"
+            deeper = seg and len(sub) > MAX_OPS_PER_TAG \
+                and self._drill_worthwhile(sub, depth)
+            if deeper:
+                for sub_label, sub_entries in self._group_by_path_prefix(sub, depth + 1):
+                    result.append((f"{label}/{sub_label}" if sub_label else label, sub_entries))
+            else:
+                result.append((label, sub))
+        return result
+
+    @staticmethod
+    def _drill_worthwhile(entries: list, depth: int) -> bool:
+        """预演按 depth+1 层分桶：单接口组占比过半则下钻无价值，停钻。
+
+        判据同时覆盖两种坏场景——下一层取值几乎全唯一（实例 ID），
+        或少数重复值混大量唯一方法名（下钻后多数接口落单）。
+        """
+        buckets = defaultdict(int)
+        for path, _m, _o in entries:
+            segs = path.strip("/").split("/")
+            seg = segs[depth + 1] if len(segs) > depth + 1 else ""
+            buckets[seg or "其余"] += 1
+        singles = sum(n for n in buckets.values() if n == 1)
+        return singles < len(entries) / 2
 
     def _java_to_oas_schema(self, java_type: str, schemas: dict, schema_refs: set) -> dict:
         """将 Java 类型名映射为 OpenAPI schema/$ref"""
