@@ -157,6 +157,21 @@ class OpenAPIGenerator:
         tag_desc = {t.get("name", ""): t.get("description", "") for t in spec["tags"]}
 
         new_tags = []       # 顶层 tags 数组（有序，保持原 tag 相对顺序）
+        # OpenAPI 3.0 要求 tags 数组内 name 唯一：细分名（"域 · 前缀"）可能撞上
+        # 既有同名 tag（用户自定义或上轮细分产物），冲突时加序号后缀消歧
+        used_names = set(counts.keys())   # 原样保留的小 tag 占据名字空间
+
+        def _unique_name(name: str) -> str:
+            if name not in used_names:
+                used_names.add(name)
+                return name
+            n = 2
+            while f"{name} · {n}" in used_names:
+                n += 1
+            uniq = f"{name} · {n}"
+            used_names.add(uniq)
+            return uniq
+
         for tag, total in counts.items():
             entries = [(p, m, o) for p, m, o in items if tag_of[id(o)] == tag]
             if tag and total <= MAX_OPS_PER_TAG:
@@ -164,7 +179,7 @@ class OpenAPIGenerator:
                 continue
             # 无域信息 → 纯前缀；有域但组过大 → "域 · 前缀"
             for label, sub in self._group_by_path_prefix(entries, depth=0):
-                name = f"{tag} · {label}" if tag else label
+                name = _unique_name(f"{tag} · {label}" if tag else label)
                 for _p, _m, op in sub:
                     op["tags"] = [name]
                 hint = "（按 URI 前缀自动细分）"

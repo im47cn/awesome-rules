@@ -196,3 +196,20 @@ def test_small_tag_untouched():
     assert spec["tags"][0]["name"] == "订单"
     assert spec["tags"][0]["description"] == "d"
     assert spec["paths"]["/orders/{id}"]["get"]["tags"] == ["订单"]
+
+
+def test_oversized_split_name_collision_disambiguated():
+    """细分名撞既有同名 tag（OpenAPI 3.0 要求 tags 唯一）→ 序号后缀消歧"""
+    paths = {f"/root/{i}": {"get": {"tags": ["订单"]}}
+             for i in range(MAX_OPS_PER_TAG + 2)}
+    paths["/misc/x"] = {"get": {"tags": ["订单 · root"]}}   # 既有小 tag 恰与细分名相同
+    spec = {
+        "paths": paths,
+        "tags": [{"name": "订单"}, {"name": "订单 · root", "description": "用户自定义"}],
+    }
+    OpenAPIGenerator("/tmp")._regroup_oversized_tags(spec)
+    names = [t["name"] for t in spec["tags"]]
+    assert len(names) == len(set(names))       # 唯一性红线
+    assert "订单 · root" in names               # 小 tag 原样保留
+    assert "订单 · root · 2" in names           # 细分组消歧
+    assert spec["paths"]["/misc/x"]["get"]["tags"] == ["订单 · root"]  # 不误改写
