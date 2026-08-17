@@ -17,15 +17,20 @@ import os
 import re
 import sys
 import xml.etree.ElementTree as ET
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from dataclasses import dataclass
-from enum import Enum
 
+# guard 共享库（Severity / MYSQL_RESERVED / SKIP_DIRS / 报告骨架）
+_SHARED = Path(__file__).resolve().parent.parent.parent / "_shared"
+if str(_SHARED) not in sys.path:
+    sys.path.insert(0, str(_SHARED))
 
-
-class Severity(Enum):
-    MANDATORY = "强制"
-    RECOMMENDED = "推荐"
+from guard_lib import (  # noqa: E402
+    MYSQL_RESERVED,
+    SKIP_DIRS,
+    Severity,
+    run_gate,
+)
 
 
 @dataclass
@@ -500,12 +505,6 @@ def check_file(file_path: str) -> list:
     return issues
 
 
-SKIP_DIRS = {
-    "target", "build", ".git", "node_modules", ".idea", ".vscode",
-    ".gradle", ".mvn", "dist", "out", ".next", ".nuxt",
-}
-
-
 def is_mapper(path: str) -> bool:
     """判断 XML 文件是否为 MyBatis mapper。
 
@@ -547,47 +546,6 @@ def find_mybatis_files(path: str) -> list:
 
 
 # ── MyBatis-Plus PO 类解析与检查 ────────────────────────────────────────
-
-MYSQL_RESERVED = {
-    "add", "all", "alter", "and", "as", "asc", "between", "bigint", "binary",
-    "blob", "both", "by", "call", "cascade", "case", "char", "check", "column",
-    "condition", "constraint", "continue", "convert", "create", "cross",
-    "current_date", "current_time", "current_timestamp", "cursor", "database",
-    "databases", "day_hour", "day_microsecond", "day_minute", "day_second",
-    "decimal", "declare", "default", "delete", "desc", "describe", "distinct",
-    "distinctrow", "div", "double", "drop", "dual", "else", "enclosed",
-    "escaped", "exists", "exit", "explain", "false", "fetch", "float", "float4",
-    "float8", "for", "force", "foreign", "from", "fulltext", "get", "grant",
-    "group", "grouping", "groups", "having", "high_priority", "hour_microsecond",
-    "hour_minute", "hour_second", "if", "ignore", "in", "index", "infile",
-    "inner", "inout", "insensitive", "insert", "int", "int1", "int2", "int3",
-    "int4", "int8", "integer", "interval", "into", "io_after_gtids",
-    "io_before_gtids", "is", "iterate", "join", "json_table", "key", "keys",
-    "kill", "leading", "leave", "left", "like", "limit", "linear", "lines",
-    "load", "localtime", "localtimestamp", "lock", "long", "longblob",
-    "longtext", "loop", "low_priority", "master_bind",
-    "master_ssl_verify_server_cert", "match", "maxvalue", "mediumblob",
-    "mediumint", "mediumtext", "middleint", "minute_microsecond",
-    "minute_second", "mod", "modifies", "natural", "not", "no_write_to_binlog",
-    "null", "numeric", "on", "optimize", "optimizer_costs", "option",
-    "optionally", "or", "order", "out", "outer", "outfile", "over", "partition",
-    "precision", "primary", "procedure", "purge", "range", "read", "read_write",
-    "reads", "real", "recursive", "references", "regexp", "release", "rename",
-    "repeat", "replace", "require", "resignal", "restrict", "return", "revoke",
-    "right", "rlike", "rows", "schema", "schemas", "second_microsecond",
-    "select", "sensitive", "separator", "set", "show", "signal", "smallint",
-    "spatial", "specific", "sql", "sqlexception", "sqlstate", "sqlwarning",
-    "sql_big_result", "sql_calc_found_rows", "sql_small_result", "ssl",
-    "starting", "stored", "straight_join", "system", "table", "terminated",
-    "then", "tinyblob", "tinyint", "tinytext", "to", "trailing", "trigger",
-    "true", "undo", "union", "unique", "unlock", "unsigned", "update", "usage",
-    "use", "using", "utc_date", "utc_time", "utc_timestamp", "values",
-    "varbinary", "varchar", "varcharacter", "varying", "virtual", "when",
-    "where", "while", "window", "with", "write", "xor", "year_month", "zerofill",
-    "date", "time", "timestamp", "text", "blob", "enum", "json", "geometry",
-    "point", "linestring", "polygon", "multipoint", "multilinestring",
-    "multipolygon", "geometrycollection",
-}
 
 PO_REQUIRED_FIELDS = [
     "id", "creator_id", "create_time", "last_updater_id", "last_update_time",
@@ -929,40 +887,13 @@ def main():
         print(f"未找到 MyBatis mapper XML 或 @TableName PO 类: {args.path}", file=sys.stderr)
         return 2
 
-    all_issues = {}
-    total_mandatory = 0
-
-    def _check(file_path, is_po):
-        return check_po_file(file_path) if is_po else check_file(file_path)
-
-    all_target_files = [(f, False) for f in xml_files] + [(f, True) for f in po_files]
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        future_to_file = {
-            executor.submit(_check, f, is_po): f
-            for f, is_po in all_target_files
-        }
-        for future in as_completed(future_to_file):
-            f = future_to_file[future]
-            result = future.result()
-            if result is not None:
-                all_issues[f] = result
-                total_mandatory += sum(
-                    1 for i in result if i.severity == Severity.MANDATORY
-                )
-
-    if args.format == "json":
-        results = []
-        for f, issues in sorted(all_issues.items()):
-            results.append(json.loads(format_report_json(f, issues)))
-        print(json.dumps(results, ensure_ascii=False, indent=2))
-    else:
-        for f, issues in sorted(all_issues.items()):
-            print(format_report_text(f, issues))
-        print(f"{'='*60}")
-        print(f"总计: {len(all_issues)} 个文件, {sum(len(v) for v in all_issues.values())} 个问题 ({total_mandatory} 个强制)")
-        print(f"{'='*60}")
-
-    return 1 if total_mandatory > 0 else 0
+    all_target_files = (
+        [(f, check_file) for f in xml_files]
+        + [(f, check_po_file) for f in po_files]
+    )
+    return run_gate(
+        all_target_files, args.format, format_report_text, format_report_json,
+    )
 
 
 if __name__ == "__main__":

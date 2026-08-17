@@ -13,15 +13,21 @@ import json
 import os
 import re
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Optional
 
+# guard 共享库（Severity / MYSQL_RESERVED / 文件发现 / 报告骨架）
+_SHARED = Path(__file__).resolve().parent.parent.parent / "_shared"
+if str(_SHARED) not in sys.path:
+    sys.path.insert(0, str(_SHARED))
 
-class Severity(Enum):
-    MANDATORY = "强制"
-    RECOMMENDED = "推荐"
+from guard_lib import (  # noqa: E402
+    MYSQL_RESERVED,
+    Severity,
+    find_files,
+    run_gate,
+)
 
 
 @dataclass
@@ -65,47 +71,6 @@ class IndexInfo:
     columns: list = field(default_factory=list)
     is_unique: bool = False
 
-
-# ── MySQL 保留字（常用子集）─────────────────────────────────────────────
-MYSQL_RESERVED = {
-    "add", "all", "alter", "and", "as", "asc", "between", "bigint", "binary",
-    "blob", "both", "by", "call", "cascade", "case", "char", "check", "column",
-    "condition", "constraint", "continue", "convert", "create", "cross",
-    "current_date", "current_time", "current_timestamp", "cursor", "database",
-    "databases", "day_hour", "day_microsecond", "day_minute", "day_second",
-    "decimal", "declare", "default", "delete", "desc", "describe", "distinct",
-    "distinctrow", "div", "double", "drop", "dual", "else", "enclosed",
-    "escaped", "exists", "exit", "explain", "false", "fetch", "float", "float4",
-    "float8", "for", "force", "foreign", "from", "fulltext", "get", "grant",
-    "group", "grouping", "groups", "having", "high_priority", "hour_microsecond",
-    "hour_minute", "hour_second", "if", "ignore", "in", "index", "infile",
-    "inner", "inout", "insensitive", "insert", "int", "int1", "int2", "int3",
-    "int4", "int8", "integer", "interval", "into", "io_after_gtids",
-    "io_before_gtids", "is", "iterate", "join", "json_table", "key", "keys",
-    "kill", "leading", "leave", "left", "like", "limit", "linear", "lines",
-    "load", "localtime", "localtimestamp", "lock", "long", "longblob",
-    "longtext", "loop", "low_priority", "master_bind", "master_ssl_verify_server_cert",
-    "match", "maxvalue", "mediumblob", "mediumint", "mediumtext", "middleint",
-    "minute_microsecond", "minute_second", "mod", "modifies", "natural", "not",
-    "no_write_to_binlog", "null", "numeric", "on", "optimize", "optimizer_costs",
-    "option", "optionally", "or", "order", "out", "outer", "outfile", "over",
-    "partition", "precision", "primary", "procedure", "purge", "range", "read",
-    "read_write", "reads", "real", "recursive", "references", "regexp",
-    "release", "rename", "repeat", "replace", "require", "resignal", "restrict",
-    "return", "revoke", "right", "rlike", "rows", "schema", "schemas",
-    "second_microsecond", "select", "sensitive", "separator", "set", "show",
-    "signal", "smallint", "spatial", "specific", "sql", "sqlexception",
-    "sqlstate", "sqlwarning", "sql_big_result", "sql_calc_found_rows",
-    "sql_small_result", "ssl", "starting", "stored", "straight_join", "system",
-    "table", "terminated", "then", "tinyblob", "tinyint", "tinytext", "to",
-    "trailing", "trigger", "true", "undo", "union", "unique", "unlock",
-    "unsigned", "update", "usage", "use", "using", "utc_date", "utc_time",
-    "utc_timestamp", "values", "varbinary", "varchar", "varcharacter", "varying",
-    "virtual", "when", "where", "while", "window", "with", "write", "xor",
-    "year_month", "zerofill", "date", "time", "timestamp", "text", "blob",
-    "enum", "json", "geometry", "point", "linestring", "polygon",
-    "multipoint", "multilinestring", "multipolygon", "geometrycollection",
-}
 
 # ── 禁用类型 ────────────────────────────────────────────────────────────
 FORBIDDEN_TYPES = {
@@ -1067,48 +1032,15 @@ def main():
     parser.add_argument("--format", choices=["text", "json"], default="text", help="输出格式")
     args = parser.parse_args()
 
-    # Find SQL files
-    sql_files = []
-    if os.path.isfile(args.path):
-        sql_files = [args.path]
-    elif os.path.isdir(args.path):
-        for root, _dirs, files in os.walk(args.path):
-            for f in files:
-                if f.endswith(".sql"):
-                    sql_files.append(os.path.join(root, f))
-
+    sql_files = find_files(args.path, lambda f: f.endswith(".sql"))
     if not sql_files:
         print("未找到 .sql 文件", file=sys.stderr)
         return 2
 
-    all_issues = {}
-    total_mandatory = 0
-
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        future_to_file = {executor.submit(check_file, f): f for f in sorted(sql_files)}
-        for future in as_completed(future_to_file):
-            sql_file = future_to_file[future]
-            issues = future.result()
-            all_issues[sql_file] = issues
-            total_mandatory += sum(1 for i in issues if i.severity == Severity.MANDATORY)
-
-    # Output
-    if args.format == "json":
-        results = []
-        for f, issues in sorted(all_issues.items()):
-            results.append(json.loads(format_report_json(f, issues)))
-        print(json.dumps(results, ensure_ascii=False, indent=2))
-    else:
-        for f, issues in sorted(all_issues.items()):
-            print(format_report_text(f, issues))
-
-        # Summary
-        print(f"{'='*60}")
-        print(f"总计: {len(sql_files)} 个文件, {sum(len(v) for v in all_issues.values())} 个问题"
-              f" ({total_mandatory} 个强制)")
-        print(f"{'='*60}")
-
-    return 1 if total_mandatory > 0 else 0
+    return run_gate(
+        [(f, check_file) for f in sql_files],
+        args.format, format_report_text, format_report_json,
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

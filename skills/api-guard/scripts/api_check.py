@@ -17,14 +17,15 @@ import json
 import os
 import re
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from dataclasses import dataclass
-from enum import Enum
 
+# guard 共享库（Severity / SKIP_DIRS / 报告骨架）
+_SHARED = Path(__file__).resolve().parent.parent.parent / "_shared"
+if str(_SHARED) not in sys.path:
+    sys.path.insert(0, str(_SHARED))
 
-class Severity(Enum):
-    MANDATORY = "强制"
-    RECOMMENDED = "推荐"
+from guard_lib import SKIP_DIRS, Severity, run_gate  # noqa: E402
 
 
 @dataclass
@@ -47,11 +48,6 @@ ALLOWED_ACTIONS = {
 }
 
 PATH_VAR_PATTERN = re.compile(r"\{[^}]+\}")
-
-SKIP_DIRS = {
-    "target", "build", ".git", "node_modules", ".idea", ".vscode",
-    ".gradle", ".mvn", "dist", "out", ".next", ".nuxt", "test", "tests",
-}
 
 HTTP_METHODS = {"GET", "POST", "PUT", "DELETE", "PATCH", "REQUESTMAPPING"}
 
@@ -484,38 +480,11 @@ def main():
         print(f"未找到 Controller 或契约对象(DTO/PO/Command/Query)文件: {args.path}", file=sys.stderr)
         return 2
 
-    all_issues = {}
-    total_mandatory = 0
-
-    def _scan(files, checker):
-        nonlocal total_mandatory
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            future_to_file = {executor.submit(checker, f): f for f in sorted(files)}
-            for future in as_completed(future_to_file):
-                f = future_to_file[future]
-                issues = future.result()
-                all_issues[f] = issues
-                total_mandatory += sum(
-                    1 for i in issues if i.severity == Severity.MANDATORY
-                )
-
-    _scan(ctrl_files, check_file)
-    _scan(contract_files, check_contract_file)
-
-    if args.format == "json":
-        results = []
-        for f, issues in sorted(all_issues.items()):
-            results.append(json.loads(format_report_json(f, issues)))
-        print(json.dumps(results, ensure_ascii=False, indent=2))
-    else:
-        for f, issues in sorted(all_issues.items()):
-            print(format_report_text(f, issues))
-        print(f"{'='*60}")
-        print(f"总计: {len(all_issues)} 个文件, {sum(len(v) for v in all_issues.values())} 个问题 "
-              f"({total_mandatory} 个强制)")
-        print(f"{'='*60}")
-
-    return 1 if total_mandatory > 0 else 0
+    all_targets = [(f, check_file) for f in ctrl_files]
+    all_targets += [(f, check_contract_file) for f in contract_files]
+    return run_gate(
+        all_targets, args.format, format_report_text, format_report_json,
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover
