@@ -36,14 +36,21 @@ command -v npm  >/dev/null 2>&1 || { echo "✘ 未检测到 npm"; exit 1; }
 echo "✔ node $(node -v)"
 
 # ── 2. 拷贝配置（install：已存在则确认；update：直接覆盖）─────────
-# lefthook.yml 是 hook 配置，入库后随 clone 共享给全团队
-for f in commitlint.config.js .versionrc.js lefthook.yml; do
-  if [ "$MODE" = "install" ] && [ -f "$TARGET/$f" ]; then
-    read -rp "⚠ $f 已存在，覆盖？[y/N] " ans || true
-    [ "${ans:-N}" = "y" ] || { echo "  跳过 $f"; continue; }
+# lefthook.yml/.lefthook/coverage.sh 是 hook 配置，入库后随 clone 共享给全团队
+copy_one() { # $1=源文件名(相对 SCRIPT_DIR) $2=目标路径
+  if [ "$MODE" = "install" ] && [ -f "$2" ]; then
+    read -rp "⚠ $2 已存在，覆盖？[y/N] " ans || true
+    [ "${ans:-N}" = "y" ] || { echo "  跳过 $2"; return; }
   fi
-  cp "$SCRIPT_DIR/$f" "$TARGET/$f"
+  cp "$SCRIPT_DIR/$1" "$2"
+}
+mkdir -p "$TARGET/.lefthook"
+for f in commitlint.config.js .versionrc.js lefthook.yml; do
+  copy_one "$f" "$TARGET/$f"
 done
+copy_one "lefthook/coverage.sh" "$TARGET/.lefthook/coverage.sh"
+copy_one "lefthook/commitmsg-check.sh" "$TARGET/.lefthook/commitmsg-check.sh"
+copy_one "lefthook/run-tests.sh" "$TARGET/.lefthook/run-tests.sh"
 
 # commit 模板 → 用户主目录 ~/.gitmessage（全局，所有仓库/IDEA 一次识别）
 skip_tmpl=0
@@ -85,15 +92,9 @@ cd "$TARGET"
 GIT_DIR="$(git rev-parse --git-dir 2>/dev/null || true)"
 if [ -n "$GIT_DIR" ]; then
   HOOK="$GIT_DIR/hooks/commit-msg"
-  # hooksPath 被其他方案（husky 等）接管时，git 不读 .git/hooks，写了也无效；
-  # 自家 cov-hooks 除外——它是链式代理设计（转回 .git/hooks 同名钩子），与 lefthook 共存
+  # hooksPath 被其他方案（husky 等）接管时，git 不读 .git/hooks，写了也无效
   HOOKS_PATH="$(git config core.hooksPath || true)"
-  own_cov=""
   if [ -n "$HOOKS_PATH" ]; then
-    hp="${HOOKS_PATH/#\~/$HOME}"
-    [ -d "$hp" ] && [ "$(cd "$hp" && pwd -P)" = "$(cd "$SCRIPT_DIR/../cov-hooks" 2>/dev/null && pwd -P)" ] && own_cov=1
-  fi
-  if [ -n "$HOOKS_PATH" ] && [ -z "$own_cov" ]; then
     echo "⚠ core.hooksPath 已指向 ${HOOKS_PATH}（husky 等已接管），跳过 lefthook 安装"
   else
     install_hook=1
@@ -112,20 +113,10 @@ if [ -n "$GIT_DIR" ]; then
       fi
     fi
     if [ "$install_hook" = "1" ]; then
-      lh_ok=0
-      if [ -n "$own_cov" ]; then
-        # lefthook 默认拒装 hooksPath 已设的仓库（--force 会把 shim 写进共享目录，不可用）；
-        # 临时摘除 → 装 .git/hooks → 恢复，cov-hooks 的链式代理自会转交 shim 执行
-        git config --unset core.hooksPath
-        lefthook install && lh_ok=1
-        git config core.hooksPath "$HOOKS_PATH"
-      else
-        lefthook install && lh_ok=1
-      fi
-      if [ "$lh_ok" = "1" ]; then
+      if lefthook install; then
         echo "✔ lefthook hooks 已安装（.git/hooks/*，配置见项目内 lefthook.yml）"
       else
-        echo "✘ lefthook install 失败（hooksPath 已恢复原值）"
+        echo "✘ lefthook install 失败"
       fi
     fi
   fi

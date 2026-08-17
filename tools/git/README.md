@@ -11,6 +11,8 @@ scenario: 提交校验/生成 changelog/发版
 |---|---|---|
 | commit 模板 | 提交前预填格式提示（IDE / 编辑器） | `.gitmessage` + `commit.template` |
 | commitlint | 提交时校验 message 格式 | `@commitlint/cli` + `config-conventional`，hook 由 [lefthook](https://github.com/evilmartians/lefthook) 托管 |
+| 变更行覆盖率红线 | pre-commit 轻检 / pre-push 全量兜底，≥95% | `lefthook.yml` + `.lefthook/coverage.sh`（diff-cover，支持 pytest-cov / vitest / Maven+JaCoCo） |
+| commit 规范校验（自动装环境） | Java 等后端机器 clone 后首次提交自动补装 commitlint | `.lefthook/commitmsg-check.sh`：缺 commitlint 时 `npm install -g` 自动安装，规则单一来源 commitlint |
 | commit-and-tag-version | 自动生成 changelog + 按语义 bump 版本号 | `commit-and-tag-version` |
 
 > **选型说明**：`standard-version` 自 2022 年起 archived，本工具采用其活跃 fork [`commit-and-tag-version`](https://github.com/absolute-version/commit-and-tag-version)，配置完全兼容。
@@ -26,7 +28,7 @@ bash /path/to/awesome-rules/tools/git/install.sh .
 `install.sh` 会：
 
 1. 检测 node / npm（需 node ≥ 16）
-2. 拷贝 `commitlint.config.js` + `.versionrc.js` + `lefthook.yml` 到项目根（**入库共享给全团队**）；`commit-template.txt` → `~/.gitmessage`（全局 commit 模板）
+2. 拷贝 `commitlint.config.js` + `.versionrc.js` + `lefthook.yml` + `.lefthook/{coverage,commitmsg-check}.sh` 到项目（**入库共享给全团队**）；`commit-template.txt` → `~/.gitmessage`（全局 commit 模板）
 3. **全局**安装工具（`@commitlint/cli`、`@commitlint/config-conventional`、`commit-and-tag-version`、`lefthook`，检测已装则跳过）
 4. 执行 `lefthook install` 写入 hook shim（读项目内 `lefthook.yml`，调全局 commitlint）
 5. 在 `package.json` 注入 `release` / `release:dry` 脚本（调全局 commit-and-tag-version）
@@ -42,7 +44,7 @@ bash /path/to/awesome-rules/tools/git/install.sh --update /path/to/业务项目
 
 `--update` 与首次安装的区别：
 
-- 配置文件（`commitlint.config.js` / `.versionrc.js` / `lefthook.yml`）与 commit 模板：**无条件覆盖**（首次安装遇已存在会询问）
+- 配置文件（`commitlint.config.js` / `.versionrc.js` / `lefthook.yml` / `.lefthook/*.sh`）与 commit 模板：**无条件覆盖**（首次安装遇已存在会询问）
 - hook：自动清理本工具旧版直写的 `commit-msg` 后重跑 `lefthook install`；非本工具、非 lefthook 生成的 hook **一律跳过**，`core.hooksPath` 被 husky 等接管时同样跳过，避免破坏既有方案
 - 全局工具、`package.json` scripts：与首次相同（检测补装 / 幂等注入）
 
@@ -55,7 +57,11 @@ npm i -g lefthook   # 一次安装，所有项目共用
 lefthook install    # 写入 .git/hooks/* shim
 ```
 
-未装 lefthook 时 hook shim 会打印警告并放行，不阻塞提交。
+commitlint 无需手动装——首次提交时 `.lefthook/commitmsg-check.sh` 自动 `npm install -g` 补装（一次性）。未装 lefthook 时 hook shim 会打印警告并放行，不阻塞提交。
+
+> **awesome-rules 本仓库例外**：根 `lefthook.yml` 是自用变体，直接引用
+> `tools/git/lefthook/`（单一源，不产生 `.lefthook/` 运行时目录，避免双份漂移）。
+> **不要对本仓库执行 `install.sh --update`**——会用分发模板覆盖根 yml 的路径。
 
 ## 使用
 
@@ -76,7 +82,10 @@ npm run release       # 正式执行：bump 版本 + 更新 CHANGELOG.md + 打 t
 
 - `~/.gitmessage` —— commit 模板（装主目录 + 全局 `commit.template`，所有仓库/IDEA 一次识别）
 - `commitlint.config.js` —— type/scope 枚举、主题行 ≤50 字符、breaking 标记（事后校验）
-- `lefthook.yml` —— hook 编排（commit-msg → commitlint），入库随 clone 共享
+- `lefthook.yml` —— hook 编排（commit-msg → 规范校验；pre-commit/pre-push → 覆盖率红线），入库随 clone 共享
+- `.lefthook/commitmsg-check.sh` —— commit 规范校验（缺 commitlint 自动 `npm install -g`；无 node 提示后放行，装 node 后首次提交自动补装）
+- `.lefthook/coverage.sh` —— 变更行覆盖率红线（diff-cover ≥95%，light/full 双模式；python/node/java），入库随 clone 共享
+- `.lefthook/run-tests.sh` —— pre-push 项目自定义测试入口壳：项目有 `scripts/pre-push-tests.sh` 则执行（非零退出阻断 push），无则跳过。**`lefthook.yml` 是分发物（`--update` 会覆盖，勿手工加段）**，项目级测试/构建门禁一律写进 `scripts/pre-push-tests.sh`
 - `.versionrc.js` —— changelog 中文分节、emoji 前缀
 
 > 修改规则时请**同步更新 `steering/git-conventions.md`**，保持规范文档为唯一事实源。
@@ -84,7 +93,8 @@ npm run release       # 正式执行：bump 版本 + 更新 CHANGELOG.md + 打 t
 ## 适用场景
 
 - ✅ **Node / 前端 / 全栈项目**：原生支持
-- ⚠️ **Java / Maven 等非 node 项目**：需先装 node；changelog/版本号功能依赖 node 运行时，提交校验可独立使用
+- ✅ **Java / Maven 项目**：提交规范校验（无 node 也有 bash 兜底）+ 覆盖率红线（Maven + JaCoCo → diff-cover）原生支持；changelog/版本号功能仍依赖 node
+- ⚠️ **Gradle 等其他构建**：覆盖率暂未接入（可自行扩展 `.lefthook/coverage.sh`）
 
 ## IDE 兼容性（commit template）
 

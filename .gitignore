@@ -7,6 +7,10 @@ __pycache__/
 # 本地工具运行时产物（crush 会话 db/日志）
 .crush/
 
+# lefthook 分发产物（install.sh 拷贝 tools/git/lefthook/ 到业务项目；
+# 本仓库直接引用源目录，不产生此运行时目录）
+.lefthook/
+
 # macOS
 .DS_Store
 

@@ -63,7 +63,7 @@ if [ "$HAS_PY" = 1 ]; then
         echo "[cov] ▶ $d: pytest --cov=$cov_target + diff-cover (≥${FAIL_UNDER}%)"
         "${PYTEST[@]}" --cov="$cov_target" --cov-report=xml:coverage.xml -q
         rc=$?
-        [ $rc -eq 5 ] && { echo "[cov] $d 无测试, 跳过"; exit 0; }
+        [ $rc -eq 5 ] && { echo "[cov] $d 未收集到测试 (pytest rc=5), 跳过"; exit 0; }
         [ $rc -ne 0 ] && exit 1
         dc coverage.xml --compare-branch="$COMPARE" --fail-under="$FAIL_UNDER"
       ) || fail=1
