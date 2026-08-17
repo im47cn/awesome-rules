@@ -35,9 +35,9 @@ on:
     branches: [master, main]
 
 env:
-  RULES_PATH: /path/to/awesome-rules            # awesome-rules 检出路径
-  DOC_GEN: ${{ format('{0}/skills/doc-gen/scripts/doc_gen.py', '/path/to/awesome-rules') }}
-  HAWKEYE: ${{ format('{0}/arch-hawkeye/scripts/hawkeye.py', '/path/to/awesome-rules') }}
+  # awesome-rules 检出路径（与下方 checkout path 一致；命令统一经 $RULES_PATH 引用，
+  # 布局变化只改这一处）
+  RULES_PATH: ${{ github.workspace }}/awesome-rules
   BASELINE_NAME: 2026H2                          # 治理基线名（季度命名）
 
 jobs:
@@ -62,16 +62,16 @@ jobs:
 
       - name: 扫描 + 治理门禁
         run: |
-          python3 awesome-rules/skills/doc-gen/scripts/doc_gen.py scan . \
+          python3 "$RULES_PATH/skills/doc-gen/scripts/doc_gen.py" scan . \
             --manifest-only --output /tmp/gov
-          python3 awesome-rules/arch-hawkeye/scripts/hawkeye.py gate \
+          python3 "$RULES_PATH/arch-hawkeye/scripts/hawkeye.py" gate \
             /tmp/gov/doc-manifest --baseline $BASELINE_NAME --warn-only
           # 灰度期观察无误报后，删除 --warn-only 进入强制阻断（exit 1）
 
       - name: PR 评论贴趋势摘要（可选）
         if: always()
         run: |
-          python3 awesome-rules/arch-hawkeye/scripts/hawkeye.py trend \
+          python3 "$RULES_PATH/arch-hawkeye/scripts/hawkeye.py" trend \
             /tmp/gov/doc-manifest --baseline $BASELINE_NAME --json \
             > trend.json
           # 将 trend.json 转为 markdown 附加到 PR（gh pr comment ...）
@@ -96,11 +96,16 @@ jobs:
       - name: 扫描并归档到 hawkeye-archive 分支
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
-          git checkout -B hawkeye-archive origin/hawkeye-archive || git checkout --orphan hawkeye-archive
-          python3 awesome-rules/skills/doc-gen/scripts/doc_gen.py scan $GITHUB_WORKSPACE \
-            --manifest-only --output "$GITHUB_REPOSITORY_NAME/$SHORT_SHA"
-          git add . && git -c user.name=arch-hawkeye -c user.email=ci@hawkeye \
-            commit -m "archive: $SHORT_SHA" && git push origin hawkeye-archive
+          # orphan 首建须清空 index——否则首个归档 commit 会带上主分支全部文件
+          git checkout -B hawkeye-archive origin/hawkeye-archive \
+            || { git checkout --orphan hawkeye-archive && git rm -rqf .; }
+          REPO_DIR="${GITHUB_REPOSITORY##*/}"    # org/repo → repo（仓库名目录）
+          python3 "$RULES_PATH/skills/doc-gen/scripts/doc_gen.py" scan . \
+            --manifest-only --output "$REPO_DIR/$SHORT_SHA"
+          # 只 add 归档产物——工作区还检出了 awesome-rules/，git add . 会误入库
+          git add "$REPO_DIR/$SHORT_SHA" \
+            && git -c user.name=arch-hawkeye -c user.email=ci@hawkeye \
+               commit -m "archive: $SHORT_SHA" && git push origin hawkeye-archive
 
 # ════════════════════════════════════════════════════════════════════
 # 中心仓库侧（鹰眼聚合，独立 workflow 文件）
