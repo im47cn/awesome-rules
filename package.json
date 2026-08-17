@@ -3,6 +3,8 @@
   "version": "0.3.0",
   "private": true,
   "scripts": {
+    "test": "bash scripts/run_tests.sh",
+    "setup:hooks": "git config core.hooksPath .githooks",
     "release": "commit-and-tag-version",
     "release:dry": "commit-and-tag-version --dry-run"
   }

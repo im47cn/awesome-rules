@@ -20,6 +20,25 @@
 - Commit 格式：`<type>(<scope>): <subject>`（中文，主题行 ≤50 字符）
 - 示例：`feat(ddl-guard): 新增索引命名检查规则`
 
+### 测试门禁（推送前必过）
+
+克隆后一次性启用 pre-push 钩子：
+
+```bash
+npm run setup:hooks        # 即 git config core.hooksPath .githooks
+```
+
+推送前钩子会跑全量测试 + 安装入口 blob 锁定校验，任一失败即阻断推送
+（跳过：`git push --no-verify`）。手动执行同一路径：
+
+```bash
+npm test                   # bash scripts/run_tests.sh
+```
+
+- Python 基线为 **3.9**（macOS 系统 Python 即此版本），脚本不得使用 3.10+
+  的运行时语法（`X | Y` 类型注解须配 `from __future__ import annotations`）
+- 新增测试套件时，在 `scripts/run_tests.sh` 的 `SUITES` 中登记
+
 ### Merge Request
 
 - MR 标题格式：`[模块] 功能描述`
