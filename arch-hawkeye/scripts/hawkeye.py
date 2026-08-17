@@ -118,17 +118,25 @@ def main():
         from governance import create_baseline
         try:
             info = create_baseline(args.manifest_dir, args.name)
-        except (FileExistsError, FileNotFoundError) as e:
+        except (FileExistsError, FileNotFoundError, RuntimeError) as e:
             print(f"❌ {e}", file=sys.stderr)
             sys.exit(2)
         print(f"📍 基线 '{info['baseline']}' 已冻结: {info['totalIssues']} 条违规，"
               f"{info['debts']} 条债务登记")
         return
-
     if args.command == "trend":
-        from governance import diff_risks, load_baseline, load_risks, sync_ledger
-        baseline = load_baseline(args.manifest_dir, args.baseline)
-        current = load_risks(args.manifest_dir)
+        from governance import (diff_risks, load_baseline, load_risks_status,
+                                sync_ledger)
+        try:
+            baseline = load_baseline(args.manifest_dir, args.baseline)
+        except FileNotFoundError as e:
+            print(f"❌ {e}", file=sys.stderr)
+            sys.exit(2)
+        current, risk_status = load_risks_status(args.manifest_dir)
+        if risk_status != "ok":
+            print(f"❌ risks 数据不可信（{risk_status}），趋势无意义——"
+                  f"先修复 doc-gen scan", file=sys.stderr)
+            sys.exit(2)
         diff = diff_risks(baseline, current)
         closed = sync_ledger(args.manifest_dir, current)
         diff["ledgerClosed"] = closed["closedCount"]
@@ -146,7 +154,12 @@ def main():
         return
 
     if args.command == "gate":
-        from governance import gate, render_gate
+        from governance import gate, load_baseline, render_gate
+        try:
+            load_baseline(args.manifest_dir, args.baseline)
+        except FileNotFoundError as e:
+            print(f"❌ {e}", file=sys.stderr)
+            sys.exit(2)
         result = gate(args.manifest_dir, args.baseline, warn_only=args.warn_only)
         if args.json:
             print(json.dumps(result, ensure_ascii=False, indent=2))

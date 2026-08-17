@@ -19,6 +19,7 @@ from governance import (
     gate,
     load_ledger,
     overdue_debts,
+    render_gate,
     sync_ledger,
 )
 
@@ -163,3 +164,86 @@ def test_gate_allows_baseline_shrink_and_new_baseline_additions(tmp_path):
     warn = gate(md, "v1", warn_only=True)
     assert warn["blocked"] is False and warn["addedCount"] == 1   # 灰度放行
     assert gate(md, "v1")["blocked"] is True                      # 强制阻断
+
+
+# ── 数据可信三态（fail-closed：失败 ≠ 零违规）───────────────────────────────
+
+
+def test_gate_blocked_on_missing_risks(tmp_path):
+    """risks.json 缺失（未接入/丢失）→ fail-closed 阻断，不得当零违规放行"""
+    md = tmp_path / "doc-manifest"
+    _write_risks(md, [_issue(desc="A")])
+    create_baseline(md, "v1")
+    (md / "risks.json").unlink()
+    r = gate(md, "v1")
+    assert r["riskStatus"] == "missing" and r["blocked"] is True
+    assert "数据不可信" in render_gate(r)
+
+
+def test_gate_blocked_on_corrupt_risks(tmp_path):
+    md = tmp_path / "doc-manifest"
+    _write_risks(md, [_issue(desc="A")])
+    create_baseline(md, "v1")
+    (md / "risks.json").write_text("{bad", encoding="utf-8")
+    r = gate(md, "v1")
+    assert r["riskStatus"] == "corrupt" and r["blocked"] is True
+
+
+def test_gate_blocked_on_scan_error(tmp_path):
+    """生成端 scan 失败（error 字段非空、issues 恒空）→ 阻断"""
+    md = tmp_path / "doc-manifest"
+    _write_risks(md, [_issue(desc="A")])
+    create_baseline(md, "v1")
+    (md / "risks.json").write_text(
+        json.dumps({"error": "arch_check.py 执行失败", "issues": [], "summary": {}}),
+        encoding="utf-8")
+    r = gate(md, "v1")
+    assert r["riskStatus"] == "scan-error" and r["blocked"] is True
+
+
+def test_gate_fail_closed_even_in_warn_only(tmp_path):
+    """数据不可信不在灰度范围：--warn-only 下仍阻断"""
+    md = tmp_path / "doc-manifest"
+    _write_risks(md, [_issue(desc="A")])
+    create_baseline(md, "v1")
+    (md / "risks.json").unlink()
+    assert gate(md, "v1", warn_only=True)["blocked"] is True
+
+
+def test_baseline_rejects_untrusted_risks(tmp_path):
+    """从失败/缺失扫描冻结空基线会污染后续所有 gate 判定 → 拒绝"""
+    md = tmp_path / "doc-manifest"
+    md.mkdir(parents=True)
+    with pytest.raises(RuntimeError):
+        create_baseline(md, "v1")
+
+
+# ── CLI 层：友好错误与 exit code（不裸 traceback）───────────────────────────
+
+HAWKEYE = Path(__file__).resolve().parent.parent / "hawkeye.py"
+
+
+def _run_cli(*argv):
+    import subprocess
+    import sys
+    return subprocess.run([sys.executable, str(HAWKEYE), *argv],
+                          capture_output=True, text=True, timeout=60)
+
+
+def test_cli_gate_missing_baseline_exits_2(tmp_path):
+    r = _run_cli("gate", str(tmp_path), "--baseline", "nope")
+    assert r.returncode == 2
+    assert "基线不存在" in r.stderr
+    assert "Traceback" not in r.stderr
+
+
+def test_cli_trend_corrupt_risks_exits_2(tmp_path):
+    """趋势对不可信数据拒绝输出（否则会渲染出'消除 N 条'的假趋势）"""
+    md = tmp_path / "doc-manifest"
+    _write_risks(md, [_issue(desc="A")])
+    create_baseline(md, "v1")
+    (md / "risks.json").write_text("{bad", encoding="utf-8")
+    r = _run_cli("trend", str(md), "--baseline", "v1")
+    assert r.returncode == 2
+    assert "数据不可信" in r.stderr
+    assert "Traceback" not in r.stderr

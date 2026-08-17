@@ -25,16 +25,30 @@ BASELINE_DIR = "baselines"
 # ── 基础 ──────────────────────────────────────────────────────────────────────
 
 
-def load_risks(manifest_dir) -> list[dict]:
-    """读取 risks.json 的 issues（无文件/无 issues 字段 → 空清单）"""
+def load_risks_status(manifest_dir) -> tuple:
+    """读取 risks.json 的 issues 与数据可信状态（gate/baseline 只信任 ok）。
+
+    状态语义（fail-closed：失败 ≠ 零违规）：
+      ok         — 分片存在且解析成功（issues 为空 = 真零违规）
+      missing    — risks.json 不存在（未接入 arch_check 或分片丢失）
+      corrupt    — 存在但 JSON 损坏/不可读
+      scan-error — 生成端 scan() 失败（error 字段非空，issues 恒空）
+    """
     f = Path(manifest_dir) / "risks.json"
     if not f.exists():
-        return []
+        return [], "missing"
     try:
         data = json.loads(f.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
-        return []
-    return data.get("issues", [])
+        return [], "corrupt"
+    if data.get("error"):
+        return data.get("issues", []), "scan-error"
+    return data.get("issues", []), "ok"
+
+
+def load_risks(manifest_dir) -> list[dict]:
+    """读取 risks.json 的 issues（向后兼容；需区分可信状态用 load_risks_status）"""
+    return load_risks_status(manifest_dir)[0]
 
 
 def fingerprint(issue: dict) -> str:
@@ -57,7 +71,11 @@ def create_baseline(manifest_dir, name: str) -> dict:
     归属，dueDate 留空待人工规划——债务是有生命周期的，不是一次性清单）。
     """
     manifest_dir = Path(manifest_dir)
-    issues = load_risks(manifest_dir)
+    issues, status = load_risks_status(manifest_dir)
+    if status != "ok":
+        # 从失败扫描冻结出的空基线会污染后续所有 gate 判定——拒绝而非降级
+        raise RuntimeError(
+            f"risks 数据不可信（{status}），拒绝冻结基线——先修复 doc-gen scan")
     meta = _load_meta(manifest_dir)
 
     baseline = {
@@ -219,9 +237,25 @@ def gate(manifest_dir, baseline_name: str, warn_only: bool = False) -> dict:
     """增量零容忍：基线之上的新增违规非空 → blocked。
 
     warn_only=True 为灰度模式（仅告警不阻断，D07 推广期过渡）。
+    **数据不可信（missing/corrupt/scan-error）不在灰度范围**：没有可信
+    数据就没有"放行"可言，fail-closed 恒 blocked——否则扫描故障会让
+    门禁在最需要拦截的时刻静默失效。
     """
     baseline = load_baseline(manifest_dir, baseline_name)
-    current = load_risks(manifest_dir)
+    current, risk_status = load_risks_status(manifest_dir)
+    if risk_status != "ok":
+        return {
+            "baseline": baseline_name,
+            "mode": "warn-only" if warn_only else "enforce",
+            "riskStatus": risk_status,
+            "addedCount": 0,
+            "added": [],
+            "stats": {"baseline": len(baseline.get("fingerprints", {})),
+                      "current": 0, "added": 0, "removed": 0,
+                      "retained": 0, "net": 0},
+            "blocked": True,
+            "reason": f"risks 数据不可信（{risk_status}），门禁拒绝在无数据下放行",
+        }
     diff = diff_risks(baseline, current)
     added = diff["added"]
     result = {
@@ -240,6 +274,11 @@ def gate(manifest_dir, baseline_name: str, warn_only: bool = False) -> dict:
 
 def render_gate(result: dict) -> str:
     lines = [f"🚦 治理门禁（{result['mode']}）| 基线 {result['baseline']}"]
+    if result.get("riskStatus"):
+        # fail-closed：数据不可信，展示原因而非空趋势误导
+        lines.append(f"   ⛔ {result['reason']}")
+        lines.append("⛔ 阻断合并（数据不可信，fail-closed）")
+        return "\n".join(lines)
     s = result["stats"]
     lines.append(f"   基线 {s['baseline']} → 当前 {s['current']}"
                  f"（新增 {s['added']} / 消除 {s['removed']} / 净 {s['net']:+d}）")
