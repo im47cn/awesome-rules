@@ -96,6 +96,9 @@ python3 scripts/hawkeye.py debt ./doc-manifest overdue
   失败降级 null）；**D06 闭环**：违规消失 → 债务自动 repaid；**豁免强制理由**
 - 真实仓库验证：mc 273 违规 → 269 条带归属（liyufei/renshibo 等），
   建基线/演进/门禁阻断（exit 1）/灰度放行（exit 0）全流程通过
+- **CI 接线样例**：[`ci/governance-pipeline.example.yml`](ci/governance-pipeline.example.yml)
+  ——项目侧（PR 门禁 + 归档联邦索引）与中心侧（周期聚合 + 治理报表）三段式，
+  含灰度 → 强制切换路径
 
 ## 目录结构
 
