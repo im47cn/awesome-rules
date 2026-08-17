@@ -213,3 +213,26 @@ def test_oversized_split_name_collision_disambiguated():
     assert "订单 · root" in names               # 小 tag 原样保留
     assert "订单 · root · 2" in names           # 细分组消歧
     assert spec["paths"]["/misc/x"]["get"]["tags"] == ["订单 · root"]  # 不误改写
+
+
+def test_var_segment_drill_preview_consistent():
+    """{var} 段预演与分组一致：不误判下钻价值，组名不退化为 '.../其余'"""
+    paths = [f"/res/{{id}}/detail{i}" for i in range(MAX_OPS_PER_TAG + 5)]
+    spec = OpenAPIGenerator("/tmp").generate(_manifest_with_bulk_endpoints(paths))
+    tags = _op_tags(spec)
+    assert set(tags.values()) == {"订单 · res"}     # 停钻单组，无 "res/其余"
+
+
+def test_oversized_regroup_idempotent():
+    """对自身输出再跑一次细分 → tag 与 op 归属均不变（无 '· · ' 嵌套）"""
+    gen = OpenAPIGenerator("/tmp")
+    spec = gen.generate(_manifest_with_bulk_endpoints(
+        [f"/root/{i}" for i in range(MAX_OPS_PER_TAG + 5)]))
+    assert set(_op_tags(spec).values()) == {"订单 · root"}   # 组仍超阈值
+    before_tags = [(t["name"], t["description"]) for t in spec["tags"]]
+    before_ops = {p: {m: o["tags"] for m, o in ops.items()}
+                  for p, ops in spec["paths"].items()}
+    gen._regroup_oversized_tags(spec)                        # 二次细分
+    assert [(t["name"], t["description"]) for t in spec["tags"]] == before_tags
+    assert {p: {m: o["tags"] for m, o in ops.items()}
+            for p, ops in spec["paths"].items()} == before_ops

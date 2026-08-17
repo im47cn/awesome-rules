@@ -259,9 +259,15 @@ function buildSidebar() {
   if (fs.existsSync(govFile2)) {
     try {
       const gov = JSON.parse(fs.readFileSync(govFile2, "utf-8"));
+      // 门控与 generateGovernancePage 对齐（projects > 0 即生成页面）——
+      // 此前按 debts > 0 门控会产生无 sidebar 入口的孤儿治理页
+      const govProjects = (gov.projects || []).length;
       const debts = (gov.projects || []).reduce((s2, g) => s2 + (g.debts?.length || 0), 0);
-      if (debts > 0) {
-        sidebar.push({ label: `🚦 治理仪表盘 (${debts})`, link: "/governance" });
+      if (govProjects > 0) {
+        sidebar.push({
+          label: debts > 0 ? `🚦 治理仪表盘 (${debts})` : "🚦 治理仪表盘",
+          link: "/governance",
+        });
       }
     } catch { /* ignore */ }
   }

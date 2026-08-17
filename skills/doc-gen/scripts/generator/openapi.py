@@ -160,6 +160,7 @@ class OpenAPIGenerator:
         # OpenAPI 3.0 要求 tags 数组内 name 唯一：细分名（"域 · 前缀"）可能撞上
         # 既有同名 tag（用户自定义或上轮细分产物），冲突时加序号后缀消歧
         used_names = set(counts.keys())   # 原样保留的小 tag 占据名字空间
+        SPLIT_MARK = " · "
 
         def _unique_name(name: str) -> str:
             if name not in used_names:
@@ -177,11 +178,25 @@ class OpenAPIGenerator:
             if tag and total <= MAX_OPS_PER_TAG:
                 new_tags.append({"name": tag, "description": tag_desc.get(tag, "")})
                 continue
-            # 无域信息 → 纯前缀；有域但组过大 → "域 · 前缀"
-            for label, sub in self._group_by_path_prefix(entries, depth=0):
-                name = _unique_name(f"{tag} · {label}" if tag else label)
+            # 解析细分产物形态 "域 · label"（label 可含 "/" 层级）：继续下钻时
+            # 从 label 已消费的深度起步、命名保持扁平（"域 · label/sub"）而非
+            # 嵌套 "域 · label · sub"——保证对自身输出幂等
+            domain, dot, base_label = tag.partition(SPLIT_MARK)
+            start_depth = base_label.count("/") + 1 if dot else 0
+            if dot and not self._drill_worthwhile(entries, start_depth - 1):
+                # 已细分产物且无更深下钻价值 → 保持原名与描述（幂等不动点）
+                new_tags.append({"name": tag, "description": tag_desc.get(tag, "")})
+                continue
+            for label, sub in self._group_by_path_prefix(entries, depth=start_depth):
+                full = (f"{base_label}/{label}" if base_label and label
+                        else (base_label or label))
+                name = _unique_name(f"{domain} · {full}" if domain else full)
                 for _p, _m, op in sub:
                     op["tags"] = [name]
+                if name == tag:
+                    # 单组且名不变：沿用原描述，避免 hint 后缀重复叠加
+                    new_tags.append({"name": name, "description": tag_desc.get(tag, "")})
+                    continue
                 hint = "（按 URI 前缀自动细分）"
                 new_tags.append({
                     "name": name,
@@ -227,12 +242,20 @@ class OpenAPIGenerator:
 
         判据同时覆盖两种坏场景——下一层取值几乎全唯一（实例 ID），
         或少数重复值混大量唯一方法名（下钻后多数接口落单）。
+        变量段（{id}）与真实分组一致抹为「其余」——否则同一模板段在预演中
+        聚成高重复键被误判"值得下钻"，递归后却全落其余桶、组名退化。
         """
         buckets = defaultdict(int)
         for path, _m, _o in entries:
             segs = path.strip("/").split("/")
             seg = segs[depth + 1] if len(segs) > depth + 1 else ""
+            if "{" in seg:
+                seg = ""
             buckets[seg or "其余"] += 1
+        if len(buckets) <= 1:
+            # 单桶分两态：真实重复段（如统一资源名 task-send ×N）延伸标签
+            # 有意义；全变量段/空段（"其余"）无分类价值，停钻
+            return "其余" not in buckets
         singles = sum(n for n in buckets.values() if n == 1)
         return singles < len(entries) / 2
 
