@@ -22,14 +22,19 @@
 
 ### 测试门禁（推送前必过）
 
-克隆后一次性启用 pre-push 钩子：
+hook 由 [lefthook](https://github.com/evilmartians/lefthook) 托管（`lefthook.yml`
+入库共享）。克隆后一次性激活：
 
 ```bash
-npm run setup:hooks        # 即 git config core.hooksPath .githooks
+npm i -g lefthook && lefthook install   # 或 npm run setup:hooks
 ```
 
-推送前钩子会跑全量测试 + 安装入口 blob 锁定校验，任一失败即阻断推送
-（跳过：`git push --no-verify`）。手动执行同一路径：
+- **commit-msg**：commitlint 校验提交信息格式（`steering/git-conventions.md`）
+- **pre-push**：全量测试 + badcase 回归 + 安装入口 blob 锁定校验，
+  任一失败即阻断推送（跳过：`git push --no-verify`）
+- 未装 lefthook 时 hook shim 打印警告并放行，不阻塞提交
+
+手动执行 pre-push 同一路径：
 
 ```bash
 npm test                   # bash scripts/run_tests.sh

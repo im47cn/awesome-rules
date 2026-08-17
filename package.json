@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "test": "bash scripts/run_tests.sh",
-    "setup:hooks": "git config core.hooksPath .githooks",
+    "setup:hooks": "lefthook install",
     "release": "commit-and-tag-version",
     "release:dry": "commit-and-tag-version --dry-run"
   }

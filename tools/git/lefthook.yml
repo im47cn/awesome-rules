@@ -1,0 +1,7 @@
+# 由 awesome-rules tools/git/install.sh 分发 —— 入库共享，hook 由 lefthook 管理
+# 规范事实源：awesome-rules 仓库 steering/git-conventions.md
+# 团队成员激活：npm i -g lefthook && lefthook install（或跑一次 install.sh）
+commit-msg:
+  commands:
+    commitlint:
+      run: commitlint --edit {1}

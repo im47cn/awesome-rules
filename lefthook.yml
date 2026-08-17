@@ -1,0 +1,16 @@
+# 由 awesome-rules tools/git/install.sh 分发 —— 入库共享，hook 由 lefthook 管理
+# 规范事实源：awesome-rules 仓库 steering/git-conventions.md
+# 团队成员激活：npm i -g lefthook && lefthook install（或 npm run setup:hooks）
+# 注意：pre-push 段为本仓库私有门禁，不在 tools/git/lefthook.yml 分发模板内，
+#       跑 install.sh --update 会以模板覆盖本文件，需自行加回
+commit-msg:
+  commands:
+    commitlint:
+      run: commitlint --edit {1}
+
+# 本仓库私有：全量测试门禁（{push_files} 是触发条件非入参——有待推文件变更才跑，
+# lefthook 2.x 无占位符的 pre-push 命令恒被 skip；手动验证: lefthook run pre-push -f；跳过: git push --no-verify）
+pre-push:
+  commands:
+    tests:
+      run: bash scripts/run_tests.sh {push_files}

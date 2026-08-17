@@ -10,7 +10,7 @@ scenario: 提交校验/生成 changelog/发版
 | 工具 | 作用 | 技术方案 |
 |---|---|---|
 | commit 模板 | 提交前预填格式提示（IDE / 编辑器） | `.gitmessage` + `commit.template` |
-| commitlint | 提交时校验 message 格式 | `@commitlint/cli` + `config-conventional` |
+| commitlint | 提交时校验 message 格式 | `@commitlint/cli` + `config-conventional`，hook 由 [lefthook](https://github.com/evilmartians/lefthook) 托管 |
 | commit-and-tag-version | 自动生成 changelog + 按语义 bump 版本号 | `commit-and-tag-version` |
 
 > **选型说明**：`standard-version` 自 2022 年起 archived，本工具采用其活跃 fork [`commit-and-tag-version`](https://github.com/absolute-version/commit-and-tag-version)，配置完全兼容。
@@ -26,9 +26,9 @@ bash /path/to/awesome-rules/tools/git/install.sh .
 `install.sh` 会：
 
 1. 检测 node / npm（需 node ≥ 16）
-2. 拷贝 `commitlint.config.js` + `.versionrc.js` 到项目根；`commit-template.txt` → `~/.gitmessage`（全局 commit 模板）
-3. **全局**安装工具（`@commitlint/cli`、`@commitlint/config-conventional`、`commit-and-tag-version`，检测已装则跳过）
-4. 写入 `.git/hooks/commit-msg`（调全局 commitlint，**无需 husky**）
+2. 拷贝 `commitlint.config.js` + `.versionrc.js` + `lefthook.yml` 到项目根（**入库共享给全团队**）；`commit-template.txt` → `~/.gitmessage`（全局 commit 模板）
+3. **全局**安装工具（`@commitlint/cli`、`@commitlint/config-conventional`、`commit-and-tag-version`、`lefthook`，检测已装则跳过）
+4. 执行 `lefthook install` 写入 hook shim（读项目内 `lefthook.yml`，调全局 commitlint）
 5. 在 `package.json` 注入 `release` / `release:dry` 脚本（调全局 commit-and-tag-version）
 
 ### 更新已装项目
@@ -42,9 +42,20 @@ bash /path/to/awesome-rules/tools/git/install.sh --update /path/to/业务项目
 
 `--update` 与首次安装的区别：
 
-- 配置文件（`commitlint.config.js` / `.versionrc.js`）与 commit 模板：**无条件覆盖**（首次安装遇已存在会询问）
-- `commit-msg` hook：仅覆盖「本工具生成的」；非本工具生成的（husky/lefthook）**一律跳过**，避免破坏既有方案
+- 配置文件（`commitlint.config.js` / `.versionrc.js` / `lefthook.yml`）与 commit 模板：**无条件覆盖**（首次安装遇已存在会询问）
+- hook：自动清理本工具旧版直写的 `commit-msg` 后重跑 `lefthook install`；非本工具、非 lefthook 生成的 hook **一律跳过**，`core.hooksPath` 被 husky 等接管时同样跳过，避免破坏既有方案
 - 全局工具、`package.json` scripts：与首次相同（检测补装 / 幂等注入）
+
+### 团队成员激活（装过一次的仓库）
+
+`lefthook.yml` 随仓库共享，新成员 clone 后只需激活 hook（无需完整 `install.sh`）：
+
+```bash
+npm i -g lefthook   # 一次安装，所有项目共用
+lefthook install    # 写入 .git/hooks/* shim
+```
+
+未装 lefthook 时 hook shim 会打印警告并放行，不阻塞提交。
 
 ## 使用
 
@@ -65,6 +76,7 @@ npm run release       # 正式执行：bump 版本 + 更新 CHANGELOG.md + 打 t
 
 - `~/.gitmessage` —— commit 模板（装主目录 + 全局 `commit.template`，所有仓库/IDEA 一次识别）
 - `commitlint.config.js` —— type/scope 枚举、主题行 ≤50 字符、breaking 标记（事后校验）
+- `lefthook.yml` —— hook 编排（commit-msg → commitlint），入库随 clone 共享
 - `.versionrc.js` —— changelog 中文分节、emoji 前缀
 
 > 修改规则时请**同步更新 `steering/git-conventions.md`**，保持规范文档为唯一事实源。
@@ -89,8 +101,16 @@ npm run release       # 正式执行：bump 版本 + 更新 CHANGELOG.md + 打 t
 
 ## FAQ
 
-**Q: 为什么不用 husky / lefthook？**
-A: `install.sh` 直接写 `.git/hooks/commit-msg`，零额外依赖。代价是 `.git/hooks` 不被 git 跟踪，团队成员需各自执行一次 `install.sh`；若要共享 hook，可自行接入 husky/lefthook。
+**Q: 为什么用 lefthook 而不是直写 `.git/hooks` 或 husky？**
+A: 三种方式的取舍：
+
+| 方案 | 优势 | 代价 |
+|---|---|---|
+| 直写 `.git/hooks`（旧版） | 零依赖 | hook 不入库，无法团队共享，扩展 pre-commit 等需自写脚本 |
+| husky | 生态成熟，配 lint-staged | 每项目一个 devDependency，深绑 npm 生命周期，非 node 项目不友好 |
+| **lefthook（当前）** | `lefthook.yml` 入库共享；单二进制语言无关；后续加 pre-commit lint（staged 文件过滤、并行执行）零成本 | 需全局装一次 lefthook |
+
+工具仍走**全局安装**（不进业务项目 `package.json`），延续「项目零依赖」原则。
 
 **Q: scope 用了枚举外的业务域被警告怎么办？**
 A: scope 校验为 `warn` 级别，不阻断提交。新增业务域请在 `commitlint.config.js` 的 `scope-enum` 补充，并同步 `steering/git-conventions.md`。

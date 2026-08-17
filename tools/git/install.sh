@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # awesome-rules —— Git 自动化工具一键安装 / 更新
-# 工具全局（commitlint/commit-and-tag-version）+ 配置仓库（commitlint.config.js/.versionrc.js）+ hook 仓库（commit-msg）
+# 工具全局（commitlint/commit-and-tag-version/lefthook）+ 配置入库（commitlint.config.js/.versionrc.js/lefthook.yml）+ hook 仓库（lefthook 托管）
 #
 # 用法:
 #   bash install.sh [目标项目根目录]            # 首次安装（默认当前目录）
@@ -36,7 +36,8 @@ command -v npm  >/dev/null 2>&1 || { echo "✘ 未检测到 npm"; exit 1; }
 echo "✔ node $(node -v)"
 
 # ── 2. 拷贝配置（install：已存在则确认；update：直接覆盖）─────────
-for f in commitlint.config.js .versionrc.js; do
+# lefthook.yml 是 hook 配置，入库后随 clone 共享给全团队
+for f in commitlint.config.js .versionrc.js lefthook.yml; do
   if [ "$MODE" = "install" ] && [ -f "$TARGET/$f" ]; then
     read -rp "⚠ $f 已存在，覆盖？[y/N] " ans || true
     [ "${ans:-N}" = "y" ] || { echo "  跳过 $f"; continue; }
@@ -58,8 +59,8 @@ fi
 echo "✔ 配置已就位"
 
 # ── 3. 全局安装工具（一次，所有项目共享；检测已装则跳过）─────────
-# commitlint / commit-and-tag-version 装全局，避免每项目重复 npm install
-GLOBAL_PKGS=("@commitlint/cli" "@commitlint/config-conventional" "commit-and-tag-version")
+# commitlint / lefthook / commit-and-tag-version 装全局，避免每项目重复 npm install
+GLOBAL_PKGS=("@commitlint/cli" "@commitlint/config-conventional" "commit-and-tag-version" "lefthook")
 # 用 npm JSON 输出精确判断（grep "$pkg@" 在包名互为子串时会误判）
 NEED=()
 while IFS= read -r missing; do
@@ -80,35 +81,56 @@ else
 fi
 cd "$TARGET"
 
-# ── 4. 写 git commit-msg hook（原生 hook，无需 husky）────────────
+# ── 4. 安装 lefthook hook（shim 由 lefthook 写 .git/hooks/*，配置已入库）──
 GIT_DIR="$(git rev-parse --git-dir 2>/dev/null || true)"
 if [ -n "$GIT_DIR" ]; then
   HOOK="$GIT_DIR/hooks/commit-msg"
-  mkdir -p "$(dirname "$HOOK")"
-  # hook 覆盖策略：
-  #   本工具生成的 → 两种模式都覆盖刷新
-  #   非本工具生成的（husky/lefthook）→ install 询问，update 一律跳过
-  write_hook=1
-  if [ -f "$HOOK" ] && ! grep -q "awesome-rules tools/git/install.sh" "$HOOK"; then
-    if [ "$MODE" = "install" ]; then
-      read -rp "⚠ $HOOK 已存在且非本工具生成，覆盖？[y/N] " ans || true
-      [ "${ans:-N}" = "y" ] || { echo "  跳过 commit-msg hook"; write_hook=0; }
-    else
-      echo "⚠ $HOOK 非本工具生成，跳过（不覆盖 husky/lefthook）"
-      write_hook=0
+  # hooksPath 被其他方案（husky 等）接管时，git 不读 .git/hooks，写了也无效；
+  # 自家 cov-hooks 除外——它是链式代理设计（转回 .git/hooks 同名钩子），与 lefthook 共存
+  HOOKS_PATH="$(git config core.hooksPath || true)"
+  own_cov=""
+  if [ -n "$HOOKS_PATH" ]; then
+    hp="${HOOKS_PATH/#\~/$HOME}"
+    [ -d "$hp" ] && [ "$(cd "$hp" && pwd -P)" = "$(cd "$SCRIPT_DIR/../cov-hooks" 2>/dev/null && pwd -P)" ] && own_cov=1
+  fi
+  if [ -n "$HOOKS_PATH" ] && [ -z "$own_cov" ]; then
+    echo "⚠ core.hooksPath 已指向 ${HOOKS_PATH}（husky 等已接管），跳过 lefthook 安装"
+  else
+    install_hook=1
+    # 本工具旧版直写的 hook → 清理，交由 lefthook 接管
+    if [ -f "$HOOK" ] && grep -q "awesome-rules tools/git/install.sh" "$HOOK"; then
+      rm "$HOOK"
+      echo "✔ 已移除旧版直写 hook，交由 lefthook 接管"
+    elif [ -f "$HOOK" ] && ! grep -q "lefthook" "$HOOK"; then
+      # 非本工具、非 lefthook 生成的 → install 询问，update 一律跳过
+      if [ "$MODE" = "install" ]; then
+        read -rp "⚠ $HOOK 已存在且非本工具/lefthook 生成，覆盖？[y/N] " ans || true
+        [ "${ans:-N}" = "y" ] || { echo "  跳过 lefthook hook 安装"; install_hook=0; }
+      else
+        echo "⚠ $HOOK 非本工具/lefthook 生成，跳过"
+        install_hook=0
+      fi
+    fi
+    if [ "$install_hook" = "1" ]; then
+      lh_ok=0
+      if [ -n "$own_cov" ]; then
+        # lefthook 默认拒装 hooksPath 已设的仓库（--force 会把 shim 写进共享目录，不可用）；
+        # 临时摘除 → 装 .git/hooks → 恢复，cov-hooks 的链式代理自会转交 shim 执行
+        git config --unset core.hooksPath
+        lefthook install && lh_ok=1
+        git config core.hooksPath "$HOOKS_PATH"
+      else
+        lefthook install && lh_ok=1
+      fi
+      if [ "$lh_ok" = "1" ]; then
+        echo "✔ lefthook hooks 已安装（.git/hooks/*，配置见项目内 lefthook.yml）"
+      else
+        echo "✘ lefthook install 失败（hooksPath 已恢复原值）"
+      fi
     fi
   fi
-  if [ "$write_hook" = "1" ]; then
-    cat > "$HOOK" <<'EOF'
-#!/usr/bin/env bash
-# 由 awesome-rules tools/git/install.sh 生成 —— 调全局 commitlint 校验
-commitlint --edit "$1"
-EOF
-    chmod +x "$HOOK"
-    echo "✔ git commit-msg hook 已写入"
-  fi
 else
-  echo "⚠ 非 git 仓库，跳过 commit-msg hook"
+  echo "⚠ 非 git 仓库，跳过 lefthook hook 安装"
 fi
 
 # ── 5. 注入 package.json scripts ────────────────────────────────
