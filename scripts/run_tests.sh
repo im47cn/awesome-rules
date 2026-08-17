@@ -9,7 +9,7 @@
 # 用法:
 #   bash scripts/run_tests.sh            # 测试 + 安装入口 blob 锁定校验
 #   bash scripts/run_tests.sh --no-lock  # 仅测试
-set -u
+set -u -o pipefail  # pipefail：badcase | tail 管道下保留 runner 真实退出码
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -36,6 +36,13 @@ for suite in "${SUITES[@]}"; do
   echo
 done
 
+# badcase 回归（真实坏例 → 检查脚本 → expected.md 双通道比对，12 例全基线绿）
+echo "── badcase"
+if ! "$PY" scripts/badcase_runner.py | tail -3; then
+  FAILED+=("badcase")
+fi
+echo
+
 # 安装入口锁定（zero-regression 门禁，与测试同为推送前置）
 if [ "${1:-}" != "--no-lock" ]; then
   echo "── plugin_lock"
@@ -48,4 +55,4 @@ if [ "${#FAILED[@]}" -gt 0 ]; then
   echo "❌ 门禁失败: ${FAILED[*]}" >&2
   exit 1
 fi
-echo "✅ 全量测试门禁通过（${#SUITES[@]} 个套件）"
+echo "✅ 全量测试门禁通过（${#SUITES[@]} 个套件 + badcase）"
