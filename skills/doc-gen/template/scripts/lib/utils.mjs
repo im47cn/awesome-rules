@@ -22,7 +22,7 @@ export function ensureDir(dir) { fs.mkdirSync(dir, { recursive: true }); }
 export function writeMDX(filePath, frontmatter, content) {
   // 支持 string/number/boolean/对象(YAML 嵌套)/数组，用于 hero 等 frontmatter 字段。
   const fmt = (v) => {
-    if (typeof v === 'string') return `"${v.replace(/"/g, '\\"')}"`;
+    if (typeof v === 'string') return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
     if (typeof v === 'number' || typeof v === 'boolean') return String(v);
     if (Array.isArray(v)) {
       return v.length
