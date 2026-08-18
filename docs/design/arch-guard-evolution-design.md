@@ -108,7 +108,35 @@ arch-guard、ArchUnit、ArchGuard 是三个物种（AI 技能 / 测试断言库 
 
 选一个已索引的 GTSP 项目，**手写**一份 `ArchitectureGuardTest.java` 跑通：JUnit5 `@ArchTest` + `layeredArchitecture()` + `FreezingArchRule.freeze()` + `archunit.properties`。确认：JDK/gtsp-parent 兼容性、`mvn test` 时长可接受、违规输出可读。**Spike 不满足（如依赖冲突不可解/时长不可接受）则停在此处，Tier 1 + Phase 0/1 即终态**。
 
+**Spike 结果（2026-08-18，试点 = `gtsp-cont-task`，✅ GO）**：
+
+| 验证点 | 结果 |
+|---|---|
+| JDK/gtsp-parent 兼容 | ✅ JDK 17 + gtsp-parent（**source 级别 Java 8**）+ ArchUnit 1.2.1（本地 .m2 全离线可解析） |
+| 四类规则可表达 | ✅ `layeredArchitecture` + `FreezingArchRule.freeze` + 命名后缀 + 状态泄漏 `callCodeUnitWhere(target(nameMatching(...)))` + `slices().beFreeOfCycles()` 全部编译运行通过 |
+| ratchet 语义 | ✅ 首跑建 store 全绿 → 制造 `infrastructure→interfaces` 反向依赖 → 红且证据到**构造器参数类型/字段类型**（Tier 1 import 正则盲区实证）→ 删除后复绿，store 未污染 |
+| 时长 | ✅ 4 规则 0.44s，单模块 mvn 总时长 ~2.3s |
+| 违规输出可读 | ✅ `Architecture Violation [Priority: MEDIUM] - Rule '<规则全文>'` + 每条 class:line 证据 |
+
+**踩坑记录（生成器必须吸收）**：
+1. **试点项目 pom 不完备**：fss-common 的 lombok 是 `provided`（不传递），纯 `mvn test` 从未跑通过（团队靠 IDE）。生成器接入指引须含"补 lombok provided"一步。
+2. **Java 8 语法约束**：gtsp-parent `-source 8`，生成代码禁用 `var`/匿名类钻石 `<>`/`List.of` 等。
+3. **`failOnEmptyShould` 默认 true**：后缀规则在无匹配类的项目会红——每条命名规则须 `.allowEmptyShould(true)`。
+4. 实际包名 ≠ 规范（`interfaces` 非 `adapter`，`infrastructure.domain.dto` 非标准 client）——再次印证 `layer_aliases` 必须是生成器一等输入。
+
+**2b go/no-go 判据数据**（判据：手写成本 < 半天且项目数 < 4 时放弃生成器）：手写一份验证过的规则集实际耗时 ~0.5h（含排错）；已索引 GTSP 项目 12 个 ≥ 4。**判据不满足放弃条件 → 生成器路线 GO**（价值在于规则演进时 12 个项目同步再生成的规模效应，而非首写成本）。
+
+Spike 产物存档：`skills/arch-guard/templates/archunit-spike/`（ArchitectureGuardTest.java + archunit.properties，作为 2b 生成器模板基线）。
+
 #### 2b. 生成器：`--mode archunit`
+
+
+> **2b 状态（2026-08-18，✅ 生成器已落地）**：`--mode archunit [--output <dir>|--verify]` 已实现并测试。
+> 验证：生成器单测 15 条（矩阵映射/别名展开/白名单/Java 8 语法守卫/verify 三态）；
+> 生成物经 `javac --release 8` + ArchUnit 1.2.1 真实编译零错误（期间抓出 `that()` 子句无
+> `doNotHaveNameMatching` 的 API 错误，改用 `DescribedPredicate.not(nameMatching(...))`）；
+> 全量 138 测试通过（覆盖率 96.8%），impact-guard 56 测试无回归（其 LayerIdentifier 为独立副本，
+> 无共享符号契约）。试点项目双跑对比（Tier 1 ⊆ ArchUnit 违规集归因）归入 Phase 3 门禁切换执行。
 
 **What**：`arch_check.py --mode archunit [--output <dir>]`，从配置生成三类产物（stdout 或 `--output` 目录，**不自动注入目标项目 pom**——pom 变更以输出指引由人执行）：
 
@@ -138,6 +166,15 @@ arch-guard、ArchUnit、ArchGuard 是三个物种（AI 技能 / 测试断言库 
 
 **验证**：生成器单测（配置矩阵 → 生成代码断言）；试点项目双跑对比——Tier 1 违规集 ⊆ ArchUnit 违规集，偏差逐条归因（ArchUnit 误报→调规则；Tier 1 漏报→记为修复证据）；`--verify` 对手工篡改的生成物报 exit 1。
 
+> **Phase 3 试点状态（2026-08-18，✅ 三项目接入完成）**：cont-task / gtsp-wop-gateway / gtsp-wop-service(core) 全部
+> 27 规则绿 + freeze store 建立存量基线（45/84/754 条）。双跑对比结论：Tier 1 每条违规在 ArchUnit 均有对应且
+> 证据更细（field/method/constructor 级），Tier 1 ⊆ ArchUnit 成立。试点新增三条生成器修正（已进 v2 产物与单测）：
+> ① `ImportOption.DoNotIncludeTests` 排除测试类（gateway 教训：测试类在 domain 包下调用 infrastructure 被误判）；
+> ② 按项目实际层裁剪 `layeredArchitecture` 定义（cont-task 教训：两层项目生成五层规则产生 "Layer X is empty" 假违规）；
+> ③ 多模块项目 `.arch-guard.json` 在仓库根时需 `--config` 显式指定。试点另发现两项目 HEAD 自带坏测试
+> （gateway `RateLimitFilterTest` int→Long、wop `PlfBizLineExchangeServiceTest` 缺符号——依赖版本漂移），
+> 验证时临时移出已复原，属项目自身债务与本技能无关。
+
 **反模式**：不硬编码包名（impact-guard 实测教训：GTSP 实际 Controller 在 `interfaces.facade.*`，规范写 `adapter.web`——`layer_aliases` 必须进生成器）；不改 `JavaScanner`/`LayerIdentifier`/`SUFFIX_TYPE_MAP` 签名（impact-guard 复用契约）；生成器不解析 Java 源码（只消费配置与内置矩阵）。
 
 ### Phase 3：门禁切换与文档（预估 1~2 天）
@@ -149,6 +186,7 @@ arch-guard、ArchUnit、ArchGuard 是三个物种（AI 技能 / 测试断言库 
 3. badcase：新增"生成器配置→规则"映射场景。
 
 **验证**：在试点项目仓库走一遍 MR 流程（新增违规 → ArchUnit 测试红 → 修复 → 绿 → 基线自动收缩）；本仓库 `pytest` + `badcase_runner.py` 全绿。
+
 
 **反模式**：不删 Tier 1 的 Java 检查（未迁移项目兜底，退役另立项）；不改退出码语义（0/1/2 全链路兼容）。
 

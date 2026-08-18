@@ -9,6 +9,8 @@ DDD 架构分层守护脚本
   python3 arch_check.py <project_root> --refreeze .arch-guard-baseline.json   # 有意重置债务线（唯一允许基线变大的路径）
   python3 arch_check.py <project_root> --baseline .arch-guard-baseline.json --frozen  # CI 模式（缺失/损坏 → exit 2；空基线=零债务放行）
   python3 arch_check.py --mode graph          # 输出 Tier 2 知识图谱 Cypher 查询清单
+  python3 arch_check.py <root> --mode archunit --output <dir>  # 生成 ArchUnit 测试/properties/接入指引（Java 8 兼容）
+  python3 arch_check.py <root> --mode archunit --verify         # 生成物漂移校验（不一致 → exit 1）
 
 退出码: 0=通过, 1=有强制问题, 2=运行错误
 """
@@ -642,8 +644,9 @@ def check_adapter_isolation(file_path: str, content: str,
 
 # ── 检查: 状态泄漏与状态机治理 ────────────────────────────────────────────
 
-# 状态改写调用：setXxxStatus / setXxxState / changeStatus / updateStatus / modifyStatus
-_STATUS_WRITE_RE = re.compile(r"\b(?:set|change|update|modify)\w*(?:Status|State)\s*\(")
+# 状态改写方法名模式（Tier 1 正则与 ArchUnit 生成器共用，单一源）
+_STATUS_WRITE_NAME_RE = r"(?:set|change|update|modify)\w*(?:Status|State)"
+_STATUS_WRITE_RE = re.compile(r"\b" + _STATUS_WRITE_NAME_RE + r"\s*\(")
 # 状态枚举命名（形态 A 锚点）
 _STATUS_ENUM_RE = re.compile(r"\benum\s+\w*(?:Status|State)\b")
 
@@ -1082,6 +1085,62 @@ def format_text(issues: List[Issue], mandatory_count: int, recommended_count: in
     return "\n".join(lines)
 
 
+# ── 收据信封（docs/design/guard-receipt-spec.md）────────────────────────────
+
+# Tier 1 结构性无法覆盖 / 需人工判断的范围（对齐 SKILL.md「仍需人工」表）
+_TIER1_NOT_ANALYZED = [
+    "tier2_method_level_dependency",        # 层间依赖方向需知识图谱（--mode graph）
+    "aggregate_design",                     # 聚合设计合理性（大小、边界）
+    "value_object_immutability",            # 值对象不可变（setter 检查）
+    "application_service_business_logic",   # 应用服务是否包含业务逻辑
+    "cross_domain_event_decoupling",        # 跨域通信应偏事件解耦
+]
+
+
+def _build_receipt(issues: List[Issue], mandatory_count: int,
+                   stats: Optional[Dict] = None,
+                   baseline_path: Optional[str] = None) -> Dict:
+    """收据信封：decision（门禁结论+原因码）/ provenance / boundary（证据边界）。"""
+    s = stats or {}
+    reason_codes = sorted({i.rule_code for i in issues
+                           if i.severity == Severity.MANDATORY and i.rule_code})
+    degraded = ["tier1_file_level_heuristic"]
+    if s.get("java_files_unclassified", 0):
+        degraded.append("unclassified_java_files")
+    return {
+        "tool": "arch-guard",
+        "schema_version": 1,
+        "decision": {"gate": "block" if mandatory_count else "pass",
+                     "reason_codes": reason_codes},
+        "provenance": {
+            "tier": 1,
+            "java_files": s.get("java_files_total", 0),
+            "java_files_classified": s.get("java_files_classified", 0),
+            "java_files_unclassified": s.get("java_files_unclassified", 0),
+            "pom_files": s.get("pom_files_total", 0),
+            "baseline": baseline_path,
+            "baseline_suppressed": s.get("baseline_suppressed", 0),
+            "baseline_retired": s.get("baseline_retired", 0),
+        },
+        "boundary": {"degraded": degraded,
+                     "not_analyzed": list(_TIER1_NOT_ANALYZED)},
+    }
+
+
+def _boundary_footer(stats: Optional[Dict] = None) -> List[str]:
+    """收据信封 boundary 的人读投影（format_text 末尾段）。"""
+    s = stats or {}
+    lines = ["── 证据边界 ──"]
+    lines.append("  检查精度: Tier 1 文件级启发式（字符串匹配）；"
+                 "层间依赖方向需 Tier 2 知识图谱（--mode graph）")
+    lines.append("  未覆盖: 聚合设计、值对象不可变、应用服务业务逻辑、"
+                 "跨域事件解耦（人工判断）")
+    if s.get("baseline_suppressed"):
+        lines.append(f"  基线抑制: {s['baseline_suppressed']} 条存量违规未列出"
+                     f"（ratchet 只缩不涨）")
+    return lines
+
+
 def format_json(issues: List[Issue], mandatory_count: int, recommended_count: int,
                 strict: bool = False, stats: Optional[Dict] = None) -> str:
     # 根因聚类：提取 callee 的包前缀，归类同源违规
@@ -1268,6 +1327,383 @@ ORDER BY caller
 """)
 
 
+# ── ArchUnit 生成器（--mode archunit，Phase 2b） ────────────────────────────
+#
+# 规则唯一源：.arch-guard.json 配置 + 本文件内置矩阵（_DEPENDENCY_RULES /
+# _SUFFIX_RULES / domain_forbidden_imports / _STATUS_WRITE_NAME_RE）。
+# 生成物为 Java 8 兼容源码（gtsp-parent -source 8 约束，禁 var/匿名类钻石）。
+# 设计：docs/design/arch-guard-evolution-design.md Phase 2b。
+
+ARCHUNIT_VERSION = "1.2.1"
+ARCHUNIT_JUNIT5_VERSION = "5.10.2"
+
+# ArchUnit 层序（生成顺序稳定，verify diff 才有意义）
+_ARCH_LAYER_ORDER = ["adapter", "client", "application", "domain", "infrastructure"]
+
+
+def _archunit_layer_packages(cfg: Dict) -> Dict[str, List[str]]:
+    """层名 → 包路径变体（canonical + alias），与 Tier 2 图查询同源。"""
+    layer_patterns: Dict[str, List[str]] = {}
+    for name, paths in cfg["layer_paths"].items():
+        layer_patterns[name] = [p.strip("/") for p in paths]
+    for alias, target in cfg["layer_aliases"].items():
+        if target not in layer_patterns:
+            layer_patterns[target] = []
+        if alias not in layer_patterns[target]:
+            layer_patterns[target].append(alias)
+    return layer_patterns
+
+
+def _pkg_patterns_for_layers(layer_packages: Dict[str, List[str]],
+                             layers: List[str]) -> List[str]:
+    """层列表 → ArchUnit 包匹配模式（..variant..），层内变体去重展开。"""
+    seen, out = set(), []
+    for layer in layers:
+        for v in layer_packages.get(layer, [layer]):
+            pat = f"..{v}.."
+            if pat not in seen:
+                seen.add(pat)
+                out.append(pat)
+    return out
+
+
+def _archunit_layer_packages(cfg: Dict) -> Dict[str, List[str]]:
+    """层名 → 包路径变体（canonical + alias），与 Tier 2 图查询同源。"""
+    layer_patterns: Dict[str, List[str]] = {}
+    for name, paths in cfg["layer_paths"].items():
+        layer_patterns[name] = [p.strip("/") for p in paths]
+    for alias, target in sorted(cfg["layer_aliases"].items()):
+        if target not in layer_patterns:
+            layer_patterns[target] = []
+        if alias not in layer_patterns[target]:
+            layer_patterns[target].append(alias)
+    return layer_patterns
+
+
+def _suffix_rule_to_name_pattern(pattern: str) -> Optional[str]:
+    """Tier 1 后缀正则 → ArchUnit haveNameMatching 的 FQN 正则。
+    (?<=[a-z])XXX$（后缀前接小写）→ .*[a-z]XXX$：FQN 以简单名结尾，
+    类名首字符前一位置是 '.'（包分隔）或小写字母，语义等价且排除了
+    "类名本身即后缀词"（如类名恰为 Inter）的边界。其余负向后行断言原样保留。
+    """
+    if pattern.startswith("(?<=[a-z])"):
+        return ".*[a-z]" + pattern[len("(?<=[a-z])"):]
+    return None
+
+
+def _java_str(s: str) -> str:
+    """转义为 Java 字符串字面量内容。"""
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _generate_archunit_layering(cfg: Dict, layer_packages: Dict) -> List[str]:
+    """_DEPENDENCY_RULES 列视图 → layeredArchitecture 链。"""
+    lines = ["    @ArchTest",
+             "    static final ArchRule layering = freeze(layeredArchitecture().consideringOnlyDependenciesInLayers()"]
+    for layer in _ARCH_LAYER_ORDER:
+        if layer not in layer_packages:
+            continue
+        pats = ", ".join(f'"{p}"' for p in _pkg_patterns_for_layers(layer_packages, [layer]))
+        lines.append(f'            .layer("{layer}").definedBy({pats})')
+    for target in _ARCH_LAYER_ORDER:
+        if target not in layer_packages:
+            continue
+        accessors = [s for s in _ARCH_LAYER_ORDER
+                     if s != target and s in layer_packages
+                     and _DEPENDENCY_RULES.get(s, {}).get(target, False)]
+        if accessors:
+            allowed = ", ".join(f'"{a}"' for a in accessors)
+            lines.append(f'            .whereLayer("{target}").mayOnlyBeAccessedByLayers({allowed})'
+                         f' // {", ".join(accessors)} → {target}')
+        else:
+            lines.append(f'            .whereLayer("{target}").mayNotBeAccessedByAnyLayer()')
+    lines.append('            .because("分层依赖方向矩阵（steering/gtsp/01 §6-7）；'
+                 '模块级 pom 校验由 Tier 1 Python 承担"));')
+    return lines
+
+
+def _generate_archunit_purity(cfg: Dict, layer_packages: Dict) -> List[str]:
+    """domain_forbidden_imports −（allowed + annotations 白名单）→ 依赖禁入规则。"""
+    forbidden = [p.rstrip(".") + ".." for p in cfg["domain_forbidden_imports"]]
+    whitelist_src = list(cfg["domain_allowed_imports"]) + list(cfg.get("domain_annotation_imports", []))
+    whitelist = [p.rstrip(".") + ".." for p in whitelist_src]
+    forbid_lit = ", ".join(f'"{_java_str(p)}"' for p in forbidden)
+    allow_lit = ", ".join(f'"{_java_str(p)}"' for p in whitelist)
+    domain_pats = ", ".join(f'"{p}"' for p in _pkg_patterns_for_layers(layer_packages, ["domain"]))
+    return [
+        "    // ── 领域层纯净度（对齐 Tier 1 check_domain_purity；JPA 注解豁免） ──",
+        "    @ArchTest",
+        "    static final ArchRule domainPurity = freeze(noClasses()",
+        f"            .that().resideInAnyPackage({domain_pats})",
+        f"            .should().dependOnClassesThat(resideInAnyPackage({forbid_lit})",
+        f"                    .and(DescribedPredicate.not(resideInAnyPackage({allow_lit}))))",
+        "            .allowEmptyShould(true)",
+        '            .because("领域层禁依赖框架业务类（JPA 注解与 domain_annotation_imports 白名单豁免）")).allowEmptyShould(true);',
+    ]
+
+
+def _generate_archunit_naming(cfg: Dict, layer_packages: Dict) -> List[str]:
+    """_SUFFIX_RULES → 每条一个命名规则（allowEmptyShould 防 failOnEmptyShould）。"""
+    exclude_prefixes = "|".join(_NAMING_EXCLUDE_STARTSWITH)
+    # that() 子句无 doNotHaveNameMatching；用 DescribedPredicate.not(nameMatching(...)) 表达排除前缀
+    exclude_lit = f'DescribedPredicate.not(nameMatching(".*\\\\.({exclude_prefixes})\\\\w*"))'
+    lines = ["    // ── 命名后缀 × 分层（对齐 _SUFFIX_RULES / 02-naming） ──"]
+    for idx, (regex, allowed_layers, severity, message) in enumerate(_SUFFIX_RULES, 1):
+        name_pat = _suffix_rule_to_name_pattern(regex.pattern)
+        if name_pat is None:
+            lines.append(f"    // [跳过] 后缀正则 {regex.pattern} 无 ArchUnit 等价形态：{message}")
+            continue
+        pats = ", ".join(f'"{p}"' for p in _pkg_patterns_for_layers(layer_packages, list(allowed_layers)))
+        sev = severity.value
+        lines.append(f"    // {message}")
+        lines.append("    @ArchTest")
+        lines.append(f"    static final ArchRule naming{idx:02d} = freeze(classes()")
+        lines.append(f"            .that().haveNameMatching(\"{_java_str(name_pat)}\")")
+        lines.append(f"            .and({exclude_lit})")
+        lines.append(f"            .should().resideInAnyPackage({pats})")
+        lines.append('            .because("[' + sev + '] ' + _java_str(message) + '"))')
+        lines.append("            .allowEmptyShould(true); // 项目无此后缀类时跳过（failOnEmptyShould 默认 true）")
+    return lines
+
+
+def _generate_archunit_state_leakage(cfg: Dict, layer_packages: Dict) -> List[str]:
+    """_STATUS_WRITE_NAME_RE → adapter/infrastructure 禁改写状态规则。"""
+    pats = ", ".join(f'"{p}"' for p in _pkg_patterns_for_layers(
+        layer_packages, ["adapter", "infrastructure"]))
+    name_re = _java_str(_STATUS_WRITE_NAME_RE)
+    return [
+        "    // ── 状态泄漏（对齐 Tier 1 check_state_field_leakage） ──",
+        "    @ArchTest",
+        "    static final ArchRule noStatusWriteFromAdapterOrInfra = freeze(noClasses()",
+        f"            .that().resideInAnyPackage({pats})",
+        f"            .should().callCodeUnitWhere(target(nameMatching(\"{name_re}\")))",
+        "            .allowEmptyShould(true)",
+        '            .because("状态流转属领域知识，adapter/infrastructure 不得直接改写（01 §12/§17）")).allowEmptyShould(true);',
+    ]
+
+
+def _generate_archunit_cycles(prefix: str) -> List[str]:
+    """循环依赖（Tier 1 无此能力，ArchUnit 增量价值）。prefix 为空则跳过。"""
+    if not prefix:
+        return ["    // [跳过] project_package_prefix 未配置，循环依赖规则无法限定分析范围"]
+    return [
+        "    // ── 循环依赖（Tier 1 无此能力） ──",
+        "    @ArchTest",
+        "    static final ArchRule noCycles = freeze(slices()",
+        f"            .matching(\"{_java_str(prefix)}.(**)\")",
+        "            .should().beFreeOfCycles());",
+    ]
+
+
+def _detect_existing_layers(project_root: str, cfg: Dict) -> set:
+    """扫描项目目录，返回实际存在的层（空层不生成规则，避免 'Layer X is empty' 假违规）。
+
+    仅匹配目录名与层路径变体（轻量目录扫描，不解析 Java 源码）。
+    """
+    layer_packages = _archunit_layer_packages(cfg)
+    variants = set()
+    for paths in layer_packages.values():
+        variants.update(paths)
+    existing_layers = set()
+    for dirpath, dirnames, _ in os.walk(project_root):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        for layer, paths in layer_packages.items():
+            if layer in existing_layers:
+                continue
+            if any(v in dirnames or v == os.path.basename(dirpath)
+                   for v in paths):
+                existing_layers.add(layer)
+                break
+    return existing_layers
+
+
+def _generate_archunit_test(cfg: Dict, project_root: str = ".") -> str:
+    prefix = cfg.get("project_package_prefix", "")
+    layer_packages = _archunit_layer_packages(cfg)
+    existing = _detect_existing_layers(project_root, cfg) or set(layer_packages)
+    # 只为实际存在的层生成规则（探测失败时回退全层，保底不静默）
+    layer_packages = {k: v for k, v in layer_packages.items() if k in existing}
+    body: List[str] = []
+    body.extend(_generate_archunit_layering(cfg, layer_packages))
+    body.append("")
+    body.extend(_generate_archunit_purity(cfg, layer_packages))
+    body.append("")
+    body.extend(_generate_archunit_naming(cfg, layer_packages))
+    body.append("")
+    body.extend(_generate_archunit_state_leakage(cfg, layer_packages))
+    body.append("")
+    body.extend(_generate_archunit_cycles(prefix))
+    header = f"""// DO NOT EDIT — 由 skills/arch-guard --mode archunit 生成，手改会被 --verify 拦截
+// 重新生成: python3 skills/arch-guard/scripts/arch_check.py <root> --mode archunit --output <dir>
+// 规则源: .arch-guard.json + arch_check.py 内置矩阵（_DEPENDENCY_RULES/_SUFFIX_RULES 等，单一源）
+// 兼容: gtsp-parent -source 8（Java 8 语法）
+package {_java_str(prefix)}.archguard;
+
+import com.tngtech.archunit.core.importer.ImportOption;
+import com.tngtech.archunit.base.DescribedPredicate;
+import com.tngtech.archunit.junit.AnalyzeClasses;
+import com.tngtech.archunit.junit.ArchTest;
+import com.tngtech.archunit.lang.ArchRule;
+
+import static com.tngtech.archunit.core.domain.JavaCall.Predicates.target;
+import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAnyPackage;
+import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.nameMatching;
+import static com.tngtech.archunit.library.Architectures.layeredArchitecture;
+import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
+import static com.tngtech.archunit.library.freeze.FreezingArchRule.freeze;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+
+// 排除测试类：测试代码不参与架构分层判定（测试位于 ..domain.. 包下调用 infrastructure
+// 属正常测试行为，非架构违规——gtsp-wop-gateway 试点实测教训）
+@AnalyzeClasses(packages = "{_java_str(prefix)}", importOptions = ImportOption.DoNotIncludeTests.class)
+class ArchitectureGuardTest {{
+
+"""
+    return header + "\n".join(body) + "\n}\n"
+
+
+def _generate_archunit_properties() -> str:
+    return (
+        "# DO NOT EDIT — 由 skills/arch-guard --mode archunit 生成\n"
+        "# 本地首跑建基线（allowStoreCreation=true）；CI 应覆盖为 false 防误建\n"
+        "freeze.store.default.path=src/test/resources/archguard-store\n"
+        "freeze.store.default.allowStoreCreation=true\n"
+        "freeze.store.default.allowStoreUpdate=true\n"
+    )
+
+
+def _generate_archunit_guide(cfg: Dict) -> str:
+    prefix = cfg.get("project_package_prefix", "")
+    return f"""# ArchUnit 接入指引（由 --mode archunit 生成）
+
+## 1. 放置产物
+
+- `ArchitectureGuardTest.java` → `src/test/java/{prefix.replace('.', '/')}/archguard/`
+- `archunit.properties` → `src/test/resources/`
+- 完整档（6 模块）：放在 `-start` 模块（传递依赖全模块，单 classpath 覆盖）
+- 轻量档（api+service）：放在 `-service` 模块
+
+## 2. pom 依赖（test scope）
+
+```xml
+<dependency>
+    <groupId>com.tngtech.archunit</groupId>
+    <artifactId>archunit-junit5</artifactId>
+    <version>{ARCHUNIT_VERSION}</version>
+    <scope>test</scope>
+</dependency>
+<dependency>
+    <groupId>org.junit.jupiter</groupId>
+    <artifactId>junit-jupiter-engine</artifactId>
+    <version>{ARCHUNIT_JUNIT5_VERSION}</version>
+    <scope>test</scope>
+</dependency>
+```
+
+> ⚠️ Spike 实测：部分项目 fss-common 的 lombok 为 provided 不传递，纯 `mvn test`
+> 会编译失败——若遇到 `package lombok does not exist`，补：
+>
+> ```xml
+> <dependency>
+>     <groupId>org.projectlombok</groupId>
+>     <artifactId>lombok</artifactId>
+>     <version>1.18.30</version>
+>     <scope>provided</scope>
+> </dependency>
+> ```
+
+## 3. 基线（ratchet，与 Tier 1 语义一致）
+
+1. 本地首跑 `mvn test -Dtest=ArchitectureGuardTest`：freeze store 落盘
+   `src/test/resources/archguard-store/`，全部存量违规被冻结，测试绿。
+2. 提交 store 目录（与 `.arch-guard-baseline.json` 同等地位，随仓走）。
+3. CI 运行时覆盖 `-Darchunit.freeze.store.default.allowStoreCreation=false`
+   防误建基线；偿还存量 → store 自动收缩（allowStoreUpdate=true）。
+
+## 4. 防漂移（DO NOT EDIT）
+
+CI 中运行 `--mode archunit --verify`：配置/矩阵变更后未重新生成 → exit 1。
+
+## 5. 层别名
+
+本项目生效的 layer_aliases：`{json.dumps(cfg.get("layer_aliases", {}), ensure_ascii=False)}`
+（ArchUnit 层定义已展开为多包模式；调整别名请改 `.arch-guard.json` 后重新生成）。
+"""
+
+
+def _find_generated_files(root: str) -> Tuple[Optional[str], Optional[str]]:
+    """在项目内定位已提交的生成物。
+
+    跳过 SKIP_DIRS 但豁免 "test"/"tests"：生成物按 Maven 惯例位于 src/test/，
+    若照抄 SKIP_DIRS（Tier 1 巡检语义：排除测试目录）会剪掉 src/test 整棵
+    子树，--verify 在标准布局项目上恒报"不存在"（三试点实测教训）。
+    """
+    verify_skip = SKIP_DIRS - {"test", "tests"}
+    test_path = props_path = None
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in verify_skip]
+        if "ArchitectureGuardTest.java" in filenames and test_path is None:
+            test_path = os.path.join(dirpath, "ArchitectureGuardTest.java")
+        if "archunit.properties" in filenames and props_path is None:
+            props_path = os.path.join(dirpath, "archunit.properties")
+    return test_path, props_path
+
+
+def print_archunit_mode(project_root: str, config_path: Optional[str] = None,
+                        output_dir: Optional[str] = None, verify: bool = False):
+    """--mode archunit：生成 ArchUnit 测试/properties/指引，或校验生成物漂移。"""
+    cfg = load_config(project_root, config_path)
+    prefix = cfg.get("project_package_prefix", "")
+    if not prefix:
+        print("错误: project_package_prefix 未配置，无法限定 @AnalyzeClasses 范围"
+              "（不限定会扫描整个 classpath 含第三方类，产生大量误报）。\n"
+              "  请先运行 --init 或在 .arch-guard.json 中配置 project_package_prefix。",
+              file=sys.stderr)
+        sys.exit(2)
+
+    test_src = _generate_archunit_test(cfg, project_root)
+    props = _generate_archunit_properties()
+    guide = _generate_archunit_guide(cfg)
+
+    if verify:
+        base = output_dir if output_dir else project_root
+        existing_test, existing_props = _find_generated_files(base)
+        problems = []
+        if existing_test is None:
+            problems.append("ArchitectureGuardTest.java 不存在（未生成或被删除）")
+        elif open(existing_test, encoding="utf-8").read() != test_src:
+            problems.append(f"ArchitectureGuardTest.java 与当前配置生成结果不一致: {existing_test}")
+        if existing_props is None:
+            problems.append("archunit.properties 不存在（未生成或被删除）")
+        elif open(existing_props, encoding="utf-8").read() != props:
+            problems.append(f"archunit.properties 与生成结果不一致: {existing_props}")
+        if problems:
+            print("❌ 生成物漂移（配置/规则矩阵变更后未重新生成，或被手改）:", file=sys.stderr)
+            for p in problems:
+                print(f"  - {p}", file=sys.stderr)
+            print("  修复: python3 arch_check.py <root> --mode archunit --output <dir> 重新生成并提交",
+                  file=sys.stderr)
+            sys.exit(1)
+        print("✅ ArchUnit 生成物与当前配置一致（无漂移）")
+        sys.exit(0)
+
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+        for name, content in (("ArchitectureGuardTest.java", test_src),
+                              ("archunit.properties", props),
+                              ("INTEGRATION.md", guide)):
+            path = os.path.join(output_dir, name)
+            with open(path, "w", encoding="utf-8") as fp:
+                fp.write(content)
+            print(f"已生成: {path}")
+        print(f"\n下一步: 按 {os.path.join(output_dir, 'INTEGRATION.md')} 接入（放置产物 + pom 依赖 + 基线）")
+    else:
+        print(test_src)
+        print("// 提示: 完整三产物（测试/properties/接入指引）用 --output <dir> 生成",
+              file=sys.stderr)
+    sys.exit(0)
+
 # ── init ────────────────────────────────────────────────────────────────────
 
 def _infer_prefix_from_pom(project_root: str) -> Optional[str]:
@@ -1334,8 +1770,13 @@ def main():
                        help="推荐问题升级为强制（影响退出码和 passed）")
     parser.add_argument("--config", default=None,
                        help="配置文件路径（默认查找 .arch-guard.json）")
-    parser.add_argument("--mode", choices=["check", "graph"], default="check",
-                       help="check: 脚本巡检（默认）; graph: 输出 Tier 2 Cypher 查询清单")
+    parser.add_argument("--mode", choices=["check", "graph", "archunit"], default="check",
+                       help="check: 脚本巡检（默认）; graph: Tier 2 Cypher 清单; "
+                            "archunit: 生成 ArchUnit 测试（配合 --output/--verify）")
+    parser.add_argument("--output", default=None, metavar="DIR",
+                       help="--mode archunit 产物输出目录（缺省打印测试源码到 stdout）")
+    parser.add_argument("--verify", action="store_true",
+                       help="--mode archunit 漂移校验：生成物与配置不一致 → exit 1")
     parser.add_argument("--baseline", default=None,
                        help="基线文件路径（仅报新增违规；偿还存量后基线自动收缩）")
     parser.add_argument("--refreeze", default=None, metavar="PATH",
@@ -1362,6 +1803,11 @@ def main():
 
     if args.mode == "graph":
         print_graph_mode(config_path=args.config)
+        sys.exit(0)
+
+    if args.mode == "archunit":
+        print_archunit_mode(args.project_root, config_path=args.config,
+                            output_dir=args.output, verify=args.verify)
         sys.exit(0)
 
     if not os.path.isdir(args.project_root):
