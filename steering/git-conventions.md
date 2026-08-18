@@ -19,7 +19,7 @@ inclusion: always
 ### type（必选）
 
 | 类型 | 说明 |
-|---|---|
+| --- | --- |
 | feat | 新功能 |
 | fix | Bug 修复 |
 | docs | 文档变更 |
@@ -35,10 +35,9 @@ inclusion: always
 按模块/技能填写，推荐值（须与 `commitlint.config.js` 的 `scope-enum` 保持一致）：
 
 | 类别 | scope |
-|---|---|
+| --- | --- |
 | 业务域 | `api`、`db`、`ui`、`ci` |
-| 技能（`skills/`） | `alibabacloud-devops`、`api-guard`、`arch-guard`、`ddl-guard`、`doc-gen`、`impact-guard`、`work-report` |
-| 工程 | `arch-hawkeye`、`tools`、`docs`、`deps`、`release` |
+| 工程 | `dependency`、`tools`、`docs`、`deps`、`release` |
 
 新增技能时同步追加到两处。
 
@@ -56,7 +55,7 @@ inclusion: always
 footer 用于关联工单与记录元数据，每行一条：
 
 | 关键字 | 用途 | 示例 |
-|---|---|---|
+| --- | --- | --- |
 | `Closes #N` | 关闭 issue | `Closes #456` |
 | `Fixes #N` | 修复 issue（同 Closes） | `Fixes #789` |
 | `Refs #N` | 关联但不关闭 | `Refs #101` |
@@ -101,7 +100,7 @@ Refs #321
 ## 分支命名
 
 | 前缀 | 用途 | 示例 |
-|---|---|---|
+| --- | --- | --- |
 | `feature/` | 新功能 | `feature/order-export` |
 | `fix/` | Bug 修复 | `fix/login-timeout` |
 | `hotfix/` | 紧急生产修复 | `hotfix/sql-injection` |
