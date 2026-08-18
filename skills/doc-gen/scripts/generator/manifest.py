@@ -504,14 +504,13 @@ class ManifestGenerator:
             return []
         class_body = raw[class_body_start:]
 
-        # 3. 搜索方法级 HTTP 注解（不使用 DOTALL，注解 → 方法签名 ≤500 字符）
+        # 搜索方法级 HTTP 注解（不使用 DOTALL，注解 → 方法签名 ≤500 字符）
         endpoints = []
         # HTTP 注解（parens 可选，兼容 @PostMapping 和 @GetMapping("/path")）
+        # 参数段为「引号串 | 非)非"字符」单层循环，分支首字符互斥 → 无嵌套量词，免疫 ReDoS
         http_anno_re = re.compile(
             r'@(GetMapping|PostMapping|PutMapping|DeleteMapping|PatchMapping|RequestMapping)'
-            r'(?:\(\s*((?:(?:value|path|method)\s*=\s*[^,)]+,?\s*)*'   # 命名参数
-            r'(?:"[^"]*"\s*,?\s*)*'                                       # 裸字符串值
-            r')\))?',
+            r'(?:\(\s*((?:"[^"]*"|[^)"])*)\))?',
         )
         # 方法签名（跟在注解后 ≤500 字符内）
         method_sig_re = re.compile(
