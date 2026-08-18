@@ -5,8 +5,9 @@ DDD 架构分层守护脚本
 
 用法:
   python3 arch_check.py <project_root> [--format json] [--strict] [--config .arch-guard.json]
-  python3 arch_check.py <project_root> --baseline .arch-guard-baseline.json   # 仅报新增违规
-  python3 arch_check.py <project_root> --update-baseline .arch-guard-baseline.json  # 更新基线
+  python3 arch_check.py <project_root> --baseline .arch-guard-baseline.json   # 仅报新增违规（存量偿还后基线自动收缩）
+  python3 arch_check.py <project_root> --refreeze .arch-guard-baseline.json   # 有意重置债务线（唯一允许基线变大的路径）
+  python3 arch_check.py <project_root> --baseline .arch-guard-baseline.json --frozen  # CI 模式（缺失/损坏 → exit 2；空基线=零债务放行）
   python3 arch_check.py --mode graph          # 输出 Tier 2 知识图谱 Cypher 查询清单
 
 退出码: 0=通过, 1=有强制问题, 2=运行错误
@@ -279,14 +280,88 @@ def _infer_layer_from_packages(pom_file: str, layer_patterns: List[Tuple[str, re
     return max(found_layers, key=found_layers.get)
 
 
+# ── Java 噪音剥离（注释/字符串/字符字面量，偏移保持） ──────────────────────
+
+def _strip_java_noise(content: str) -> str:
+    """剥离行注释/块注释/字符串/字符字面量的内容（偏移与行号保持不变）。
+
+    被剥离字符替换为等长空格（换行保留），使 CLASS_PATTERN/_STATUS_WRITE_RE/
+    import 提取不再命中注释与字符串字面量，且命中位置行号不变。逐字符状态机，
+    处理转义（\\'、\\'' 等），不建 AST。
+    """
+    out: List[str] = []
+    i, n = 0, len(content)
+    _CODE, _LINE, _BLOCK, _STR, _CHAR = range(5)
+    state = _CODE
+    while i < n:
+        c = content[i]
+        nxt = content[i + 1] if i + 1 < n else ""
+        if state == _CODE:
+            if c == "/" and nxt == "/":
+                out.append("  "); i += 2; state = _LINE
+            elif c == "/" and nxt == "*":
+                out.append("  "); i += 2; state = _BLOCK
+            elif c == '"':
+                out.append(" "); i += 1; state = _STR
+            elif c == "'":
+                out.append(" "); i += 1; state = _CHAR
+            else:
+                out.append(c); i += 1
+        elif state == _LINE:
+            out.append("\n" if c == "\n" else " ")
+            if c == "\n":
+                state = _CODE
+            i += 1
+        elif state == _BLOCK:
+            if c == "*" and nxt == "/":
+                out.append("  "); i += 2; state = _CODE
+            else:
+                out.append("\n" if c == "\n" else " "); i += 1
+        elif state == _STR:
+            if c == "\\":
+                out.append(" ")
+                if nxt:
+                    out.append(" ")
+                i += 2
+            elif c == '"':
+                out.append(" "); i += 1; state = _CODE
+            else:
+                out.append("\n" if c == "\n" else " "); i += 1
+        else:  # _CHAR
+            if c == "\\":
+                out.append(" ")
+                if nxt:
+                    out.append(" ")
+                i += 2
+            elif c == "'":
+                out.append(" "); i += 1; state = _CODE
+            else:
+                out.append("\n" if c == "\n" else " "); i += 1
+    return "".join(out)
+
+
 # ── import 提取（含行号） ──────────────────────────────────────────────────
 
-IMPORT_PATTERN = re.compile(r"^import\s+([\w.]+)", re.MULTILINE)
+# P0: 支持静态导入与通配导入（修复 ^import\s+([\w.]+) 捕获到 "static" 的漏报）：
+# - import static x.y.Z.member → 宿主类 x.y.Z（静态成员的层归属跟随宿主类）
+# - import static x.y.Z.*      → 宿主类 x.y.Z + ".*" 通配标记
+# - import x.y.*               → x.y.*（通配标记，层归属降级为结构性债务）
+IMPORT_PATTERN = re.compile(r"^import\s+(static\s+)?([\w.]+)", re.MULTILINE)
 
 
 def extract_imports_with_lines(content: str) -> List[Tuple[str, int]]:
-    return [(m.group(1), content[:m.start()].count("\n") + 1)
-            for m in IMPORT_PATTERN.finditer(content)]
+    """提取 (fqn, line)。通配导入以 ".*" 后缀标记；静态成员导入折算为宿主类 FQN。"""
+    imports: List[Tuple[str, int]] = []
+    for m in IMPORT_PATTERN.finditer(content):
+        is_static = m.group(1) is not None
+        fqn = m.group(2).rstrip(".")
+        wildcard = m.end(2) < len(content) and content[m.end(2)] == "*"
+        if wildcard:
+            fqn += ".*"
+        elif is_static and "." in fqn:
+            fqn = fqn.rsplit(".", 1)[0]
+        imports.append((fqn, content[:m.start()].count("\n") + 1))
+    return imports
 
 
 # ── suggestion 分流（按 callee 性质给不同修复方向） ───────────────────────
@@ -363,7 +438,14 @@ def check_domain_purity(file_path: str, content: str, cfg: Dict) -> List[Issue]:
     allowed = set(cfg["domain_allowed_imports"])
     annotations = set(cfg.get("domain_annotation_imports", []))
 
+    prefix = cfg.get("project_package_prefix", "")
+
     for imp, line in extract_imports_with_lines(content):
+        # P0: 内部包通配 import 无法定位目标类，不猜层——结构性债务由
+        # check_dependency_direction 统一报告（所有层均执行该检查），
+        # 此处跳过避免同一 import 双报
+        if imp.endswith(".*") and _is_internal_import(imp, prefix):
+            continue
         is_forbidden = any(imp.startswith(p) for p in forbidden)
         if not is_forbidden:
             continue
@@ -436,6 +518,15 @@ def check_dependency_direction(file_path: str, source_layer: str, content: str,
                         if _is_internal_import(imp, prefix)]
 
     for imp, line in internal_imports:
+        # P0: 通配 import 无法定位目标类，不猜层，记结构性债务待 ArchUnit 复核
+        if imp.endswith(".*"):
+            issues.append(Issue(
+                file=file_path, line=line, severity=Severity.STRUCTURAL_DEBT,
+                rule="依赖方向", rule_code=DEP_DIRECTION,
+                description=f"通配 import 无法定位目标类，待 ArchUnit 复核: import {imp}",
+                suggestion="改为显式 import 目标类；或迁移 ArchUnit 后由字节码规则精确判定",
+            ))
+            continue
         imp_path = imp.replace(".", "/") + ".java"
         # P0-4: 复用 identify_layer 获得 alias 感知的 target 层识别
         target_layer = identify_layer(imp_path, layer_patterns, cfg)
@@ -711,6 +802,9 @@ def check_file(file_path: str, project_root: str,
         _debug(f"跳过文件读取 ({file_path}): {e}")
         return [], False, None
 
+    # P0: 统一剥离注释/字符串/字符字面量内容（偏移保持，行号不变），
+    # 抑制 CLASS_PATTERN/_STATUS_WRITE_RE/import 提取对注释与字符串的误报
+    content = _strip_java_noise(content)
     rel_path = os.path.relpath(file_path, project_root)
     layer = identify_layer(rel_path, layer_patterns, cfg)
     if layer is None:
@@ -759,16 +853,57 @@ def load_baseline(baseline_path: str) -> set[str]:
     except Exception:
         return set()
 
+def baseline_state(baseline_path: str) -> Tuple[str, set]:
+    """探测基线文件状态，供 --frozen 区分处置：
+
+    ("missing", set())  文件不存在 —— CI 拒绝（fail-fast，防误建吞违规）
+    ("corrupt", set())  文件存在但 JSON 损坏/结构非法 —— CI 拒绝（fail-closed）
+    ("empty",  set())   合法基线但零指纹 —— 债务已还清，正常放行
+    ("ok",     fps)     常规基线
+    """
+    if not os.path.isfile(baseline_path):
+        return "missing", set()
+    try:
+        with open(baseline_path, "r", encoding="utf-8") as fp:
+            data = json.load(fp)
+        if not isinstance(data, dict) or not isinstance(
+                data.get("fingerprints", []), list):
+            return "corrupt", set()
+        fps = set(data.get("fingerprints", []))
+    except Exception:
+        return "corrupt", set()
+    return ("empty", set()) if not fps else ("ok", fps)
+
 
 def save_baseline(baseline_path: str, issues: List[Issue]):
-    fingerprints = sorted(_issue_fingerprint(i) for i in issues)
+    _write_baseline(baseline_path, {_issue_fingerprint(i) for i in issues})
+
+
+def _write_baseline(baseline_path: str, fingerprints: set[str]):
+    """按指纹集合写基线文件（结构 version/created/total_issues/fingerprints）。"""
+    ordered = sorted(fingerprints)
     with open(baseline_path, "w", encoding="utf-8") as fp:
         json.dump({
             "version": 1,
             "created": _now_iso(),
-            "total_issues": len(fingerprints),
-            "fingerprints": fingerprints,
+            "total_issues": len(ordered),
+            "fingerprints": ordered,
         }, fp, ensure_ascii=False, indent=2)
+
+
+def shrink_baseline(baseline_path: str, baseline_fps: set[str],
+                    current_fps: set[str]) -> int:
+    """ratchet 收缩：本次未再现的基线指纹视为已偿还，剔除并写回基线文件。
+
+    对齐 ArchUnit FreezingArchRule（allowStoreUpdate=true）：只缩不涨——
+    新增违规由调用方照常上报，不进入基线。
+    返回收缩掉的指纹数（0 表示基线无变化，不写文件）。
+    """
+    retained = baseline_fps & current_fps
+    if retained == baseline_fps:
+        return 0
+    _write_baseline(baseline_path, retained)
+    return len(baseline_fps) - len(retained)
 
 
 def _now_iso() -> str:
@@ -777,7 +912,10 @@ def _now_iso() -> str:
 
 
 def filter_by_baseline(issues: List[Issue], baseline_fingerprints: Optional[set] = None) -> Tuple[List[Issue], int]:
-    """过滤掉基线中已存在的存量违规，仅返回新增违规。"""
+    """过滤掉基线中已存在的存量违规，仅返回新增违规。
+
+    ratchet 双向对账的"报新增"半边；"收缩写回"半边由调用方接 shrink_baseline 完成。
+    """
     new_issues = []
     suppressed = 0
     for issue in issues:
@@ -833,12 +971,16 @@ def run(project_root: str, strict: bool = False, config_path: Optional[str] = No
             if issue.severity == Severity.RECOMMENDED:
                 issue.severity = Severity.MANDATORY
 
-    # 基线过滤
+    # 基线过滤（ratchet：只缩不涨）
     suppressed_count = 0
+    retired_count = 0
     if baseline_path:
         baseline_fps = load_baseline(baseline_path)
         if baseline_fps:
+            current_fps = {_issue_fingerprint(i) for i in all_issues}
             all_issues, suppressed_count = filter_by_baseline(all_issues, baseline_fps)
+            # 检查成功完成后收缩写回：本次未再现的存量视为已偿还
+            retired_count = shrink_baseline(baseline_path, baseline_fps, current_fps)
 
     # 去重（含 severity：同一位置强制+推荐并存时保留两者）
     seen = set()
@@ -859,6 +1001,7 @@ def run(project_root: str, strict: bool = False, config_path: Optional[str] = No
         "java_files_unclassified": unclassified_count,
         "pom_files_total": len(pom_files),
         "baseline_suppressed": suppressed_count,
+        "baseline_retired": retired_count,
         "structural_debt_count": structural_debt_count,
         "warnings": list(_warnings),
     }
@@ -886,6 +1029,8 @@ def format_text(issues: List[Issue], mandatory_count: int, recommended_count: in
         lines.append(f"  检查 pom.xml: {stats['pom_files_total']}")
         if stats.get("baseline_suppressed"):
             lines.append(f"  基线抑制存量违规: {stats['baseline_suppressed']}")
+        if stats.get("baseline_retired"):
+            lines.append(f"  基线自动收缩: 已偿还 {stats['baseline_retired']} 条存量（已写回基线文件）")
         if structural_debt_count:
             lines.append(f"  📋 结构性债务: {structural_debt_count}（已知架构约束，不计入门禁）")
         if stats.get("warnings"):
@@ -1192,9 +1337,13 @@ def main():
     parser.add_argument("--mode", choices=["check", "graph"], default="check",
                        help="check: 脚本巡检（默认）; graph: 输出 Tier 2 Cypher 查询清单")
     parser.add_argument("--baseline", default=None,
-                       help="基线文件路径（仅报基线中不存在的【新增】违规）")
-    parser.add_argument("--update-baseline", default=None,
-                       help="用当前所有违规更新基线文件（不执行检查）")
+                       help="基线文件路径（仅报新增违规；偿还存量后基线自动收缩）")
+    parser.add_argument("--refreeze", default=None, metavar="PATH",
+                       help="用当前全部违规重置基线（唯一允许基线变大的路径，有意重置债务线时使用）")
+    parser.add_argument("--update-baseline", default=None, metavar="PATH",
+                       help="[已弃用] --refreeze 的别名：用当前所有违规重写基线文件")
+    parser.add_argument("--frozen", action="store_true",
+                       help="CI 模式：基线缺失/损坏时拒绝执行（exit 2）；合法空基线=零债务，放行")
     parser.add_argument("--warn-unclassified", action="store_true",
                        help="将未识别层的文件数输出为警告")
     parser.add_argument("--debug", action="store_true",
@@ -1219,17 +1368,44 @@ def main():
         print(f"错误: 路径不存在或不是目录: {args.project_root}", file=sys.stderr)
         sys.exit(2)
 
-    # --update-baseline 模式：执行完整检查，将所有违规写入基线
-    if args.update_baseline:
+    # --refreeze 模式：执行完整检查，将当前全部违规重置进基线（唯一允许基线变大的路径）
+    # --update-baseline 为弃用别名（行为等价，仅打印迁移提示）
+    refreeze_path = args.refreeze or args.update_baseline
+    if refreeze_path:
+        if args.update_baseline:
+            print("⚠️  --update-baseline 已弃用，请改用 --refreeze（语义相同：用当前全部违规重置基线）",
+                  file=sys.stderr)
         issues, m, r, stats = run(args.project_root, strict=True,
                                   config_path=args.config)
         # 使用原始违规（不含基线过滤）保存
-        save_baseline(args.update_baseline, issues)
+        save_baseline(refreeze_path, issues)
         sd = stats.get("structural_debt_count", 0)
-        print(f"更新基线: {args.update_baseline} ({len(issues)} 个违规)")
+        print(f"重置基线: {refreeze_path} ({len(issues)} 个违规)")
         print(f"  其中 {m} 强制, {r} 推荐"
               + (f", {sd} 结构债务" if sd else ""))
         sys.exit(0)
+
+    # --frozen（CI 模式）：扫描前校验基线文件状态（三态区分）：
+    #   missing/corrupt → 拒绝执行（exit 2，防误建吞违规/坏文件静默放过）
+    #   empty（合法零指纹）→ 放行 —— 债务已全部还清，零债务即全绿（对齐
+    #     ArchUnit FreezingArchRule：store 收缩为空时测试通过而非失败）
+    if args.frozen:
+        if not args.baseline:
+            print("错误: --frozen 需要同时指定 --baseline", file=sys.stderr)
+            sys.exit(2)
+        state, _ = baseline_state(args.baseline)
+        if state == "missing":
+            print(f"错误: 基线文件不存在: {args.baseline}\n"
+                  "  CI 模式拒绝自动创建基线（防止吞掉违规）。请先在本地执行:\n"
+                  f"    python3 arch_check.py {args.project_root} --refreeze {args.baseline}",
+                  file=sys.stderr)
+            sys.exit(2)
+        if state == "corrupt":
+            print(f"错误: 基线文件损坏或结构非法: {args.baseline}\n"
+                  "  CI 模式 fail-closed 拒绝运行（无法确认基线可信）。"
+                  "请在本地检查该文件，或重新执行 --refreeze 生成。",
+                  file=sys.stderr)
+            sys.exit(2)
 
     issues, m, r, stats = run(args.project_root, strict=args.strict,
                               config_path=args.config,
@@ -1240,7 +1416,6 @@ def main():
         print(format_json(issues, m, r, strict=args.strict, stats=stats))
     else:
         print(format_text(issues, m, r, stats=stats))
-
     # 输出未分类文件的警告（如果很多文件未被识别层，可能是配置问题）
     if args.warn_unclassified and stats.get("java_files_unclassified", 0) > stats.get("java_files_total", 1) * 0.5:
         print(f"\n⚠️  超过半数 Java 文件 ({stats['java_files_unclassified']}/{stats['java_files_total']}) "

@@ -24,4 +24,4 @@ check: sql_check.py
 
 5 个违规语句（每个 1 个或多个问题），3 个合规语句通过检查。
 
-- 脚本自动检出：别名含义清晰、INNER JOIN 不简写、减少JOIN、避免RIGHT JOIN
+- 脚本自动检出：别名含义清晰、INNER JOIN 不简写、减少JOIN、避免RIGHT JOIN、多表关联字段前缀

@@ -116,14 +116,27 @@ class BusinessContextScanner:
                 continue
 
             if section == "flows":
-                # ### 流程名（可选「：描述」）
+                # ### 流程名 [@场景A,场景B]：描述 —— @ 标注为流程-场景归属（多对多）
                 m = _FLOW_HEAD_RE.match(line)
                 if m:
-                    name, _, desc = m.group(1).partition("：")
+                    head = m.group(1).strip()
+                    scenarios: list = []
+                    tag_desc = ""
+                    at = head.find("@")
+                    if at >= 0:
+                        tag_part = head[at + 1:]
+                        head = head[:at].rstrip()
+                        m2 = re.match(r"([^：:]+)[：:]?\s*(.*)$", tag_part)
+                        if m2:
+                            scenarios = [s.strip() for s in re.split(r"[,，]", m2.group(1)) if s.strip()]
+                            tag_desc = m2.group(2).strip()
+                    name, _, desc = head.partition("：")
                     if not desc:
-                        name, _, desc = m.group(1).partition(": ")
+                        name, _, desc = head.partition(": ")
                     current_flow = BusinessFlowDoc(
-                        name=name.strip(), description=desc.strip())
+                        name=name.strip(),
+                        description=desc.strip() or tag_desc,
+                        scenarios=scenarios)
                     result["flows"].append(current_flow)
                     continue
                 # 有序步骤：1. 步骤名 → 锚点1, 锚点2

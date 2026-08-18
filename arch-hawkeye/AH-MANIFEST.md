@@ -119,7 +119,7 @@ inferred 边服务名匹配与 `unmatchedByService` 分组依赖此结构化字�
 - **对账**：(settlement) 商户每日拉取对账单核对流水
 
 ## 业务流程
-### 订单履约流程
+### 订单履约流程 @下单
 1. 创建订单 → CreateOrderCmdExe
 2. 支付 → PayOrderCmdExe
 3. 履约发货 → DeliverOrderCmdExe
@@ -127,6 +127,7 @@ inferred 边服务名匹配与 `unmatchedByService` 分组依赖此结构化字�
 
 解析规则：
 - 四个固定二级标题：`## 客户` / `## 角色` / `## 业务场景` / `## 业务流程`；其余节忽略
+- 流程头可选场景归属标注：`### 流程名 @场景A,场景B：描述`——多对多（一个流程可归属多个场景），未标注视为通用流程
 - 客户/角色/场景条目：`- **名称**：描述`；场景支持 `(域名)` 前缀后缀标注归属
 - 流程：`### 流程名` + 有序列表步骤，`步骤名 → 锚点表达式`（锚定 qualifiedName / `METHOD /path` / 表名）
 - **行为/动作不独立建模**：由 scenarios/flows 的 `anchors` 关联 `component.methods` / `endpoints` 承载（代码强信号已在 domains 分片）

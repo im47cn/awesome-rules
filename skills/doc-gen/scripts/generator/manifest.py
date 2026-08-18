@@ -466,7 +466,15 @@ class ManifestGenerator:
         return jobs
 
     def _extract_endpoints(self, file_info: FileInfo) -> list[EndpointDoc]:
-        """从 Controller 文件中提取 REST 端点 — 解析方法级 HTTP 注解"""
+        """从 Controller 文件中提取 REST 端点 — 解析方法级 HTTP 注解
+
+        提取顺序：
+        1. 实现类自身类体的方法级注解
+        2. 契约式回溯：GTSP/Feign 契约模式方法级 mapping 在 implements 接口上
+           （实现类仅有类级 @RequestMapping），此时读接口源文件提取；
+           路径前缀以实现类为准（Spring 运行时注解继承语义）
+        3. 类级注解兜底
+        """
         source_path = file_info.get("filePath", "")
         java_file = self.root_path / source_path
         if not java_file.exists():
@@ -477,10 +485,39 @@ class ManifestGenerator:
         except Exception:
             return []
 
-        # 1. 提取类级路径前缀：
-        #    Controller: @RequestMapping(value/path) — 兼容裸字符串
-        #    Feign 接口: @FeignClient(path="...")（GTSP 规范四属性之一，服务根路径）
-        #    两者并存时依次拼接（@RequestMapping 前缀 + Feign path 前缀）
+        class_prefix = self._extract_class_prefix(raw)
+        class_name = file_info.get("className", "")
+        endpoints = self._extract_mapping_endpoints(raw, class_name, class_prefix)
+
+        # 契约式回溯：方法级 mapping 在 Inter 接口上
+        if not endpoints:
+            for iface_raw in self._resolve_interface_sources(raw):
+                endpoints = self._extract_mapping_endpoints(
+                    iface_raw, class_name,
+                    class_prefix or self._extract_class_prefix(iface_raw))
+                if endpoints:
+                    break
+
+        # 如果方法级注解未命中，回退到类级检测
+        if not endpoints:
+            for ann in file_info.get("annotations", []):
+                if ann in CONTROLLER_ANNOTATIONS:
+                    endpoints.append(EndpointDoc(
+                        method="*",
+                        path=class_prefix or "/*",
+                        summary=f"{ann} 端点（详见源代码）",
+                    ))
+                    break
+
+        return endpoints
+
+    @staticmethod
+    def _extract_class_prefix(raw: str) -> str:
+        """提取类级路径前缀：
+        Controller: @RequestMapping(value/path) — 兼容裸字符串
+        Feign 接口: @FeignClient(path="...")（GTSP 规范四属性之一，服务根路径）
+        两者并存时依次拼接（@RequestMapping 前缀 + Feign path 前缀）
+        """
         class_prefix = ""
         class_header = raw.split("class ")[0] if "class " in raw else raw
         class_header = class_header.split("interface ")[0] if "interface " in class_header else class_header
@@ -495,8 +532,40 @@ class ManifestGenerator:
                     class_prefix = (class_prefix.rstrip("/") + "/" + seg).rstrip("/")
         if class_prefix and not class_prefix.startswith("/"):
             class_prefix = "/" + class_prefix
+        return class_prefix
 
-        # 2. 提取类体（"class Xxx {" / "interface Xxx {" 到最后的 "}"）
+    def _resolve_interface_sources(self, controller_raw: str) -> list[str]:
+        """解析 Controller 的 implements 接口名，返回接口源文件内容列表
+
+        接口文件按 {接口名}.java 全仓查找；排除 target/（构建产物）与
+        docs-site/（文档模板）目录，避免陈旧副本。
+        """
+        decl_m = re.search(
+            r'\bclass\s+\w+[^{;]*?\bimplements\s+([\w<>,\s.]+?)\s*\{',
+            controller_raw,
+        )
+        if not decl_m:
+            return []
+        names = [n.strip().split(".")[-1] for n in decl_m.group(1).split(",") if n.strip()]
+
+        sources = []
+        for name in names:
+            hit = next(
+                (p for p in self.root_path.rglob(f"{name}.java")
+                 if not any(part in p.parts for part in ("target", "docs-site"))),
+                None,
+            )
+            if hit:
+                try:
+                    sources.append(hit.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+        return sources
+
+    def _extract_mapping_endpoints(self, raw: str, class_name: str,
+                                   class_prefix: str) -> list[EndpointDoc]:
+        """从类体提取方法级 HTTP 注解端点（Controller 实现类或契约接口）"""
+        # 提取类体（"class Xxx {" / "interface Xxx {" 到最后的 "}"）
         decl_pos = min((p for p in (raw.find("class "), raw.find("interface ")) if p >= 0),
                        default=-1)
         class_body_start = raw.find("{", decl_pos)
@@ -537,7 +606,7 @@ class ManifestGenerator:
             method_params = sig_m.group(3)
 
             # 跳过构造函数（方法名与类名相同）
-            if method_name == file_info.get("className", ""):
+            if method_name == class_name:
                 continue
 
             http_method = HTTP_MAPPING_ANNOTATIONS.get(annotation, "GET")
@@ -601,17 +670,6 @@ class ManifestGenerator:
                 responseBody=return_type,
                 deprecated=method_deprecated,
             ))
-
-        # 如果方法级注解未命中，回退到类级检测
-        if not endpoints:
-            for ann in file_info.get("annotations", []):
-                if ann in CONTROLLER_ANNOTATIONS:
-                    endpoints.append(EndpointDoc(
-                        method="*",
-                        path=class_prefix or "/*",
-                        summary=f"{ann} 端点（详见源代码）",
-                    ))
-                    break
 
         return endpoints
 

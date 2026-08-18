@@ -379,6 +379,8 @@ class BusinessFlowDoc:
     steps: list = field(default_factory=list)   # list[BusinessFlowStepDoc]
     source: str = "manual"
     anchors: list = field(default_factory=list)
+    # 归属业务场景名（多对多）：md 流程头 "@场景A,场景B" 标注；空 = 通用流程
+    scenarios: list = field(default_factory=list)
 
 
 @dataclass

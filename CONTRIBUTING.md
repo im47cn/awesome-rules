@@ -43,6 +43,9 @@ npm test                   # bash scripts/run_tests.sh
 - Python 基线为 **3.9**（macOS 系统 Python 即此版本），脚本不得使用 3.10+
   的运行时语法（`X | Y` 类型注解须配 `from __future__ import annotations`）
 - 新增测试套件时，在 `scripts/run_tests.sh` 的 `SUITES` 中登记
+- 个别测试套件配置了覆盖率门禁（如 `skills/arch-guard/scripts/pytest.ini` 的
+  `--cov-fail-under`），运行前需安装测试依赖：`pip3 install pytest pytest-cov`，
+  否则 pytest 会以 `unrecognized arguments: --cov` 拒绝启动
 
 ### Merge Request
 
@@ -223,21 +226,24 @@ skills/{skill-name}/badcase/
 
 ### expected.md 格式
 
-期望结果只写一次，所有提示词共享：
+期望结果只写一次，所有提示词共享。统一使用**双通道格式**——`## 预期检查输出` 小节内：
+「脚本自动检出」参与 runner 比对，「人工补充」仅记录不比对（把人工审查项计入失败会让 runner 永远红着）：
 
 ```markdown
 # badcase 标题（可选）
 
 check: ddl_check.py
 
-- 禁用类型
-- 表注释缺失
-- 字段注释缺失
+## 预期检查输出
+
+- 脚本自动检出：禁用类型、表注释缺失、字段注释缺失
+- 人工补充：命名语义（拼音、泛化词）需人工核对 ddl-manual-rules.md
 ```
 
 - `check:` — 指定运行的检查脚本文件名（如 `ddl_check.py`）；不填则自动运行该技能的全部 `*_check.py`
-- `- xxx` — 期望检出的规则名称，与脚本 JSON 输出中的 `rule` 字段对应；子串匹配，无需逐字一致
-- 列出的规则 **全部被检出才算通过**；实际多检出不算失败
+- `脚本自动检出：` — 期望检出的规则名称，顿号分隔；与脚本 JSON 输出中的 `rule` 字段子串匹配，无需逐字一致
+- `人工补充：` — 脚本无法覆盖的负向断言/语义判断，runner 不比对，仅提示人工核对
+- 列出的自动检出规则 **全部被检出才算通过**；实际多检出不算失败
 
 > 快速获取规则名称：对 `input/` 运行 `python3 scripts/xxx_check.py input/ --format json`，查看输出的 `rule` 字段。
 

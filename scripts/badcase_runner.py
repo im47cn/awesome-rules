@@ -20,8 +20,13 @@ expected.md 期望模型（双通道）:
   python3 scripts/badcase_runner.py                     # 运行所有 badcase
   python3 scripts/badcase_runner.py --skill ddl-guard    # 只运行指定技能
   python3 scripts/badcase_runner.py --verbose            # 显示实际检出详情
+  python3 scripts/badcase_runner.py --strict-exact       # 发版回归：双向精确比对
 
-退出码: 0=全部通过, 1=存在失败
+严格模式（--strict-exact，发版回归用）：在「期望的都检出」之上再要求双向相等——
+每条实际检出规则都必须命中某条期望，捕获「夹具多出未声明规则」（新规则落地、
+夹具意外触发其他规则）。子串匹配的歧义（如"依赖方向"含于"跨域依赖方向"）会
+让双向判定不可靠，严格模式退化为精确等值匹配。
+
 """
 
 import argparse
@@ -43,6 +48,7 @@ class BadcaseResult:
     manual_rules: list = field(default_factory=list)
     actual_rules: list = field(default_factory=list)
     missing_rules: list = field(default_factory=list)
+    unexpected_rules: list = field(default_factory=list)
     scripts_run: list = field(default_factory=list)
     prompts: list = field(default_factory=list)
     known_issues: list = field(default_factory=list)
@@ -193,8 +199,21 @@ def rule_matches(expected_rule: str, actual_rules: list) -> bool:
             return True
     return False
 
+def exact_match_failures(expected_rules: list, actual_rules: list):
+    """严格模式双向比对：返回 (missing, unexpected)，均基于小写精确等值。
 
-def run_badcase(skill_name, case_name, case_dir: Path, project_root: Path):
+    missing     — 期望了但未检出的规则
+    unexpected  — 检出了但未声明的规则（普通模式不检查的方向）
+    """
+    expected_set = {r.lower() for r in expected_rules}
+    actual_set = {r.lower() for r in actual_rules}
+    missing = [r for r in expected_rules if r.lower() not in actual_set]
+    unexpected = [r for r in actual_rules if r.lower() not in expected_set]
+    return missing, unexpected
+
+
+def run_badcase(skill_name, case_name, case_dir: Path, project_root: Path,
+                strict_exact: bool = False):
     """运行单个 badcase，返回结果。"""
     skill_dir = project_root / "skills" / skill_name
     input_dir = case_dir / "input"
@@ -255,7 +274,13 @@ def run_badcase(skill_name, case_name, case_dir: Path, project_root: Path):
         result.error = "; ".join(errors)
 
     # 比对期望规则
-    if expected_rules:
+    if strict_exact and expected_rules:
+        # 双向精确：捕获夹具多出未声明规则（新规则落地/意外触发）
+        missing, unexpected = exact_match_failures(expected_rules, actual_rules)
+        result.missing_rules = missing
+        result.unexpected_rules = unexpected
+        result.passed = not missing and not unexpected
+    elif expected_rules:
         missing = [r for r in expected_rules if not rule_matches(r, actual_rules)]
         result.missing_rules = missing
         result.passed = len(missing) == 0
@@ -309,6 +334,12 @@ def print_result(result: BadcaseResult, verbose=False):
             else:
                 print(f"    {c('✓', green)} {rule}")
 
+    # 严格模式额外方向：检出但未声明（普通模式不检查）
+    if result.unexpected_rules:
+        print(f"  {c('多出未声明规则', red)}:")
+        for rule in result.unexpected_rules:
+            print(f"    {c('✗', red)} {rule} {c('(expected.md 未声明)', red)}")
+
     # 人工补充（双通道期望模型：不参与比对，仅提示人工审查范围）
     if result.manual_rules:
         print(f"  {c('人工补充（不参与脚本比对）', dim)}:")
@@ -357,6 +388,8 @@ def main():
     )
     parser.add_argument("--skill", help="只运行指定技能的 badcase")
     parser.add_argument("--verbose", "-v", action="store_true", help="显示实际检出详情")
+    parser.add_argument("--strict-exact", action="store_true",
+                        help="严格模式：双向精确比对，检出未声明规则也判失败（发版回归用）")
     args = parser.parse_args()
 
     project_root = find_project_root()
@@ -375,7 +408,8 @@ def main():
 
     results = []
     for skill_name, case_name, case_dir in badcases:
-        result = run_badcase(skill_name, case_name, case_dir, project_root)
+        result = run_badcase(skill_name, case_name, case_dir, project_root,
+                             strict_exact=args.strict_exact)
         results.append(result)
         print_result(result, args.verbose)
 

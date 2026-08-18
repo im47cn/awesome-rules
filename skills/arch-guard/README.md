@@ -20,13 +20,15 @@ DDD 架构分层守护技能 — 检查分层依赖方向、Maven 模块依赖�
 python3 scripts/arch_check.py . --init
 
 # 2. 冻结当前违规为基线（历史容忍，增量零容忍）
-python3 scripts/arch_check.py . --update-baseline .arch-guard-baseline.json
+python3 scripts/arch_check.py . --refreeze .arch-guard-baseline.json
 
-# 3. 此后每次提交仅检查增量
+# 3. 此后每次提交仅检查增量（存量偿还后基线自动收缩，只缩不涨）
 python3 scripts/arch_check.py . --baseline .arch-guard-baseline.json --strict
+#    CI 建议：加 --frozen（基线缺失/损坏 → exit 2 防误建/防坏文件；合法空基线=零债务放行）
 ```
 
-存量违规逐条偿还后，重新执行第 2 步更新基线——自然收敛到零。
+基线为 ratchet 语义：偿还一条存量 → 下次运行自动从基线剔除并写回，自然收敛到零；
+只有有意重置债务线时才用 `--refreeze` 重新冻结（唯一允许基线变大的路径）。
 
 ### Tier 1: 脚本巡检
 

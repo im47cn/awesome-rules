@@ -1142,3 +1142,216 @@ def test_main_warn_unclassified(tmp_path, monkeypatch, capsys):
         arch_check.main()
     assert exc.value.code == 0
     assert "未被识别" in capsys.readouterr().err
+
+# ── Phase 0: 静态导入 / 通配导入 / 注释与字符串误报抑制 ───────────────────
+
+
+def test_extract_imports_static_member_resolves_host_class():
+    """import static x.y.Z.member → 宿主类 x.y.Z 参与层归属（修复捕获到 static 的漏报）。"""
+    content = "package p;\nimport static com.example.FooUtil.bar;\nclass X {}"
+    assert arch_check.extract_imports_with_lines(content) == [("com.example.FooUtil", 2)]
+
+
+def test_extract_imports_static_wildcard_marks_host_class():
+    """import static x.y.Z.* → 宿主类 Z + 通配标记（走通配逻辑）。"""
+    content = "import static com.example.FooUtil.*;"
+    assert arch_check.extract_imports_with_lines(content) == [("com.example.FooUtil.*", 1)]
+
+
+def test_extract_imports_package_wildcard_marked():
+    content = "import com.example.other.domain.*;"
+    assert arch_check.extract_imports_with_lines(content) == [("com.example.other.domain.*", 1)]
+
+
+def test_domain_purity_static_import_framework_member():
+    """domain 静态导入框架成员（宿主类非注解白名单）→ 必须报 DOMAIN_PURITY（强制）。"""
+    cfg = _cfg()
+    content = ("package com.example.domain.entity;\n"
+               "import static org.springframework.transaction.support."
+               "TransactionSynchronizationManager.getCurrentTransactionName;\n"
+               "public class OrderE {}")
+    issues = arch_check.check_domain_purity("src/main/java/com/example/domain/entity/OrderE.java",
+                                            content, cfg)
+    assert len(issues) == 1
+    assert issues[0].rule_code == arch_check.DOMAIN_PURITY
+    assert issues[0].severity == arch_check.Severity.MANDATORY
+    assert "TransactionSynchronizationManager" in issues[0].description
+
+
+def test_domain_purity_static_import_annotation_whitelist_consistent():
+    """注解白名单语义与导入形态无关：静态导入白名单注解类的成员同样放行。"""
+    cfg = _cfg()
+    content = ("import static org.springframework.transaction.annotation.Transactional.REQUIRED;\n"
+               "public class OrderE {}")
+    assert arch_check.check_domain_purity("d.java", content, cfg) == []
+
+
+def test_dependency_direction_internal_wildcard_structural_debt():
+    """内部包通配 import → STRUCTURAL_DEBT（不猜层），描述含 ArchUnit 复核提示。"""
+    cfg = _cfg(project_package_prefix="com.acme")
+    content = ("package com.acme.order.adapter.web;\n"
+               "import com.acme.other.domain.*;\n"
+               "public class OrderController {}")
+    issues = arch_check.check_dependency_direction(
+        "src/main/java/com/acme/order/adapter/web/OrderController.java",
+        "adapter", content, _patterns(cfg), cfg)
+    assert len(issues) == 1
+    assert issues[0].severity == arch_check.Severity.STRUCTURAL_DEBT
+    assert "通配 import 无法定位目标类" in issues[0].description
+    assert "ArchUnit" in issues[0].description
+    assert "import com.acme.other.domain.*" in issues[0].description
+
+
+def test_domain_purity_internal_wildcard_single_report(tmp_path):
+    """内部包通配 import：purity 跳过（不猜层不双报），结构性债务由
+    check_dependency_direction 统一报告——check_file 级恰好 1 条。"""
+    cfg = _cfg(project_package_prefix="com.acme")
+    content = ("package com.acme.order.domain;\n"
+               "import com.acme.other.adapter.web.*;\n"
+               "public class OrderE {}")
+    file_path = "src/main/java/com/acme/order/domain/OrderE.java"
+    assert arch_check.check_domain_purity(file_path, content, cfg) == []
+
+    real = tmp_path / file_path
+    real.parent.mkdir(parents=True)
+    real.write_text(content, encoding="utf-8")
+    issues, _, _ = arch_check.check_file(str(real), str(tmp_path),
+                                         _patterns(cfg), cfg)
+    wildcard = [i for i in issues if "通配 import 无法定位目标类" in i.description]
+    assert len(wildcard) == 1
+    assert wildcard[0].severity == arch_check.Severity.STRUCTURAL_DEBT
+    assert wildcard[0].rule_code == arch_check.DEP_DIRECTION
+
+
+def test_wildcard_structural_debt_not_in_mandatory_count(tmp_path):
+    """通配 import 结构性债务不进入 mandatory_count（run 级端到端）。"""
+    src = tmp_path / "src/main/java/com/acme/order/adapter/web"
+    src.mkdir(parents=True)
+    (src / "OrderController.java").write_text(
+        "package com.acme.order.adapter.web;\n"
+        "import com.acme.other.domain.*;\n"
+        "public class OrderController {}\n", encoding="utf-8")
+    cfg_file = tmp_path / ".arch-guard.json"
+    cfg_file.write_text(json.dumps({"project_package_prefix": "com.acme"}),
+                        encoding="utf-8")
+    issues, m, r, stats = arch_check.run(str(tmp_path), config_path=str(cfg_file))
+    assert m == 0
+    assert stats["structural_debt_count"] >= 1
+    assert any("通配 import 无法定位目标类" in i.description for i in issues)
+
+
+def test_dependency_direction_third_party_wildcard_ignored():
+    """第三方通配（java.util.*）在依赖方向检查中保持忽略。"""
+    cfg = _cfg(project_package_prefix="com.example")
+    content = ("package com.example.adapter.web;\n"
+               "import java.util.*;\n"
+               "public class C {}")
+    issues = arch_check.check_dependency_direction(
+        "src/main/java/com/example/adapter/web/C.java", "adapter", content,
+        _patterns(cfg), cfg)
+    assert issues == []
+
+
+def test_strip_java_noise_preserves_offsets_and_lines():
+    """剥离注释/字符串/字符字面量：等长、换行与行号保持、代码本体保留。"""
+    src = ("public class A {\n"
+           "    // class FooDTO\n"
+           "    /* class BlockPO */\n"
+           '    String s = "updateStatus()";\n'
+           "    char c = '\\'';\n"
+           "    char b = '\\\\';\n"
+           '    String e = "a\\"b";\n'
+           "}\n")
+    out = arch_check._strip_java_noise(src)
+    assert len(out) == len(src)
+    assert out.count("\n") == src.count("\n")
+    for a, b in zip(src, out):
+        if a == "\n":
+            assert b == "\n"
+    assert "FooDTO" not in out
+    assert "BlockPO" not in out
+    assert "updateStatus" not in out
+    assert "public class A" in out
+
+
+def test_strip_java_noise_unterminated_and_trailing_backslash():
+    """未闭合字符串 / 文件尾反斜杠不越界、不崩溃，长度保持。"""
+    src = 'String s = "x\\'
+    out = arch_check._strip_java_noise(src)
+    assert len(out) == len(src)
+    assert "x" not in out
+    assert arch_check._strip_java_noise("/* class X") == " " * len("/* class X")
+
+
+def test_check_file_naming_ignores_comments(tmp_path):
+    """注释/javadoc 里的 class XxxDTO/XxxPO 不触发 NAMING；真实声明仍触发。"""
+    src = tmp_path / "src/main/java/com/example/domain/service"
+    src.mkdir(parents=True)
+    f = src / "OrderDomainService.java"
+    f.write_text(
+        "package com.example.domain.service;\n"
+        "// class FooDTO 注释里的命名不应触发\n"
+        "/**\n"
+        " * class XxxPO javadoc 内命名不应触发\n"
+        " */\n"
+        "class FooDTO {}\n"
+        "public class OrderDomainService {}\n", encoding="utf-8")
+    cfg = _cfg()
+    issues, classified, layer = arch_check.check_file(str(f), str(tmp_path),
+                                                      _patterns(cfg), cfg)
+    assert classified is True and layer == "domain"
+    naming = [i for i in issues if i.rule_code == arch_check.NAMING]
+    assert len(naming) == 1
+    assert "FooDTO" in naming[0].description
+    assert naming[0].line == 6
+
+
+def test_check_file_state_leakage_ignores_string_and_comment(tmp_path):
+    """adapter 字符串 "updateStatus()" 与注释 setStatus 不触发；真实调用仍触发。"""
+    src = tmp_path / "src/main/java/com/example/adapter/web"
+    src.mkdir(parents=True)
+    f = src / "OrderController.java"
+    f.write_text(
+        "package com.example.adapter.web;\n"
+        "public class OrderController {\n"
+        "    void sync() {\n"
+        '        log.info("retry updateStatus() later");\n'
+        "        // order.setStatus(PAID);\n"
+        "        order.setStatus(PAID);\n"
+        "    }\n"
+        "}\n", encoding="utf-8")
+    cfg = _cfg()
+    issues, _, layer = arch_check.check_file(str(f), str(tmp_path), _patterns(cfg), cfg)
+    assert layer == "adapter"
+    leakage = [i for i in issues if i.rule_code == arch_check.STATE_FIELD_LEAKAGE]
+    assert len(leakage) == 1
+    assert leakage[0].line == 6
+
+
+def test_check_file_commented_import_not_extracted(tmp_path):
+    """块注释里的 import 不再参与提取（修复 ^import 对注释行首的命中）。"""
+    src = tmp_path / "src/main/java/com/example/domain/entity"
+    src.mkdir(parents=True)
+    f = src / "OrderE.java"
+    f.write_text(
+        "package com.example.domain.entity;\n"
+        "/*\n"
+        "import org.springframework.web.client.RestTemplate;\n"
+        "*/\n"
+        "public class OrderE {}\n", encoding="utf-8")
+    cfg = _cfg()
+    issues, _, _ = arch_check.check_file(str(f), str(tmp_path), _patterns(cfg), cfg)
+    assert not any(i.rule_code == arch_check.DOMAIN_PURITY for i in issues)
+
+
+def test_run_static_import_badcase_005():
+    """端到端：005 夹具触发静态导入纯净度 + 状态泄漏 + 通配结构性债务。"""
+    base = os.path.join(_BADCASE, "005-static-import-noise-suppression", "input")
+    if not os.path.isdir(base):
+        pytest.skip("badcase 005 missing")
+    issues, m, r, stats = arch_check.run(base)
+    codes = {i.rule_code for i in issues}
+    assert arch_check.DOMAIN_PURITY in codes
+    assert arch_check.STATE_FIELD_LEAKAGE in codes
+    # 通配结构性债务恰好 1 条：依赖方向检查统一报告，purity 不双报
+    assert stats["structural_debt_count"] == 1

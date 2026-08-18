@@ -64,6 +64,11 @@
         "properties": {
           "name": { "type": "string", "minLength": 1 },
           "description": { "type": "string" },
+          "scenarios": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "description": "归属业务场景名（多对多），须能对应 scenarios[].name；缺省为通用流程"
+          },
           "steps": {
             "type": "array",
             "items": {

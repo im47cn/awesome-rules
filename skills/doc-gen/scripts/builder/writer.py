@@ -296,6 +296,8 @@ class ManifestWriter:
             d = {"name": f.name, "source": f.source}
             if f.description:
                 d["description"] = f.description
+            if getattr(f, "scenarios", None):
+                d["scenarios"] = f.scenarios
             if f.anchors:
                 d["anchors"] = f.anchors
             if f.steps:

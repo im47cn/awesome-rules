@@ -86,10 +86,10 @@ class LayerIdentifier:
 
     def identify_domain_from_module(self, artifact_id: str, modules: dict) -> Optional[str]:
         """从 Maven 模块名提取业务域名"""
-        # 移除已知的层后缀
+        # 移除已知的层后缀（含 GTSP 轻量档契约模块 -api 与实现模块 -core）
         suffixes = ["-adapter", "-client", "-start",
                     "-app", "-domain", "-infrastructure", "-infra",
-                    "-common", "-shared"]
+                    "-common", "-shared", "-api", "-core"]
         name = artifact_id
         for suffix in suffixes:
             if name.endswith(suffix):

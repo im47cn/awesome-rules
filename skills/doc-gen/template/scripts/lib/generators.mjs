@@ -766,6 +766,11 @@ export function generateBusinessPage() {
     ) + '\n\n';
   }
 
+  // 流程 → 场景归属索引（多对多）：场景卡下挂关联流程锚点链接
+  const flowsByScenario = {};
+  flows.forEach((f, i) =>
+    (f.scenarios || []).forEach((sn) => (flowsByScenario[sn] ||= []).push(i)));
+
   if (scenarios.length) {
     content += '## 业务场景\n\n';
     for (const s of scenarios) {
@@ -773,13 +778,20 @@ export function generateBusinessPage() {
       content += '### ' + s.name + domainTag + ' ' + srcBadge(s.source) + '\n\n';
       if (s.description) content += s.description + '\n\n';
       if (s.anchors?.length) content += '代码锚点: ' + anchorsInline(s.anchors) + '\n\n';
+      if (flowsByScenario[s.name]?.length) {
+        content += '**关联流程**: ' +
+          flowsByScenario[s.name].map((i) => `[${flows[i].name}](#flow-${i + 1})`).join(' \u00B7 ') + '\n\n';
+      }
     }
   }
 
   if (flows.length) {
     content += '## 业务流程\n\n';
-    for (const f of flows) {
-      content += '### ' + f.name + ' ' + srcBadge(f.source) + '\n\n';
+    flows.forEach((f, flowIdx) => {
+      const scTag = (f.scenarios?.length ? f.scenarios : ['通用'])
+        .map((sn) => '`' + sn + '`').join(' \u00B7 ');
+      content += `<a id="flow-${flowIdx + 1}"></a>\n\n`;
+      content += '### ' + f.name + ' \u00B7 ' + scTag + ' ' + srcBadge(f.source) + '\n\n';
       if (f.description) content += f.description + '\n\n';
       // 人工/混合流程：Mermaid 流程图（步骤序 → 节点链）；code 流程不画（状态机页已有 stateDiagram）
       if (f.source !== 'code' && f.steps?.length > 1) {
@@ -806,7 +818,7 @@ export function generateBusinessPage() {
       if (f.source === 'code' && fs.existsSync(path.join(MANIFEST_DIR, 'state-machines.json'))) {
         content += '> 🤖 本流程由状态机代码提取，完整状态转换图与质量审查见[状态机](/state-machine/)。\n\n';
       }
-    }
+    });
     if (fs.existsSync(path.join(MANIFEST_DIR, 'state-machines.json'))) {
       content += '> 流程中状态流转的技术细节（stateDiagram + 死状态/不可达审查）见[状态机](/state-machine/)。\n\n';
     }

@@ -30,14 +30,15 @@ description: >
 # 1. 生成配置（自动从 pom.xml 推断 project_package_prefix）
 python3 scripts/arch_check.py . --init
 
-# 2. 冻结当前所有违规为基线（基准快照）
-python3 scripts/arch_check.py . --update-baseline .arch-guard-baseline.json
+# 2. 冻结当前所有违规为基线（有意重置债务线时才用）
+python3 scripts/arch_check.py . --refreeze .arch-guard-baseline.json
 
 # 3. 此后 CI 仅报基线中不存在的【新增】违规
-python3 scripts/arch_check.py . --baseline .arch-guard-baseline.json --strict
+python3 scripts/arch_check.py . --baseline .arch-guard-baseline.json --strict --frozen
 ```
 
-存量违规逐条偿还后，重新执行第 2 步更新基线——自然收敛到零。
+基线为 ratchet 语义（只缩不涨）：偿还一条存量 → 下次运行自动从基线剔除并写回，
+自然收敛到零，无需重新生成；`--frozen` 三态校验：基线缺失/损坏 → exit 2（防 CI 误建吞违规/坏文件静默放行），合法空基线 = 债务已还清，正常放行（对齐 ArchUnit 空 store 全绿）。
 
 ## 审查工作流
 
@@ -133,10 +134,10 @@ python3 scripts/arch_check.py . --init     # 从 pom.xml 推断 prefix，生成 
 - name: 架构分层巡检
   run: |
     python3 skills/arch-guard/scripts/arch_check.py src/ \
-      --baseline .arch-guard-baseline.json --strict
+      --baseline .arch-guard-baseline.json --strict --frozen
 
-# 基线随项目提交（首次用 --update-baseline 生成）
-# 偿还一条存量违规 → 删一条基线指纹 → 重新生成 → 自然收敛到零
+# 基线随项目提交（首次用 --refreeze 生成）
+# ratchet 只缩不涨：偿还一条存量 → 下次运行基线自动少一条 → 自然收敛到零
 
 # Tier 2: 深度审查（仅 main 分支合并时）
 # 通过 codebase-memory-mcp 执行 --mode graph 输出的 Cypher 查询
