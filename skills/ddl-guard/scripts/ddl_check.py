@@ -244,8 +244,9 @@ def extract_tables(raw_text: str) -> list:
             table.full_text = full_text
 
             # Extract table comment
+            # 注：`.` 默认不跨行，与原 (?:.*?)*? 语义等价但无嵌套量词（免疫 ReDoS）
             table_comment_match = re.search(
-                r"(?i)\)\s*(?:.*?)*?comment\s*=?\s*'([^']*)'", full_text
+                r"(?i)\)\s*.*?comment\s*=?\s*'([^']*)'", full_text
             )
             if not table_comment_match:
                 # Try inline comment on CREATE TABLE line
