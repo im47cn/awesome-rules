@@ -16,7 +16,7 @@ module.exports = {
 
     // ── scope 建议在枚举内（warn，业务域靠 warn 放行，不阻断）─────
     //    枚举须与 steering/git-conventions.md 保持一致
-    'scope-enum': [1, 'always', ['api', 'db', 'ui', 'ci']],
+    'scope-enum': [1, 'always', ['api', 'db', 'ui', 'ci', 'dependency']],
 
     // ── 主题行长度（git 经典 50/72 规则，对应规范"主题行 ≤50 字符"）──
     'subject-max-length': [2, 'always', 50],
