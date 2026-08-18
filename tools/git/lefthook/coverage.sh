@@ -28,15 +28,27 @@ echo "$changed" | grep -qE '\.(ts|tsx)$' && HAS_TS=1 || HAS_TS=0
 echo "$changed" | grep -qE '\.java$'     && HAS_JAVA=1 || HAS_JAVA=0
 [ $((HAS_PY + HAS_TS + HAS_JAVA)) -eq 0 ] && exit 0
 
+# python 解释器探测: python3 → python → py -3 (Windows 常无 python3, Git Bash 下回退 py 启动器)
+# pip --user 装出的 diff-cover.exe 在 Windows 落用户 Scripts 目录(多不在 PATH), 故一律以 -m 方式调用
+if   command -v python3 >/dev/null 2>&1; then PY=(python3)
+elif command -v python  >/dev/null 2>&1; then PY=(python)
+elif command -v py      >/dev/null 2>&1; then PY=(py -3)
+else PY=(); fi
+
 # diff-cover 入口: PATH → 当前 python 环境 → uv 按需拉取 → pip 装到用户目录后复用; 均失败才提示后放行
+dc_pip_install() {
+  [ ${#PY[@]} -eq 0 ] && return 1
+  "${PY[@]}" -m pip install --user -q diff-cover >/dev/null 2>&1 && return 0
+  # PEP 668 受管环境 (Homebrew/Debian 系 python) 二次尝试; Windows 无此限制, 走不到这
+  "${PY[@]}" -m pip install --user -q --break-system-packages diff-cover >/dev/null 2>&1
+}
 dc() {
   if command -v diff-cover >/dev/null 2>&1; then diff-cover "$@"
-  elif python3 -c 'import diff_cover' >/dev/null 2>&1; then python3 -m diff_cover.diff_cover_tool "$@"
+  elif [ ${#PY[@]} -gt 0 ] && "${PY[@]}" -c 'import diff_cover' >/dev/null 2>&1; then "${PY[@]}" -m diff_cover.diff_cover_tool "$@"
   elif command -v uv >/dev/null 2>&1; then uv tool run diff-cover "$@"
-  elif python3 -m pip install --user -q diff-cover 2>/dev/null \
-    || python3 -m pip install --user -q --break-system-packages diff-cover 2>/dev/null; then
+  elif dc_pip_install; then
     echo "[cov] 已自动安装 diff-cover (pip --user)"
-    python3 -m diff_cover.diff_cover_tool "$@"
+    "${PY[@]}" -m diff_cover.diff_cover_tool "$@"
   else echo "[cov] diff-cover 自动安装失败, 跳过 (可手动: pip install --user diff-cover / uv tool install diff-cover)"; return 0
   fi
 }
@@ -57,7 +69,8 @@ if [ "$HAS_PY" = 1 ]; then
         if [ -f uv.lock ] && command -v uv >/dev/null 2>&1; then
           PYCHK=(uv run python -c); PYTEST=(uv run pytest)
         else
-          PYCHK=(python3 -c); PYTEST=(python3 -m pytest)
+          [ ${#PY[@]} -gt 0 ] || { echo "[cov] $d 无 python3/python/py, 跳过 python 覆盖"; exit 0; }
+          PYCHK=("${PY[@]}" -c); PYTEST=("${PY[@]}" -m pytest)
         fi
         if ! "${PYCHK[@]}" 'import pytest, pytest_cov' >/dev/null 2>&1; then
           echo "[cov] $d 缺 pytest/pytest-cov, 跳过 python 覆盖 (uv add --dev pytest pytest-cov 启用)"; exit 0

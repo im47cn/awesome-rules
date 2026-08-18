@@ -63,6 +63,23 @@ commitlint 无需手动装——首次提交时 `.lefthook/commitmsg-check.sh` �
 > `tools/git/lefthook/`（单一源，不产生 `.lefthook/` 运行时目录，避免双份漂移）。
 > **不要对本仓库执行 `install.sh --update`**——会用分发模板覆盖根 yml 的路径。
 
+### 覆盖率红线依赖（diff-cover）
+
+`.lefthook/coverage.sh` 自动解析 diff-cover，**无需手动安装**，获取链依次为：
+
+1. PATH 上已有的 `diff-cover`
+2. 当前 python 环境已安装（探测顺序 `python3` → `python` → `py -3`）
+3. 有 `uv` 则 `uv tool run` 按需拉取（首次自动下载并缓存）
+4. 均无则 `pip install --user` **自动安装**后复用；仍失败才提示跳过放行（不阻塞提交）
+
+前置条件仅两个：**bash**（macOS/Linux 自带；Windows 随 Git for Windows 自带）+ **任一 python 或 uv**。
+
+**Windows 用户**：
+
+- python.org 安装的 python 没有 `python3` 命令，脚本自动回退 `python` / `py -3`，无需手动处理
+- `pip --user` 装出的 `diff-cover.exe` 落在用户 Scripts 目录（通常不在 PATH），脚本统一以 `python -m diff_cover.diff_cover_tool` 调用，不依赖 PATH
+- 想免去首次联网拉取，可提前手动装：`uv tool install diff-cover`（跨平台单二进制，推荐）或 `pip install --user diff-cover`
+
 ## 使用
 
 ### 提交校验
@@ -84,7 +101,7 @@ npm run release       # 正式执行：bump 版本 + 更新 CHANGELOG.md + 打 t
 - `commitlint.config.js` —— type/scope 枚举、主题行 ≤50 字符、breaking 标记（事后校验）
 - `lefthook.yml` —— hook 编排（commit-msg → 规范校验；pre-commit/pre-push → 覆盖率红线），入库随 clone 共享
 - `.lefthook/commitmsg-check.sh` —— commit 规范校验（缺 commitlint 自动 `npm install -g`；无 node 提示后放行，装 node 后首次提交自动补装）
-- `.lefthook/coverage.sh` —— 变更行覆盖率红线（diff-cover ≥95%，light/full 双模式；python/node/java），入库随 clone 共享
+- `.lefthook/coverage.sh` —— 变更行覆盖率红线（diff-cover ≥95%，light/full 双模式；python/node/java；缺 diff-cover 自动安装，见「覆盖率红线依赖」），入库随 clone 共享
 - `.lefthook/run-tests.sh` —— pre-push 项目自定义测试入口壳：项目有 `scripts/pre-push-tests.sh` 则执行（非零退出阻断 push），无则跳过。**`lefthook.yml` 是分发物（`--update` 会覆盖，勿手工加段）**，项目级测试/构建门禁一律写进 `scripts/pre-push-tests.sh`
 - `.versionrc.js` —— changelog 中文分节、emoji 前缀
 
@@ -94,6 +111,7 @@ npm run release       # 正式执行：bump 版本 + 更新 CHANGELOG.md + 打 t
 
 - ✅ **Node / 前端 / 全栈项目**：原生支持
 - ✅ **Java / Maven 项目**：提交规范校验（无 node 也有 bash 兜底）+ 覆盖率红线（Maven + JaCoCo → diff-cover）原生支持；changelog/版本号功能仍依赖 node
+- ✅ **Windows**：Git Bash（随 Git for Windows 自带）下完整可用，python 解释器自动探测，见「覆盖率红线依赖」
 - ⚠️ **Gradle 等其他构建**：覆盖率暂未接入（可自行扩展 `.lefthook/coverage.sh`）
 
 ## IDE 兼容性（commit template）
