@@ -28,12 +28,16 @@ echo "$changed" | grep -qE '\.(ts|tsx)$' && HAS_TS=1 || HAS_TS=0
 echo "$changed" | grep -qE '\.java$'     && HAS_JAVA=1 || HAS_JAVA=0
 [ $((HAS_PY + HAS_TS + HAS_JAVA)) -eq 0 ] && exit 0
 
-# diff-cover 入口: PATH → 当前 python 环境 → uv 按需拉取; 均无则提示后放行
+# diff-cover 入口: PATH → 当前 python 环境 → uv 按需拉取 → pip 装到用户目录后复用; 均失败才提示后放行
 dc() {
   if command -v diff-cover >/dev/null 2>&1; then diff-cover "$@"
   elif python3 -c 'import diff_cover' >/dev/null 2>&1; then python3 -m diff_cover.diff_cover_tool "$@"
   elif command -v uv >/dev/null 2>&1; then uv tool run diff-cover "$@"
-  else echo "[cov] diff-cover 不可用, 跳过 (安装: pip install diff-cover / uv add diff-cover)"; return 0
+  elif python3 -m pip install --user -q diff-cover 2>/dev/null \
+    || python3 -m pip install --user -q --break-system-packages diff-cover 2>/dev/null; then
+    echo "[cov] 已自动安装 diff-cover (pip --user)"
+    python3 -m diff_cover.diff_cover_tool "$@"
+  else echo "[cov] diff-cover 自动安装失败, 跳过 (可手动: pip install --user diff-cover / uv tool install diff-cover)"; return 0
   fi
 }
 
