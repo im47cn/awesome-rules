@@ -39,6 +39,7 @@ class ImpactReport:
     cross_service: list[str] = field(default_factory=list)   # 跨服务未分析告警
     cross_service_contracts: dict = field(default_factory=dict)  # v2b: {qn: {service, endpoints}}
     warnings: list[str] = field(default_factory=list)
+    receipt: dict | None = None  # 收据信封（guard-receipt-spec），由 CLI 组装后携带
 
 
 def _max_level(levels: list[str]) -> str:

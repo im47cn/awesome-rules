@@ -83,6 +83,10 @@ python3 scripts/impact_check.py . --changed com.example.order.app.OrderCreateExe
 - **过期图谱**：`head_sha` 与 HEAD 不一致 → 自动 reindex（或 `--skip-reindex` 跳过 + 告警）
 - **入口组件**：inbound 无法分析 → 明确标注 + 给回归范围
 
+### 报告收据（receipt）
+
+JSON 报告顶层携带 `receipt` 收据信封（规范：[`../../docs/design/guard-receipt-spec.md`](../../docs/design/guard-receipt-spec.md)）——`decision`（gate + 稳定原因码，CI 可程序化匹配）/ `provenance`（diff 范围、扫描量、5 通道命中计数）/ `boundary`（降级与未覆盖声明）。text 报告末尾投影为「── 证据边界 ──」段：**报告主动声明自身精度与盲区，防止被读者当成全面事实**。
+
 ### Tier 2 深度审查
 
 ```bash

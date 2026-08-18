@@ -99,6 +99,16 @@ python3 scripts/arch_check.py --mode graph --config .arch-guard.json
 | 命名后缀（脚本）                  | 应用服务是否包含业务逻辑                         |
 | 跨域 Maven 依赖（脚本）           | 跨域通信是否使用了事件而非 API（应偏向事件解耦） |
 
+## 报告收据（receipt）
+
+JSON 输出（`--format json`）顶层携带 `receipt` 收据信封，规范见 [`../../docs/design/guard-receipt-spec.md`](../../docs/design/guard-receipt-spec.md)：
+
+- `decision`：`gate`（pass/block）+ 强制问题 `rule_code` 去重列表，CI 可程序化匹配
+- `provenance`：扫描量（Java/pom 文件、分类情况）、基线路径与抑制/收缩计数
+- `boundary`：降级声明（Tier 1 文件级启发式）+ 未覆盖声明（Tier 2 方法级依赖、聚合设计等人工判断项）
+
+text 输出在所有路径（含通过早退分支）末尾投影「── 证据边界 ──」段——**报告主动声明自身精度与盲区，防止被读者当成全面事实**。
+
 ## 配置文件
 
 自动生成（推荐）：

@@ -1019,7 +1019,7 @@ def format_text(issues: List[Issue], mandatory_count: int, recommended_count: in
     structural_debt_count = stats.get("structural_debt_count", 0) if stats else 0
 
     if not issues and not (stats and stats.get("warnings")):
-        return "✅ 所有架构分层检查通过"
+        return "\n".join(["✅ 所有架构分层检查通过"] + _boundary_footer(stats))
 
     lines = []
 
@@ -1043,6 +1043,7 @@ def format_text(issues: List[Issue], mandatory_count: int, recommended_count: in
 
     if not issues:
         lines.append("✅ 无新增违规")
+        lines.extend(_boundary_footer(stats))
         return "\n".join(lines)
 
     lines.append(f"发现 {mandatory_count} 个强制问题，{recommended_count} 个推荐问题")
@@ -1082,6 +1083,7 @@ def format_text(issues: List[Issue], mandatory_count: int, recommended_count: in
         if issue.suggestion:
             lines.append(f"   → {issue.suggestion}")
         lines.append("")
+    lines.extend(_boundary_footer(stats))
     return "\n".join(lines)
 
 
@@ -1142,7 +1144,8 @@ def _boundary_footer(stats: Optional[Dict] = None) -> List[str]:
 
 
 def format_json(issues: List[Issue], mandatory_count: int, recommended_count: int,
-                strict: bool = False, stats: Optional[Dict] = None) -> str:
+                strict: bool = False, stats: Optional[Dict] = None,
+                baseline_path: Optional[str] = None) -> str:
     # 根因聚类：提取 callee 的包前缀，归类同源违规
     callee_clusters: Dict[str, int] = defaultdict(int)
     _CALLEE_RE = re.compile(r"(:?import|[→]\s*)\s*([\w.]+)")
@@ -1173,6 +1176,7 @@ def format_json(issues: List[Issue], mandatory_count: int, recommended_count: in
         "recommended_count": recommended_count,
         "structural_debt_count": (stats or {}).get("structural_debt_count", 0),
         "strict": strict,
+        "receipt": _build_receipt(issues, mandatory_count, stats, baseline_path),
         "summary": summary,
         "stats": stats or {},
         "issues": [
@@ -1859,7 +1863,8 @@ def main():
                               warn_unclassified=args.warn_unclassified)
 
     if args.format == "json":
-        print(format_json(issues, m, r, strict=args.strict, stats=stats))
+        print(format_json(issues, m, r, strict=args.strict, stats=stats,
+                          baseline_path=args.baseline))
     else:
         print(format_text(issues, m, r, stats=stats))
     # 输出未分类文件的警告（如果很多文件未被识别层，可能是配置问题）

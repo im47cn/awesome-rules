@@ -603,6 +603,45 @@ def test_format_json_has_callee_summary():
     assert "infra.common.enums" in clusters[0]["package"]
 
 
+def test_format_json_receipt_envelope():
+    issues = [
+        arch_check.Issue("a.java", 1, arch_check.Severity.MANDATORY, "依赖方向",
+                         "desc", "DEP_DIRECTION", "sug"),
+    ]
+    stats = {"java_files_total": 10, "java_files_classified": 8,
+             "java_files_unclassified": 2, "pom_files_total": 3,
+             "baseline_suppressed": 5, "baseline_retired": 1}
+    result = json.loads(arch_check.format_json(
+        issues, 1, 0, stats=stats, baseline_path=".arch-guard-baseline.json"))
+    r = result["receipt"]
+    assert r["tool"] == "arch-guard" and r["schema_version"] == 1
+    assert r["decision"]["gate"] == "block"
+    assert r["decision"]["reason_codes"] == ["DEP_DIRECTION"]
+    assert r["provenance"]["baseline"] == ".arch-guard-baseline.json"
+    assert r["provenance"]["baseline_suppressed"] == 5
+    assert "tier1_file_level_heuristic" in r["boundary"]["degraded"]
+    assert "unclassified_java_files" in r["boundary"]["degraded"]
+    assert "aggregate_design" in r["boundary"]["not_analyzed"]
+    # 无强制问题 → pass
+    ok = json.loads(arch_check.format_json([], 0, 0))
+    assert ok["receipt"]["decision"]["gate"] == "pass"
+    assert ok["receipt"]["decision"]["reason_codes"] == []
+
+
+def test_format_text_boundary_footer():
+    stats = {"java_files_total": 5, "java_files_classified": 5,
+             "java_files_unclassified": 0, "pom_files_total": 1,
+             "baseline_suppressed": 7, "warnings": []}
+    text = arch_check.format_text([], 0, 0, stats=stats)
+    assert "── 证据边界 ──" in text
+    assert "Tier 2 知识图谱" in text
+    assert "基线抑制: 7" in text
+    # 无 stats 路径也有边界声明，无基线行
+    bare = arch_check.format_text([], 0, 0)
+    assert "── 证据边界 ──" in bare
+    assert "基线抑制" not in bare
+
+
 # ── State machine ──────────────────────────────────────────────────────────
 
 def test_state_field_leakage_adapter_mandatory():

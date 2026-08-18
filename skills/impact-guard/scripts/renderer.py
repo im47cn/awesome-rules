@@ -13,6 +13,64 @@ def _short(qn: str) -> str:
 # ── json（机读：CI / Agent）───────────────────────────────────────────────────
 
 
+def build_receipt(report, tier=1, strict=False, diff_range=None,
+                  changed_points=0, scanned_classes=0,
+                  config_source="auto", boundary_channels=None):
+    """构建收据信封（docs/design/guard-receipt-spec.md）：
+    decision（门禁结论+原因码）/ provenance（数据来源）/ boundary（证据边界声明）。"""
+    reason_codes = []
+    if report.level == "DIRECT":
+        reason_codes.append("direct_boundary_hit")
+    if report.cross_service:
+        reason_codes.append("cross_service_downstream_unanalyzed")
+    if any(rc.is_entry for rc in report.changes):
+        reason_codes.append("entry_inbound_unanalyzable")
+    if strict and report.level == "DIRECT":
+        gate = "block"
+    elif reason_codes:
+        gate = "warn"
+    else:
+        gate = "pass"
+    not_analyzed = ["reflection_dynamic_dispatch"]
+    if report.cross_service:
+        not_analyzed.append("cross_service_downstream")
+    return {
+        "tool": "impact-guard",
+        "schema_version": 1,
+        "decision": {"gate": gate, "reason_codes": reason_codes},
+        "provenance": {
+            "tier": tier,
+            "diff_range": diff_range,
+            "changed_points": changed_points,
+            "scanned_classes": scanned_classes,
+            "config_source": config_source,
+            "boundary_channels": {ch: len(qns)
+                                  for ch, qns in (boundary_channels or {}).items()},
+        },
+        "boundary": {
+            "degraded": ["tier1_class_level"] if tier == 1 else [],
+            "not_analyzed": not_analyzed,
+        },
+    }
+
+
+def _boundary_footer(report) -> list:
+    """收据信封 boundary 的人读投影（render_text 末尾段）。"""
+    r = getattr(report, "receipt", None)
+    if not r:
+        return []
+    lines = ["── 证据边界 ──"]
+    if "tier1_class_level" in r["boundary"]["degraded"]:
+        lines.append("  分析精度: Tier 1 类级（import 反向索引）；"
+                     "方法级证据需 Tier 2 图谱（--mode graph）")
+    if "cross_service_downstream" in r["boundary"]["not_analyzed"]:
+        lines.append(f"  未分析: 跨服务下游影响（{len(report.cross_service)} 个契约）"
+                     f" → 需人工评估")
+    if "reflection_dynamic_dispatch" in r["boundary"]["not_analyzed"]:
+        lines.append("  结构盲区: 反射/动态代理/多态分发不在 import 索引内")
+    return lines
+
+
 def render_json(report, tier: int = 1) -> str:
     data = {
         "schema_version": 1,
@@ -39,6 +97,8 @@ def render_json(report, tier: int = 1) -> str:
             "regression_scope": rc.regression_scope,
         } for rc in report.changes],
     }
+    if report.receipt:
+        data["receipt"] = report.receipt
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
@@ -78,6 +138,7 @@ def render_text(report, tier: int = 1) -> str:
                         for e in c.get("endpoints", []))
         lines.append(f"🔗 跨服务契约: {_short(qn)} → {c['service']}"
                      + (f"（{eps}）" if eps else ""))
+    lines.extend(_boundary_footer(report))
     return "\n".join(lines) + "\n"
 
 

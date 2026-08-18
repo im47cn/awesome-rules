@@ -1,6 +1,7 @@
 """impact-guard v1 测试：变更点识别 / 传播 / 影响方向 / 分级 / 边界 / 渲染 / CLI"""
 
 import json
+import types
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,7 @@ from change_extractor import ChangeExtractor
 from critical_ranker import CriticalRanker
 from graph_tracer import build_cypher, current_head
 from impact_scanner import ImpactScanner
-from renderer import render_json, render_mermaid, render_text
+from renderer import build_receipt, render_json, render_mermaid, render_text
 
 QN = {
     "agg": "com.acme.demo.domain.order.OrderAgg",
@@ -295,6 +296,49 @@ class TestRenderer:
                                   scanned.propagate_outbound(QN["ctrl"], 3))]
         md = render_mermaid(ranker.rank(rcs))
         assert "🚪" in md
+
+    def test_json_receipt_envelope(self, scanned):
+        report = self._report(scanned)
+        report.receipt = build_receipt(
+            report, tier=1, strict=True, diff_range="origin/master...HEAD",
+            changed_points=1, scanned_classes=len(scanned.infos),
+            config_source=".impact-guard.json",
+            boundary_channels={"http_entry": ["com.acme.Ctrl"]})
+        data = json.loads(render_json(report))
+        r = data["receipt"]
+        assert r["tool"] == "impact-guard" and r["schema_version"] == 1
+        assert r["decision"]["gate"] == "pass"          # INDIRECT 非 DIRECT
+        assert r["decision"]["reason_codes"] == []
+        assert r["provenance"]["diff_range"] == "origin/master...HEAD"
+        assert r["provenance"]["boundary_channels"] == {"http_entry": 1}
+        assert "tier1_class_level" in r["boundary"]["degraded"]
+        assert "reflection_dynamic_dispatch" in r["boundary"]["not_analyzed"]
+
+    def test_receipt_gate_block_and_cross_service(self):
+        stub = types.SimpleNamespace(level="DIRECT",
+                                     cross_service=["com.acme.OrderClient"],
+                                     changes=[])
+        r = build_receipt(stub, tier=1, strict=True)
+        assert r["decision"]["gate"] == "block"
+        assert r["decision"]["reason_codes"] == [
+            "direct_boundary_hit", "cross_service_downstream_unanalyzed"]
+        assert "cross_service_downstream" in r["boundary"]["not_analyzed"]
+        # 不带 strict → 仅告警不阻断
+        assert build_receipt(stub)["decision"]["gate"] == "warn"
+
+    def test_receipt_tier2_no_degradation(self):
+        stub = types.SimpleNamespace(level="INFO", cross_service=[], changes=[])
+        r = build_receipt(stub, tier=2)
+        assert r["boundary"]["degraded"] == []
+
+    def test_text_boundary_footer(self, scanned):
+        report = self._report(scanned)
+        assert "证据边界" not in render_text(report)   # 无收据不输出
+        report.receipt = build_receipt(report)
+        text = render_text(report)
+        assert "── 证据边界 ──" in text
+        assert "Tier 1 类级" in text
+        assert "结构盲区" in text
 
 
 # ── graph 模式（Tier 2 Cypher）───────────────────────────────────────────────

@@ -25,7 +25,7 @@ from cross_service import build_cross_service_cypher, extract_feign_contracts
 from critical_ranker import CriticalRanker, RankedChange
 from graph_tracer import render_graph_mode
 from impact_scanner import ImpactScanner
-from renderer import render_json, render_mermaid, render_text
+from renderer import build_receipt, render_json, render_mermaid, render_text
 
 
 def main():
@@ -135,6 +135,13 @@ def main():
         ranked.append(ranker.rank_change(p, impacts, outbound))
 
     report = ranker.rank(ranked)
+
+    # 收据信封（guard-receipt-spec）：provenance + decision + 证据边界声明
+    report.receipt = build_receipt(
+        report, tier=1, strict=args.strict, diff_range=args.diff,
+        changed_points=len(qns), scanned_classes=len(scanner.infos),
+        config_source=args.config or "auto (.impact-guard.json)",
+        boundary_channels=config.get("boundary_hits"))
 
     # v2b 跨服务契约提取：DIRECT 跨服务变更点 → 契约明细（评估范围明确化）
     for qn in report.cross_service:

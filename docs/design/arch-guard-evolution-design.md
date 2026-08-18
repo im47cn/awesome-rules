@@ -187,6 +187,14 @@ Spike 产物存档：`skills/arch-guard/templates/archunit-spike/`（Architectur
 
 **验证**：在试点项目仓库走一遍 MR 流程（新增违规 → ArchUnit 测试红 → 修复 → 绿 → 基线自动收缩）；本仓库 `pytest` + `badcase_runner.py` 全绿。
 
+> **收据对齐（2026-08-18 已生效）**：Tier 1 CLI 的 JSON/text 输出已携带收据信封
+> （`decision` / `provenance` / `boundary`，规范见 [`guard-receipt-spec.md`](guard-receipt-spec.md)）——
+> 含未覆盖声明（Tier 2 方法级依赖 + 人工判断四项），通过路径同样不豁免。ArchUnit 侧的收据等价物：
+> surefire 报告 + freeze store 路径与存量条数（provenance），`-Darchunit.freeze.store.default.allowStoreCreation=false`
+> 的 fail-closed 对应收据三态不变量的 rejected 态（store 缺失/损坏拒绝运行，不静默放行）。双跑对比与
+> 试点报告按 [`../../steering/review-report-standards.md`](../../steering/review-report-standards.md) 五段式输出，
+> 末段证据边界声明双引擎各自的覆盖差（如 ArchUnit 字段/构造器级证据 vs Tier 1 import 级、pom 检查仅 Tier 1）。
+
 
 **反模式**：不删 Tier 1 的 Java 检查（未迁移项目兜底，退役另立项）；不改退出码语义（0/1/2 全链路兼容）。
 
@@ -226,7 +234,7 @@ Spike 产物存档：`skills/arch-guard/templates/archunit-spike/`（Architectur
 | 4 | 生成物被目标项目手改 | DO NOT EDIT 头 + `--verify` CI 校验 |
 | 5 | impact-guard 复用契约破坏 | Phase 2 只增 mode 不改共享组件签名；合入前跑 impact-guard 测试 |
 | 6 | 大项目 `mvn test` 时长增加 | 测试类独立可拆；必要时 `-Parch-guard` profile 按需触发；spike 实测量化 |
-| 7 | 团队对 ArchUnit 生成规则的信任成本 | 双跑对比报告作为采纳证据；迁移期 Tier 1 结果保留展示 |
+| 7 | 团队对 ArchUnit 生成规则的信任成本 | 双跑对比报告作为采纳证据（按 review-report-standards 五段式输出，含证据边界段）；迁移期 Tier 1 结果保留展示 |
 
 ---
 

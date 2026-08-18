@@ -94,7 +94,9 @@ def test_repay_shrinks_baseline(tmp_path, monkeypatch, capsys):
     code, out, _ = _run_cli([root, "--baseline", baseline, "--strict"],
                             monkeypatch, capsys)
     assert code == 0  # 剩余存量被抑制，无新增
-    assert out.strip() == "✅ 所有架构分层检查通过"  # 全抑制时走通过早退分支
+    # 全抑制时走通过早退分支；收据规范要求通过路径同样携带证据边界声明
+    assert out.strip().startswith("✅ 所有架构分层检查通过")
+    assert "── 证据边界 ──" in out
 
     # 基线文件已写回：偿还的 Order 指纹消失，只剩 Invoice 一条
     assert len(_load_fps(baseline)) == 1
