@@ -3,14 +3,14 @@
   "files": {
     ".agents/plugins/marketplace.json": "a8c9d4ddf59735675a3aa3066ea57c115628d9bf",
     ".claude-plugin/marketplace.json": "feaf1660fec29031a75cea314e9ed34e410fccb7",
-    ".claude-plugin/plugin.json": "daeaf55bfe797a758fcf59031809697c91aec712",
+    ".claude-plugin/plugin.json": "faa4cccad62744be663d5d5693ed78886c18c8e3",
     ".codex-plugin/plugin.json": "5dfe34cca56d801fb6b0d63d3191d09d334cc034",
     ".cursor-plugin/marketplace.json": "2cefae9f3cfd5dce1a10e4339d3684e4818f3ef6",
-    ".cursor-plugin/plugin.json": "42634316705d3ef556b222d904f384fbc7baff22",
+    ".cursor-plugin/plugin.json": "5342aa04248ad3517cc83f3f796211cf4cef91f7",
     ".grok-plugin/marketplace.json": "6d5ef7b967582f307b1ce5371b1ca0cd76f9c123",
-    ".grok-plugin/plugin.json": "42634316705d3ef556b222d904f384fbc7baff22",
-    ".kimi-plugin/marketplace.json": "aed63413c75c8b94f8dcd907c1096372bae3bec1",
-    ".kimi-plugin/plugin.json": "200f1b8d9c1d2ff203100869a65016ef06b8b33b",
+    ".grok-plugin/plugin.json": "5342aa04248ad3517cc83f3f796211cf4cef91f7",
+    ".kimi-plugin/marketplace.json": "449147eff3a8cc87b35973612660435dc9b2258d",
+    ".kimi-plugin/plugin.json": "6946d390165db4df4c04e37cd1217541b141a7bd",
     ".opencode/opencode.json": "4334d876deb48c6b00f018f3cf58d039e251f631",
     "hooks/hooks.json": "6644851e1e68579d4c06d96a443f82a1305e8f37"
   }
