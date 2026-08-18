@@ -22,6 +22,7 @@ SUITES=(
   "skills/ddl-guard/scripts"
   "skills/doc-gen/scripts"
   "skills/impact-guard/scripts"
+  "skills/skill-evo/scripts"
   "arch-hawkeye/scripts"
 )
 

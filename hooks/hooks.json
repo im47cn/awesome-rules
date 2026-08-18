@@ -1,5 +1,5 @@
 {
-  "description": "SessionStart 注入 steering 规范索引，使 AI 在相关任务时主动加载对应规范文件",
+  "description": "SessionStart 注入 steering 规范索引；SessionEnd 异步总结会话生成 skill-evo 进化提案",
   "hooks": {
     "SessionStart": [
       {
@@ -8,6 +8,17 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/load-steering.sh\""
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/on-session-end.sh\""
           }
         ]
       }
