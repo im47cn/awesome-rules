@@ -11,6 +11,7 @@ awesome-rules/
 │   ├── database-design-specification.md # 数据库设计规范（MySQL）
 │   ├── git-conventions.md             # Git 提交规范
 │   ├── testing-standards.md           # 测试规范
+│   ├── review-report-standards.md     # 审查报告输出规范
 │   └── gtsp/                          # GTSP 工程规范（Java/Spring Cloud，按维度拆分，含 DDD 架构）
 ├── skills/                            # AI Agent 技能
 │   ├── ddl-guard/                     # DDL 设计与审查
@@ -19,8 +20,10 @@ awesome-rules/
 │   ├── doc-gen/                       # DDD 技术文档自动生成（单项目）
 │   ├── impact-guard/                  # 变更影响分析（blast radius）
 │   ├── work-report/                   # 跨仓库工作日报/周报
-│   └── alibabacloud-devops/           # 云效 DevOps 工具集
+│   ├── alibabacloud-devops/           # 云效 DevOps 工具集
+│   └── skill-evo/                     # 会话经验自动总结与规范进化（Hermes 式自进化闭环）
 ├── arch-hawkeye/                      # 架构鹰眼：全局架构观测与治理（消费 doc-gen manifest）
+├── hooks/                             # Claude Code hooks（SessionStart 规范索引 + SessionEnd 会话总结）
 ├── scripts/                           # 工具脚本
 │   ├── badcase_runner.py              # Badcase 回归测试
 │   └── plugin_lock.py                 # 插件安装入口 blob 锁定（zero-regression 门禁）
@@ -50,6 +53,7 @@ awesome-rules/
 | [数据库设计规范](steering/database-design-specification.md) | MySQL DDL/DML 设计标准：表、字段、索引、注释、SQL 语句，按【强制】【推荐】分级 |
 | [Git 提交规范](steering/git-conventions.md) | 分支命名、Commit 格式、MR 约定 |
 | [测试规范](steering/testing-standards.md) | 测试编写与审查标准 |
+| [审查报告输出规范](steering/review-report-standards.md) | 审查结论输出结构（guard 技能人工判断部分、CR 评审意见） |
 
 ### GTSP 工程规范（`steering/gtsp/`，编码阶段）
 
@@ -68,6 +72,7 @@ Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分�
 | [impact-guard](skills/impact-guard/README.md) | 变更影响分析（blast radius），按直接/间接 + GTSP 5 通道分级 |
 | [work-report](skills/work-report/README.md) | 跨仓库工作日报/周报自动生成（3 种受众模板） |
 | [alibabacloud-devops](skills/alibabacloud-devops/SKILL.md) | 阿里云云效 DevOps 工具集（Codeup/流水线/工作项，mcporter 代理） |
+| [skill-evo](skills/skill-evo/README.md) | 会话经验自动总结与规范进化：CC/omp 会话结束自动提炼经验生成提案，人工审核应用；GEPA 引擎进化自身（Hermes 式自进化闭环） |
 
 **独立工程**（非技能，随仓库发布）：
 
@@ -83,6 +88,9 @@ Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分�
 | --- | --- |
 | [doc-gen 可信化改造](docs/design/doc-gen-contract-design.md) | Manifest Schema 契约 + 诚实退出码/receipt + revision-pinned evidence（已落地） |
 | [impact-guard 技术设计](docs/design/impact-guard-design.md) | 变更影响分析（blast radius）完整论证与 grill 决策（评审稿） |
+| [arch-guard 演进设计](docs/design/arch-guard-evolution-design.md) | ArchUnit 试点演进（Tier 1 巡检 + Tier 2 字节码双跑互补） |
+| [guard 收据规范](docs/design/guard-receipt-spec.md) | 审查报告 receipt（收据）通用规范 |
+| [skill-evo 技术设计](docs/design/skill-evo-design.md) | Hermes 式会话经验进化闭环 + GEPA 引擎（含竞态修复记录，已实现） |
 
 ## 安装
 
