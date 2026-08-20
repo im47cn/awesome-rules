@@ -10,6 +10,7 @@ description: >
 # DDD 架构分层守护
 
 ## 两层架构
+- Tier 1 正则仅检查 import 语句，无法发现内联全限定名引用、字段类型与构造器参数类型的逆向依赖；试点实测 ArchUnit（字节码）能抓到此类证据——重要项目建议 Tier 1 巡检与 ArchUnit 生成测试双跑互补
 
 | 层级                 | 工具                              | 精度                          | 适用场景                         |
 | -------------------- | --------------------------------- | ----------------------------- | -------------------------------- |
@@ -23,6 +24,7 @@ description: >
 - 输出完整的证据链（caller → callee）
 
 ## 接入工作流（推荐）
+- 接入前先用 `mvn test` 验证项目可独立编译：GTSP 试点实测发现公共依赖（如 fss-common 的 lombok）声明为 `provided` 不传递，部分项目纯 `mvn test` 从未通过（团队平时靠 IDE），需先在项目 pom 补齐缺失的 provided 依赖再接入 ArchUnit 测试
 
 存量项目优先使用基线机制——**历史债务容忍，增量腐化零容忍**。
 
@@ -41,6 +43,7 @@ python3 scripts/arch_check.py . --baseline .arch-guard-baseline.json --strict --
 自然收敛到零，无需重新生成；`--frozen` 三态校验：基线缺失/损坏 → exit 2（防 CI 误建吞违规/坏文件静默放行），合法空基线 = 债务已还清，正常放行（对齐 ArchUnit 空 store 全绿）。
 
 ## 审查工作流
+- 被审项目 HEAD 自带的坏测试阻塞编译时（历史遗留的编译错误测试类）：不修改用户代码，临时移出编译路径，跑完守护检查后原样恢复，并在报告中注明移出清单
 
 ### Tier 1: 快速巡检（脚本）
 
@@ -110,6 +113,7 @@ JSON 输出（`--format json`）顶层携带 `receipt` 收据信封，规范见 
 text 输出在所有路径（含通过早退分支）末尾投影「── 证据边界 ──」段——**报告主动声明自身精度与盲区，防止被读者当成全面事实**。
 
 ## 配置文件
+- project_package_prefix 必须收紧到本项目业务包（如 com.wanlianyida.gtsp.wop.gateway），禁止使用公司级全局前缀（如 com.wanlianyida）：全局前缀会把 fss-api 等契约依赖类扫进 ArchUnit 分层规则产生误报
 
 自动生成（推荐）：
 
@@ -138,6 +142,7 @@ python3 scripts/arch_check.py . --init     # 从 pom.xml 推断 prefix，生成 
 | `module_suffixes`           | Maven 模块后缀 → 层映射（覆盖默认）                     |
 
 ## CI 集成
+- 修改 pom.xml 时注意：XML 注释内禁止出现 `--`（如把 CLI 参数写进注释 `--mode archunit` 会破坏 XML 结构导致解析失败），应改写为 `mode archunit` 等不含双连字符的措辞
 
 ```yaml
 # Tier 1: 存量容忍，增量零容忍（推荐）
