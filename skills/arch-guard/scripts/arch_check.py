@@ -22,6 +22,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict
@@ -998,6 +999,7 @@ def run(project_root: str, strict: bool = False, config_path: Optional[str] = No
     recommended_count = sum(1 for i in deduped if not strict and i.severity == Severity.RECOMMENDED)
     structural_debt_count = sum(1 for i in deduped if i.severity == Severity.STRUCTURAL_DEBT)
 
+    commit_sha, dirty = _commit_binding(project_root)
     stats = {
         "java_files_total": len(java_files),
         "java_files_classified": classified_count,
@@ -1007,6 +1009,10 @@ def run(project_root: str, strict: bool = False, config_path: Optional[str] = No
         "baseline_retired": retired_count,
         "structural_debt_count": structural_debt_count,
         "warnings": list(_warnings),
+        # §4 内容绑定：收据结论钉在项目 git 提交切面上（stale/dirty 即无权威性）
+        "project_root": project_root,
+        "commit_sha": commit_sha,
+        "dirty": dirty,
     }
 
     return deduped, mandatory_count, recommended_count, stats
@@ -1099,21 +1105,45 @@ _TIER1_NOT_ANALYZED = [
 ]
 
 
+def _commit_binding(project_root: str) -> Tuple[Optional[str], Optional[bool]]:
+    """项目 git 提交切面（guard-receipt-spec §4）：
+
+    返回 (commit_sha, dirty)：HEAD 的 40 位原生 sha 与工作区相对 HEAD 是否有差异
+    （含未跟踪文件——Tier1 按文件系统扫描，未跟踪文件同样进入分析）。
+    非 git 仓库 / git 不可用 → (None, None)，消费方按 fail-closed 视为无权威性。
+    """
+    try:
+        sha = subprocess.run(["git", "-C", project_root, "rev-parse", "HEAD"],
+                             capture_output=True, text=True, timeout=10)
+        if sha.returncode != 0:
+            return None, None
+        st = subprocess.run(["git", "-C", project_root, "status", "--porcelain"],
+                            capture_output=True, text=True, timeout=10)
+        return sha.stdout.strip() or None, bool(st.stdout.strip())
+    except (OSError, subprocess.TimeoutExpired):
+        return None, None
+
+
 def _build_receipt(issues: List[Issue], mandatory_count: int,
                    stats: Optional[Dict] = None,
                    baseline_path: Optional[str] = None) -> Dict:
-    """收据信封：decision（门禁结论+原因码）/ provenance / boundary（证据边界）。"""
+    """收据信封：decision / provenance / boundary / verified（§4 内容绑定）。"""
     s = stats or {}
     reason_codes = sorted({i.rule_code for i in issues
                            if i.severity == Severity.MANDATORY and i.rule_code})
     degraded = ["tier1_file_level_heuristic"]
     if s.get("java_files_unclassified", 0):
         degraded.append("unclassified_java_files")
+    verified = [{"check_id": "tier1_scan",
+                 "subject": s.get("project_root", "."),
+                 "commit_sha": s.get("commit_sha"),
+                 "dirty": s.get("dirty")}]
     return {
         "tool": "arch-guard",
         "schema_version": 1,
         "decision": {"gate": "block" if mandatory_count else "pass",
                      "reason_codes": reason_codes},
+        "verified": verified,
         "provenance": {
             "tier": 1,
             "java_files": s.get("java_files_total", 0),

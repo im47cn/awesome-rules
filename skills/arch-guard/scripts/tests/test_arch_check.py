@@ -622,10 +622,34 @@ def test_format_json_receipt_envelope():
     assert "tier1_file_level_heuristic" in r["boundary"]["degraded"]
     assert "unclassified_java_files" in r["boundary"]["degraded"]
     assert "aggregate_design" in r["boundary"]["not_analyzed"]
+    # §4 内容绑定：verified 恒有 tier1_scan 条目，字段取自 stats
+    stats2 = dict(stats, commit_sha="a" * 40, dirty=False, project_root="/p")
+    r2 = json.loads(arch_check.format_json(
+        issues, 1, 0, stats=stats2))["receipt"]
+    assert r2["verified"] == [{"check_id": "tier1_scan", "subject": "/p",
+                               "commit_sha": "a" * 40, "dirty": False}]
     # 无强制问题 → pass
     ok = json.loads(arch_check.format_json([], 0, 0))
     assert ok["receipt"]["decision"]["gate"] == "pass"
     assert ok["receipt"]["decision"]["reason_codes"] == []
+    assert ok["receipt"]["verified"][0]["commit_sha"] is None   # 无绑定 → None
+
+
+def test_commit_binding_git_semantics(tmp_path):
+    """§4 提交切面：非 git 目录 (None, None)；git 仓库 sha + dirty（含未跟踪）。"""
+    import subprocess as sp
+    assert arch_check._commit_binding(str(tmp_path)) == (None, None)
+    sp.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    sp.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
+    sp.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
+    (tmp_path / "A.java").write_text("class A {}", encoding="utf-8")
+    sp.run(["git", "add", "."], cwd=tmp_path, check=True)
+    sp.run(["git", "commit", "-qm", "init"], cwd=tmp_path, check=True)
+    sha, dirty = arch_check._commit_binding(str(tmp_path))
+    assert len(sha) == 40 and dirty is False
+    (tmp_path / "A.java").write_text("class A2 {}", encoding="utf-8")  # 已跟踪修改
+    sha2, dirty2 = arch_check._commit_binding(str(tmp_path))
+    assert sha2 == sha and dirty2 is True
 
 
 def test_format_text_boundary_footer():

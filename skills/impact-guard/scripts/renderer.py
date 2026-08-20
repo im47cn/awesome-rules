@@ -1,7 +1,11 @@
 """Renderer — text / json / mermaid 三态渲染"""
 
+from __future__ import annotations
+
 import json
 import re
+import subprocess
+from typing import Optional, Tuple
 
 from critical_ranker import LEVEL_ICONS
 
@@ -10,14 +14,35 @@ def _short(qn: str) -> str:
     return qn.rsplit(".", 1)[-1] if "." in qn else qn
 
 
+def commit_binding(root) -> Tuple[Optional[str], Optional[bool]]:
+    """项目 git 提交切面（guard-receipt-spec §4）：
+
+    返回 (commit_sha, dirty)：HEAD 的 40 位原生 sha 与工作区相对 HEAD 是否有差异
+    （含未跟踪文件——guard 按文件系统扫描，未跟踪文件同样进入分析）。
+    非 git 仓库 / git 不可用 → (None, None)，消费方按 fail-closed 视为无权威性。
+    """
+    try:
+        sha = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
+                             capture_output=True, text=True, timeout=10)
+        if sha.returncode != 0:
+            return None, None
+        st = subprocess.run(["git", "-C", str(root), "status", "--porcelain"],
+                            capture_output=True, text=True, timeout=10)
+        return sha.stdout.strip() or None, bool(st.stdout.strip())
+    except (OSError, subprocess.TimeoutExpired):
+        return None, None
+
+
 # ── json（机读：CI / Agent）───────────────────────────────────────────────────
 
 
 def build_receipt(report, tier=1, strict=False, diff_range=None,
                   changed_points=0, scanned_classes=0,
-                  config_source="auto", boundary_channels=None):
+                  config_source="auto", boundary_channels=None,
+                  commit_sha=None, dirty=None):
     """构建收据信封（docs/design/guard-receipt-spec.md）：
-    decision（门禁结论+原因码）/ provenance（数据来源）/ boundary（证据边界声明）。"""
+    decision（门禁结论+原因码）/ provenance（数据来源）/ boundary（证据边界声明）/
+    verified（§4 内容绑定：结论钉在项目 git 提交切面上，stale/dirty 即无权威性）。"""
     reason_codes = []
     if report.level == "DIRECT":
         reason_codes.append("direct_boundary_hit")
@@ -34,10 +59,14 @@ def build_receipt(report, tier=1, strict=False, diff_range=None,
     not_analyzed = ["reflection_dynamic_dispatch"]
     if report.cross_service:
         not_analyzed.append("cross_service_downstream")
+    verified = [{"check_id": "impact_analysis",
+                 "subject": diff_range or "explicit --changed files",
+                 "commit_sha": commit_sha, "dirty": dirty}]
     return {
         "tool": "impact-guard",
         "schema_version": 1,
         "decision": {"gate": gate, "reason_codes": reason_codes},
+        "verified": verified,
         "provenance": {
             "tier": tier,
             "diff_range": diff_range,

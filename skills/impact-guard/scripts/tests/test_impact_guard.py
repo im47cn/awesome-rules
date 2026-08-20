@@ -11,7 +11,7 @@ from change_extractor import ChangeExtractor
 from critical_ranker import CriticalRanker
 from graph_tracer import build_cypher, current_head
 from impact_scanner import ImpactScanner
-from renderer import build_receipt, render_json, render_mermaid, render_text
+from renderer import build_receipt, commit_binding, render_json, render_mermaid, render_text
 
 QN = {
     "agg": "com.acme.demo.domain.order.OrderAgg",
@@ -330,6 +330,39 @@ class TestRenderer:
         stub = types.SimpleNamespace(level="INFO", cross_service=[], changes=[])
         r = build_receipt(stub, tier=2)
         assert r["boundary"]["degraded"] == []
+
+    def test_receipt_verified_commit_binding(self):
+        """§4 内容绑定：verified 绑 (check_id, subject, commit_sha, dirty)。"""
+        stub = types.SimpleNamespace(level="INFO", cross_service=[], changes=[])
+        sha = "a" * 40
+        r = build_receipt(stub, diff_range="origin/master...HEAD",
+                          commit_sha=sha, dirty=False)
+        assert r["verified"] == [{"check_id": "impact_analysis",
+                                  "subject": "origin/master...HEAD",
+                                  "commit_sha": sha, "dirty": False}]
+        # 显式 --changed 无 diff_range；未提供绑定时字段为 None（fail-closed 默认）
+        r2 = build_receipt(stub, commit_sha=sha, dirty=True)
+        assert r2["verified"][0]["subject"] == "explicit --changed files"
+        assert r2["verified"][0]["dirty"] is True
+        assert build_receipt(stub)["verified"] == [
+            {"check_id": "impact_analysis", "subject": "explicit --changed files",
+             "commit_sha": None, "dirty": None}]
+
+    def test_commit_binding_git_semantics(self, tmp_path):
+        """commit_binding：非 git 目录 → (None, None)；git 仓库 → sha + dirty 语义。"""
+        import subprocess as sp
+        assert commit_binding(tmp_path) == (None, None)      # 非 git 目录
+        sp.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+        sp.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
+        sp.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
+        (tmp_path / "a.java").write_text("class A {}", encoding="utf-8")
+        sp.run(["git", "add", "."], cwd=tmp_path, check=True)
+        sp.run(["git", "commit", "-qm", "init"], cwd=tmp_path, check=True)
+        sha, dirty = commit_binding(tmp_path)
+        assert len(sha) == 40 and dirty is False
+        (tmp_path / "b.java").write_text("class B {}", encoding="utf-8")  # 未跟踪
+        sha2, dirty2 = commit_binding(tmp_path)
+        assert sha2 == sha and dirty2 is True              # 未跟踪文件同样计入 dirty
 
     def test_text_boundary_footer(self, scanned):
         report = self._report(scanned)
