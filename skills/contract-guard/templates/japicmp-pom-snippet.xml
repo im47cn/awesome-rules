@@ -1,0 +1,68 @@
+<!-- 跨仓契约门禁 japicmp 配置(已在 gtsp-wop-service 仓实测验证, 2026-08-20)
+     结构: 父 pom pluginManagement 放公共参数; 契约模块各自声明插件并配 oldVersion(file.path)
+
+     ===== 三个实测踩坑(违反任一即门禁静默失效) =====
+     1. oldVersion/newVersion 是复杂类型 Version{dependency,file}, 字符串直传报
+        "Cannot find default setter in class japicmp.maven.Version"; file 内层字段名是 path
+     2. 严禁在 pom <properties> 给 contract.baseline.version 设默认值——
+        POM properties 会遮蔽 CLI -D 注入(Maven 已知行为), baseline 恒为当前版本、门禁恒绿
+     3. oldVersion 禁用 GAV(dependency) 形式——同坐标 GAV 在多模块构建内会被 aether reactor
+        命中当前模块自身产物(target jar), 自比自恒绿; 必须用 file.path 直指 m2 的 baseline jar,
+        且版本须是 timestamp 形式(如 1.0-20260819.071525-7), 不能写 1.0-SNAPSHOT
+-->
+
+<!-- ===== 父 pom: properties ===== -->
+<!--
+<properties>
+  <japicmp.skip>true</japicmp.skip>
+</properties>
+-->
+
+<!-- ===== 父 pom: pluginManagement(公共参数, 不含 oldVersion) ===== -->
+<!--
+<plugin>
+  <groupId>com.github.siom79.japicmp</groupId>
+  <artifactId>japicmp-maven-plugin</artifactId>
+  <version>0.23.1</version>
+  <configuration>
+    <skip>${japicmp.skip}</skip>
+    <parameter>
+      <onlyModified>true</onlyModified>
+      <breakBuildOnBinaryIncompatibleModifications>true</breakBuildOnBinaryIncompatibleModifications>
+      <breakBuildOnSourceIncompatibleModifications>true</breakBuildOnSourceIncompatibleModifications>
+      <ignoreMissingClasses>true</ignoreMissingClasses>
+      <excludes>
+        <exclude>*.internal.*</exclude>
+      </excludes>
+    </parameter>
+  </configuration>
+  <executions>
+    <execution>
+      <id>japicmp-contract-gate</id>
+      <phase>verify</phase>
+      <goals><goal>cmp</goal></goals>
+    </execution>
+  </executions>
+</plugin>
+-->
+
+<!-- ===== 契约模块 pom: 声明插件 + oldVersion 直指 m2 baseline jar ===== -->
+<!-- artifactId 与 m2 路径按模块替换 -->
+<!--
+<plugin>
+  <groupId>com.github.siom79.japicmp</groupId>
+  <artifactId>japicmp-maven-plugin</artifactId>
+  <configuration>
+    <oldVersion>
+      <file>
+        <path>${settings.localRepository}/com/wanlianyida/<模块artifactId>/1.0-SNAPSHOT/<模块artifactId>-${contract.baseline.version}.jar</path>
+      </file>
+    </oldVersion>
+  </configuration>
+</plugin>
+-->
+
+<!-- CI 命令(上游仓流水线):
+     mvn verify -pl <契约模块...> -Djapicmp.skip=false -Dcontract.baseline.version=$(baseline)
+     构建绿后用本次 SNAPSHOT timestamp 更新 baseline 制品库变量;
+     CI 需先 dependency:get 将 baseline jar 拉到 m2(file.path 不做远程解析) -->

@@ -1,0 +1,57 @@
+# 云效 Flow 跨仓契约门禁流水线骨架
+# 上游仓(service): 变更检测 → deploy 契约模块 → 触发下游契约编译
+# 下游仓(gateway): 最小契约编译流水线(mvn -U clean test-compile)
+#
+# 接入前须确认(规范 cross-repo-contract-standards.md「外部依赖假设」):
+#   1. 云效私服保留历史 SNAPSHOT(japicmp baseline 依赖); 不保留则 baseline 改制品库缓存 jar
+#   2. 组织级开启跨仓流水线触发权限
+#
+# 以下为云效 Flow yaml 化编排骨架, 字段以控制台导出格式为准, 含 <占位符> 处需按仓替换
+
+# ==================== 上游仓: 契约发布流水线 ====================
+# 触发: MR / 合并到默认分支
+upstream-pipeline:
+  name: "<上游仓名>-contract-publish"
+  sources:
+    - type: codeup
+      repo: "<上游仓 codeup 仓库>"
+      branch: "<上游分支>"
+  stages:
+    - name: "契约门禁"
+      jobs:
+        - job1_detect: # 变更路径检测: 只有契约模块变更才走后续
+            steps:
+              - run: |
+                  CHANGED=$(git diff --name-only origin/${BASE_REF}...HEAD)
+                  echo "$CHANGED" | grep -E '^<契约模块路径, 如 gtsp-wop-service-api>' && export CONTRACT_CHANGED=1
+                  echo "$CHANGED" | grep -E '^<契约模块路径, 如 gtsp-wop-service-api-gateway>' && export CONTRACT_CHANGED=1
+                  # 云效环境变量导出方式按实际 runner 调整; 无变更时跳过 job2/job3
+        - job2_gate_and_deploy: # japicmp 门禁 + 刷私服 SNAPSHOT
+            steps:
+              - run: |
+                  mvn verify -pl <契约模块1>,<契约模块2> -am \
+                    -Djapicmp.skip=false \
+                    -Dcontract.baseline.version=${CONTRACT_BASELINE}
+                  # 门禁绿后 deploy, 并将本次 SNAPSHOT timestamp 写回 baseline 制品库变量
+                  mvn deploy -pl <契约模块1>,<契约模块2>
+        - job3_trigger_downstream: # 下游契约编译触发
+            steps:
+              - triggerPipeline: "<下游仓 契约编译流水线>"
+                # 分支映射必须走配置(上下游分支不保证同名), 映射表存流水线变量组:
+                #   BRANCH_MAP: feature/20260812-open_platform_v1=feature_20260808_init,...
+
+# ==================== 下游仓: 契约编译流水线 ====================
+# 独立最小流水线, 只验证"最新契约 SNAPSHOT 下我仍能编译+契约测试通过"
+downstream-pipeline:
+  name: "<下游仓名>-contract-compile"
+  sources:
+    - type: codeup
+      repo: "<下游仓 codeup 仓库>"
+      branch: "${BRANCH_FROM_MAP}"  # 由上游触发时按 BRANCH_MAP 注入, 日常手动跑用默认分支
+  stages:
+    - name: "契约编译"
+      jobs:
+        - steps:
+            - run: mvn -U clean test-compile   # -U 强拉最新契约 SNAPSHOT, 字段被拆当场红
+            - run: mvn test -Dtest='<契约相关测试, 如 *Contract*Test>'
+  # 失败必须回写上游 MR(commit status / 评论); 仅本流水线红而上游无感知 = 门禁失效
