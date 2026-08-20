@@ -26,14 +26,23 @@ upstream-pipeline:
                   echo "$CHANGED" | grep -E '^<契约模块路径, 如 gtsp-wop-service-api>' && export CONTRACT_CHANGED=1
                   echo "$CHANGED" | grep -E '^<契约模块路径, 如 gtsp-wop-service-api-gateway>' && export CONTRACT_CHANGED=1
                   # 云效环境变量导出方式按实际 runner 调整; 无变更时跳过 job2/job3
-        - job2_gate_and_deploy: # japicmp 门禁 + 刷私服 SNAPSHOT
+        - job2_gate_and_deploy: # japicmp 门禁 + 对比对象自检 + 刷私服 SNAPSHOT
             steps:
               - run: |
                   mvn verify -pl <契约模块1>,<契约模块2> -am \
                     -Djapicmp.skip=false \
                     -Dcontract.baseline.version=${CONTRACT_BASELINE}
+                  # 门禁自检【强制】(规范 cross-repo-contract-standards.md「门禁自检」):
+                  # 对比对象 A≠B, 防止 reactor 自比自/属性遮蔽导致的静默恒绿
+                  for d in <契约模块1>/target/japicmp <契约模块2>/target/japicmp; do
+                    head -1 $d/*.diff | sed -E 's/.*of (.+) against (.+)$/\1|\2/' \
+                      | awk -F'|' '{ if ($1 == $2) { print "门禁失效: 自比自 " $1; exit 1 } }'
+                  done
                   # 门禁绿后 deploy, 并将本次 SNAPSHOT timestamp 写回 baseline 制品库变量
                   mvn deploy -pl <契约模块1>,<契约模块2>
+        # 接入验收(一次性, 不入日常流水线): 用已知含破坏性变更的 baseline 跑一次,
+        # 断言 BUILD FAILURE 且错误含 METHOD_REMOVED/incompatible —— 本次 gtsp-wop-service
+        # 接入已用 baseline=1.0-20260819.071525-7 完成验收(检出 AppSecretDTO.getAppSecret 移除)
         - job3_trigger_downstream: # 下游契约编译触发
             steps:
               - triggerPipeline: "<下游仓 契约编译流水线>"

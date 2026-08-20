@@ -82,6 +82,20 @@ inclusion: always
 
 豁免记录每季度复盘一次：豁免后下游是否完成迁移、豁免是否可回收。
 
+## 门禁自检【强制】
+
+假门禁（看起来在跑、实际恒绿）比没有门禁更危险——三个实测坑（properties 遮蔽 CLI 注入、
+reactor 自比自、配置形式错误）全部表现为**静默恒绿**而非报错。因此：
+
+1. **对比对象断言**（每次契约门禁运行顺带执行，零额外成本）：门禁绿后检查
+   `target/japicmp/*.diff` 首行，`Comparing source compatibility of <A> against <B>`
+   中 **A ≠ B**（A 应为当前构建产物、B 应为 m2 的 baseline jar）。A == B 即自比自，
+   门禁已失效，流水线按失败处理。
+2. **接入验收**（一次性）：用一份已知含破坏性变更的 baseline（相对当前代码有 public API
+   移除的历史版本）跑门禁，断言必须 `BUILD FAILURE` 且错误信息含 `METHOD_REMOVED`/
+   `incompatible` 等破坏标志。未做过此验收的门禁视为未接入。
+3. **环境变更重验**：升级 Maven/japicmp 版本或调整仓库结构后，重跑第 2 条验收。
+
 ## 本地 hook 的定位
 
 commit hook 仅做防呆提示（检测到契约模块 diff 时打印提醒"走 CI 门禁 + 通知下游"），
