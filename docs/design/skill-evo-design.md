@@ -153,7 +153,7 @@ append-only + supersedes 修正链），只取语义层不复刻其事件溯源�
   护栏警告；来源会话缺失 → 仅提示不阻断（旧提案兼容）。人工抽查 evidence 真实性
   （2026-08-19 曾逐条抽查）由此变成脚本核验
 
-### 6.4 目标资产扩展：各层 README + CLAUDE.md（2026-08-20）
+### 6.5 目标资产扩展：各层 README + CLAUDE.md（2026-08-20）
 
 - 白名单扩展：根 `README.md`（索引表）与根 `CLAUDE.md`（AI 操作指引）纳入
   `validate_target` 与目标资产清单；skills/steering 下的 README 本就在前缀范围内
@@ -165,7 +165,7 @@ append-only + supersedes 修正链），只取语义层不复刻其事件溯源�
 - 个人记忆**不纳入**：职责边界——个人偏好归记忆系统（claude-mem / auto-memory），
   skill-evo 只进团队可共享的 git 资产
 
-### 6.5 v3 候选（YAGNI，暂不做）
+### 6.6 v3 候选（YAGNI，暂不做）
 
 - 跨会话相似 lesson 合并（当前仅做精确内容去重，相似度合并待重复真实发生再立项）
 - replace 语义（改写既有条款，需更强护栏：diff 审阅界面 + steering 强制条款削弱检测）
