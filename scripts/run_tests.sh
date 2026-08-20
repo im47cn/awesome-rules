@@ -24,6 +24,7 @@ SUITES=(
   "skills/impact-guard/scripts"
   "skills/skill-evo/scripts"
   "arch-hawkeye/scripts"
+  "scripts"
 )
 
 FAILED=()
@@ -49,6 +50,10 @@ if [ "${1:-}" != "--no-lock" ]; then
   echo "── plugin_lock"
   if ! "$PY" scripts/plugin_lock.py; then
     FAILED+=("plugin_lock")
+  fi
+  echo "── md_link_check"
+  if ! "$PY" scripts/md_link_check.py; then
+    FAILED+=("md_link_check")
   fi
 fi
 

@@ -54,6 +54,7 @@ awesome-rules/
 | [Git 提交规范](steering/git-conventions.md) | 分支命名、Commit 格式、MR 约定 |
 | [测试规范](steering/testing-standards.md) | 测试编写与审查标准 |
 | [审查报告输出规范](steering/review-report-standards.md) | 审查结论输出结构（guard 技能人工判断部分、CR 评审意见） |
+| [跨仓契约兼容性规范](steering/cross-repo-contract-standards.md) | 变更被其他仓库依赖的 API 模块/契约门禁（japicmp、下游编译触发） |
 
 ### GTSP 工程规范（`steering/gtsp/`，编码阶段）
 
@@ -73,6 +74,7 @@ Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分�
 | [work-report](skills/work-report/README.md) | 跨仓库工作日报/周报自动生成（3 种受众模板） |
 | [alibabacloud-devops](skills/alibabacloud-devops/SKILL.md) | 阿里云云效 DevOps 工具集（Codeup/流水线/工作项，mcporter 代理） |
 | [skill-evo](skills/skill-evo/README.md) | 会话经验自动总结与规范进化：CC/omp 会话结束自动提炼经验生成提案，人工审核应用；GEPA 引擎进化自身（Hermes 式自进化闭环） |
+| [contract-guard](skills/contract-guard/SKILL.md) | 跨仓契约兼容性设计与审查（japicmp + 下游编译门禁，配 steering 跨仓契约规范） |
 
 **独立工程**（非技能，随仓库发布）：
 
