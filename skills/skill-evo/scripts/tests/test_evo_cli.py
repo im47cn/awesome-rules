@@ -191,7 +191,59 @@ def test_list_apply_reject_flow(tmp_path, monkeypatch, capsys):
     assert list((base / "proposals" / "rejected").glob("*.md"))
 
 
+def test_apply_evidence_miss_requires_force(tmp_path, monkeypatch, capsys):
+    """evidence 未命中来源会话 → list 标 ✗、apply 阻断，--force 越过。"""
+    cfg, base, repo = make_env(tmp_path, monkeypatch)
+    src = tmp_path / "s-evcheck.jsonl"
+    cc_fixture(src, cwd=str(tmp_path / "demo-repo"), extra_users=2, sid=src.stem)
+    p = PR.Proposal(id="20260818-140000-cc-cccc9999", source_agent="cc",
+                    source_session="s", source_path=str(src), created="T",
+                    lessons=[PR.Lesson(
+                        type="correction", evidence="会话中不存在的引用",
+                        target_file="steering/demo-spec.md",
+                        confidence="High", reason="r", change=PR.Change(
+                            action="append_end", new_text="- 证据核验测试条款"))])
+    PR.write_proposal(p, base / "proposals" / "pending")
 
+    assert evo.cmd_list(SimpleNamespace()) == 0
+    assert "✗" in capsys.readouterr().out
+
+    assert evo.cmd_apply(SimpleNamespace(id="20260818-14", dry_run=False, force=False)) == 1
+    assert "- 证据核验测试条款" not in (repo / "steering" / "demo-spec.md").read_text(encoding="utf-8")
+    assert evo.cmd_apply(SimpleNamespace(id="20260818-14", dry_run=False, force=True)) == 0
+    assert "- 证据核验测试条款" in (repo / "steering" / "demo-spec.md").read_text(encoding="utf-8")
+
+
+def test_apply_evidence_hit_passes(tmp_path, monkeypatch, capsys):
+    """evidence 逐字命中来源会话 → list 标 ✓、apply 直接通过（无需 force）。"""
+    cfg, base, repo = make_env(tmp_path, monkeypatch)
+    src = tmp_path / "s-evok.jsonl"
+    cc_fixture(src, cwd=str(tmp_path / "demo-repo"), extra_users=2, sid=src.stem)
+    # evidence 逐字取自会话首条用户消息（fixture 固定内容）
+    p = PR.Proposal(id="20260818-150000-cc-dddd8888", source_agent="cc",
+                    source_session="s", source_path=str(src), created="T",
+                    lessons=[PR.Lesson(
+                        type="correction", evidence="帮我审查这个 DDL",
+                        target_file="steering/demo-spec.md",
+                        confidence="High", reason="r", change=PR.Change(
+                            action="append_end", new_text="- 证据命中的测试条款"))])
+    PR.write_proposal(p, base / "proposals" / "pending")
+    assert evo.cmd_list(SimpleNamespace()) == 0
+    assert "✓" in capsys.readouterr().out
+    assert evo.cmd_apply(SimpleNamespace(id="20260818-15", dry_run=False, force=False)) == 0
+
+
+def test_session_corpus_tolerates_parse_failure(tmp_path, monkeypatch):
+    """来源会话解析异常 → 语料为空（no_corpus），不抛栈。"""
+    src = tmp_path / "s-broken.jsonl"
+    src.write_text('{"type":"session"}\n', encoding="utf-8")
+    p = PR.Proposal(id="x", source_agent="omp", source_session="s",
+                    source_path=str(src), created="T", lessons=[])
+    assert evo._session_corpus(p) == ""            # 合法但无消息 → 空语料
+    monkeypatch.setattr(evo.S, "parse_session", lambda *a: (_ for _ in ()).throw(ValueError("bad")))
+    assert evo._session_corpus(p) == ""            # 解析异常 → 空语料兜底
+    p.source_path = str(tmp_path / "absent.jsonl")
+    assert evo._session_corpus(p) == ""            # 文件缺失 → 空语料
 
 
 def test_dry_run_prompt_written(tmp_path, monkeypatch):

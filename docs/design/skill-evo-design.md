@@ -1,6 +1,6 @@
 # skill-evo 技术设计文档
 
-> **状态**：已实现（v2）· 单测 50 例全绿 · 待真实会话观察期验证
+> **状态**：已实现（v2）· 单测 60 例全绿 · 待真实会话观察期验证
 > **范围**：v2 = v1 + omp 原生触发 + GEPA 进化引擎（进化自身 SYSTEM_PROMPT）
 > **参考**：[NousResearch/hermes-agent-self-evolution](https://github.com/NousResearch/hermes-agent-self-evolution)（session 挖掘 + PR 人工审核护栏）、hermes-agent 本体（任务后自主创建/改进 skill）、[GEPA arXiv 2507.19457](https://arxiv.org/abs/2507.19457) · **日期**：2026-08-18
 
@@ -134,9 +134,28 @@ omp 原生 hook 首日即暴露 mtime 记账缺陷：SessionEnd flush 碰 mtime 
   状态已有该会话提案即跳过总结——内容增长的兜底防线，代价是尾部新增经验丢失
   （与「处理过即不再重提」取舍一致）
 
-### 6.4 v3 候选（YAGNI，暂不做）
+### 6.4 lesson 溯源三件套（2026-08-20，借鉴 harness-anything Fact 语义）
 
-- 跨会话 lesson 去重（同 target + 相似 text 合并）
+设计参考 harness-anything 的 Fact 实体（confidence 三档枚举 / provenance 结构化 /
+append-only + supersedes 修正链），只取语义层不复刻其事件溯源机制层：
+
+- **lesson_id 确定性派生**：`L- + sha256(target|type|new_text)[:8]`——内容相同 ID
+  相同（幂等），内容变化 ID 变化（自然演化为新 lesson）；write 时自动派生并持久化，
+  旧提案加载时按内容补派生（兼容）
+- **重复沉淀检测**：apply 时比对 applied 归档索引（`applied_lesson_ids`）与目标文件
+  现文——lesson_id 已应用、或 new_text 已逐字存在于目标文件 → 护栏警告（--force 越过）。
+  此前同会话重复提案靠人工「超集优先」判断（2026-08-19 首份驳回样本），现收敛为脚本判定
+- **supersedes 修正链**：不修改既有 lesson，新 lesson 填 `supersedes: L-XXXXXXXX`
+  （人工审核时填写）指向被修正的旧 lesson；引用不在 applied 归档或指向自身为硬错
+  （force 不可越过）——防拼写错，保演进链完整
+- **evidence 脚本核验**（`verify_evidence`）：evidence 对来源会话原文做空白与引号字形不敏感的
+  逐字命中（弯引号归一为直引号）（语料 = source_path 解析的消息文本脱敏拼接）。未命中（可疑编造）→ apply
+  护栏警告；来源会话缺失 → 仅提示不阻断（旧提案兼容）。人工抽查 evidence 真实性
+  （2026-08-19 曾逐条抽查）由此变成脚本核验
+
+### 6.5 v3 候选（YAGNI，暂不做）
+
+- 跨会话相似 lesson 合并（当前仅做精确内容去重，相似度合并待重复真实发生再立项）
 - replace 语义（改写既有条款，需更强护栏：diff 审阅界面 + steering 强制条款削弱检测）
 - 「新增 skill」级提案
 - guard skill 触发词（SKILL.md description）的 GEPA 进化——引擎已就绪，
@@ -144,7 +163,7 @@ omp 原生 hook 首日即暴露 mtime 记账缺陷：SessionEnd flush 碰 mtime 
 
 ## 7. 验证记录
 
-- 单测：50 例全绿（`python3 -m pytest skills/skill-evo/scripts/tests`，claude 调用全 mock）
+- 单测：60 例全绿（`python3 -m pytest skills/skill-evo/scripts/tests`，claude 调用全 mock）
 - `evo.py scan-omp`：对本机真实 `~/.omp/agent/sessions/` 的发现与 scope 过滤正常
 - `evo.py run --transcript <真实 CC 会话> --dry-run`：prompt 生成含目标索引与脱敏视图
 - omp hook 模板已安装至 `~/.omp/agent/hooks/pre/`，待自然会话结束验证 evo.log

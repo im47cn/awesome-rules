@@ -54,21 +54,31 @@ cp hooks/omp/skill-evo.ts ~/.omp/agent/hooks/pre/
 python3 scripts/evo.py list
 ```
 
-输出每个提案的 id、lessons（置信度 + 类型 + 目标文件）与护栏警告。
+输出每个提案的 id、lessons（lesson_id + 证据核验标记 + 置信度 + 类型 + 目标文件）与护栏警告。
+证据核验标记：`✓` = evidence 逐字命中来源会话原文；`✗` = 未命中（可疑编造，apply 会拦截）；
+`?` = 来源会话缺失无法核验。
 
 ### 第 2 步：逐条审核
 
 对每个 lesson 核对三点（AI 协助时必须打开提案原文展示）：
 
-1. **证据可追溯**：evidence 是否真出现在来源会话中（防幻觉）
+1. **证据可追溯**：evidence 是否真出现在来源会话中——`list`/`apply` 已自动做空白与引号字形不敏感的
+   逐字核验（脚本代人工抽查），`✗` 时仍应人工打开来源会话确认
 2. **目标合理**：target_file 与 heading 锚点是否是该经验的正确落点
 3. **变更得当**：new_text 是否与目标文件既有风格一致、无重复条款
 
 护栏规则（apply 会自动检查，命中则需 `--force`）：
 - new_text 含**【强制】**标记 → 强制级别是人工评审决策，自动化只能提【推荐】级内容
 - 置信度 Low → 建议先人工核实
+- **evidence 未命中来源会话**（✗）→ 可疑编造，需人工核实
+- **重复沉淀**：lesson_id（按 target|type|new_text 内容哈希确定性派生）已存在于 applied
+  归档，或 new_text 已逐字存在于目标文件 → 疑似同一教训重复提案
 - **steering 既有【强制】条款不可被削弱**——v1 仅支持追加（append_under/append_end），
   改写删除类变更一律驳回并等待人工直接编辑规范文件
+
+硬错（`--force` 不可越过）：`supersedes` 引用不在 applied 归档中的 lesson_id 或指向自身。
+修正既有 lesson 的方式不是改写，而是新 lesson 填写 `supersedes: L-XXXXXXXX` 指向旧
+lesson_id（人工审核时在提案 JSON 块中填写），保留完整的演进链。
 
 ### 第 3 步：应用或驳回
 

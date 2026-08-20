@@ -199,6 +199,23 @@ def _find_pending(cfg: dict, pid: str) -> Path:
     return hits[0]
 
 
+def _session_corpus(p: PR.Proposal) -> str:
+    """证据核验语料：来源会话的原始消息文本（脱敏后拼接）。缺失/解析失败返回空。"""
+    src = Path(p.source_path)
+    if not src.is_file():
+        return ""
+    try:
+        sess = S.parse_session(S.sniff_agent(src), src)
+        return "\n".join(P.sanitize(m.text) for m in sess.messages)
+    except Exception:
+        return ""
+
+
+def _evidence_warnings(checks: list) -> list:
+    return [f"lesson {i}: evidence 未在来源会话中命中（可疑编造，需人工核实，--force 可越过）"
+            for i, status in checks if status == "miss"]
+
+
 def cmd_list(args) -> int:
     cfg = C.load_config()
     paths = C.base_paths(cfg)
@@ -210,8 +227,13 @@ def cmd_list(args) -> int:
         print(f"{p.id}  [{len(p.lessons)} lessons]")
         for w in p.warnings():
             print(f"  ⚠ {w}")
-        for ls in p.lessons:
-            print(f"  - [{ls.confidence}] {ls.type} → {ls.target_file}")
+        checks = dict(PR.verify_evidence(p, _session_corpus(p)))
+        marks = {"hit": "✓", "miss": "✗", "no_corpus": "?"}
+        for i, ls in enumerate(p.lessons, 1):
+            mark = marks.get(checks.get(i, "no_corpus"), "?")
+            print(f"  - {mark} {ls.lesson_id or PR.derive_lesson_id(ls)} "
+                  f"[{ls.confidence}] {ls.type} → {ls.target_file}"
+                  + (f"（修正 {ls.supersedes}）" if ls.supersedes else ""))
     return 0
 
 
@@ -220,9 +242,15 @@ def cmd_apply(args) -> int:
     paths = C.base_paths(cfg)
     path = _find_pending(cfg, args.id)
     proposal = PR.load_proposal(path)
+    checks = PR.verify_evidence(proposal, _session_corpus(proposal))
+    for i, status in checks:
+        if status == "no_corpus":
+            print(f"ℹ lesson {i}: 来源会话缺失（{proposal.source_path}），evidence 无法核验")
     try:
         report = PR.apply_proposal(proposal, C.repo_root(),
-                                   dry_run=args.dry_run, force=args.force)
+                                   dry_run=args.dry_run, force=args.force,
+                                   applied_dir=paths["applied"],
+                                   extra_warnings=_evidence_warnings(checks))
     except PR.ApplyError as e:
         print(f"❌ 应用失败：{e}")
         return 1
