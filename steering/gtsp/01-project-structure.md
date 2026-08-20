@@ -112,6 +112,7 @@ gtsp-{域}-api/src/main/java/com/acme/{module}/
 - 不写 try-catch，异常交全局处理器
 
 ## 9. Application Service 层
+- 编排链路中过滤/短路判定应前置于高成本操作：先完成事件级过滤与订阅命中判定，确认存在有效下游后再发起补数等外部调用，避免补数后才发现无订阅或事件被过滤，造成无效处理与逻辑不内聚。
 
 - 事务边界在 AppService：写方法标 `@Transactional(rollbackFor = Exception.class)`，不得标在 DomainService/Controller
 - **Handler / Manager（可选）**：策略分发过多或跨用例编排复杂时，拆 `handler/`（后缀 `Handler`，按渠道/功能域实现策略）与 `manager/`（后缀 `Manager`，跨 Handler 编排）。AppService 持事务边界与分发入口，Handler/Manager 不开新事务；简单场景不引入（命名见 [02](02-naming.md)）
