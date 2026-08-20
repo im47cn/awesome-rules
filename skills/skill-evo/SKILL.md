@@ -126,8 +126,11 @@ python3 scripts/evo.py evolve             # 正式进化（预算默认 16 rollo
 
 ## 设计边界（v2）
 
-- 只做存量文件的**追加**，不做改写/删除，不做「新增 skill」级提案
-- 处理过的会话不再重提（state.json 按 id+mtime 去重；SessionEnd 尾部少量丢尾可接受）
+- 进化目标：`skills/**/*.md`、`steering/**/*.md`、根 `README.md`（索引表，表格感知追加）、
+  根 `CLAUDE.md`（AI 操作指引）；只做**追加**，不做改写/删除，不做「新增 skill」级提案
+- README 索引另有确定性兜底：`scripts/readme_index_check.py`（zero-drift 门禁，
+  已接入 `run_tests.sh`），磁盘新增技能/规范/设计文档而 README 未登记即红
+- 处理过的会话不再重提（state.json 内容哈希去重 + 单会话单提案守卫）
 - omp 触发优先用原生 hook（未安装时 CC 搭车扫描兜底）；`evo.py scan-omp` 可手动查看
 - GEPA 进化对象 v2 仅 `SYSTEM_PROMPT`；guard skill 触发词进化待数据积累后立项
 

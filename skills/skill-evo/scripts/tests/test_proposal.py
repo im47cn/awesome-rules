@@ -115,7 +115,36 @@ def test_apply_append_under(tmp_path):
     assert len(report) == 1
 
 
-def test_apply_append_end(tmp_path):
+def test_apply_append_under_table_aware(tmp_path):
+    """表格感知追加：标题下是表格时插到末行之后，不破坏表头。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text(
+        "# 索引\n\n## 技能（skills/）\n\n| 技能 | 说明 |\n| --- | --- |\n"
+        "| [a](skills/a/README.md) | A |\n| [b](skills/b/README.md) | B |\n\n## 其他\n\n文字\n",
+        encoding="utf-8")
+    p = make_proposal(tmp_path, lessons=[make_lesson(
+        target_file="README.md", change=PR.Change(
+            action="append_under", heading="## 技能（skills/）",
+            new_text="| [c](skills/c/README.md) | C |"))])
+    PR.apply_proposal(p, repo)
+    content = (repo / "README.md").read_text(encoding="utf-8")
+    assert "| [b](skills/b/README.md) | B |\n| [c](skills/c/README.md) | C |\n" in content
+    assert content.index("| [c]") > content.index("| [b]")           # 在表格末行后
+    assert content.index("| [c]") < content.index("## 其他")         # 未越出该节
+    # 非表格标题行为不变（原 test_apply_append_under 覆盖）
+
+
+def test_validate_target_root_files(tmp_path):
+    make_repo(tmp_path)
+    (tmp_path / "README.md").write_text("# r\n", encoding="utf-8")
+    (tmp_path / "CLAUDE.md").write_text("# c\n", encoding="utf-8")
+    assert PR.validate_target("README.md", tmp_path).is_file()
+    assert PR.validate_target("CLAUDE.md", tmp_path).is_file()
+    with pytest.raises(PR.ApplyError):
+        PR.validate_target("CONTRIBUTING.md", tmp_path)   # 根级白名单外
+    with pytest.raises(PR.ApplyError):
+        PR.validate_target("docs/design/x.md", tmp_path)
     repo = make_repo(tmp_path)
     p = make_proposal(tmp_path, lessons=[make_lesson(change=PR.Change(
         action="append_end", new_text="- 末尾新条款"))])

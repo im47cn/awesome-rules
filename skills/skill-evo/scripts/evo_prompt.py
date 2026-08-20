@@ -80,9 +80,11 @@ def _frontmatter_title(content: str, fallback: str) -> str:
 
 
 def build_target_index(repo_root: Path) -> str:
-    """进化目标清单：skills/*/SKILL.md + steering/**.md（标题 + 二级标题锚点）。"""
+    """进化目标清单：根 README/CLAUDE.md + skills 下全部 .md + steering/**.md（标题 + 二级标题锚点）。"""
     rows: List[str] = []
-    targets: List[Path] = sorted(repo_root.glob("skills/*/SKILL.md"))
+    targets: List[Path] = [p for p in (repo_root / "README.md", repo_root / "CLAUDE.md")
+                           if p.is_file()]
+    targets += sorted(repo_root.glob("skills/*/*.md"))
     targets += sorted(repo_root.glob("steering/*.md")) + sorted(repo_root.glob("steering/gtsp/*.md"))
     for p in targets:
         rel = p.relative_to(repo_root).as_posix()
@@ -130,6 +132,8 @@ SYSTEM_PROMPT = """你是研发规范仓库 awesome-rules 的「经验提炼器�
 约束：
 - v1 只允许追加（append_under / append_end），不得改写或删除既有内容
 - new_text 必须自包含成一条规范条款（列表项或短段落），不使用「如上」「同前」等指代
+- 目标标题下是表格时（如 README 的技能/规范/文档索引表），new_text 必须是完整表格行（以 | 开头，列数与该表一致）
+- 新技能/新规范/新设计文档已在磁盘但未登记 README 索引表的经验，优先以表格行追加到对应 README
 - 不新增【强制】标记（强制级别是人工评审决策）
 - 每条 evidence 必须能在会话记录中找到出处"""
 

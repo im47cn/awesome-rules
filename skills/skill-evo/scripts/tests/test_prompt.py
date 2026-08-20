@@ -58,12 +58,15 @@ def _mk_repo(tmp_path):
     (tmp_path / "steering" / "demo-spec.md").write_text(
         "---\ntitle: 测试规范\nscenario: 测试\n---\n# 测试规范\n\n## 强制条款\n\n1. 【强制】条款 A\n",
         encoding="utf-8")
+    (tmp_path / "README.md").write_text("# 索引\n\n## 技能\n\n| a | b |\n", encoding="utf-8")
+    (tmp_path / "CLAUDE.md").write_text("# 指引\n\n## 审查技能\n\n- x\n", encoding="utf-8")
     return tmp_path
 
 
 def test_build_target_index(tmp_path):
     idx = P.build_target_index(_mk_repo(tmp_path))
     assert "skills/demo/SKILL.md" in idx and "steering/demo-spec.md" in idx
+    assert "README.md" in idx and "CLAUDE.md" in idx   # 根级索引/指引资产已纳入
     assert "## 工作流" in idx                 # 标题锚点已列出（append_under 可用）
     assert "测试规范" in idx                  # frontmatter title 生效
 

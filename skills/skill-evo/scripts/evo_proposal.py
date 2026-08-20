@@ -250,14 +250,19 @@ class ApplyError(Exception):
 
 
 def validate_target(target_file: str, repo_root: Path) -> Path:
-    """目标必须解析到仓库内 skills/ 或 steering/ 下的 .md（防路径逃逸）。"""
+    """目标必须解析到仓库内的允许资产（防路径逃逸）。
+
+    允许：skills/**.md、steering/**.md、根 README.md（索引表格）、根 CLAUDE.md（AI 操作指引）。
+    """
     root = repo_root.resolve()
     p = (root / target_file).resolve()
     if root != p and root not in p.parents:
         raise ApplyError(f"目标越出仓库边界：{target_file}")
     rel = p.relative_to(root).as_posix()
-    if not (rel.startswith("skills/") or rel.startswith("steering/")) or not rel.endswith(".md"):
-        raise ApplyError(f"目标不在允许范围（skills/ 或 steering/ 的 .md）：{target_file}")
+    ok = ((rel.startswith("skills/") or rel.startswith("steering/"))
+          and rel.endswith(".md")) or rel in ("README.md", "CLAUDE.md")
+    if not ok:
+        raise ApplyError(f"目标不在允许范围（skills/、steering/ 的 .md 或根 README/CLAUDE.md）：{target_file}")
     if not p.is_file():
         raise ApplyError(f"目标文件不存在：{target_file}")
     return p
@@ -278,6 +283,15 @@ def _apply_change(content: str, ch: Change, target_file: str) -> str:
         if len(hits) > 1:
             raise ApplyError(f"{target_file}: 标题锚点 `{ch.heading}` 出现 {len(hits)} 次，不唯一")
         i = hits[0]
+        # 表格感知：标题下紧跟表格（| 行）时，插到表格末行之后（插到表头前会破坏表格）
+        j = i + 1
+        while j < len(lines) and not lines[j].strip():
+            j += 1
+        if j < len(lines) and lines[j].lstrip().startswith("|"):
+            while j + 1 < len(lines) and lines[j + 1].lstrip().startswith("|"):
+                j += 1
+            lines.insert(j + 1, ch.new_text.rstrip("\n") + "\n")
+            return "".join(lines)
         insert = ("\n" if i + 1 < len(lines) and lines[i + 1].strip() else "") + ch.new_text + "\n"
         lines.insert(i + 1, insert)
         return "".join(lines)

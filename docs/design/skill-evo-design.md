@@ -153,6 +153,18 @@ append-only + supersedes 修正链），只取语义层不复刻其事件溯源�
   护栏警告；来源会话缺失 → 仅提示不阻断（旧提案兼容）。人工抽查 evidence 真实性
   （2026-08-19 曾逐条抽查）由此变成脚本核验
 
+### 6.4 目标资产扩展：各层 README + CLAUDE.md（2026-08-20）
+
+- 白名单扩展：根 `README.md`（索引表）与根 `CLAUDE.md`（AI 操作指引）纳入
+  `validate_target` 与目标资产清单；skills/steering 下的 README 本就在前缀范围内
+- **表格感知追加**：`append_under` 检测标题下紧跟表格（`|` 行）时，新内容插到
+  **表格末行之后**（插到表头前会破坏表格）；SYSTEM_PROMPT 约束索引类经验必须产出
+  完整表格行（列数一致）
+- **确定性兜底**：`scripts/md_link_check.py`（链接完整性 + README 索引零漂移统一门禁，
+  接入 run_tests.sh）校验 README 索引与磁盘一致——LLM 进化管自动补，门禁管不漏，分工同「脚本+人工判断」
+- 个人记忆**不纳入**：职责边界——个人偏好归记忆系统（claude-mem / auto-memory），
+  skill-evo 只进团队可共享的 git 资产
+
 ### 6.5 v3 候选（YAGNI，暂不做）
 
 - 跨会话相似 lesson 合并（当前仅做精确内容去重，相似度合并待重复真实发生再立项）
@@ -160,6 +172,7 @@ append-only + supersedes 修正链），只取语义层不复刻其事件溯源�
 - 「新增 skill」级提案
 - guard skill 触发词（SKILL.md description）的 GEPA 进化——引擎已就绪，
   缺评估集（合成任务 + judge 噪声大，待提案数据积累后立项）
+- lesson 二分类路由（个人偏好类经验标记后不进提案流）——待观察到误路由实例再做
 
 ## 7. 验证记录
 
