@@ -47,6 +47,7 @@ def test_run_creates_proposal_and_state(tmp_path, monkeypatch):
     cc_fixture(transcript, cwd=str(tmp_path / "demo-repo"), extra_users=6, sid=transcript.stem)
 
     args = SimpleNamespace(hook_json_file=None, transcript=str(transcript),
+                           session_file=None, cwd=None, agent="auto",
                            no_omp=True, dry_run=False)
     assert evo.cmd_run(args) == 0
 
@@ -63,7 +64,7 @@ def test_run_creates_proposal_and_state(tmp_path, monkeypatch):
 
 
 def test_run_dedup_by_state(tmp_path, monkeypatch):
-    """处理过的会话再次 run 不重复提案（增量幂等）。"""
+    """处理过的会话再次 run 不重复提案（内容哈希增量幂等）。"""
     cfg, base, repo = make_env(tmp_path, monkeypatch)
     calls = []
     monkeypatch.setattr(evo, "call_claude",
@@ -71,11 +72,37 @@ def test_run_dedup_by_state(tmp_path, monkeypatch):
     transcript = tmp_path / "s-666.jsonl"
     cc_fixture(transcript, cwd=str(tmp_path / "demo-repo"), extra_users=6, sid=transcript.stem)
     args = SimpleNamespace(hook_json_file=None, transcript=str(transcript),
+                           session_file=None, cwd=None, agent="auto",
                            no_omp=True, dry_run=False)
     evo.cmd_run(args)
+    # 模拟竞态：mtime 变化但内容未变（flush/touch）→ 仍不重复
+    import os, time
+    os.utime(transcript, (time.time() + 10, time.time() + 10))
     evo.cmd_run(args)
     assert len(calls) == 1
     assert len(list((base / "proposals" / "pending").glob("*.md"))) == 1
+
+
+def test_run_single_proposal_guard(tmp_path, monkeypatch):
+    """单会话单提案守卫：内容哈希未命中（state 被清）但已有提案 → 跳过总结。"""
+    cfg, base, repo = make_env(tmp_path, monkeypatch)
+    calls = []
+    monkeypatch.setattr(evo, "call_claude",
+                        lambda p, c: calls.append(1) or json.loads(json.dumps(FAKE_LESSONS)))
+    transcript = tmp_path / "s-777.jsonl"
+    cc_fixture(transcript, cwd=str(tmp_path / "demo-repo"), extra_users=6, sid=transcript.stem)
+    args = SimpleNamespace(hook_json_file=None, transcript=str(transcript),
+                           session_file=None, cwd=None, agent="auto",
+                           no_omp=True, dry_run=False)
+    evo.cmd_run(args)
+    assert len(calls) == 1
+    # 模拟 state 丢失/旧格式：守卫仍防重复提案
+    (base / "state.json").unlink()
+    evo.cmd_run(args)
+    assert len(calls) == 1                                   # 未再调 LLM
+    assert len(list((base / "proposals" / "pending").glob("*.md"))) == 1
+    log = (base / "logs" / "evo.log").read_text(encoding="utf-8")
+    assert "单会话单提案守卫" in log
 
 
 def test_run_no_signal_marks_processed(tmp_path, monkeypatch):
@@ -84,6 +111,7 @@ def test_run_no_signal_marks_processed(tmp_path, monkeypatch):
     transcript = tmp_path / "s-333.jsonl"
     cc_fixture(transcript, cwd=str(tmp_path / "demo-repo"), extra_users=6, sid=transcript.stem)
     args = SimpleNamespace(hook_json_file=None, transcript=str(transcript),
+                           session_file=None, cwd=None, agent="auto",
                            no_omp=True, dry_run=False)
     evo.cmd_run(args)
     assert not list((base / "proposals" / "pending").glob("*.md"))
@@ -102,7 +130,8 @@ def test_run_piggyback_omp(tmp_path, monkeypatch):
     omp_fixture(omp_dir / "2099-01-01T01-00-00-000Z_0omp-2222.jsonl",
                 cwd=str(tmp_path / "demo-repo"), extra_users=6)
 
-    args = SimpleNamespace(hook_json_file=None, transcript=None, no_omp=False, dry_run=False)
+    args = SimpleNamespace(hook_json_file=None, transcript=None, session_file=None,
+                           cwd=None, agent="auto", no_omp=False, dry_run=False)
     evo.cmd_run(args)
     pendings = list((base / "proposals" / "pending").glob("*.md"))
     assert len(pendings) == 1 and "omp" in pendings[0].name
@@ -118,6 +147,7 @@ def test_run_claude_error_does_not_crash(tmp_path, monkeypatch):
     transcript = tmp_path / "s-444.jsonl"
     cc_fixture(transcript, cwd=str(tmp_path / "demo-repo"), extra_users=6, sid=transcript.stem)
     args = SimpleNamespace(hook_json_file=None, transcript=str(transcript),
+                           session_file=None, cwd=None, agent="auto",
                            no_omp=True, dry_run=False)
     assert evo.cmd_run(args) == 0                       # 静默失败
     state = json.loads((base / "state.json").read_text(encoding="utf-8"))
@@ -161,12 +191,75 @@ def test_list_apply_reject_flow(tmp_path, monkeypatch, capsys):
     assert list((base / "proposals" / "rejected").glob("*.md"))
 
 
+
+
+
 def test_dry_run_prompt_written(tmp_path, monkeypatch):
     cfg, base, repo = make_env(tmp_path, monkeypatch)
     transcript = tmp_path / "s-555.jsonl"
     cc_fixture(transcript, cwd=str(tmp_path / "demo-repo"), extra_users=6, sid=transcript.stem)
     args = SimpleNamespace(hook_json_file=None, transcript=str(transcript),
+                           session_file=None, cwd=None, agent="auto",
                            no_omp=True, dry_run=True)
     evo.cmd_run(args)
     prompt = Path("/tmp/ar-skill-evo-prompt.md").read_text(encoding="utf-8")
     assert "# 会话信息" in prompt
+    # dry-run 不记账：会话之后仍会被真正总结
+    assert not (base / "state.json").exists() or "cc:s-555" not in json.loads(
+        (base / "state.json").read_text(encoding="utf-8")).get("processed", {})
+
+
+def test_run_omp_hook_entry_by_cwd(tmp_path, monkeypatch):
+    """omp 原生 hook 入口：--cwd 定位最近 omp 会话并总结。"""
+    cfg, base, repo = make_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(evo, "call_claude", lambda p, c: json.loads(json.dumps(FAKE_LESSONS)))
+    omp_dir = Path(cfg["omp_sessions_dir"]) / "-demo-repo"
+    omp_dir.mkdir(parents=True)
+    older = omp_dir / "2099-01-01T00-00-00-000Z_0omp-aaaa.jsonl"
+    newer = omp_dir / "2099-01-02T00-00-00-000Z_0omp-bbbb.jsonl"
+    omp_fixture(older, cwd=str(tmp_path / "demo-repo"), extra_users=6, sid="0omp-aaaa")
+    import os, time
+    os.utime(older, (0, 0))
+    omp_fixture(newer, cwd=str(tmp_path / "demo-repo"), extra_users=6, sid="0omp-bbbb")
+
+    args = SimpleNamespace(hook_json_file=None, transcript=None, session_file=None,
+                           cwd=str(tmp_path / "demo-repo"), agent="omp", no_omp=True,
+                           dry_run=False)
+    assert evo.cmd_run(args) == 0
+    pendings = list((base / "proposals" / "pending").glob("*.md"))
+    assert len(pendings) == 2                       # 该 cwd 下未处理的会话均补处理
+    state = json.loads((base / "state.json").read_text(encoding="utf-8"))
+    assert "omp:0omp-bbbb" in state["processed"] and "omp:0omp-aaaa" in state["processed"]
+
+
+def test_sniff_agent(tmp_path):
+    from test_session import cc_fixture, omp_fixture as omp_fix
+    cc = tmp_path / "cc.jsonl"
+    cc_fixture(cc)
+    omf = tmp_path / "2099-01-01T00-00-00-000Z_x.jsonl"
+    omp_fix(omf)
+    import evo_session as S
+    assert S.sniff_agent(cc) == "cc"
+    assert S.sniff_agent(omf) == "omp"
+
+
+def test_find_latest_omp_sessions(tmp_path):
+    import evo_config as C
+    import evo_session as S
+    from test_session import omp_fixture
+    cfg = dict(C.DEFAULTS)
+    cfg["omp_sessions_dir"] = str(tmp_path)
+    d = tmp_path / "-demo-repo"
+    d.mkdir()
+    a = d / "2099-01-01T00-00-00-000Z_0a.jsonl"
+    b = d / "2099-01-02T00-00-00-000Z_0b.jsonl"
+    other = d / "2099-01-03T00-00-00-000Z_0c.jsonl"
+    omp_fixture(a, cwd="/w/demo", extra_users=1)
+    omp_fixture(b, cwd="/w/demo", extra_users=1)
+    omp_fixture(other, cwd="/other/proj", extra_users=1)
+    import os
+    os.utime(a, (0, 0)); os.utime(b, (100, 100)); os.utime(other, (200, 200))
+    hits = S.find_latest_omp_sessions(cfg, "/w/demo", limit=5)
+    assert [p.name for p in hits] == ["2099-01-02T00-00-00-000Z_0b.jsonl",
+                                      "2099-01-01T00-00-00-000Z_0a.jsonl"]
+    assert S.find_latest_omp_sessions(cfg, "/absent", limit=5) == []

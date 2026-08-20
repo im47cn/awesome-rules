@@ -11,6 +11,7 @@ transcript 格式（均 JSONL，逐行 JSON，损坏行容错跳过）：
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -159,6 +160,63 @@ def parse_session(agent: str, path: Path) -> Session:
     return parse_cc_session(path) if agent == "cc" else parse_omp_session(path)
 
 
+def sniff_agent(path: Path) -> str:
+    """格式嗅探：omp 首部有 {"type":"session",...}，CC 首部无此类型。默认 cc。"""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for _ in range(5):
+                line = f.readline()
+                if not line:
+                    break
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(obj, dict):
+                    if obj.get("type") == "session":
+                        return "omp"
+                    if obj.get("type") in ("user", "assistant", "summary"):
+                        return "cc"
+    except OSError:
+        pass
+    return "cc"
+
+
+def find_latest_omp_sessions(cfg: dict, cwd: str, limit: int = 1) -> List[Path]:
+    """按 cwd 定位最近的 omp 会话文件（首行 cwd 匹配 + mtime 降序）。
+
+    omp hook 侧拿不到 session 文件路径（ctx 只有 cwd），退路由 Python 精确定位：
+    同 cwd 并发会话属罕见，且 state 去重使误选无害（只是延迟处理）。
+    """
+    if not cwd:
+        return []
+    root = Path(os.path.expanduser(str(cfg["omp_sessions_dir"])))
+    if not root.is_dir():
+        return []
+    target = os.path.normpath(os.path.expanduser(cwd))
+    hits = []
+    for f in root.glob("*/*.jsonl"):
+        m = _OMP_FILE_RE.match(f.name)
+        if not m:
+            continue
+        try:
+            with open(f, encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(obj, dict) and obj.get("type") == "session":
+                        if os.path.normpath(os.path.expanduser(
+                                str(obj.get("cwd", "")))) == target:
+                            hits.append(f)
+                        break   # session 首部之后不再读
+        except OSError:
+            continue
+    hits.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+    return hits[:limit]
+
+
 # ── 发现与增量 ───────────────────────────────────────────────────────────────
 
 def discover_omp_roots(cfg: dict) -> List[Path]:
@@ -204,7 +262,24 @@ def save_state(state_path: Path, state: dict) -> None:
     tmp.replace(state_path)  # 原子替换
 
 
+def content_digest(path: Path) -> str:
+    """会话文件内容哈希（记账用）。mtime 不可靠：SessionEnd flush 也会碰它，
+    曾导致同一会话 45 秒内被整会话重总结、产出重复提案。"""
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+    except OSError:
+        return ""
+    return h.hexdigest()
+
+
 def is_processed(state: dict, sess: Session) -> bool:
-    """增量去重：处理过即不再重处理（接受 SessionEnd 尾部少量丢尾，防重复提案）。"""
+    """增量去重（内容哈希版）：内容未变即视为已处理（touch/flush 不触发重处理）。
+
+    兼容旧 mtime 记账（float）：值非 str 视为未处理，自然重算为哈希。
+    """
     done = state.get("processed", {})
-    return done.get(sess.key) is not None and done[sess.key] >= sess.mtime
+    recorded = done.get(sess.key)
+    return isinstance(recorded, str) and recorded == content_digest(sess.path)

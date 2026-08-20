@@ -1,8 +1,8 @@
 # skill-evo 技术设计文档
 
-> **状态**：已实现（v1）· 单测 36 例全绿 · 待真实会话观察期验证
-> **范围**：v1 完整版（CC SessionEnd hook 自动总结 + omp 搭车增量扫描 + 置信度分级提案 + 人工审核应用）
-> **参考**：[NousResearch/hermes-agent-self-evolution](https://github.com/NousResearch/hermes-agent-self-evolution)（session 挖掘 + PR 人工审核护栏）、hermes-agent 本体（任务后自主创建/改进 skill） · **日期**：2026-08-18
+> **状态**：已实现（v2）· 单测 50 例全绿 · 待真实会话观察期验证
+> **范围**：v2 = v1 + omp 原生触发 + GEPA 进化引擎（进化自身 SYSTEM_PROMPT）
+> **参考**：[NousResearch/hermes-agent-self-evolution](https://github.com/NousResearch/hermes-agent-self-evolution)（session 挖掘 + PR 人工审核护栏）、hermes-agent 本体（任务后自主创建/改进 skill）、[GEPA arXiv 2507.19457](https://arxiv.org/abs/2507.19457) · **日期**：2026-08-18
 
 ---
 
@@ -92,18 +92,61 @@ omp 无生命周期 hooks API（探明其扩展机制为 TypeScript 插件；`~/
 - 永不自动 `git commit`（应用后提示用户 `git diff` 自查）
 - 总开关：`AR_SKILL_EVO_ENABLED=0` 或配置 `enabled = false`
 
-## 6. v2 候选（YAGNI，v1 不做）
+## 6. v2 增强（2026-08-18 已实现）
 
-- omp 原生 TS hook 触发（替代搭车扫描）
+### 6.1 omp 原生触发
+
+- 机制确证：omp 自动发现用户级 `~/.omp/agent/hooks/pre/*.ts`（Bun 原生加载，
+  default export `f(pi: HookAPI)`），`session_shutdown` 事件即会话结束时机；
+  handler 有 30s 上限 → detached fire-and-forget（样例：claude-mem.ts）
+- 仓库提供模板 `hooks/omp/skill-evo.ts`，一条 `cp` 安装；TS 侧只传 `ctx.cwd`
+  （ctx 上确证可用的只有 cwd），会话文件由 Python `find_latest_omp_sessions`
+  （首行 cwd 匹配 + mtime 降序）定位——不依赖未确证的 `ctx.sessionManager`
+- CC 搭车扫描保留作兜底（hook 未安装时），state 去重收敛重复
+- 防递归链三段：omp → evo.py（`AR_SKILL_EVO_CHILD=1`）→ claude -p（继承标记 +
+  禁 hooks）→ CC SessionEnd hook 见标记即退
+
+### 6.2 GEPA 进化引擎（`evo_gepa.py`，stdlib 复刻 arXiv 2507.19457）
+
+- 引擎与资产解耦：`run_gepa(baseline, train, holdout, execute, reflect, budget,
+  validate)` —— execute/reflect 均为回调，引擎不含任何 LLM/ML 依赖
+- 算法保真点：逐实例最优并集 Pareto 前沿（并列保留、被支配剔除）+ 按 f[Φ] 加权
+  采样；minibatch 反思变异（reflector 看分数+judge 反馈）；minibatch 局部接受
+  （均分改善才进池）；接受则补评 train 缺口；rollout 预算硬上限；holdout
+  每候选只评一次后选优（防择优污染）
+- **首个应用 = 进化自身 SYSTEM_PROMPT**（`evo_evolve.py`）：标注 = applied/rejected
+  提案（人工审核即真实标签，reject_reason 是负反馈）；judge 四维
+  precision/recall/negative_avoidance/format_compliance 加权打分；train/holdout
+  按会话分层切（holdout ≥4）；变异约束（JSON 契约关键词 + 长度 ≤ baseline×1.5）
+  违约即丢弃
+- 进化产物 = prompt_evolution 型 pending 提案（新旧 prompt + 分数 + 谱系），
+  **人工采纳**（手动编辑 SYSTEM_PROMPT 常量），不走 apply（apply 仅支持
+  markdown 追加）；holdout 改善 ≤ 0.2 仅存报告不出提案
+- 冷启动保护：标注 < `gepa_min_cases`（10）拒绝运行，`evolve --dry-run` 可查进度
+
+### 6.3 竞态修复（2026-08-18 实测发现）
+
+omp 原生 hook 首日即暴露 mtime 记账缺陷：SessionEnd flush 碰 mtime 导致同一会话
+45 秒内被整会话重总结、产出两份重叠提案。修复（单测 51 例）：
+- **state 记账改为内容哈希**（`content_digest`）：touch/flush 不再触发重处理；
+  内容真实增长才重处理；旧 mtime 记账（float）自然迁移
+- **单会话单提案守卫**（`session_proposal_exists`）：pending/applied/rejected 任一
+  状态已有该会话提案即跳过总结——内容增长的兜底防线，代价是尾部新增经验丢失
+  （与「处理过即不再重提」取舍一致）
+
+### 6.4 v3 候选（YAGNI，暂不做）
+
 - 跨会话 lesson 去重（同 target + 相似 text 合并）
 - replace 语义（改写既有条款，需更强护栏：diff 审阅界面 + steering 强制条款削弱检测）
 - 「新增 skill」级提案
-- 参考 hermes-agent-self-evolution 的 GEPA：对 SKILL.md 的 description（触发词）做
-  eval 驱动的自动调优（需要坏例数据集，待积累）
+- guard skill 触发词（SKILL.md description）的 GEPA 进化——引擎已就绪，
+  缺评估集（合成任务 + judge 噪声大，待提案数据积累后立项）
 
 ## 7. 验证记录
 
-- 单测：36 例全绿（`python3 -m pytest skills/skill-evo/scripts/tests`，claude 调用全 mock）
+- 单测：50 例全绿（`python3 -m pytest skills/skill-evo/scripts/tests`，claude 调用全 mock）
 - `evo.py scan-omp`：对本机真实 `~/.omp/agent/sessions/` 的发现与 scope 过滤正常
 - `evo.py run --transcript <真实 CC 会话> --dry-run`：prompt 生成含目标索引与脱敏视图
-- 真实闭环（SessionEnd 自动成案 → 人工 apply）待观察期验证，见 SKILL.md 工作流
+- omp hook 模板已安装至 `~/.omp/agent/hooks/pre/`，待自然会话结束验证 evo.log
+- `evolve --dry-run`：标注不足时正确拒绝（冷启动预期）
+- 真实闭环（SessionEnd 自动成案 → 人工 apply → 数据积累 → evolve）待观察期验证

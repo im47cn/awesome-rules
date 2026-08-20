@@ -93,14 +93,24 @@ def test_parse_omp_session(tmp_path):
 
 # ── 增量去重 ────────────────────────────────────────────────────────────────
 
-def test_is_processed(tmp_path):
+def test_is_processed_by_content_hash(tmp_path):
     f = tmp_path / "s.jsonl"
     cc_fixture(f)
     sess = S.parse_cc_session(f)
     assert not S.is_processed({}, sess)
-    assert not S.is_processed({"processed": {sess.key: sess.mtime - 1}}, sess)  # mtime 变化重看?否—
-    # ↑ mtime 更新意味着内容变了 → 未处理（is_processed 为 False 表示需处理）
-    assert S.is_processed({"processed": {sess.key: sess.mtime}}, sess)
+    # 内容哈希记账：记录当前哈希 → 已处理
+    digest = S.content_digest(f)
+    assert S.is_processed({"processed": {sess.key: digest}}, sess)
+    # mtime 变化但内容未变（touch/flush）→ 仍视为已处理（竞态修复）
+    import os, time
+    os.utime(f, (time.time() + 10, time.time() + 10))
+    assert S.is_processed({"processed": {sess.key: digest}}, sess)
+    # 内容增长 → 重新处理
+    with open(f, "a", encoding="utf-8") as fh:
+        fh.write('{"type":"user","message":{"role":"user","content":[{"type":"text","text":"新消息"}]}}\n')
+    assert not S.is_processed({"processed": {sess.key: digest}}, sess)
+    # 旧 mtime 记账（float）视为未处理 → 自然迁移为哈希
+    assert not S.is_processed({"processed": {sess.key: 123.0}}, sess)
 
 
 def test_state_roundtrip(tmp_path):

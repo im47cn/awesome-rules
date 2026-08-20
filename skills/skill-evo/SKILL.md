@@ -23,10 +23,30 @@ CC SessionEnd hook（秒退，nohup 后台）
       ├─ 总结当前 CC 会话（headless claude -p，禁 hooks 防递归）
       ├─ 搭车增量扫描 omp 会话（~/.omp/agent/sessions/，state.json 去重）
       └─ 提案落盘 ~/.config/ar/skill-evo/proposals/pending/*.md
-人工审核（本 skill 的核心工作流 ↓）
+
+omp 原生 hook（可选安装，session_shutdown 即时触发，见下节）
+  → scripts/evo.py run --agent omp --cwd <cwd>（搭车扫描保留作兜底）
+
+GEPA 进化引擎（手动低频，见「进化自身」一节）
 ```
 
+## omp 原生触发（可选安装）
+
+omp 会话结束即时总结，不依赖 CC 会话搭车（避免「只用 omp 时经验滞后积累」）：
+
+```bash
+cp hooks/omp/skill-evo.ts ~/.omp/agent/hooks/pre/
+```
+
+- omp 自动发现用户级 hook；会话结束（`session_shutdown`）fire-and-forget 调用
+  `evo.py run --agent omp --cwd <cwd>`（会话文件由 Python 按 cwd+mtime 定位）
+- 脚本路径默认 `~/sources/awesome-rules/...`，可用环境变量 `AR_SKILL_EVO_SCRIPT` 覆盖
+- 与 CC 搭车扫描并存无害（state.json 增量去重收敛）；防递归链：
+  omp → evo.py（`AR_SKILL_EVO_CHILD=1`）→ claude -p（继承标记）→ CC hook 见标记即退
+- 验证：安装后结束一个 omp 会话，`~/.config/ar/skill-evo/logs/evo.log` 应有记录
+
 ## 工作流（人工审核入口）
+- 审核「模式归纳」类提案时警惕单例过拟合：从单一来源归纳的结构可能不完整或误判必选项（实测案例：初版模板在 5 条样本下即被修正，14 条样本后才区分出必选段与可选段）。优先采纳有跨会话/多样本复现证据的条目；仅凭单例归纳的模式即使采纳也应保持低置信度。
 
 ### 第 1 步：列出待审提案
 
@@ -67,6 +87,26 @@ python3 scripts/evo.py reject <id> --reason "证据不足"
 - 变更已写入工作区，**提示用户 `git diff` 检查，满意后自行提交**（本技能永不自动 commit）
 - 锚点失配/不唯一时 apply 整体失败不盲写——此时应人工打开目标文件与提案，改由人工编辑
 
+> ⚠️ **prompt_evolution 型提案不走 apply**（apply 仅支持 markdown 追加语义）。人工审阅
+> 提案中新 SYSTEM_PROMPT 后，手动编辑 `scripts/evo_prompt.py` 的 `SYSTEM_PROMPT` 常量采纳。
+
+## 进化自身（GEPA，手动低频）
+
+skill-evo 用 GEPA（Genetic-Pareto prompt evolution）进化自己的总结 SYSTEM_PROMPT——
+标注数据就是人工审核结果（applied 提案 = 正样本，rejected + reject_reason = 负样本），
+冷启动天然成立、随使用持续积累：
+
+```bash
+python3 scripts/evo.py evolve --dry-run   # 查看标注数据积累进度（不足会提示，属预期）
+python3 scripts/evo.py evolve             # 正式进化（预算默认 16 rollouts ≈ 32-50 次 claude -p）
+```
+
+- **成本提示**：budget 默认 16（config `gepa_budget`），每 rollout 含提炼+judge 两次
+  headless 调用；仅在用户明确要求时运行
+- 产出：`~/.config/ar/skill-evo/evolve/<ts>/`（迭代日志 + 候选 prompt）；
+  holdout 改善 > 0.2 才生成 prompt_evolution 型 pending 提案（人工采纳方式见提案正文）
+- 防过拟合：train/holdout 按会话分层切（holdout ≥4），holdout 每候选只评一次
+
 ## 配置
 
 `~/.config/ar/skill-evo/config.toml`（可选，零配置即可用），模板见
@@ -74,17 +114,19 @@ python3 scripts/evo.py reject <id> --reason "证据不足"
 `AR_SKILL_EVO_ENABLED=0`）、`scope_dirs`（只总结哪些目录下的会话）、`omp_max_per_run`、
 `min_messages`。
 
-## 设计边界（v1）
+## 设计边界（v2）
 
 - 只做存量文件的**追加**，不做改写/删除，不做「新增 skill」级提案
 - 处理过的会话不再重提（state.json 按 id+mtime 去重；SessionEnd 尾部少量丢尾可接受）
-- omp 无生命周期 hooks，依赖 CC 会话结束时搭车扫描；omp 会话也可能由
-  `evo.py scan-omp` 手动补偿（仅列出，处理仍走 `run`）
+- omp 触发优先用原生 hook（未安装时 CC 搭车扫描兜底）；`evo.py scan-omp` 可手动查看
+- GEPA 进化对象 v2 仅 `SYSTEM_PROMPT`；guard skill 触发词进化待数据积累后立项
 
 ## 相关文件
 
 - 核心脚本：[`scripts/evo.py`](scripts/evo.py)（CLI）、[`scripts/evo_session.py`](scripts/evo_session.py)、
   [`scripts/evo_prompt.py`](scripts/evo_prompt.py)、[`scripts/evo_proposal.py`](scripts/evo_proposal.py)、
-  [`scripts/evo_config.py`](scripts/evo_config.py)
-- hook 入口：[`../../hooks/on-session-end.sh`](../../hooks/on-session-end.sh)
+  [`scripts/evo_config.py`](scripts/evo_config.py)、[`scripts/evo_gepa.py`](scripts/evo_gepa.py)、
+  [`scripts/evo_evolve.py`](scripts/evo_evolve.py)
+- hook 入口：[`../../hooks/on-session-end.sh`](../../hooks/on-session-end.sh)（CC）、
+  [`../../hooks/omp/skill-evo.ts`](../../hooks/omp/skill-evo.ts)（omp，需安装）
 - 设计文档：[`../../docs/design/skill-evo-design.md`](../../docs/design/skill-evo-design.md)

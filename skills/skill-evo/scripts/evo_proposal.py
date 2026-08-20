@@ -105,11 +105,18 @@ def load_proposal(path: Path) -> Proposal:
             for line in content[3:end].strip().splitlines():
                 key, _, val = line.partition(":")
                 fm[key.strip()] = val.strip()
-    m = _JSON_BLOCK_RE.search(content)
     lessons: List[Lesson] = []
-    if m:
+    payload = None
+    for m in _JSON_BLOCK_RE.finditer(content):
         try:
-            payload = json.loads(m.group(1))
+            candidate_payload = json.loads(m.group(1))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(candidate_payload, dict):   # 跳过非 lessons 载荷（如迭代日志 list）
+            payload = candidate_payload
+            break
+    if payload:
+        try:
             for ls in payload.get("lessons", []):
                 ch_raw = ls.get("change") or {}
                 ch = Change(action=str(ch_raw.get("action", "append_end")),
@@ -132,6 +139,42 @@ def list_proposals(status_dir: Path) -> List[Proposal]:
     if not status_dir.is_dir():
         return []
     return [load_proposal(p) for p in sorted(status_dir.glob("*.md"))]
+
+
+def _read_fm(path: Path) -> dict:
+    """轻量 frontmatter 读取（只扫文件头，不解析正文）。"""
+    fm: dict = {}
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            if f.readline().startswith("---"):
+                for line in f:
+                    if line.startswith("---"):
+                        break
+                    key, _, val = line.partition(":")
+                    fm[key.strip()] = val.strip()
+    except OSError:
+        pass
+    return fm
+
+
+def session_proposal_exists(paths: dict, source_agent: str, source_session: str) -> bool:
+    """单会话单提案守卫：该会话在 pending/applied/rejected 任一状态已有提案。
+
+    防两类重复：a) 内容哈希竞态之外的兜底（如手动跑两次）；
+    b) 会话尾部增长触发重总结导致整包重复提案。代价是丢失尾部新增经验，
+    与「处理过即不再重提」的既定取舍一致。
+    """
+    for key in ("pending", "applied", "rejected"):
+        d: Path = paths[key]
+        if not d.is_dir():
+            continue
+        for f in d.glob("*.md"):
+            fm = _read_fm(f)
+            if (fm.get("source_agent") == source_agent
+                    and fm.get("source_session") == source_session
+                    and fm.get("type") != "prompt_evolution"):
+                return True
+    return False
 
 
 # ── 应用 ────────────────────────────────────────────────────────────────────

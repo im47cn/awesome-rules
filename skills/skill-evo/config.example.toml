@@ -26,5 +26,17 @@ claude_timeout = 180
 # 只总结 cwd 位于这些目录下的会话
 scope_dirs = ["~/sources"]
 
-# 运行数据根目录（proposals/ state.json logs/）
+# 运行数据根目录（proposals/ state.json logs/ evolve/）
 base_dir = "~/.config/ar/skill-evo"
+
+# ── GEPA 进化（evo.py evolve）──
+# rollout 预算（每次 execute 含提炼+judge 两次 claude -p）
+gepa_budget = 16
+# 反思 minibatch 大小
+gepa_batch_size = 4
+# holdout 比例（按会话分层切，holdout ≥4 sessions 才可运行）
+gepa_holdout_ratio = 0.2
+# 标注样本（applied/rejected 提案）低于此数拒绝进化
+gepa_min_cases = 10
+# judge 四维权重：precision / recall / negative_avoidance / format_compliance
+judge_weights = [0.35, 0.35, 0.2, 0.1]

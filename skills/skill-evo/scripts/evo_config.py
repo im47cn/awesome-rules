@@ -31,6 +31,15 @@ DEFAULTS = {
     "scope_dirs": ["~/sources"],
     # 运行数据根目录（proposals/ state.json logs/ 均在其下）
     "base_dir": "~/.config/ar/skill-evo",
+    # ── GEPA 进化（evo.py evolve）──
+    # rollout 预算 = evolve 一次的 execute 调用上限（每次 execute 含提炼+judge 两次 claude -p）
+    "gepa_budget": 16,
+    "gepa_batch_size": 4,
+    "gepa_holdout_ratio": 0.2,
+    # 标注样本（applied/rejected 提案）低于此数拒绝进化（冷启动保护）
+    "gepa_min_cases": 10,
+    # judge 四维权重：precision / recall / negative_avoidance / format_compliance
+    "judge_weights": [0.35, 0.35, 0.2, 0.1],
 }
 
 # 不允许被配置覆盖的键（防误配把数据目录指到仓库内）
