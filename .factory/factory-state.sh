@@ -85,13 +85,17 @@ for o in json.load(sys.stdin)["ops"]:
 }
 
 if [ "$TARGET" = "--all" ]; then
-  gh issue list --repo "$REPO_SLUG" --state all --limit 200 --json number,labels \
-    | python3 -c '
+  { gh issue list --repo "$REPO_SLUG" --state all --limit 200 --json number,labels \
+      | python3 -c '
 import json, sys
 for i in json.load(sys.stdin):
     if any(l["name"].startswith("factory:") for l in i["labels"]):
-        print(i["number"])' \
-    | while read -r N; do sync_one "$N"; done
+        print(i["number"])'
+    # 零标签 issue 也会被 open PR 关联（链中途死亡 → trap 清标签但 PR 已建），
+    # 并入 PR 的 closingIssues 引用，--all 才能收敛完整
+    gh pr list --repo "$REPO_SLUG" --state open --limit 100 \
+      --json closingIssuesReferences --jq '.[].closingIssuesReferences[].number'; } \
+    | sort -un | while read -r N; do sync_one "$N"; done
 else
   sync_one "$TARGET"
 fi
