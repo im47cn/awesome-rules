@@ -20,6 +20,8 @@ if [ -z "${ISSUE}" ]; then
 fi
 
 REPO="$(git rev-parse --show-toplevel)"
+REPO_SLUG="${GH_REPO:-$(git -C "$(dirname "$0")/.." remote get-url github 2>/dev/null \
+  | sed -E 's#.*github\.com[:/]##; s#\.git$##')}"
 DIR="${REPO}/.factory/artifacts/issue-${ISSUE}"
 BRANCH="factory/issue-${ISSUE}"
 node_timeout() { python3 "${REPO}/.factory/factory_lib.py" timeout "$1"; }  # 分级预算：裁决器5m/工作节点15m/implement 30m
@@ -244,7 +246,9 @@ if [ "${DRY}" = 0 ]; then
   # 链内等价门（run_tests.sh/guard/holdout）已在本链跑过，此处跳过的是
   # 与链重复的人工推送门，非绕过验证
   git -C "${REPO}" push -u origin "${BRANCH}" --no-verify
-  gh pr create --fill \
+  # --repo/--head 显式指定：origin 的 fetch URL 是 codeup，gh 无法从
+  # remote 解析 GitHub 仓库（dispatch5 实测 "could not resolve remote origin"）
+  gh pr create --repo "$REPO_SLUG" --head "$BRANCH" --fill \
     --label "factory:needs-review" \
     --body-file <(echo "Closes #${ISSUE}"; echo; echo "工厂链产物见 ${DIR}"; echo; echo "链: triage → prime → plan → implement → review → guard → holdout")
   # PR 落地后 issue 侧转移：accepted → in-review（PR 状态接管 issue，§7）。
