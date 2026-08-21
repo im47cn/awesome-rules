@@ -2,6 +2,17 @@
 
 DDD 架构分层守护技能 — 检查分层依赖方向、Maven 模块依赖、领域层纯净度、命名后缀和 Adapter 隔离。
 
+## 试点教训（GTSP）
+
+- 接入 ArchUnit 前先用 `mvn test` 验证项目可独立编译：公共依赖（如 fss-common 的 lombok）
+  声明为 `provided` 不传递，部分项目纯 `mvn test` 从未通过（团队平时靠 IDE），
+  需先在项目 pom 补齐缺失依赖再接入
+- Tier 1 正则仅检查 import 语句，无法发现内联全限定名引用、字段类型与构造器参数类型的
+  逆向依赖；ArchUnit（字节码）能抓到此类证据——重要项目建议 Tier 1 巡检与 ArchUnit
+  生成测试双跑互补
+- 修改 pom.xml 时 XML 注释内禁止出现 `--`（把 CLI 参数写进注释如 `--mode archunit`
+  会破坏 XML 结构），改写为 `mode archunit` 等不含双连字符的措辞
+
 ## 架构
 
 两层设计，分工互补：
