@@ -2,9 +2,10 @@
 """evo — skill-evo CLI 入口
 
 子命令：
-  run        （hook 后台入口）总结当前 CC 会话 + 搭车增量扫描 omp 会话
+  run        （hook 后台入口）总结当前 CC 会话 + 搭车增量扫描 omp 会话 + 插件巡检
   scan-omp   仅扫描 omp 会话（调试/手动补偿）
-  list       列出 pending 进化提案
+  patrol     插件哑故障巡检（手动复查，--force 越过节流）
+  list       列出 pending 进化提案（置顶展示插件巡检告警）
   apply      应用提案（--dry-run 预演；--force 越过护栏警告）
   reject     驳回提案（--reason 记录原因）
 
@@ -24,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import evo_config as C
 import evo_gepa as G
+import evo_patrol as PT
 import evo_prompt as P
 import evo_proposal as PR
 import evo_session as S
@@ -170,6 +172,13 @@ def cmd_run(args) -> int:
         if not args.dry_run:
             state.setdefault("processed", {})[sess.key] = S.content_digest(sess.path)
             S.save_state(state_path, state)
+
+    # 4) 搭车：插件哑故障巡检（节流在模块内，异常静默不影响主流程）
+    if not getattr(args, "no_patrol", False):
+        try:
+            PT.patrol(cfg, log=_log)
+        except Exception as e:
+            _log(cfg, f"patrol error: {type(e).__name__}: {e}")
     return 0
 
 
@@ -189,6 +198,24 @@ def cmd_scan_omp(args) -> int:
         print(f"{flag}\t{f.parent.name}/{f.name}\tcwd={sess.cwd}\t用户消息={sess.user_message_count()}")
     print(f"共 {n_all} 个会话文件（lookback {cfg['omp_lookback_days']} 天），待处理 {n_new}")
     return 0
+
+
+def cmd_patrol(args) -> int:
+    """手动巡检插件哑故障（--force 越过节流）。"""
+    cfg = C.load_config()
+    report = PT.patrol(cfg, force=args.force, log=_log)
+    if report is None:
+        print(f"节流窗口内未执行（间隔 {cfg['patrol_interval_hours']}h，--force 可越过）")
+        return 0
+    failures = report["failures"]
+    if not failures:
+        print("✅ 全部插件加载正常")
+        return 0
+    print(f"⚠️ {len(failures)} 个插件加载失败：")
+    for f in failures:
+        print(f"  {f['id']} v{f['version']} [{f['scope']}] 首见 {f['first_seen']}")
+        print(f"    {f['error'][:120]}")
+    return 1
 
 
 def _find_pending(cfg: dict, pid: str) -> Path:
@@ -219,6 +246,12 @@ def _evidence_warnings(checks: list) -> list:
 def cmd_list(args) -> int:
     cfg = C.load_config()
     paths = C.base_paths(cfg)
+    # 巡检告警置顶展示：哑故障优先于提案进入视野
+    alerts = PT.load_alerts(cfg)
+    if alerts:
+        print(f"⚠️ 插件哑故障 {len(alerts)} 个（evo patrol 复查，台账 patrol.json）：")
+        for f in alerts:
+            print(f"  {f['id']} 首见 {f.get('first_seen', '?')}")
     props = PR.list_proposals(paths["pending"])
     if not props:
         print(f"无 pending 提案（{paths['pending']}）")
@@ -334,11 +367,16 @@ def main() -> int:
                        help="会话格式（auto=嗅探，默认）")
     p_run.add_argument("--cwd", help="omp 原生 hook 入口：按 cwd 定位最近 omp 会话")
     p_run.add_argument("--no-omp", action="store_true", help="跳过 omp 搭车扫描")
+    p_run.add_argument("--no-patrol", action="store_true", help="跳过插件哑故障巡检")
     p_run.add_argument("--dry-run", action="store_true", help="只生成 prompt 不调用 LLM")
     p_run.set_defaults(func=cmd_run)
 
     p_scan = sub.add_parser("scan-omp", help="列出 omp 会话与增量状态")
     p_scan.set_defaults(func=cmd_scan_omp)
+
+    p_patrol = sub.add_parser("patrol", help="插件哑故障巡检（手动/调试，--force 越过节流）")
+    p_patrol.add_argument("--force", action="store_true", help="忽略节流立即巡检")
+    p_patrol.set_defaults(func=cmd_patrol)
 
     p_list = sub.add_parser("list", help="列出 pending 提案")
     p_list.set_defaults(func=cmd_list)

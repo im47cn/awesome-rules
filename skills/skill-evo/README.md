@@ -16,6 +16,7 @@ SessionEnd hook（hooks.json）                  session_shutdown hook（hooks/o
                 ├─ 会话定位：hook stdin / --cwd（首行 cwd 匹配 + 内容哈希增量去重）
                 ├─ 脱敏切片（密钥/长 token/ANSI）+ 目标资产锚点索引
                 ├─ headless claude -p 提炼 lessons（防递归三层）
+                ├─ 搭车插件哑故障巡检（evo_patrol，节流 + 台账 patrol.json）
                 └─ 提案落盘 ~/.config/ar/skill-evo/proposals/pending/
                        ▼
          人工审核：evo.py list / apply / reject
@@ -36,6 +37,12 @@ SessionEnd hook（hooks.json）                  session_shutdown hook（hooks/o
 cp hooks/omp/skill-evo.ts ~/.omp/agent/hooks/pre/
 ```
 
+- omp 自动发现用户级 hook；`session_shutdown` fire-and-forget 调用
+  `evo.py run --agent omp --cwd <cwd>`；脚本路径可用 `AR_SKILL_EVO_SCRIPT` 覆盖
+- 与 CC 搭车扫描并存无害（state.json 增量去重收敛）；防递归链：
+  omp → evo.py（`AR_SKILL_EVO_CHILD=1`）→ claude -p（继承标记）→ CC hook 见标记即退
+- 验证：安装后结束一个 omp 会话，`~/.config/ar/skill-evo/logs/evo.log` 应有记录
+
 审核流程（在任意 AI 会话中说「查看 skill-evo 提案」即可触发技能引导）：
 
 ```bash
@@ -43,6 +50,7 @@ python3 skills/skill-evo/scripts/evo.py list            # 列 pending 提案（�
 python3 skills/skill-evo/scripts/evo.py apply <id> --dry-run   # 预演
 python3 skills/skill-evo/scripts/evo.py apply <id>      # 应用（锚点失配整体失败）
 python3 skills/skill-evo/scripts/evo.py reject <id> --reason "证据不足"   # 驳回 → GEPA 负样本
+python3 skills/skill-evo/scripts/evo.py patrol [--force]          # 插件哑故障巡检复查
 ```
 
 GEPA 进化（冷启动保护：标注 ≥10 cases 且 ≥8 sessions 才可运行）：
@@ -60,13 +68,38 @@ python3 skills/skill-evo/scripts/evo.py evolve            # 进化总结 prompt�
 - 置信度 Low
 - `prompt_evolution` 型提案不走 apply，人工编辑 `evo_prompt.py` 的 `SYSTEM_PROMPT` 采纳
 
+## 插件哑故障巡检（evo_patrol）
+
+CC 插件 `failed to load` 不弹通知，hook 静默失效无感知（曾发生：awesome-rules
+插件因 manifest 重复 hooks 声明静默失效多日）。`evo.py run` 搭车巡检
+`claude plugin list`（`patrol_interval_hours` 节流，默认 6h）：
+
+- 加载失败落盘 `~/.config/ar/skill-evo/patrol.json` 台账（含 first_seen），
+  新故障/错误变化记 `logs/evo.log` 告警，恢复记恢复日志
+- `evo.py list` 置顶展示未决故障；`evo.py patrol [--force]` 手动复查（有故障 exit 1）
+- 巡检自身永不抛栈（哑故障检测器不能自己成为哑故障）
+
+## 设计边界（v2）
+
+- 排查「会话被跳过/被重复处理」时先查 state.json 的内容哈希记账（omp 退出 flush 会碰 mtime，mtime 不可作为处理依据）
+- 进化目标：`skills/**/*.md`、`steering/**/*.md`、根 `README.md`（索引表，表格感知追加）、
+  根 `CLAUDE.md`（AI 操作指引）；只做**追加**，不做改写/删除，不做「新增 skill」级提案
+- README 索引另有确定性兜底：`scripts/md_link_check.py`（链接有效性 + README 索引
+  零漂移统一门禁，已接入 `run_tests.sh`），磁盘新增技能/规范/设计文档而 README
+  未登记即红
+- 处理过的会话不再重提（state.json 内容哈希去重 + 单会话单提案守卫）
+- omp 触发优先用原生 hook（未安装时 CC 搭车扫描兜底）；`evo.py scan-omp` 可手动查看
+- GEPA 进化对象 v2 仅 `SYSTEM_PROMPT`；guard skill 触发词进化待数据积累后立项
+
 ## 配置
 
-`~/.config/ar/skill-evo/config.toml`（可选），模板见 [`config.example.toml`](config.example.toml)。常用项：`scope_dirs`（会话范围）、`min_messages`（跳过短会话）、`gepa_budget`。总开关：环境变量 `AR_SKILL_EVO_ENABLED=0`。
+`~/.config/ar/skill-evo/config.toml`（可选），模板见 [`config.example.toml`](config.example.toml)。常用项：`scope_dirs`（会话范围）、`min_messages`（跳过短会话）、`gepa_budget`、
+`patrol_interval_hours`（插件巡检节流间隔）。总开关：环境变量 `AR_SKILL_EVO_ENABLED=0`。
 
 ## 相关文件
 
-- 技能定义：[`SKILL.md`](SKILL.md)
+- 技能定义：[`SKILL.md`](SKILL.md)（AI 审核操作指引）
+- 核心脚本：[`scripts/evo.py`](scripts/evo.py)（CLI）、[`scripts/evo_patrol.py`](scripts/evo_patrol.py)（插件巡检）等
 - 技术设计（含 GEPA 算法保真点与竞态修复记录）：[`../../docs/design/skill-evo-design.md`](../../docs/design/skill-evo-design.md)
 - CC hook：[`../../hooks/on-session-end.sh`](../../hooks/on-session-end.sh)
 - omp hook 模板：[`../../hooks/omp/skill-evo.ts`](../../hooks/omp/skill-evo.ts)

@@ -38,6 +38,9 @@ DEFAULTS = {
     "gepa_holdout_ratio": 0.2,
     # 标注样本（applied/rejected 提案）低于此数拒绝进化（冷启动保护）
     "gepa_min_cases": 10,
+    # ── 插件哑故障巡检（evo_patrol）──
+    # 两次巡检最小间隔（小时）；run 搭车执行，patrol 子命令 --force 可越过
+    "patrol_interval_hours": 6,
     # judge 四维权重：precision / recall / negative_avoidance / format_compliance
     "judge_weights": [0.35, 0.35, 0.2, 0.1],
 }

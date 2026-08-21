@@ -40,3 +40,6 @@ gepa_holdout_ratio = 0.2
 gepa_min_cases = 10
 # judge 四维权重：precision / recall / negative_avoidance / format_compliance
 judge_weights = [0.35, 0.35, 0.2, 0.1]
+
+# 插件哑故障巡检：两次巡检最小间隔（小时），run 搭车执行
+patrol_interval_hours = 6
