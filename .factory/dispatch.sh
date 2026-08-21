@@ -110,49 +110,51 @@ dispatch_once() {
 
   echo "-- PR 结果处理（优先） --"
   # approved：sync 已打好标签；此处只做 A5 门内的 merge 动作
-  gh pr list --repo "$REPO_SLUG" --state open --label factory:approved \
+  # 注意：列表用命令替换读入、主 shell for 迭代——管道 while 子 shell
+  # 里的后台链不进主 shell job 表，wait 等不到（孤儿链事故 2026-08-21）
+  APPROVED="$(gh pr list --repo "$REPO_SLUG" --state open --label factory:approved \
     --json number,mergeable,reviewDecision --limit 50 \
     | python3 -c '
 import json, sys
 for pr in json.load(sys.stdin):
     if pr["reviewDecision"] == "APPROVED":
-        print(pr["number"], pr["mergeable"])' \
-    | while read -r P MERGEABLE; do
-        if [ "$AUTO_MERGE" = 1 ] && [ "$MERGEABLE" = "MERGEABLE" ]; then
-          say "merge PR #$P (--$MERGE_METHOD)"
-          [ "$DRY" = 0 ] && gh pr merge "$P" --repo "$REPO_SLUG" "--$MERGE_METHOD" >/dev/null \
-            && echo "  PR #$P 已合并；issue 由 GitHub 自动关闭"
-        else
-          echo "  PR #$P approved 但 A5 门未开（FACTORY_AUTO_MERGE + metrics/auto-merge-unlocked）→ 人工合并"
-        fi
-      done
+        print(pr["number"], pr["mergeable"])')"
+  for entry in $APPROVED; do
+    set -- $entry; P="$1"; MERGEABLE="$2"
+    if [ "$AUTO_MERGE" = 1 ] && [ "$MERGEABLE" = "MERGEABLE" ]; then
+      say "merge PR #$P (--$MERGE_METHOD)"
+      [ "$DRY" = 0 ] && gh pr merge "$P" --repo "$REPO_SLUG" "--$MERGE_METHOD" >/dev/null \
+        && echo "  PR #$P 已合并；issue 由 GitHub 自动关闭"
+    else
+      echo "  PR #$P approved 但 A5 门未开（FACTORY_AUTO_MERGE + metrics/auto-merge-unlocked）→ 人工合并"
+    fi
+  done
 
   echo "-- needs-fix 重派（计数契约：claim 时移除 needs-fix） --"
-  gh pr list --repo "$REPO_SLUG" --state open --label factory:needs-fix \
+  NEEDS_FIX="$(gh pr list --repo "$REPO_SLUG" --state open --label factory:needs-fix \
     --json number --limit 50 \
     | python3 -c '
 import json, sys
-for pr in json.load(sys.stdin): print(pr["number"])' \
-    | while read -r P; do
-        N="$(pr_link_issue "$P")"
-        [ -z "$N" ] && { echo "  PR #$P 无关联 issue（body 缺 Closes #N），跳过" >&2; continue; }
-        # issue 已在跑（in-progress）则不重复派
-        if gh issue view "$N" --repo "$REPO_SLUG" --json labels -q '.labels[].name' 2>/dev/null \
-           | grep -q '^factory:in-progress$'; then
-          echo "  issue #$N 已 in-progress，跳过"; continue
-        fi
-        say "PR #$P → issue #$N 重派（remove needs-fix 保计数活性）"
-        [ "$DRY" = 0 ] && gh pr edit "$P" --repo "$REPO_SLUG" --remove-label factory:needs-fix >/dev/null
-        if claim "$N"; then run_chain "$N"; fi
-      done
+for pr in json.load(sys.stdin): print(pr["number"])')"
+  for P in $NEEDS_FIX; do
+    N="$(pr_link_issue "$P")"
+    [ -z "$N" ] && { echo "  PR #$P 无关联 issue（body 缺 Closes #N），跳过" >&2; continue; }
+    # issue 已在跑（in-progress）则不重复派
+    if gh issue view "$N" --repo "$REPO_SLUG" --json labels -q '.labels[].name' 2>/dev/null \
+       | grep -q '^factory:in-progress$'; then
+      echo "  issue #$N 已 in-progress，跳过"; continue
+    fi
+    say "PR #$P → issue #$N 重派（remove needs-fix 保计数活性）"
+    [ "$DRY" = 0 ] && gh pr edit "$P" --repo "$REPO_SLUG" --remove-label factory:needs-fix >/dev/null
+    if claim "$N"; then run_chain "$N"; fi
+  done
 
   echo "-- accepted 队列（priority 排序，并发 ≤${MAX_PARALLEL}） --"
-  gh issue list --repo "$REPO_SLUG" --state open --label factory:accepted \
-    --json number,labels --limit 100 \
-    | sort_by_priority \
-    | while read -r N; do
-        if claim "$N"; then say "issue #$N → 链"; run_chain "$N"; fi
-      done
+  QUEUE="$(gh issue list --repo "$REPO_SLUG" --state open --label factory:accepted \
+    --json number,labels --limit 100 | sort_by_priority)"
+  for N in $QUEUE; do
+    if claim "$N"; then say "issue #$N → 链"; run_chain "$N"; fi
+  done
 
   if [ "$DRY" = 0 ]; then
     wait; echo "本轮链全部结束，收尾 sync"
