@@ -203,7 +203,7 @@ if [ "${DRY}" = 0 ]; then
 
 fi
 # --- 2-4. prime → plan → implement（同一分支上顺序执行） ---
-[ "${DRY}" = 0 ] && git -C "${REPO}" checkout -b "${BRANCH}" 2>/dev/null || true
+[ "${DRY}" = 0 ] && git -C "${REPO}" checkout -B "${BRANCH}" main
 run_node prime    || exit 1
 run_node plan     || exit 1
 run_node implement|| exit 1
