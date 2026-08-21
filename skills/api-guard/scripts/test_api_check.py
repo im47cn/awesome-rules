@@ -88,6 +88,27 @@ class TestCheckKebabCase(unittest.TestCase):
         check_kebab_case(_ep(path="/logistics/v1/waybill/{id}"), issues)
         self.assertEqual(len(issues), 0)
 
+    def test_leading_hyphen_rejected(self):
+        issues = []
+        check_kebab_case(_ep(path="/logistics/v1/-users"), issues)
+        self.assertEqual(len(issues), 1)
+
+    def test_trailing_hyphen_rejected(self):
+        issues = []
+        check_kebab_case(_ep(path="/logistics/v1/users-"), issues)
+        self.assertEqual(len(issues), 1)
+
+    def test_consecutive_hyphens_rejected(self):
+        issues = []
+        check_kebab_case(_ep(path="/logistics/v1/user--list"), issues)
+        self.assertEqual(len(issues), 1)
+
+    def test_valid_multi_hyphen_segment(self):
+        """合法多段短横线不应误报。"""
+        issues = []
+        check_kebab_case(_ep(path="/logistics/waybill-sync"), issues)
+        self.assertEqual(len(issues), 0)
+
 
 # ── 动词后置检查 ──────────────────────────────────────────────────────────
 

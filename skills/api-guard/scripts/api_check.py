@@ -160,7 +160,7 @@ def extract_endpoints(content: str, file_path: str):
 
 
 def check_kebab_case(ep: ApiEndpoint, issues: list):
-    """路径全小写 kebab-case，禁止 camelCase。"""
+    """路径全小写 kebab-case，禁止 camelCase、下划线及畸形短横线（段首/段尾/连续）。"""
     ctx = _ctx(ep)
     segments = [s for s in ep.path.split("/") if s]
     for seg in segments:
@@ -177,6 +177,12 @@ def check_kebab_case(ep: ApiEndpoint, issues: list):
                 location=f"路径:{ep.path} 段:{seg}",
                 description=f"路径段 '{seg}' 包含下划线",
                 suggestion="路径使用 kebab-case（短横线），禁止下划线"))
+            return
+        if re.search(r"^-|-$|--", seg):
+            issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="路径命名",
+                location=f"路径:{ep.path} 段:{seg}",
+                description=f"路径段 '{seg}' 短横线畸形（段首/段尾/连续）",
+                suggestion="路径段使用合法 kebab-case：不以短横线开头或结尾，不使用连续短横线"))
             return
 
 
