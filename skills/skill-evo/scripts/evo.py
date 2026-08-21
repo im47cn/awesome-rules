@@ -293,10 +293,20 @@ def cmd_apply(args) -> int:
         return 0
     from datetime import datetime, timezone
     stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    try:
+        PR.finalize_review(path, _split_codes(getattr(args, "codes", "")), rejected=False)
+    except PR.ApplyError as e:
+        print(f"❌ verdict 注入失败：{e}")
+        return 1
     dest = PR.move_proposal(path, paths["applied"], {"status": "applied", "applied_at": stamp})
+    PR.archive_orig(path, paths["applied"])
     print(f"提案已归档：{dest}")
     print("提示：变更已写入工作区，请 git diff 检查；满意后自行提交（本技能不自动 commit）")
     return 0
+
+
+def _split_codes(raw: str) -> list:
+    return [c.strip() for c in (raw or "").split(",") if c.strip()]
 
 
 def cmd_reject(args) -> int:
@@ -305,9 +315,15 @@ def cmd_reject(args) -> int:
     path = _find_pending(cfg, args.id)
     from datetime import datetime, timezone
     stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    try:
+        PR.finalize_review(path, _split_codes(getattr(args, "codes", "")), rejected=True)
+    except PR.ApplyError as e:
+        print(f"❌ verdict 注入失败：{e}")
+        return 1
     dest = PR.move_proposal(path, paths["rejected"],
                             {"status": "rejected", "rejected_at": stamp,
                              "reject_reason": args.reason or ""})
+    PR.archive_orig(path, paths["rejected"])
     print(f"已驳回并归档：{dest}")
     return 0
 
@@ -385,11 +401,16 @@ def main() -> int:
     p_apply.add_argument("id", help="提案 id（可前缀匹配）")
     p_apply.add_argument("--dry-run", action="store_true", help="预演不落盘")
     p_apply.add_argument("--force", action="store_true", help="越过护栏警告（人工已确认）")
+    p_apply.add_argument("--codes", default="",
+                         help="语义码（GEPA 标注）：裸码=提案级；L-XXXX:code=lesson 级。"
+                              "合法码见 evo_proposal.REASON_CODES，逗号分隔")
     p_apply.set_defaults(func=cmd_apply)
 
     p_rej = sub.add_parser("reject", help="驳回提案")
     p_rej.add_argument("id")
     p_rej.add_argument("--reason", default="")
+    p_rej.add_argument("--codes", default="",
+                       help="语义码（GEPA 标注），同 apply --codes")
     p_rej.set_defaults(func=cmd_reject)
 
     p_ev = sub.add_parser("evolve", help="GEPA 进化 SYSTEM_PROMPT（手动低频，有 LLM 成本）")

@@ -1,6 +1,6 @@
 # skill-evo 技术设计文档
 
-> **状态**：已实现（v2）· 单测 60 例全绿 · 待真实会话观察期验证
+> **状态**：已实现（v2）· 单测 78 例全绿 · 待真实会话观察期验证
 > **范围**：v2 = v1 + omp 原生触发 + GEPA 进化引擎（进化自身 SYSTEM_PROMPT）
 > **参考**：[NousResearch/hermes-agent-self-evolution](https://github.com/NousResearch/hermes-agent-self-evolution)（session 挖掘 + PR 人工审核护栏）、hermes-agent 本体（任务后自主创建/改进 skill）、[GEPA arXiv 2507.19457](https://arxiv.org/abs/2507.19457) · **日期**：2026-08-18
 
@@ -165,7 +165,30 @@ append-only + supersedes 修正链），只取语义层不复刻其事件溯源�
 - 个人记忆**不纳入**：职责边界——个人偏好归记忆系统（claude-mem / auto-memory），
   skill-evo 只进团队可共享的 git 资产
 
-### 6.6 v3 候选（YAGNI，暂不做）
+### 6.6 结构化审核标注（2026-08-21，借鉴 harness-anything verdict 语义）
+
+设计动机：此前标签是提案级二值（apply/reject + 自由文本 reason），而真实人工判断
+发生在 lesson 级且带中间态（裁剪后应用、修锚点后应用、剔除个别 lesson）——
+两份真实部分应用案例（2026-08-19 剔 lesson、2026-08-20 裁剪+修锚点）的判断过程
+全部丢失。借鉴 HA 的 verdict 结构化（其可信正因 verdict 从执行切面推导而非自证）：
+
+- **lesson 级 verdict**：applied / trimmed / edited / rejected（提案级二值只是聚合投影）
+- **采集=自动推导+人工语义**：`write_proposal` 落原始快照 `<id>.orig`（无 .md 后缀，
+  绕开 list/守卫/md_link_check 的 `*.md` glob）；apply/reject 时 diff 推导结构事实
+  （两遍匹配：同 id 对位 → 残余按 target+type+文本包含关系配对，排除剔除错配）；
+  语义原因码人工补（`--codes`，裸码=提案级、`L-XXXX:码`=lesson 级）
+- **码表**：7 封闭枚举（dup_superset/content_overlap/anchor_defect/low_value/
+  off_target/scope_mismatch/style_mismatch）+ `other:<文本>` 逃生舱；未知码 fail-closed
+- **承载**：归档机读 JSON 注入 `verdict`/`verdict_codes` + frontmatter `review:`
+  单行投影；pending 态不落 verdict（两态 schema，verdict 是 review 时点产物）
+- **快照随归档保留**：`.orig` 移入 applied/rejected 目录——LLM 原始输出 vs
+  人工修订对照是 GEPA 最有价值的标注信号（对应 HA 的 submission/verdict digest 双钉）
+- **judge 消费（方案 A，事实供给）**：case 载荷携带 verdict/codes，judge prompt
+  声明 negative_avoidance 按码逐类核对——不硬编码码权重（无数据校准的加权是
+  伪精确，HA 研究中批评过的反模式）；权重待首次 evolve 暴露评分缺陷后再定
+- 存量 8 案例按会话记录回填 verdict+codes（`.orig` 不可再生，接受）
+
+### 6.7 v3 候选（YAGNI，暂不做）
 
 - 跨会话相似 lesson 合并（当前仅做精确内容去重，相似度合并待重复真实发生再立项）
 - replace 语义（改写既有条款，需更强护栏：diff 审阅界面 + steering 强制条款削弱检测）
@@ -173,10 +196,11 @@ append-only + supersedes 修正链），只取语义层不复刻其事件溯源�
 - guard skill 触发词（SKILL.md description）的 GEPA 进化——引擎已就绪，
   缺评估集（合成任务 + judge 噪声大，待提案数据积累后立项）
 - lesson 二分类路由（个人偏好类经验标记后不进提案流）——待观察到误路由实例再做
+- verdict 码加权评分（若首次 evolve 显示 judge 对码利用不足）
 
 ## 7. 验证记录
 
-- 单测：60 例全绿（`python3 -m pytest skills/skill-evo/scripts/tests`，claude 调用全 mock）
+- 单测：78 例全绿（`python3 -m pytest skills/skill-evo/scripts/tests`，claude 调用全 mock）
 - `evo.py scan-omp`：对本机真实 `~/.omp/agent/sessions/` 的发现与 scope 过滤正常
 - `evo.py run --transcript <真实 CC 会话> --dry-run`：prompt 生成含目标索引与脱敏视图
 - omp hook 模板已安装至 `~/.omp/agent/hooks/pre/`，待自然会话结束验证 evo.log

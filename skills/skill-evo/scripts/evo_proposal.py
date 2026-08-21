@@ -38,6 +38,9 @@ class Lesson:
     change: Optional[Change] = None
     lesson_id: str = ""            # L-XXXXXXXX，write/load 时自动派生
     supersedes: str = ""           # 被修正的旧 lesson_id（人工审核时填写）
+    # 以下仅在归档态存在（review 产物，借鉴 harness-anything verdict 语义）
+    verdict: str = ""              # applied | trimmed | edited | rejected
+    verdict_codes: List[str] = field(default_factory=list)
 
 
 def derive_lesson_id(ls: Lesson) -> str:
@@ -107,10 +110,12 @@ def write_proposal(p: Proposal, pending_dir: Path) -> Path:
                    "new_text": ls.change.new_text} if ls.change else None,
     } for ls in p.lessons]}
     machine = "```json\n" + json.dumps(payload, ensure_ascii=False, indent=1) + "\n```"
-    path.write_text(
-        f"{fm}\n# 进化提案 {p.id}\n\n> 来源：{p.source_agent} 会话 `{p.source_session}`"
-        f"（{p.source_path}）\n\n{rendered}\n\n## 机读数据（apply 依据，勿手改）\n\n{machine}\n",
-        encoding="utf-8")
+    body = (f"{fm}\n# 进化提案 {p.id}\n\n> 来源：{p.source_agent} 会话 `{p.source_session}`"
+            f"（{p.source_path}）\n\n{rendered}\n\n## 机读数据（apply 依据，勿手改）\n\n{machine}\n")
+    path.write_text(body, encoding="utf-8")
+    # 原始快照（无 .md 后缀：绕开 list/守卫/md_link_check 的 *.md glob）——
+    # review 编辑只改正式文件，apply/reject 时 diff 快照推导结构化 verdict
+    (pending_dir / f"{p.id}.orig").write_text(body, encoding="utf-8")
     return path
 
 
@@ -146,7 +151,9 @@ def load_proposal(path: Path) -> Proposal:
                     confidence=str(ls.get("confidence", "")),
                     reason=str(ls.get("reason", "")), change=ch,
                     lesson_id=str(ls.get("lesson_id", "")),
-                    supersedes=str(ls.get("supersedes", ""))))
+                    supersedes=str(ls.get("supersedes", "")),
+                    verdict=str(ls.get("verdict", "")),
+                    verdict_codes=[str(c) for c in ls.get("verdict_codes") or []]))
         except json.JSONDecodeError:
             pass
     for ls in lessons:
@@ -365,3 +372,136 @@ def move_proposal(proposal_path: Path, dest_dir: Path, extra_fm: dict) -> Path:
     else:
         proposal_path.unlink(missing_ok=True)
     return final
+
+
+# ── 结构化审核标注（verdict，借鉴 harness-anything verdict 语义）─────────────
+
+REASON_CODES = ("dup_superset", "content_overlap", "anchor_defect", "low_value",
+                "off_target", "scope_mismatch", "style_mismatch")
+
+
+def validate_codes(codes: List[str]) -> None:
+    """语义原因码校验：封闭枚举 + other:<自由文本> 逃生舱；非法即拒（fail-closed）。"""
+    for c in codes:
+        if c not in REASON_CODES and not c.startswith("other:"):
+            raise ApplyError(f"未知语义码：{c}（合法：{', '.join(REASON_CODES)} 或 other:<文本>）")
+
+
+def _parse_codes(raw: List[str]) -> Tuple[dict, List[str]]:
+    """拆分 'L-XXXX:code'（lesson 级）与裸 'code'（提案级，作用于全部 lessons）。"""
+    per_lesson: dict = {}
+    proposal_level: List[str] = []
+    for item in raw:
+        item = item.strip()
+        if not item:
+            continue
+        lid, sep, code = item.partition(":")
+        if sep and lid.startswith("L-"):
+            per_lesson.setdefault(lid, []).append(code.strip())
+        else:
+            proposal_level.append(item)
+    all_codes = proposal_level + [c for cs in per_lesson.values() for c in cs]
+    validate_codes(all_codes)
+    return per_lesson, proposal_level
+
+
+def _orig_path(path: Path) -> Path:
+    return path.parent / (path.stem + ".orig")
+
+
+def _derive_verdicts(cur: List[Lesson], orig: Optional[List[Lesson]]) -> List[str]:
+    """diff 原始 vs 当前 lessons 推导结构 verdict（事实由脚本定，语义码由人补）。
+
+    两遍匹配：① 同 lesson_id（内容未变，含位移）；② 残余按 (target, type) 且
+    new_text 存包含关系配对（裁剪的典型特征：改后文本 ⊂ 原文本）——包含关系
+    排除"剔除后错配到相邻 lesson"。new_text 变化 → trimmed；仅锚点/action
+    变化 → edited；原版存在但无对应 → 被剔除（不占 verdict 位）；
+    无原版快照 → 全部 applied（退化为声明性）。
+    """
+    verdicts = ["applied"] * len(cur)
+    if not orig:
+        return verdicts
+    remaining = set(range(len(cur)))
+    unmatched_orig: List[Lesson] = []
+    for o in orig:
+        hit = next((i for i in sorted(remaining)
+                    if cur[i].lesson_id == o.lesson_id), None)
+        if hit is None:
+            unmatched_orig.append(o)
+            continue
+        _mark_verdict(verdicts, hit, o, cur[hit])
+        remaining.discard(hit)
+    for o in unmatched_orig:                     # 第二遍：裁剪配对（id 随内容变）
+        hit = next((i for i in sorted(remaining)
+                    if cur[i].target_file == o.target_file and cur[i].type == o.type
+                    and _text_related(o, cur[i])), None)
+        if hit is None:
+            continue                             # 真被剔除
+        _mark_verdict(verdicts, hit, o, cur[hit])
+        remaining.discard(hit)
+    return verdicts
+
+
+def _mark_verdict(verdicts: List[str], i: int, o: Lesson, c: Lesson) -> None:
+    ch_o, ch_c = o.change, c.change
+    if ch_o and ch_c:
+        if ch_o.new_text != ch_c.new_text:
+            verdicts[i] = "trimmed"
+        elif (ch_o.heading, ch_o.action) != (ch_c.heading, ch_c.action):
+            verdicts[i] = "edited"
+
+
+def _text_related(a: Lesson, b: Lesson) -> bool:
+    """裁剪判定：两文本存在包含关系（短的是长的子串）。"""
+    ta = (a.change.new_text if a.change else "").strip()
+    tb = (b.change.new_text if b.change else "").strip()
+    return bool(ta) and bool(tb) and (ta in tb or tb in ta)
+
+
+def finalize_review(path: Path, raw_codes: List[str], *, rejected: bool) -> Path:
+    """归档前注入结构化 verdict：diff 推导 + 语义码，写回机读 JSON 与 fm 投影。
+
+    返回处理后的 pending 路径（调用方随后 move_proposal 归档并搬运 .orig）。
+    """
+    p = load_proposal(path)
+    per_lesson, proposal_level = _parse_codes(raw_codes)
+    orig = load_proposal(_orig_path(path)).lessons if _orig_path(path).is_file() else None
+    verdicts = (["rejected"] * len(p.lessons) if rejected
+                else _derive_verdicts(p.lessons, orig))
+    codes = []
+    for i, ls in enumerate(p.lessons):
+        ls.verdict = verdicts[i]
+        merged = list(proposal_level) + list(per_lesson.get(ls.lesson_id, []))
+        ls.verdict_codes = list(dict.fromkeys(merged))          # 合并去重保序
+        codes.extend(ls.verdict_codes)
+    # 注入机读 JSON 块（首个 lessons 载荷）
+    content = path.read_text(encoding="utf-8")
+    m = _JSON_BLOCK_RE.search(content)
+    if not m:
+        raise ApplyError(f"{path.name}: 找不到机读 JSON 块")
+    payload = json.loads(m.group(1))
+    for ls_json, ls in zip(payload.get("lessons", []), p.lessons):
+        ls_json["verdict"] = ls.verdict
+        ls_json["verdict_codes"] = ls.verdict_codes
+    content = content[:m.start()] + "```json\n" + json.dumps(
+        payload, ensure_ascii=False, indent=1) + "\n```" + content[m.end():]
+    # frontmatter 单行投影（人扫读）
+    counts = {v: verdicts.count(v) for v in ("applied", "trimmed", "edited", "rejected") if v in verdicts}
+    summary = ", ".join(f"{k}={n}" for k, n in counts.items())
+    if codes:
+        summary += f"；codes={','.join(sorted(set(codes)))}"
+    content = content.replace(
+        f"lessons: {len(p.lessons)}\n", f"lessons: {len(p.lessons)}\nreview: {summary}\n", 1)
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def archive_orig(path: Path, dest_dir: Path) -> Optional[Path]:
+    """原始快照随归档保留（GEPA 最肥信号：LLM 原始输出 vs 人工修订对照）。"""
+    orig = _orig_path(path)
+    if not orig.is_file():
+        return None
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / orig.name
+    shutil.move(str(orig), dest)
+    return dest

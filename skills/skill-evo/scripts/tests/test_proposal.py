@@ -1,4 +1,6 @@
-"""evo_proposal 单测：round-trip、路径逃逸、锚点应用、护栏、状态流转。"""
+"""evo_proposal 单测：round-trip、路径逃逸、锚点应用、护栏、状态流转、verdict。"""
+import json
+
 import pytest
 
 import evo_proposal as PR
@@ -275,3 +277,110 @@ def test_move_proposal_adds_fm(tmp_path):
     assert "applied_at: T" in content
     # 归档后仍可加载（frontmatter 注入未破坏 JSON 块）
     assert len(PR.load_proposal(dest).lessons) == 1
+
+
+# ── 结构化 verdict（借鉴 harness-anything verdict 语义）──────────────────────
+
+def test_validate_codes():
+    PR.validate_codes(["dup_superset", "other:自定义理由"])     # 合法枚举 + 逃生舱
+    with pytest.raises(PR.ApplyError, match="未知语义码"):
+        PR.validate_codes(["not_a_code"])
+
+
+def test_write_proposal_orig_snapshot(tmp_path):
+    PR.write_proposal(make_proposal(tmp_path), tmp_path / "pending")
+    orig = tmp_path / "pending" / "20260818-000000-cc-abcd1234.orig"
+    assert orig.is_file() and orig.suffix == ".orig"           # 无 .md 后缀
+    assert orig.read_text(encoding="utf-8") == \
+        (tmp_path / "pending" / "20260818-000000-cc-abcd1234.md").read_text(encoding="utf-8")
+    # glob 语义：*.md 不应扫到快照
+    assert len(list((tmp_path / "pending").glob("*.md"))) == 1
+
+
+def _mk3(tmp_path, pid="20260821-000000-cc-verdict1"):
+    """三 lesson 提案：1 保持、2 裁剪内容、3 修锚点。"""
+    lessons = [
+        make_lesson(change=PR.Change(action="append_end", new_text="- 保持")),
+        make_lesson(change=PR.Change(action="append_end", new_text="- 原始长内容，将被裁剪\n- 第二条冗余")),
+        make_lesson(change=PR.Change(action="append_under", heading="## 旧锚点",
+                                     new_text="- 锚点修复")),
+    ]
+    return PR.write_proposal(make_proposal(tmp_path, lessons=lessons, pid=pid),
+                             tmp_path / "pending")
+
+
+def test_finalize_review_derives_verdicts(tmp_path):
+    path = _mk3(tmp_path)
+    p = PR.load_proposal(path)
+    # review 编辑：lesson2 裁剪（内容变→id 变）、lesson3 补 ##
+    p.lessons[1].change.new_text = "- 原始长内容，将被裁剪"
+    p.lessons[2].change.heading = "## 新锚点"
+    # 直接改写 JSON 块模拟人工编辑（绕过 write_proposal 重建）
+    payload = {"lessons": [{
+        "type": ls.type, "evidence": ls.evidence, "target_file": ls.target_file,
+        "confidence": ls.confidence, "reason": ls.reason,
+        "lesson_id": ls.lesson_id, "supersedes": ls.supersedes,
+        "change": {"action": ls.change.action, "heading": ls.change.heading,
+                   "new_text": ls.change.new_text}} for ls in p.lessons]}
+    content = path.read_text(encoding="utf-8")
+    m = PR._JSON_BLOCK_RE.search(content)
+    path.write_text(content[:m.start()] + "```json\n" + json.dumps(
+        payload, ensure_ascii=False, indent=1) + "\n```" + content[m.end():],
+        encoding="utf-8")
+
+    code_l2 = PR.load_proposal(path).lessons[1].lesson_id
+    PR.finalize_review(path, [f"{code_l2}:content_overlap", "anchor_defect"],
+                       rejected=False)
+    archived = PR.load_proposal(path)
+    vs = [(ls.verdict, ls.verdict_codes) for ls in archived.lessons]
+    assert vs[0] == ("applied", ["anchor_defect"])             # 提案级码作用于全部
+    assert vs[1] == ("trimmed", ["anchor_defect", "content_overlap"])
+    assert vs[2] == ("edited", ["anchor_defect"])
+    # fm 投影 + JSON 注入
+    text = path.read_text(encoding="utf-8")
+    assert "review: applied=1, trimmed=1, edited=1" in text
+    assert '"verdict": "trimmed"' in text
+    # .orig 保留待归档
+    assert (tmp_path / "pending" / "20260821-000000-cc-verdict1.orig").is_file()
+
+
+def test_finalize_review_removed_and_rejected(tmp_path):
+    """原版 4 lesson 被剔 1：剔除者无 verdict 位；整包 reject 全 rejected。"""
+    lessons = [make_lesson(change=PR.Change(action="append_end", new_text=f"- l{i}"))
+               for i in range(4)]
+    pid = "20260821-000001-cc-verdict2"
+    path = PR.write_proposal(make_proposal(tmp_path, lessons=lessons, pid=pid),
+                             tmp_path / "pending")
+    # 人工剔除 lesson 3（index 2）
+    p = PR.load_proposal(path)
+    kept = [ls for i, ls in enumerate(p.lessons) if i != 2]
+    payload = {"lessons": [{
+        "type": ls.type, "evidence": ls.evidence, "target_file": ls.target_file,
+        "confidence": ls.confidence, "reason": ls.reason,
+        "lesson_id": ls.lesson_id, "supersedes": ls.supersedes,
+        "change": {"action": ls.change.action, "heading": ls.change.heading,
+                   "new_text": ls.change.new_text}} for ls in kept]}
+    content = path.read_text(encoding="utf-8")
+    m = PR._JSON_BLOCK_RE.search(content)
+    path.write_text(content[:m.start()] + "```json\n" + json.dumps(
+        payload, ensure_ascii=False, indent=1) + "\n```" + content[m.end():],
+        encoding="utf-8")
+    PR.finalize_review(path, ["dup_superset"], rejected=False)
+    assert [ls.verdict for ls in PR.load_proposal(path).lessons] == \
+        ["applied"] * 3                                            # 剔除者不占位
+
+    # 整包 reject：全部 rejected
+    path2 = PR.write_proposal(make_proposal(tmp_path, pid="20260821-000002-cc-vf3"),
+                              tmp_path / "pending")
+    PR.finalize_review(path2, ["low_value"], rejected=True)
+    assert [ls.verdict for ls in PR.load_proposal(path2).lessons] == ["rejected"]
+
+
+def test_archive_orig_moves_snapshot(tmp_path):
+    path = PR.write_proposal(make_proposal(tmp_path), tmp_path / "pending")
+    orig = tmp_path / "pending" / "20260818-000000-cc-abcd1234.orig"
+    dest = PR.archive_orig(path, tmp_path / "applied")
+    assert dest == tmp_path / "applied" / "20260818-000000-cc-abcd1234.orig"
+    assert dest.is_file() and not orig.exists()
+    assert PR.archive_orig(tmp_path / "pending" / "absent.md",
+                           tmp_path / "applied") is None       # 无快照容错

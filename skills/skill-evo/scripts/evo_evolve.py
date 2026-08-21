@@ -25,14 +25,22 @@ import evo_session as S
 
 # judge 输出四维（各 0-10）：权重见 config judge_weights
 JUDGE_PROMPT = """你是「经验提炼质量」评审。给定：候选 prompt 在一段会话上提炼出的 lessons，
-以及人工审核的参考结果（applied 的 lessons = 应提炼出的内容；rejected 的 lessons 与
-reject_reason = 不应产出/曾被驳回的内容与原因）。
+以及人工审核的参考结果。参考中每条 lesson 携带结构化 verdict（最终处置）：
+- applied = 原样应用（应提炼出的内容）
+- trimmed = 内容被裁剪后应用（产出方向对但含冗余，verdict_codes 给出原因）
+- edited = 修正锚点/落点后应用（内容对，元数据有缺陷）
+- rejected = 被剔除或整包驳回（不应产出；verdict_codes 给出原因）
+另有整包 reject_reason（若有）。
+
+negative_avoidance 按 verdict_codes 精确评估：候选复现被标注 dup_superset /
+content_overlap / low_value / off_target 等模式的内容则低分；trimmed 的教训
+（超量/冗余产出）也计入。
 
 按四维打分（0-10 整数），输出严格单个 JSON（无围栏无其他文字）：
 {
-  "precision": "产出的 lessons 中命中人工认可内容的比例",
+  "precision": "产出的 lessons 中命中人工认可内容的比例（trimmed 部分按冗余扣）",
   "recall": "人工认可的经验中被提炼出的比例",
-  "negative_avoidance": "是否规避了被驳回的错误（复现 rejected 内容/幻觉 evidence/锚点失配则低分）",
+  "negative_avoidance": "是否规避了被驳回/被裁剪的错误（按 verdict_codes 逐类核对）",
   "format_compliance": "JSON schema、追加语义（append_under/append_end）、无新增【强制】标记",
   "feedback": "一句话最有价值的改进方向"
 }"""
@@ -84,7 +92,9 @@ def build_dataset(cfg: dict) -> Tuple[List[G.Case], List[G.Case]]:
                 reference={"status": status, "lessons": [
                     {"target_file": ls.target_file, "confidence": ls.confidence,
                      "change_new_text": ls.change.new_text if ls.change else "",
-                     "evidence": ls.evidence} for ls in p.lessons],
+                     "evidence": ls.evidence,
+                     "verdict": ls.verdict,
+                     "verdict_codes": ls.verdict_codes} for ls in p.lessons],
                     "reject_reason": _reject_reason(f)}))
     # 按 session 分层切（同会话的提案不跨集）
     sessions = sorted({c.id for c in cases})

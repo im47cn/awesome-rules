@@ -65,15 +65,26 @@ lesson_id（人工审核时在提案 JSON 块中填写），保留完整的演�
 python3 scripts/evo.py apply <id> --dry-run
 
 # 确认后应用（直接写入目标文件；护栏警告命中时加 --force）
-python3 scripts/evo.py apply <id> [--force]
+python3 scripts/evo.py apply <id> [--force] [--codes "L-XXXX:content_overlap"]
 
 # 驳回
-python3 scripts/evo.py reject <id> --reason "证据不足"
+python3 scripts/evo.py reject <id> --reason "证据不足" --codes "dup_superset"
 ```
+
+**结构化 verdict（GEPA 标注）**：apply/reject 归档时自动 diff 原始快照（`<id>.orig`）
+推导每条 lesson 的最终处置（applied 原样 / trimmed 裁剪后应用 / edited 修锚点后应用 /
+rejected 剔除或驳回）——review 时对 pending 文件的任何裁剪、锚点修正、lesson 剔除
+都会被确定性捕获。`--codes` 补充机器推不出的**语义原因**（裸码=提案级；`L-XXXX:码`
+=lesson 级，可混用逗号分隔）。合法码：`dup_superset`（被超集包含）/`content_overlap`
+（与目标现文重复）/`anchor_defect`（锚点缺陷）/`low_value`（单例过拟合等价值不足）/
+`off_target`（落点不当）/`scope_mismatch`（个人偏好非团队资产）/`style_mismatch`
+（风格不符）/`other:<自由文本>`（逃生舱，GEPA 不消费）。未知码 fail-closed 拒收。
 
 应用后：
 - 变更已写入工作区，**提示用户 `git diff` 检查，满意后自行提交**（本技能永不自动 commit）
 - 锚点失配/不唯一时 apply 整体失败不盲写——此时应人工打开目标文件与提案，改由人工编辑
+- 归档文件携带 verdict（frontmatter `review:` 投影 + 机读 JSON 字段），`.orig` 快照
+  随归档保留（LLM 原始输出 vs 人工修订对照，GEPA 最有价值的标注信号）
 
 > ⚠️ **prompt_evolution 型提案不走 apply**（apply 仅支持 markdown 追加语义）。人工审阅
 > 提案中新 SYSTEM_PROMPT 后，手动编辑 `scripts/evo_prompt.py` 的 `SYSTEM_PROMPT` 常量采纳。
