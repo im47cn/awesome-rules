@@ -28,7 +28,7 @@ python3 scripts/api_check.py path/to/project/ --format json
 
 | 类别 | 检查项 |
 |---|---|
-| 路径命名 | 全小写 kebab-case，禁止 camelCase 和下划线 |
+| 路径命名 | 全小写 kebab-case，禁止 camelCase、下划线及畸形短横线（段首/段尾/连续短横线） |
 | 动作收敛 | 末段须在固定动词集内：create/query/update/remove/cancel/sync/confirm/apply/push |
 | 路径变量 | 禁止 path 中传 `{id}` 等唯一标识 |
 | 时间注解 | DTO 禁 `shape=NUMBER`（须 ISO 8601 pattern）；PO 禁任何日期注解 |
