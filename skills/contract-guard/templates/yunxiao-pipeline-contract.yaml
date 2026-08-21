@@ -26,23 +26,37 @@ upstream-pipeline:
                   echo "$CHANGED" | grep -E '^<契约模块路径, 如 gtsp-wop-service-api>' && export CONTRACT_CHANGED=1
                   echo "$CHANGED" | grep -E '^<契约模块路径, 如 gtsp-wop-service-api-gateway>' && export CONTRACT_CHANGED=1
                   # 云效环境变量导出方式按实际 runner 调整; 无变更时跳过 job2/job3
-        - job2_gate_and_deploy: # japicmp 门禁 + 对比对象自检 + 刷私服 SNAPSHOT
+        - job2_gate_and_deploy: # 重建 baseline + japicmp 门禁 + 自检 + 刷私服 SNAPSHOT
             steps:
+              # 步骤 1: 从上次绿构建的 commit sha 重建契约 jar(baseline 机制见规范 B 节;
+              #         重建脚本完整版在 japicmp-pom-snippet.xml 尾部)
               - run: |
-                  mvn verify -pl <契约模块1>,<契约模块2> -am \
-                    -Djapicmp.skip=false \
-                    -Dcontract.baseline.version=${CONTRACT_BASELINE}
-                  # 门禁自检【强制】(规范 cross-repo-contract-standards.md「门禁自检」):
-                  # 对比对象 A≠B, 防止 reactor 自比自/属性遮蔽导致的静默恒绿
+                  WT=$(mktemp -d /tmp/japicmp-baseline.XXXXXX)
+                  git worktree add "$WT" ${CONTRACT_BASELINE_SHA}
+                  mvn -q -f "$WT/pom.xml" install -pl <契约模块1>,<契约模块2> -DskipTests
+                  for m in <契约模块1> <契约模块2>; do
+                    A=$(basename "$m")
+                    mkdir -p "$m/.japicmp-baseline"
+                    cp "$WT/$m/target/$A-*.jar" "$m/.japicmp-baseline/$A-baseline.jar"
+                  done
+                  git worktree remove --force "$WT"
+              # 步骤 2: 门禁(无需注入版本号) + 对比对象自检
+              - run: |
+                  mvn verify -pl <契约模块1>,<契约模块2> -am -Djapicmp.skip=false
+                  # 门禁自检【强制】(规范「门禁自检」): 对比对象 A≠B,
+                  # 防止 reactor 自比自/配置形式错误导致的静默恒绿
                   for d in <契约模块1>/target/japicmp <契约模块2>/target/japicmp; do
                     head -1 $d/*.diff | sed -E 's/.*of (.+) against (.+)$/\1|\2/' \
                       | awk -F'|' '{ if ($1 == $2) { print "门禁失效: 自比自 " $1; exit 1 } }'
                   done
-                  # 门禁绿后 deploy, 并将本次 SNAPSHOT timestamp 写回 baseline 制品库变量
+              # 步骤 3: 全绿后才允许: deploy + 更新 baseline sha 到制品库变量
+              #        (顺序硬性红线: 记了红 sha 会永久洗白区间内破坏)
+              - run: |
                   mvn deploy -pl <契约模块1>,<契约模块2>
-        # 接入验收(一次性, 不入日常流水线): 用已知含破坏性变更的 baseline 跑一次,
+                  # 更新制品库变量 CONTRACT_BASELINE_SHA=${GIT_COMMIT_SHA} -- 失败即本 job 红
+        # 接入验收(一次性, 不入日常流水线): 用已知含破坏性变更的历史 sha 重建 baseline 跑一次,
         # 断言 BUILD FAILURE 且错误含 METHOD_REMOVED/incompatible —— 本次 gtsp-wop-service
-        # 接入已用 baseline=1.0-20260819.071525-7 完成验收(检出 AppSecretDTO.getAppSecret 移除)
+        # 接入已用 sha=8790133(appSign 拆分前) 完成端到端验收(检出 AppSecretDTO.getAppSecret 移除)
         - job3_trigger_downstream: # 下游契约编译触发
             steps:
               - triggerPipeline: "<下游仓 契约编译流水线>"

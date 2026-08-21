@@ -1,0 +1,4 @@
+unlocked: 2026-08-21
+basis: python3 .factory/mutations/run.py 全量
+result: kill-rate 6/6=100%, 负例放行 1/1
+note: A5 必要非充分条件已满足；重新启用门需删除本文件

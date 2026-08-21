@@ -24,7 +24,7 @@ SUITES=(
   "skills/impact-guard/scripts"
   "skills/skill-evo/scripts"
   "arch-hawkeye/scripts"
-  "scripts"
+  ".factory/tests"
 )
 
 FAILED=()

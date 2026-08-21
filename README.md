@@ -21,6 +21,7 @@ awesome-rules/
 │   ├── impact-guard/                  # 变更影响分析（blast radius）
 │   ├── work-report/                   # 跨仓库工作日报/周报
 │   ├── alibabacloud-devops/           # 云效 DevOps 工具集
+│   ├── tokensave-mcp/                 # tokensave 图谱专项能力（mcporter 代理）
 │   └── skill-evo/                     # 会话经验自动总结与规范进化（Hermes 式自进化闭环）
 ├── arch-hawkeye/                      # 架构鹰眼：全局架构观测与治理（消费 doc-gen manifest）
 ├── hooks/                             # Claude Code hooks（SessionStart 规范索引 + SessionEnd 会话总结）
@@ -73,6 +74,7 @@ Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分�
 | [impact-guard](skills/impact-guard/README.md) | 变更影响分析（blast radius），按直接/间接 + GTSP 5 通道分级 |
 | [work-report](skills/work-report/README.md) | 跨仓库工作日报/周报自动生成（3 种受众模板） |
 | [alibabacloud-devops](skills/alibabacloud-devops/SKILL.md) | 阿里云云效 DevOps 工具集（Codeup/流水线/工作项，mcporter 代理） |
+| [tokensave-mcp](skills/tokensave-mcp/SKILL.md) | tokensave 代码图谱专项能力（测试覆盖/dead code/rename 安全网，mcporter 代理；常规发现走 codebase-memory-mcp） |
 | [skill-evo](skills/skill-evo/README.md) | 会话经验自动总结与规范进化：CC/omp 会话结束自动提炼经验生成提案，人工审核应用；GEPA 引擎进化自身（Hermes 式自进化闭环） |
 | [contract-guard](skills/contract-guard/SKILL.md) | 跨仓契约兼容性设计与审查（japicmp + 下游编译门禁，配 steering 跨仓契约规范） |
 
@@ -93,6 +95,7 @@ Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分�
 | [arch-guard 演进设计](docs/design/arch-guard-evolution-design.md) | ArchUnit 试点演进（Tier 1 巡检 + Tier 2 字节码双跑互补） |
 | [guard 收据规范](docs/design/guard-receipt-spec.md) | 审查报告 receipt（收据）通用规范 |
 | [skill-evo 技术设计](docs/design/skill-evo-design.md) | Hermes 式会话经验进化闭环 + GEPA 引擎（含竞态修复记录，已实现） |
+| [Factory Harness 设计](docs/design/factory-harness-design.md) | L4 自举工厂：第一性原理推导、方案 B（omp headless）、治理锁与 mutation 门（S0 已落地） |
 
 ## 安装
 

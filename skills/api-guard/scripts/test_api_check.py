@@ -92,18 +92,24 @@ class TestCheckKebabCase(unittest.TestCase):
         issues = []
         check_kebab_case(_ep(path="/logistics/v1/-users"), issues)
         self.assertEqual(len(issues), 1)
+        self.assertEqual(Severity.MANDATORY, issues[0].severity)
+        self.assertEqual("路径命名", issues[0].rule)
         self.assertIn("畸形", issues[0].description)
 
     def test_trailing_hyphen_rejected(self):
         issues = []
         check_kebab_case(_ep(path="/logistics/v1/users-"), issues)
         self.assertEqual(len(issues), 1)
+        self.assertEqual(Severity.MANDATORY, issues[0].severity)
+        self.assertEqual("路径命名", issues[0].rule)
         self.assertIn("畸形", issues[0].description)
 
     def test_consecutive_hyphens_rejected(self):
         issues = []
         check_kebab_case(_ep(path="/logistics/v1/user--list"), issues)
         self.assertEqual(len(issues), 1)
+        self.assertEqual(Severity.MANDATORY, issues[0].severity)
+        self.assertEqual("路径命名", issues[0].rule)
         self.assertIn("畸形", issues[0].description)
 
     def test_valid_multi_hyphen_segment(self):

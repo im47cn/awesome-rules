@@ -20,3 +20,5 @@ __pycache__/
 *.pdf
 target/
 **/.coverage
+.factory/artifacts/
+.factory/locks/

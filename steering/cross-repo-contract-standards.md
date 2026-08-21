@@ -41,27 +41,35 @@ inclusion: always
 
 - 阶段 `verify`，`breakBuildOnBinaryIncompatibleModifications=true`：
   删除/改签名 public 成员即构建红；
-- `oldVersion` 由 CI 注入 baseline（见下），本地无 baseline 时默认跳过
+- `oldVersion` 以 `file.path` 指向重建的 baseline jar（见下），本地默认跳过
   （`japicmp.skip=true`），不拖慢开发构建。
 
-**baseline 策略**（SNAPSHOT 无"上一个 release"可对比）：
+**baseline 策略（sha 重建方案）**：
 
-- CI 以制品库变量（或 `.contract-baseline` 文件）记录**上次绿构建的 SNAPSHOT
-  timestamp 版本**（如 `1.0-20260819.071525-7`）；
-  优先制品库变量，避免回写仓库污染历史；
-- 构建绿后用本次 timestamp 更新 baseline；
-- 运行时注入：`mvn verify -Djapicmp.skip=false -Dcontract.baseline.version=$(baseline)`；
-- **两个实测坑**（踩中任一即门禁静默恒绿，详见模板注释）：①pom `<properties>` 定义
-  baseline 默认值会遮蔽 CLI `-D` 注入，pom 里只能放 `japicmp.skip` 默认值；②oldVersion
+- CI 以制品库变量记录**上次绿构建的 commit sha**——sha 随 git 永存，不依赖私服
+  SNAPSHOT 保留策略，换设备/清 m2 均可重建（消灭"外部依赖假设 1"）；
+- 门禁运行前，CI/预检脚本用 `git worktree add <tmp> <sha>` + `mvn install -pl 契约模块
+  -DskipTests` 重建契约 jar 到各契约模块 `.japicmp-baseline/<artifactId>-baseline.jar`
+  （gitignore，不受 `clean` 影响）；重建脚本见 `skills/contract-guard/templates/japicmp-pom-snippet.xml`；
+- 门禁命令统一为 `mvn verify -pl <契约模块> -Djapicmp.skip=false`，无需注入版本号；
+- **红线：sha 必须是"上次绿构建"**，更新动作在 job 全绿之后，记了红 sha 会永久洗白
+  区间内已放过的破坏；
+- 可靠性依据：japicmp 只比 API 签名（重建的时间戳/环境差异无关）；契约模块依赖全
+  `provided` + `ignoreMissingClasses=true`，依赖 SNAPSHOT 漂移不渗入对比。若未来契约模块
+  引入 compile 期 SNAPSHOT 依赖，需重新评估；
+- **三个实测坑**（踩中任一即门禁静默恒绿，详见模板注释）：①pom `<properties>` 给
+  baseline 属性设默认值会遮蔽 CLI `-D` 注入，pom 里只能放 `japicmp.skip`；②oldVersion
   禁用 GAV 形式——同坐标在多模块构建内被 aether reactor 命中当前模块自身产物（自比自），
-  必须用 `file.path` 直指 m2 的 baseline timestamp jar，且 CI 先 `dependency:get` 拉取。
+  必须 `file.path` 直指重建 jar；③baseline jar 缺失时 japicmp 直接报错（fail-closed），
+  见到 "path does not point to an existing file" 即先跑重建脚本，不要绕过。
 
 ### C：下游编译触发（跨仓）
 
 ```
 上游仓流水线（MR / 合并）
   ├─ job1: 变更路径检测   git diff --name-only | grep -E '^<契约模块路径>'
-  ├─ job2: mvn deploy     （仅契约模块，-U 刷私服 SNAPSHOT）
+  ├─ job2: 重建 baseline + japicmp 门禁 + 自检 + mvn deploy（仅契约模块，-U 刷私服 SNAPSHOT）
+  │          └─ 见 B 节 baseline 策略与「门禁自检」
   └─ job3: 触发下游仓「契约编译」流水线（云效 Flow 流水线触发器）
              └─ mvn -U clean test-compile   # -U 强拉最新 SNAPSHOT，字段被拆当场红
 ```
@@ -81,6 +89,18 @@ inclusion: always
 | 新增跨仓契约模块 | pom description 含"契约"；登记进下游触发配置 |
 
 豁免记录每季度复盘一次：豁免后下游是否完成迁移、豁免是否可回收。
+
+## 本地预检的边界（防漏报）
+
+本地跑门禁的漏报源不是 jar 内容（sha 重建产物不可变），而是 **baseline sha 本身**：
+凭记忆/本地残留的旧 sha 跑门禁，会漏掉区间内的破坏。因此：
+
+1. **本地跑门禁只具预检性质**，CI 是唯一权威裁决；本地绿不代表 CI 绿；
+2. baseline sha 不靠记忆/猜测——从流水线制品库变量（或流水线页面）读取；
+3. 预检流程与 CI 完全一致：同一份重建脚本（worktree + install）→ `mvn verify
+   -Djapicmp.skip=false`，不引入第二套做法；
+4. baseline jar 缺失时 japicmp 直接报错（fail-closed，实测验证），不会静默漏报——
+   见到 "path does not point to an existing file" 即先跑重建脚本，不要绕过。
 
 ## 门禁自检【强制】
 
@@ -103,6 +123,6 @@ commit hook 仅做防呆提示（检测到契约模块 diff 时打印提醒"走 
 
 ## 外部依赖假设（接入前须确认）
 
-1. 云效私服保留历史 SNAPSHOT（japicmp 拉旧 jar 依赖它）；不保留则 baseline 改为
-   CI 制品库缓存上次绿构建的契约 jar；
-2. 云效 Flow 允许组织内跨仓流水线触发（需组织级权限配置）。
+1. ~~云效私服保留历史 SNAPSHOT~~——已由 sha 重建方案消灭（baseline 只依赖 git）；
+2. 云效 Flow 允许组织内跨仓流水线触发（需组织级权限配置）；
+3. CI runner 可访问仓库完整历史（`git fetch` 得到任意历史 sha，用于 worktree 重建）。
