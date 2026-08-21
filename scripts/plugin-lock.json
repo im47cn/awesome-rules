@@ -3,7 +3,7 @@
   "files": {
     ".agents/plugins/marketplace.json": "a8c9d4ddf59735675a3aa3066ea57c115628d9bf",
     ".claude-plugin/marketplace.json": "feaf1660fec29031a75cea314e9ed34e410fccb7",
-    ".claude-plugin/plugin.json": "faa4cccad62744be663d5d5693ed78886c18c8e3",
+    ".claude-plugin/plugin.json": "b874f28259c35a82bef5951e8fa394250958739e",
     ".codex-plugin/plugin.json": "5dfe34cca56d801fb6b0d63d3191d09d334cc034",
     ".cursor-plugin/marketplace.json": "2cefae9f3cfd5dce1a10e4339d3684e4818f3ef6",
     ".cursor-plugin/plugin.json": "5342aa04248ad3517cc83f3f796211cf4cef91f7",
