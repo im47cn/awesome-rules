@@ -103,10 +103,20 @@ run_triage() {  # 物理隔离裁决器：--no-tools --no-session，输入全部
     echo "    产物: ${DIR}/triage.(json|log)"
     return 0
   fi
-  local mission title body prompt
+  local mission title body cmts prompt
   mission="$(cat "${REPO}/MISSION.md")"
   title="$(json_field "${DIR}/issue.json" 'd["title"]')"
   body="$(json_field "${DIR}/issue.json" 'd.get("body") or ""')"
+  # 评论是重投/整改指令的载体（holdout FAIL 后人类补充验收标准等），
+  # 物理隔离裁决器无工具，必须内联；最新 3 条足够传达整改上下文
+  cmts="$(python3 - "${DIR}/issue.json" <<'PYC'
+import json, sys
+d = json.load(open(sys.argv[1]))
+cs = d.get("comments") or []
+out = "\n\n".join("[作者: %s]\n%s" % (c["author"]["login"], c["body"]) for c in cs[-3:])
+print(out if out else "（无评论）")
+PYC
+)"
   prompt="$(cat "${REPO}/.factory/prompts/triage.md")
 
 ——MISSION.md 开始——
@@ -115,7 +125,11 @@ ${mission}
 
 ——issue #${ISSUE} 标题: ${title} 正文开始——
 ${body}
-——正文结束——"
+——正文结束——
+
+——issue 评论开始（最新 3 条；含整改/重投指令时以评论为准）——
+${cmts}
+——评论结束——"
   local t0; t0=$(date +%s)
   if ! (cd "${REPO}" && omp -p "${prompt}" --no-tools --no-session --max-time "$(node_timeout triage)" < /dev/null) \
       > "${DIR}/triage.log" 2>&1; then
@@ -162,7 +176,7 @@ ${out}
 if [ "${DRY}" = 0 ]; then
   command -v gh >/dev/null || { echo "需要 gh CLI" >&2; exit 2; }
   mkdir -p "${DIR}"
-  gh issue view "${ISSUE}" --json number,title,body > "${DIR}/issue.json" 2>/dev/null \
+  gh issue view "${ISSUE}" --json number,title,body,comments > "${DIR}/issue.json" 2>/dev/null \
     || { echo "issue #${ISSUE} 不存在或不可读" >&2; exit 2; }
   ensure_labels
   issue_label add factory:triaging

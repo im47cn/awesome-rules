@@ -4,7 +4,8 @@
 
 ## 输入（只读）
 
-- `$ISSUE_DIR/plan.json`
+- `$ISSUE_DIR/plan.json`（plan 已吸收 issue 评论中的整改要求；
+  若任务与 `$ISSUE_DIR/issue.json` 评论冲突，停止并声明 blocked）
 
 ## 纪律（违反任何一条 = 本节点失败）
 

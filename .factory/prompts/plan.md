@@ -5,8 +5,9 @@ implement 节点可以不做任何设计决策地照做。
 
 ## 输入（只读）
 
+- `$ISSUE_DIR/issue.json`（含 `comments` 字段：重投/整改时人类的补充
+  验收标准在评论里，**以评论为准**，正文不可覆盖评论要求）
 - `$ISSUE_DIR/prime.md`
-- `$ISSUE_DIR/triage.json`
 
 ## 任务
 
