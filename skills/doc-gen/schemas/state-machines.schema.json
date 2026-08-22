@@ -1,7 +1,0 @@
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://awesome-rules/skills/doc-gen/schemas/state-machines.schema.json",
-  "title": "doc-manifest/state-machines.json 契约",
-  "type": "array",
-  "items": { "$ref": "common.schema.json#/$defs/stateMachine" }
-}

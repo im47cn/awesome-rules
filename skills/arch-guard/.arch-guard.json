@@ -1,8 +1,0 @@
-{
-  "project_package_prefix": "",
-  "layer_aliases": {},
-  "domain_annotation_imports": [
-    "org.springframework.stereotype",
-    "org.springframework.transaction.annotation"
-  ]
-}
