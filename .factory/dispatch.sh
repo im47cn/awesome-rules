@@ -18,7 +18,8 @@
 # issue 回零标签态，人工重投或重开 issue（设计：失败清理，可观测非门）
 #
 # 用法: dispatch.sh [--dry-run] [--watch] [--interval SEC]
-#   默认单轮；--watch 常驻（默认 1800s，对齐设计 cron 30min）
+#   默认单轮；--watch 常驻（默认 300s = 5min；2026-08-22 从 1800s 收紧：
+#   链首 triage 批次 30s 级、全链分钟级，30min 轮询让新 issue 平均等 15min）
 #   DRY 环境变量与 --dry-run 等价（2026-08-21 事故教训：两者都认）
 set -u
 REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "不在 git 仓库" >&2; exit 2; }
@@ -31,8 +32,7 @@ REPO_SLUG="${GH_REPO:-$(
   } | grep -m1 'github\.com' | sed -E 's#^.*github\.com(:[0-9]+)?[/:]##; s#\.git$##'
 )}"
 [ -n "$REPO_SLUG" ] || { echo "无法确定 GitHub 仓库 slug" >&2; exit 2; }
-
-DRY="${DRY:-0}"; WATCH=0; INTERVAL="${INTERVAL:-1800}"
+DRY="${DRY:-0}"; WATCH=0; INTERVAL="${INTERVAL:-300}"
 MAX_PARALLEL="${MAX_PARALLEL:-4}"  # worktree 隔离(246cba05)+D1/D4 修复(e2e 2026-08-22 issue#64 全绿)后恢复并行
 MERGE_METHOD="${FACTORY_MERGE_METHOD:-merge}"
 AUTO_MERGE=0
