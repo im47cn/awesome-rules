@@ -161,3 +161,35 @@ class TestNodeTimeout:
     def test_hyphen_node_env_key(self):
         from factory_lib import node_timeout
         assert node_timeout("pr-review", {"FACTORY_TIMEOUT_PR_REVIEW": "3m"}) == "3m"
+
+class TestClassifyTask:
+    """任务类型分类：doc/code 预算分布分开统计的数据基础（S3 耗时分析结论）。"""
+
+    def test_doc_only(self):
+        from factory_lib import classify_task
+        assert classify_task(["README.md", "docs/x.md", "share-docs/y.mdx"]) == "doc"
+
+    def test_code_with_tests(self):
+        from factory_lib import classify_task
+        assert classify_task(["a.py", "test_a.py"]) == "code"
+
+    def test_test_only(self):
+        from factory_lib import classify_task
+        assert classify_task(["test_a.py", "pkg/tests/b.py"]) == "test"
+
+    def test_mixed(self):
+        from factory_lib import classify_task
+        assert classify_task(["a.py", "README.md"]) == "mixed"
+
+    def test_issue5_round3_shape(self):
+        """#5 round3 实际形态：md + code + test 混合 → mixed（真实回归锚点）。"""
+        from factory_lib import classify_task
+        assert classify_task([
+            "share-docs/01-api-guard.md",
+            "skills/api-guard/README.md",
+            "skills/api-guard/scripts/test_api_check.py",
+        ]) == "mixed"
+
+    def test_empty(self):
+        from factory_lib import classify_task
+        assert classify_task([]) == "empty"
