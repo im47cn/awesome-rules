@@ -51,8 +51,12 @@ gh >/dev/null 2>&1 || { echo "需要 gh CLI" >&2; exit 2; }
 
 # --- 双实例硬锁：mkdir 原子性 + PID 活性检测（macOS 无 flock(1)） ---
 # GitHub 换标签非原子，claim 互斥完全依赖单 dispatcher；此锁把"文档假设"
-# 变成进程级事实。cron 包装器（cron-dispatch.sh）与本脚本共用此锁。
-LOCKDIR="$FACTORY/locks/dispatcher"
+# 跨 worktree 全局：链在独立 worktree 跑（人工侧隔离）后各树 locks/ 互不可见，
+# 锁若随树走，主树手动单轮与 worktree 常驻 watch 会绕开互斥双实例。
+# git-common-dir 在 worktree 中指向主 .git，据此回到主树 .factory。
+MAIN_FACTORY="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null \
+  | sed 's#/\.git$##')/.factory"
+LOCKDIR="${MAIN_FACTORY:-$FACTORY}/locks/dispatcher"
 acquire_lock() {
   if mkdir "$LOCKDIR" 2>/dev/null; then
     echo $$ > "$LOCKDIR/pid"
