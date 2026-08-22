@@ -1,0 +1,25 @@
+# 本仓库自用变体——直接引用 tools/git/lefthook/（单一源，零拷贝漂移），
+# 与分发模板 tools/git/lefthook.yml 的差异仅在此路径（模板用 .lefthook/，
+# 由 install.sh 拷贝产物到业务项目）。
+# ⚠ 不要对本仓库跑 tools/git/install.sh --update（会用模板覆盖本文件的路径）
+# 规范事实源：steering/git-conventions.md + 全局红线「变更行覆盖率 ≥95%」
+# 团队成员激活：npm i -g lefthook && lefthook install（或 npm run setup:hooks）
+# 占位符 {staged_files}/{push_files} 是触发条件：有对应文件变更才执行（lefthook 2.x 无占位符恒 skip）
+commit-msg:
+  commands:
+    commitmsg:
+      run: bash tools/git/lefthook/commitmsg-check.sh {1}
+
+# 变更行覆盖率红线（≥95%；本仓库无 pyproject/pom/vitest 配置时各分支自动跳过）
+pre-commit:
+  commands:
+    coverage-light:
+      run: bash tools/git/lefthook/coverage.sh light {staged_files}
+
+pre-push:
+  commands:
+    coverage-full:
+      run: bash tools/git/lefthook/coverage.sh full {push_files}
+    # 项目自定义测试入口: scripts/pre-push-tests.sh（本仓库私有门禁 = run_tests.sh）
+    tests:
+      run: bash tools/git/lefthook/run-tests.sh {push_files}

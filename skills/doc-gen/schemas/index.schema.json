@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://awesome-rules/skills/doc-gen/schemas/index.schema.json",
+  "title": "doc-manifest/index.json 契约",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "domainCount", "componentCount", "tableCount", "domains"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "schemaVersion": { "type": "string" },
+    "generatedAt": { "type": "string" },
+    "generator": { "type": "string" },
+    "project": { "type": "object" },
+    "domainCount": { "type": "integer", "minimum": 0 },
+    "componentCount": { "type": "integer", "minimum": 0 },
+    "tableCount": { "type": "integer", "minimum": 0 },
+    "hasOpenApi": { "type": "boolean" },
+    "hasDeepAnalysis": { "type": "boolean" },
+    "hasCrossDomain": { "type": "boolean" },
+    "staleCommits": { "type": "integer", "minimum": 0 },
+    "domains": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "componentCount", "file"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "displayName": { "type": "string" },
+          "description": { "type": "string" },
+          "componentCount": { "type": "integer", "minimum": 0 },
+          "layers": { "type": "array", "items": { "type": "string" } },
+          "file": { "type": "string", "pattern": "^domains/.+\\.json$" }
+        }
+      }
+    }
+  }
+}

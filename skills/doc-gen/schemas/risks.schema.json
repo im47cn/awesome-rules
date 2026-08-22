@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://awesome-rules/skills/doc-gen/schemas/risks.schema.json",
+  "title": "doc-manifest/risks.json 契约（可选分片）",
+  "description": "架构风险扫描结果（复用 arch-guard arch_check.py）。error 分支（执行失败）仅含 error/issues/summary 三键，故除 issues 外均为可选。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "issues"
+  ],
+  "properties": {
+    "passed": {
+      "type": "boolean"
+    },
+    "totalIssues": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "criticalCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "warningCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "infoCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "error": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "object"
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "file",
+          "level"
+        ],
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "severity": {
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "critical",
+              "warning",
+              "info"
+            ]
+          },
+          "rule": {
+            "type": "string"
+          },
+          "ruleCode": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "suggestion": {
+            "type": "string"
+          },
+          "author": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "D03 责任归属：git blame 最近修改人（失败降级 null）"
+          },
+          "introducedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "引入时间（blame author-time，ISO8601；失败降级 null）"
+          }
+        }
+      }
+    }
+  }
+}

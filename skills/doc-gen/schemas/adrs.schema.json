@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://awesome-rules/skills/doc-gen/schemas/adrs.schema.json",
+  "title": "doc-manifest/adrs.json 契约（可选分片）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["adrs"],
+  "properties": {
+    "total": { "type": "integer", "minimum": 0 },
+    "adrs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "status"],
+        "properties": {
+          "number": { "type": ["integer", "string"] },
+          "title": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "minLength": 1 },
+          "date": { "type": "string" },
+          "filename": { "type": "string" },
+          "sourcePath": { "type": "string" }
+        }
+      }
+    }
+  }
+}

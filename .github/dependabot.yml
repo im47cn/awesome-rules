@@ -1,0 +1,16 @@
+# 依赖清单现状：仓库内唯一带依赖的 manifest 是 doc-gen Astro 模板
+# （根 package.json 仅 scripts 零依赖；python 侧无 pyproject/requirements/uv.lock，
+#  故不配置 uv/pip 生态——无清单的生态每次运行必 FAIL）
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/skills/doc-gen/template"
+    schedule:
+      interval: "weekly"
+    # astro/starlight/mermaid 全家桶依赖众多，minor+patch 合并成组 PR 降低噪音
+    # （major 仍单独提 PR，便于评估破坏性变更）
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"

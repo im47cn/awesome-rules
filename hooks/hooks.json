@@ -1,0 +1,27 @@
+{
+  "description": "SessionStart 注入 steering 规范索引；SessionEnd 异步总结会话生成 skill-evo 进化提案",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/load-steering.sh\""
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/on-session-end.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}

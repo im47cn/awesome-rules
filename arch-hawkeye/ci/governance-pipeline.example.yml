@@ -1,0 +1,137 @@
+# CI 治理管线示例 — 架构鹰眼 scan → gate 联邦治理（Phase 3 收官接线）
+#
+# 三段式管线（对应 arch-hawkeye/requirements.md REQ-A/REQ-D）：
+#
+#   ┌─ 项目仓库（每个 Java 服务一份）──────────────────────────────┐
+#   │ PR:  scan → gate --baseline（增量零容忍 D07）                 │
+#   │ push: scan --manifest-only → 归档 manifest（联邦索引 AH-A02）│
+#   └──────────────────────────────────────────────────────────────┘
+#                     │ 各项目归档的 doc-manifest
+#                     ▼
+#   ┌─ 中心仓库（awesome-rules 或独立鹰眼仓库）────────────────────┐
+#   │ 周期: aggregate（联邦聚合）→ trend / debt 报表（D02/D04/D05）│
+#   └──────────────────────────────────────────────────────────────┘
+#
+# 首次接入三步：
+#   1. 各项目 scan 干净工作区产出 manifest → hawkeye.py baseline --name <季度>
+#      （存量违规自动登记债务，owner 来自 git blame）
+#   2. PR 门禁先跑 --warn-only 灰度（观察 1-2 周，确认无误报）
+#   3. 去掉 --warn-only 进入强制（exit 1 阻断新增违规合并）
+#
+# 本文件为 GitHub Actions 语法示例；Codeup Flow 按相同步骤翻译。
+# 用法：项目侧复制到目标 Java 仓库 .github/workflows/；中心侧放
+# awesome-rules 或独立仓库。路径按实际布局调整。
+
+# ════════════════════════════════════════════════════════════════════
+# 项目仓库侧（每个 Java 服务）
+# ════════════════════════════════════════════════════════════════════
+
+name: arch-governance
+
+on:
+  pull_request:
+    branches: [master, main]
+  push:
+    branches: [master, main]
+
+env:
+  # awesome-rules 检出路径（与下方 checkout path 一致；命令统一经 $RULES_PATH 引用，
+  # 布局变化只改这一处）
+  RULES_PATH: ${{ github.workspace }}/awesome-rules
+  BASELINE_NAME: 2026H2                          # 治理基线名（季度命名）
+
+jobs:
+  # ── PR 门禁：增量零容忍（D07）────────────────────────────────────
+  # 工作区须干净（CI checkout 天然满足 §6.3 revision 卫生：本地 dirty
+  # 快照不进联邦索引；此处只做门禁，不建基线不写 ledger）
+  gate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+
+      - name: 检出 awesome-rules（含 doc-gen + 架构鹰眼）
+        uses: actions/checkout@v4
+        with:
+          repository: your-org/awesome-rules
+          ref: master
+          path: awesome-rules
+
+      - name: 扫描 + 治理门禁
+        run: |
+          python3 "$RULES_PATH/skills/doc-gen/scripts/doc_gen.py" scan . \
+            --manifest-only --output /tmp/gov
+          python3 "$RULES_PATH/arch-hawkeye/scripts/hawkeye.py" gate \
+            /tmp/gov/doc-manifest --baseline $BASELINE_NAME --warn-only
+          # 灰度期观察无误报后，删除 --warn-only 进入强制阻断（exit 1）
+
+      - name: PR 评论贴趋势摘要（可选）
+        if: always()
+        run: |
+          python3 "$RULES_PATH/arch-hawkeye/scripts/hawkeye.py" trend \
+            /tmp/gov/doc-manifest --baseline $BASELINE_NAME --json \
+            > trend.json
+          # 将 trend.json 转为 markdown 附加到 PR（gh pr comment ...）
+
+  # ── master push：归档 manifest（联邦索引 AH-A02 / 增量指纹 AH-A03）──
+  # 归档到独立分支 hawkeye-archive，不污染主分支；evidence.revision 即
+  # 项目指纹，鹰眼聚合侧按 revision 变更增量重算
+  archive:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - uses: actions/checkout@v4
+        with:
+          repository: your-org/awesome-rules
+          ref: master
+          path: awesome-rules
+
+      - name: 扫描并归档到 hawkeye-archive 分支
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          # orphan 首建须清空 index——否则首个归档 commit 会带上主分支全部文件
+          git checkout -B hawkeye-archive origin/hawkeye-archive \
+            || { git checkout --orphan hawkeye-archive && git rm -rqf .; }
+          REPO_DIR="${GITHUB_REPOSITORY##*/}"    # org/repo → repo（仓库名目录）
+          python3 "$RULES_PATH/skills/doc-gen/scripts/doc_gen.py" scan . \
+            --manifest-only --output "$REPO_DIR/$SHORT_SHA"
+          # 只 add 归档产物——工作区还检出了 awesome-rules/，git add . 会误入库
+          git add "$REPO_DIR/$SHORT_SHA" \
+            && git -c user.name=arch-hawkeye -c user.email=ci@hawkeye \
+               commit -m "archive: $SHORT_SHA" && git push origin hawkeye-archive
+
+# ════════════════════════════════════════════════════════════════════
+# 中心仓库侧（鹰眼聚合，独立 workflow 文件）
+# ════════════════════════════════════════════════════════════════════
+#
+# name: hawkeye-federate
+# on:
+#   schedule: [{ cron: "23 2 * * *" }]        # 每日聚合；或各项目归档后 webhook 触发
+#
+# jobs:
+#   aggregate-and-report:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#       # 1. 拉取各项目最新归档 manifest（hawkeye-archive 分支），按 revision
+#       #    增量选取（AH-A03：未变项目跳过重算）
+#       # 2. 生成 projects.json（项目 id ←→ 归档 manifest 路径）
+#       # 3. 联邦聚合（§6.1 契约校验后纳管，§6.3 拒 dirty 快照）
+#       #    python3 arch-hawkeye/scripts/hawkeye.py aggregate projects.json \
+#       #      --output site/ --build
+#       # 4. 治理报表：各项目 trend --baseline + debt overdue（D02/D05），
+#       #    超期清单推送 IM（告警通道接入点）
+#       # 5. 站点发布（静态托管），manifest 与 cross-project.json 随站分发
+#
+# 基线管理（治理者手动，低频）：
+#   首次接入/季度轮换时，在各项目干净 checkout 上：
+#     python3 hawkeye.py baseline ./doc-manifest --name 2026Q3
+#   基线文件（baselines/<name>.json）与债务 ledger（debt-ledger.json）
+#   随归档分支管理，审计可回溯。

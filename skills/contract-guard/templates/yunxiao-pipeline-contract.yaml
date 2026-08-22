@@ -1,0 +1,80 @@
+# 云效 Flow 跨仓契约门禁流水线骨架
+# 上游仓(service): 变更检测 → deploy 契约模块 → 触发下游契约编译
+# 下游仓(gateway): 最小契约编译流水线(mvn -U clean test-compile)
+#
+# 接入前须确认(规范 cross-repo-contract-standards.md「外部依赖假设」):
+#   1. 云效私服保留历史 SNAPSHOT(japicmp baseline 依赖); 不保留则 baseline 改制品库缓存 jar
+#   2. 组织级开启跨仓流水线触发权限
+#
+# 以下为云效 Flow yaml 化编排骨架, 字段以控制台导出格式为准, 含 <占位符> 处需按仓替换
+
+# ==================== 上游仓: 契约发布流水线 ====================
+# 触发: MR / 合并到默认分支
+upstream-pipeline:
+  name: "<上游仓名>-contract-publish"
+  sources:
+    - type: codeup
+      repo: "<上游仓 codeup 仓库>"
+      branch: "<上游分支>"
+  stages:
+    - name: "契约门禁"
+      jobs:
+        - job1_detect: # 变更路径检测: 只有契约模块变更才走后续
+            steps:
+              - run: |
+                  CHANGED=$(git diff --name-only origin/${BASE_REF}...HEAD)
+                  echo "$CHANGED" | grep -E '^<契约模块路径, 如 gtsp-wop-service-api>' && export CONTRACT_CHANGED=1
+                  echo "$CHANGED" | grep -E '^<契约模块路径, 如 gtsp-wop-service-api-gateway>' && export CONTRACT_CHANGED=1
+                  # 云效环境变量导出方式按实际 runner 调整; 无变更时跳过 job2/job3
+        - job2_gate_and_deploy: # 重建 baseline + japicmp 门禁 + 自检 + 刷私服 SNAPSHOT
+            steps:
+              # 步骤 1: 从上次绿构建的 commit sha 重建契约 jar(baseline 机制见规范 B 节;
+              #         重建脚本完整版在 japicmp-pom-snippet.xml 尾部)
+              - run: |
+                  WT=$(mktemp -d /tmp/japicmp-baseline.XXXXXX)
+                  git worktree add "$WT" ${CONTRACT_BASELINE_SHA}
+                  mvn -q -f "$WT/pom.xml" install -pl <契约模块1>,<契约模块2> -DskipTests
+                  for m in <契约模块1> <契约模块2>; do
+                    A=$(basename "$m")
+                    mkdir -p "$m/.japicmp-baseline"
+                    cp "$WT/$m/target/$A-*.jar" "$m/.japicmp-baseline/$A-baseline.jar"
+                  done
+                  git worktree remove --force "$WT"
+              # 步骤 2: 门禁(无需注入版本号) + 对比对象自检
+              - run: |
+                  mvn verify -pl <契约模块1>,<契约模块2> -am -Djapicmp.skip=false
+                  # 门禁自检【强制】(规范「门禁自检」): 对比对象 A≠B,
+                  # 防止 reactor 自比自/配置形式错误导致的静默恒绿
+                  for d in <契约模块1>/target/japicmp <契约模块2>/target/japicmp; do
+                    head -1 $d/*.diff | sed -E 's/.*of (.+) against (.+)$/\1|\2/' \
+                      | awk -F'|' '{ if ($1 == $2) { print "门禁失效: 自比自 " $1; exit 1 } }'
+                  done
+              # 步骤 3: 全绿后才允许: deploy + 更新 baseline sha 到制品库变量
+              #        (顺序硬性红线: 记了红 sha 会永久洗白区间内破坏)
+              - run: |
+                  mvn deploy -pl <契约模块1>,<契约模块2>
+                  # 更新制品库变量 CONTRACT_BASELINE_SHA=${GIT_COMMIT_SHA} -- 失败即本 job 红
+        # 接入验收(一次性, 不入日常流水线): 用已知含破坏性变更的历史 sha 重建 baseline 跑一次,
+        # 断言 BUILD FAILURE 且错误含 METHOD_REMOVED/incompatible —— 本次 gtsp-wop-service
+        # 接入已用 sha=8790133(appSign 拆分前) 完成端到端验收(检出 AppSecretDTO.getAppSecret 移除)
+        - job3_trigger_downstream: # 下游契约编译触发
+            steps:
+              - triggerPipeline: "<下游仓 契约编译流水线>"
+                # 分支映射必须走配置(上下游分支不保证同名), 映射表存流水线变量组:
+                #   BRANCH_MAP: feature/20260812-open_platform_v1=feature_20260808_init,...
+
+# ==================== 下游仓: 契约编译流水线 ====================
+# 独立最小流水线, 只验证"最新契约 SNAPSHOT 下我仍能编译+契约测试通过"
+downstream-pipeline:
+  name: "<下游仓名>-contract-compile"
+  sources:
+    - type: codeup
+      repo: "<下游仓 codeup 仓库>"
+      branch: "${BRANCH_FROM_MAP}"  # 由上游触发时按 BRANCH_MAP 注入, 日常手动跑用默认分支
+  stages:
+    - name: "契约编译"
+      jobs:
+        - steps:
+            - run: mvn -U clean test-compile   # -U 强拉最新契约 SNAPSHOT, 字段被拆当场红
+            - run: mvn test -Dtest='<契约相关测试, 如 *Contract*Test>'
+  # 失败必须回写上游 MR(commit status / 评论); 仅本流水线红而上游无感知 = 门禁失效

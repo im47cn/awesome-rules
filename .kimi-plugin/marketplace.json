@@ -1,0 +1,10 @@
+{
+  "version": "2",
+  "plugins": [
+    {
+      "id": "awesome-rules",
+      "displayName": "Awesome Rules",
+      "source": "https://github.com/im47cn/awesome-rules.git"
+    }
+  ]
+}

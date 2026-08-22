@@ -1,0 +1,33 @@
+{
+  "site": {
+    "title": "架构鹰眼",
+    "description": "全公司 DDD 架构全景视图 — 自动从代码生成",
+    "logo": "/favicon.svg",
+    "logo_darkmode": "/favicon.svg",
+    "logo_width": "127",
+    "logo_height": "32",
+    "logo_text": "架构鹰眼",
+    "author": "Architecture Team",
+    "base_url": "/",
+    "generator": "arch-hawkeye v2.0"
+  },
+
+  "settings": {
+    "search": true,
+    "theme_switcher": true
+  },
+
+  "params": {
+    "footer_contact": {
+      "enable": false,
+      "action": "#"
+    },
+    "copyright": "架构鹰眼 · 基于 <a class=\"text-primary hover:underline no-underline\" href=\"https://github.com/themefisher/dockit-astro\" target=\"_blank\" rel=\"noopener\">DocKit</a> 主题"
+  },
+
+  "navigation_button": {
+    "enable": true,
+    "label": "快速开始",
+    "link": "/architecture"
+  }
+}

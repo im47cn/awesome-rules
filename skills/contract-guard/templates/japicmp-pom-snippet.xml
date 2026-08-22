@@ -1,0 +1,92 @@
+<!-- 跨仓契约门禁 japicmp 配置(sha 重建方案, 已在 gtsp-wop-service 仓端到端实测验证, 2026-08-21)
+     结构: 父 pom pluginManagement 放公共参数; 契约模块各自声明插件并配 oldVersion(file.path)
+
+     ===== baseline 机制: 记录上次绿构建的 commit sha, 用 git worktree 重建契约 jar =====
+     - sha 随 git 永存: 不依赖私服 SNAPSHOT 保留策略, 换设备/清 m2 均可重建
+     - 重建产物放各契约模块 .japicmp-baseline/<artifactId>-baseline.jar(须 gitignore, 不受 clean 影响)
+     - japicmp 只比 API 签名, 重建的时间戳/环境差异无关; 契约模块依赖全 provided +
+       ignoreMissingClasses=true, 依赖 SNAPSHOT 漂移不渗入对比
+     - 红线: baseline sha 必须是"上次绿构建"的 sha, 全绿后才更新, 记了红 sha 会永久洗白区间内破坏
+
+     ===== 两个实测踩坑(违反任一即门禁静默失效) =====
+     1. oldVersion/newVersion 是复杂类型 Version{dependency,file}, 字符串直传报
+        "Cannot find default setter in class japicmp.maven.Version"; file 内层字段名是 path
+     2. 严禁在 pom <properties> 给 baseline 相关属性设默认值——
+        POM properties 会遮蔽 CLI -D 注入(Maven 已知行为), 恒等当前版本、门禁恒绿
+     3. oldVersion 禁用 GAV(dependency) 形式——同坐标 GAV 在多模块构建内会被 aether reactor
+        命中当前模块自身产物(target jar), 自比自恒绿; 必须 file.path 直指重建的 baseline jar
+-->
+
+<!-- ===== 父 pom: properties(只放 skip 默认值) + pluginManagement(公共参数, 不含 oldVersion) ===== -->
+<!--
+<properties>
+  <japicmp.skip>true</japicmp.skip>
+</properties>
+<build><pluginManagement><plugins>
+  <plugin>
+    <groupId>com.github.siom79.japicmp</groupId>
+    <artifactId>japicmp-maven-plugin</artifactId>
+    <version>0.23.1</version>
+    <configuration>
+      <skip>${japicmp.skip}</skip>
+      <parameter>
+        <onlyModified>true</onlyModified>
+        <breakBuildOnBinaryIncompatibleModifications>true</breakBuildOnBinaryIncompatibleModifications>
+        <breakBuildOnSourceIncompatibleModifications>true</breakBuildOnSourceIncompatibleModifications>
+        <ignoreMissingClasses>true</ignoreMissingClasses>
+        <excludes>
+          <exclude>*.internal.*</exclude>
+        </excludes>
+      </parameter>
+    </configuration>
+    <executions>
+      <execution>
+        <id>japicmp-contract-gate</id>
+        <phase>verify</phase>
+        <goals><goal>cmp</goal></goals>
+      </execution>
+    </executions>
+  </plugin>
+</plugins></pluginManagement></build>
+-->
+
+<!-- ===== 契约模块 pom: 声明插件 + oldVersion 指向重建产物 ===== -->
+<!--
+<plugin>
+  <groupId>com.github.siom79.japicmp</groupId>
+  <artifactId>japicmp-maven-plugin</artifactId>
+  <configuration>
+    <oldVersion>
+      <file>
+        <path>${project.basedir}/.japicmp-baseline/<模块artifactId>-baseline.jar</path>
+      </file>
+    </oldVersion>
+  </configuration>
+</plugin>
+-->
+
+<!-- ===== .gitignore ===== -->
+<!--
+.japicmp-baseline/
+-->
+
+<!-- ===== baseline 重建脚本(CI job / 本地预检通用, 以 gtsp-wop-service 为例) ===== -->
+<!--
+#!/bin/bash
+# 用法: rebuild-baseline.sh <baseline_sha> <仓库根目录>
+set -euo pipefail
+SHA="$1"; REPO="$(cd "$2" && pwd)"
+WT=$(mktemp -d /tmp/japicmp-baseline.XXXXXX)
+trap 'git -C "$REPO" worktree remove --force "$WT" 2>/dev/null || true' EXIT
+git -C "$REPO" worktree add "$WT" "$SHA"
+mvn -q -f "$WT/pom.xml" install -pl <契约模块1>,<契约模块2> -DskipTests
+for m in <契约模块1> <契约模块2>; do
+  A=$(basename "$m")  # artifactId 同名
+  mkdir -p "$REPO/$m/.japicmp-baseline"
+  cp "$WT/$m/target/$A-*.jar" "$REPO/$m/.japicmp-baseline/$A-baseline.jar"
+done
+-->
+
+<!-- 门禁执行(CI 与本地预检同一条命令, 无需注入版本号):
+     mvn verify -pl <契约模块...> -Djapicmp.skip=false
+     全绿后由 CI 将本次 commit sha 更新到 baseline 制品库变量(顺序硬性: 必须在 job 全绿之后) -->
