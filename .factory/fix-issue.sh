@@ -22,7 +22,11 @@ fi
 REPO="$(git rev-parse --show-toplevel)"
 REPO_SLUG="${GH_REPO:-$(
   # 双 remote 布局：origin pushurl 可能多条（codeup 镜像 + github），
+<<<<<<< ours
   # 逐条扫，取含 github.com 者；github remote 名优先
+=======
+  # 逐条扫含 github.com 者（github remote 名优先）；443 端口形态兼容
+>>>>>>> theirs
   { git -C "$(dirname "$0")/.." remote get-url --all --push github 2>/dev/null
     git -C "$(dirname "$0")/.." remote get-url --all --push origin 2>/dev/null
   } | grep -m1 'github\.com' | sed -E 's#^.*github\.com(:[0-9]+)?[/:]##; s#\.git$##'
@@ -214,8 +218,16 @@ if [ "${DRY}" = 0 ]; then
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ISSUE}" "${ROUND}" "${kind}" "${rc}" \
       "$(( $(date +%s) - CHAIN_T0 ))" >> "${REPO}/.factory/locks/ledger.jsonl"
   }
+<<<<<<< ours
   # 失败清理 + 台账：非零退出移除流转标签回零标签态（可重试），无论成败都记账
   trap 'rc=$?; write_ledger "${rc}"; [ $rc -ne 0 ] && { issue_label remove factory:triaging; issue_label remove factory:accepted; issue_label remove factory:in-progress; }' EXIT
+=======
+  # 失败清理 + 台账 + worktree 回收：非零退出移除流转标签回零标签态（可重试），
+  # 无论成败都记账；worktree 无论成败一并回收（分支推送后树内仅剩未跟踪产物）
+  # D1: 本 trap 覆盖早期放锁 trap，故自带锁释放；派发链 MANUAL_LOCK=0 不动锁
+  # shellcheck disable=SC2154  # rc 于本 trap 行内由 rc=$? 赋值，shellcheck 不解析 trap 字符串
+  trap 'rc=$?; write_ledger "${rc}"; git -C "${REPO}" worktree remove --force "${WT}" >/dev/null 2>&1 || true; [ $rc -ne 0 ] && { issue_label remove factory:triaging; issue_label remove factory:accepted; issue_label remove factory:in-progress; }; [ "${MANUAL_LOCK}" = 1 ] && rm -rf "${LOCKDIR:-}" 2>/dev/null' EXIT
+>>>>>>> theirs
 else
   echo "[dry-run] gh issue view #${ISSUE} → ${DIR}/issue.json"
   echo "[dry-run] label: +factory:triaging（裁决后 → accepted|rejected）"
