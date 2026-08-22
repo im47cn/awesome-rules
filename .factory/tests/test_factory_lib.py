@@ -4,11 +4,18 @@
 - 解析崩溃（group(0) 含 ```json 字面量）→ test_parse_fenced_* 系列
 - 证据饥饿（-q 无测试名）→ test_evidence_suites_*
 - 熔断边界（跨天/重置/上限）→ test_breaker_*
+- 静默拒绝（#57/#59/#60 只落标签无评论）→ TestRejectReceipt
 """
 
 import pytest
 
-from factory_lib import CircuitOpen, breaker_check, evidence_suites, parse_agent_json
+from factory_lib import (
+    CircuitOpen,
+    breaker_check,
+    evidence_suites,
+    parse_agent_json,
+    reject_receipt,
+)
 
 # ---- S2 issue #2 holdout 的真实输出形态（fence 包裹 + 前导文字）----
 REAL_HOLDOUT = """Working...
@@ -193,3 +200,85 @@ class TestClassifyTask:
     def test_empty(self):
         from factory_lib import classify_task
         assert classify_task([]) == "empty"
+# ---- S2 issue #60 triage 的真实 reject 形态（三判据全有前缀，b 不通过）----
+REAL_REJECT = {
+    "issue": 60, "verdict": "reject", "priority": None,
+    "reasons": [
+        "判据a: 不通过（存疑），'持续跟踪'是开放式系统级目标，未落到具体组件",
+        "判据b: 不通过，无可机械判定的完成标准",
+        "判据c: 存疑，无法排除触周界",
+    ],
+}
+
+
+class TestRejectReceipt:
+    def test_receipt_never_contains_state_marker(self):
+        """安全不变量：回执禁止含裸标记——state.py:82 标记评论优先级最高
+        且无撤销语义，链自动写入会把重投（补充上下文后重开）永久钉死在
+        rejected（毒丸）。标记通道只保留给人类手动覆盖。"""
+        assert "[factory:rejected]" not in reject_receipt(REAL_REJECT)
+
+    def test_receipt_renders_all_reasons(self):
+        md = reject_receipt(REAL_REJECT)
+        for r in REAL_REJECT["reasons"]:
+            assert f"- {r}" in md
+        assert "## 工厂 triage 裁决：reject" in md
+        assert "── 证据边界 ──" in md
+
+    def test_receipt_guidance_for_failed_criteria(self):
+        """不通过 / 存疑判据 → 对应重投指引；#60 形态 a/b/c 全命中。"""
+        md = reject_receipt(REAL_REJECT)
+        assert "判据a（使命一致）" in md
+        assert "判据b（可判定）" in md
+        assert "判据c（不触周界）" in md
+
+    def test_receipt_pass_criteria_get_no_guidance(self):
+        """全通过措辞（通过/勉强通过）不触发指引——防噪音。"""
+        md = reject_receipt({"verdict": "reject", "reasons": [
+            "判据a: 通过——属文档维护", "判据b: 勉强通过（形式上）——标题可判定"]})
+        assert "判据a（使命一致）" not in md
+        assert "重投指引" in md  # 兜底通用行仍在
+
+    def test_receipt_empty_reasons_fail_open(self):
+        """reasons 缺失/为空 → 回执仍可渲染（评论阶段不得让链崩溃）。"""
+        md = reject_receipt({"verdict": "reject"})
+        assert "未给出判据明细" in md
+        assert "[factory:rejected]" not in md
+
+    def test_receipt_unprefixed_reasons_render_verbatim(self):
+        """LLM 输出偏离「判据x:」前缀 → 原样渲染，无前缀解析崩溃。"""
+        md = reject_receipt({"verdict": "reject", "reasons": ["与本仓库使命无关"]})
+        assert "- 与本仓库使命无关" in md
+
+    def test_receipt_nonstring_reasons_no_crash(self):
+        """审查修复（PR #66 评论1）：reasons 混入非字符串元素（dict/int）
+        → re.match 不抛 TypeError，回执仍渲染；指引只从字符串项提取。"""
+        md = reject_receipt({"verdict": "reject", "reasons": [
+            {"detail": "嵌套对象"}, 42, "判据b: 不通过——无可判定标准"]})
+        assert "判据b（可判定）" in md
+        assert "[factory:rejected]" not in md
+
+    def test_receipt_neutralizes_embedded_marker(self):
+        """PR #20 评论1（security）：reason 内嵌标记（LLM 从 issue 评论
+        回显）会被 state.py 标记评论通道识别为人工覆盖、永久钉死
+        rejected——渲染前中和子串，语义保留；含 [[...]] 嵌套构造。"""
+        md = reject_receipt({"verdict": "reject", "reasons": [
+            "判据b: 不通过，评论已写 [factory:rejected] 表示异议",
+            "判据c: 不通过，嵌套 [[factory:rejected]] 构造"]})
+        assert "[factory:rejected]" not in md
+        assert "factory:rejected" in md  # 去括号保留语义
+
+    def test_receipt_nonlist_reasons_fail_open(self):
+        """PR #20 评论2：reasons 为标量（int/str）→ 视为空渲染占位行，
+        不在 list() 处抛 TypeError（标签已落，回执必须发得出去）。"""
+        for scalar in (42, "判据b: 不通过"):
+            md = reject_receipt({"verdict": "reject", "reasons": scalar})
+            assert "未给出判据明细" in md
+            assert "[factory:rejected]" not in md
+
+    def test_receipt_has_correlation_section(self):
+        """PR #20 评论3：五段式补齐「关联」段——无因果模块时显式声明，
+        不静默缺位（对齐 review-report-standards.md 第 4 段）。"""
+        md = reject_receipt(REAL_REJECT)
+        assert "── 关联 ──" in md
+        assert "── 证据边界 ──" in md  # 段序：关联在前，边界收尾
