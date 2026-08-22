@@ -1,12 +1,6 @@
-"""pytest 共享配置 — 注入鹰眼 scripts 目录（aggregate.py 自行注入 doc-gen 侧路径）。"""
+"""pytest 共享配置 — 环境密封（测试自带 sys.path 注入，见 test_arch_check.py 头部）。"""
 
 import os
-import sys
-from pathlib import Path
-
-SCRIPTS_DIR = Path(__file__).resolve().parent.parent
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
 
 # 测试密封性：pytest 可能运行在 hook 注入的 GIT_DIR/GIT_WORK_TREE 环境下
 # （lefthook pre-push 链），显式环境变量优先于 cwd 发现，会把测试里

@@ -22,18 +22,43 @@ fi
 REPO="$(git rev-parse --show-toplevel)"
 REPO_SLUG="${GH_REPO:-$(
   # 双 remote 布局：origin pushurl 可能多条（codeup 镜像 + github），
-<<<<<<< ours
-  # 逐条扫，取含 github.com 者；github remote 名优先
-=======
   # 逐条扫含 github.com 者（github remote 名优先）；443 端口形态兼容
->>>>>>> theirs
   { git -C "$(dirname "$0")/.." remote get-url --all --push github 2>/dev/null
     git -C "$(dirname "$0")/.." remote get-url --all --push origin 2>/dev/null
   } | grep -m1 'github\.com' | sed -E 's#^.*github\.com(:[0-9]+)?[/:]##; s#\.git$##'
 )}"
 DIR="${REPO}/.factory/artifacts/issue-${ISSUE}"
 BRANCH="factory/issue-${ISSUE}"
+WT="${REPO}/.factory/worktrees/issue-${ISSUE}"   # 链独立 worktree（多驱动隔离）
 node_timeout() { python3 "${REPO}/.factory/factory_lib.py" timeout "$1"; }  # 分级预算：裁决器5m/工作节点15m/implement 30m
+
+# --- 互斥与环境标记（2026-08-21 三链并发事故修复） ---
+# D2: 链内所有子进程(omp 节点)可见，仓库 pre-push 钩子据此禁推 main
+export FACTORY_CHAIN=1
+# D1: S1 手动直跑与 S2 派发器共用 dispatcher 目录锁；派发器子进程
+# (FACTORY_DISPATCHED=1)锁已由父持有，重复获取会自锁。
+# 锁挂主树 .factory（git-common-dir 锚定，对齐 dispatch.sh 硬锁）：
+# 链在独立 worktree 跑后各树 locks/ 互不可见，锁随树走会绕开互斥。
+# worktree 隔离落地后 checkout 安全已由分支独占保证，此锁额外序列化
+# label 操作与 gate 资源占用（验证 e2e 后可评估放开）
+MANUAL_LOCK=0
+if [ "${FACTORY_DISPATCHED:-0}" != 1 ] && [ "${DRY}" = 0 ]; then
+  MAIN_FACTORY="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null \
+    | sed 's#/\.git$##' || true)/.factory"
+  LOCKDIR="${MAIN_FACTORY:-${REPO}/.factory}/locks/dispatcher"
+  if mkdir "$LOCKDIR" 2>/dev/null; then
+    echo $$ > "$LOCKDIR/pid"; MANUAL_LOCK=1
+  else
+    _pid="$(cat "$LOCKDIR/pid" 2>/dev/null || true)"
+    if [ -n "${_pid}" ] && ! kill -0 "${_pid}" 2>/dev/null; then
+      echo "锁持有者 pid=${_pid} 已死，接管陈锁" >&2
+      rm -rf "$LOCKDIR" && mkdir "$LOCKDIR" && echo $$ > "$LOCKDIR/pid" && MANUAL_LOCK=1
+    fi
+  fi
+  [ "${MANUAL_LOCK}" = 1 ] || { echo "dispatcher 或另一链运行中（${LOCKDIR}），稍后再试" >&2; exit 3; }
+  # 早期退出(设下方链 trap 前)也要放锁
+  trap '[ "${MANUAL_LOCK}" = 1 ] && rm -rf "${LOCKDIR}" 2>/dev/null' EXIT
+fi
 # --- 状态机标签：S1 issue 侧 triaging → accepted|rejected → in-review；S2 加
 #     in-progress（dispatcher 抢占锁）与 PR 侧 needs-fix/needs-human/approved。
 #     完整转移表唯一权威在 state.py TRANSITIONS；标签派生/收敛见 factory-state.sh ---
@@ -46,6 +71,7 @@ FACTORY_LABELS=(
   "factory:needs-fix fbca04 PR被打回待修（≤2轮）"
   "factory:needs-human e99695 轮次耗尽，人工接管"
   "factory:approved 2cbe4e 审查通过（merge受A5门控）"
+  "factory:needs-review 1d76db PR已开待人工审查"
 )
 
 ensure_labels() {
@@ -64,6 +90,17 @@ issue_label() { # issue_label <add|remove> <name> —— 失败仅告警
   fi
 }
 
+issue_label_swap() { # issue_label_swap <"删,删"> <"加,加"> —— 单请求原子转移，失败链终止
+  # 逐个 add/remove 会把状态机跳变拆成可失败的顺序依赖（半途断裂=双标签或裸奔）；
+  # 单请求换标签消除顺序问题。失败非零退出，由 EXIT trap 清理、factory-state.sh sync 兜底。
+  if gh issue edit "${ISSUE}" --remove-label "${1}" --add-label "${2}" >/dev/null 2>&1; then
+    echo "  [label] -${1} +${2}"
+  else
+    echo "[error] 标签转移失败：-${1} +${2}（issue #${ISSUE}），链终止" >&2
+    exit 1
+  fi
+}
+
 
 run_node() {  # run_node <name> — 拼接静态 prompt + 任务参数，独立进程执行
   local name="$1" t0 t1
@@ -78,10 +115,10 @@ run_node() {  # run_node <name> — 拼接静态 prompt + 任务参数，独立�
 
 任务参数:
 - ISSUE_DIR: ${DIR}
-- 仓库根: ${REPO}
+- 仓库根: ${WT}（链独立 worktree，勿越界改主工作区）
 - issue 编号: ${ISSUE}"
   t0=$(date +%s)
-  if ! (cd "${REPO}" && omp -p "${prompt}" --no-session --max-time "$(node_timeout "${name}")" < /dev/null) \
+  if ! (cd "${WT}" && omp -p "${prompt}" --no-session --max-time "$(node_timeout "${name}")" < /dev/null) \
       > "${DIR}/${name}.log" 2>&1; then
     _node_metric "${name}" "${t0}" "fail" >> "${DIR}/node-metrics.jsonl"
     echo "    节点 ${name} 失败（详见 ${DIR}/${name}.log）" >&2; return 1
@@ -218,16 +255,11 @@ if [ "${DRY}" = 0 ]; then
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ISSUE}" "${ROUND}" "${kind}" "${rc}" \
       "$(( $(date +%s) - CHAIN_T0 ))" >> "${REPO}/.factory/locks/ledger.jsonl"
   }
-<<<<<<< ours
-  # 失败清理 + 台账：非零退出移除流转标签回零标签态（可重试），无论成败都记账
-  trap 'rc=$?; write_ledger "${rc}"; [ $rc -ne 0 ] && { issue_label remove factory:triaging; issue_label remove factory:accepted; issue_label remove factory:in-progress; }' EXIT
-=======
   # 失败清理 + 台账 + worktree 回收：非零退出移除流转标签回零标签态（可重试），
   # 无论成败都记账；worktree 无论成败一并回收（分支推送后树内仅剩未跟踪产物）
   # D1: 本 trap 覆盖早期放锁 trap，故自带锁释放；派发链 MANUAL_LOCK=0 不动锁
   # shellcheck disable=SC2154  # rc 于本 trap 行内由 rc=$? 赋值，shellcheck 不解析 trap 字符串
   trap 'rc=$?; write_ledger "${rc}"; git -C "${REPO}" worktree remove --force "${WT}" >/dev/null 2>&1 || true; [ $rc -ne 0 ] && { issue_label remove factory:triaging; issue_label remove factory:accepted; issue_label remove factory:in-progress; }; [ "${MANUAL_LOCK}" = 1 ] && rm -rf "${LOCKDIR:-}" 2>/dev/null' EXIT
->>>>>>> theirs
 else
   echo "[dry-run] gh issue view #${ISSUE} → ${DIR}/issue.json"
   echo "[dry-run] label: +factory:triaging（裁决后 → accepted|rejected）"
@@ -238,21 +270,25 @@ echo "=== fix-issue #${ISSUE} → ${DIR} ==="
 run_triage || exit 1
 if [ "${DRY}" = 0 ]; then
   VERDICT="$(json_field "${DIR}/triage.json" 'd["verdict"]')"
-  issue_label remove factory:triaging
   if [ "${VERDICT}" = accept ]; then
-    issue_label add factory:accepted
+    # S1/S2 互斥: in-progress 双标签 + dispatch.sh accepted 队列显式跳过
+    # in-progress 条目（gh label 过滤是"含有"非"仅有"，2026-08-21 实证双派）
+    issue_label_swap "factory:triaging" "factory:accepted,factory:in-progress"
   else
-    issue_label add factory:rejected
+    issue_label_swap "factory:triaging" "factory:rejected"
     echo "triage=${VERDICT}，链终止"
     exit 0
   fi
 
 fi
 # --- 2-4. prime → plan → implement（同一分支上顺序执行） ---
-# 基于 github/main（fetch 后最新）而非本地 main：工厂在独立 worktree，
-# 本地 main 由人工侧更新、时序不可控；链必须自取最新基线
-[ "${DRY}" = 0 ] && { git -C "${REPO}" fetch -q github main \
-  && git -C "${REPO}" checkout -q -B "${BRANCH}" github/main; }
+if [ "${DRY}" = 0 ]; then
+  # 链独立 worktree: 主 worktree 永不切分支, 多链并行天然安全, 人工会话零冲突。
+  # 分支若被其他 worktree 持有则 add 失败(宁死勿抢, 防误伤人工现场)
+  git -C "${REPO}" worktree remove --force "${WT}" >/dev/null 2>&1 || true
+  git -C "${REPO}" worktree prune
+  git -C "${REPO}" worktree add -B "${BRANCH}" "${WT}" main >/dev/null
+fi
 run_node prime    || exit 1
 run_node plan     || exit 1
 run_node implement|| exit 1
@@ -262,19 +298,19 @@ run_node review   || exit 1
 
 # --- 6. 确定性门：周界 + 测试（tests-output.txt 由脚本生成，不依赖节点自觉） ---
 if [ "${DRY}" = 0 ]; then
-  CHANGED="$(git -C "${REPO}" diff --name-only main..."${BRANCH}" 2>/dev/null \
-    || git -C "${REPO}" diff --name-only HEAD~1)"
+  CHANGED="$(git -C "${WT}" diff --name-only main..."${BRANCH}" 2>/dev/null \
+    || git -C "${WT}" diff --name-only HEAD~1)"
   python3 "${REPO}/.factory/guard.py" --files ${CHANGED}
-  if ! (cd "${REPO}" && scripts/run_tests.sh --no-lock) > "${DIR}/tests-output.txt" 2>&1; then
+  if ! (cd "${WT}" && scripts/run_tests.sh --no-lock) > "${DIR}/tests-output.txt" 2>&1; then
     echo "测试门失败（详见 ${DIR}/tests-output.txt）" >&2; exit 1
   fi
   # 证据段：触及的测试套件以 -v 重跑附于末尾——holdout 不许推测，
   # 需要可引用的测试名/参数化用例名（-q 点号无法建立诉求对应关系）
   for suite in $(python3 "${REPO}/.factory/factory_lib.py" suites ${CHANGED}); do
-    [ -d "${REPO}/${suite}" ] || continue
+    [ -d "${WT}/${suite}" ] || continue
     echo "" >> "${DIR}/tests-output.txt"
     echo "── 证据段（verbose）: ${suite}" >> "${DIR}/tests-output.txt"
-    (cd "${REPO}/${suite}" && python3 -m pytest -o addopts="" -v) >> "${DIR}/tests-output.txt" 2>&1 || true
+    (cd "${WT}/${suite}" && python3 -m pytest -o addopts="" -v) >> "${DIR}/tests-output.txt" 2>&1 || true
   done
 else
   echo "[dry-run] guard.py --files <changed> + run_tests.sh → ${DIR}/tests-output.txt（脚本生成）"
@@ -298,7 +334,7 @@ if [ "${DRY}" = 0 ]; then
   # --no-verify：新分支首推无 @{push}，lefthook {push_files} 模板必然 exit 128；
   # 链内等价门（run_tests.sh/guard/holdout）已在本链跑过，此处跳过的是
   # 与链重复的人工推送门，非绕过验证
-  git -C "${REPO}" push -u origin "${BRANCH}" --no-verify
+  git -C "${WT}" push -u origin "${BRANCH}" --no-verify
   # --repo/--head 显式指定：origin 的 fetch URL 是 codeup，gh 无法从
   # remote 解析 GitHub 仓库（dispatch5 实测 "could not resolve remote origin"）
   gh pr create --repo "$REPO_SLUG" --head "$BRANCH" --fill \
@@ -307,9 +343,7 @@ if [ "${DRY}" = 0 ]; then
   # PR 落地后 issue 侧转移：accepted → in-review（PR 状态接管 issue，§7）。
   # in-progress 由链属主自清：锁不进 PR 阶段，避免 in-review+in-progress
   # 双标签滞留到 closed（锁单一属主原则，链是 in-progress 生命周期的终点）
-  issue_label remove factory:accepted
-  issue_label remove factory:in-progress
-  issue_label add factory:in-review
+  issue_label_swap "factory:accepted,factory:in-progress" "factory:in-review"
   echo "PR 已建（factory:needs-review）。issue #${ISSUE} → factory:in-review。人类合并。"
 else
   echo "[dry-run] push + gh pr create --label factory:needs-review；issue: accepted → in-review"

@@ -106,6 +106,12 @@ inclusion: always
 - 变异 harness 必须内置负控制对：一个必被击杀的变异 + 一个**严格等价**的变异，harness 对二者必须给出不同判定；等价性须可论证（如无副作用操作的交换律），"当前测试下等价"不合格——未来某测试 pin 住该行为时会误报
 - 碰撞类风险（缓存复用、字节码继承）用**确定性构造**复现（固定 mtime 等固定输入使碰撞必然发生），不得依赖"碰巧同秒"的概率性触发
 
+### 测试密封性（git 环境隔离）【强制】
+
+- 凡测试/门禁脚本调用 `git`，所在套件 conftest 必须在 **import 期**从 `os.environ` 剥离 `GIT_DIR`、`GIT_WORK_TREE`、`GIT_INDEX_FILE`、`GIT_OBJECT_DIRECTORY`、`GIT_ALTERNATE_OBJECT_DIRECTORIES`、`GIT_COMMON_DIR`、`GIT_NAMESPACE`——显式环境变量优先于 cwd 发现，hook（lefthook pre-push 等）注入的 `GIT_DIR` 会把 `cwd=tmp_path` 的 `git init/add/commit` 劫持到注入仓（2026-08-22 事故：真仓被改写、389 文件删除）。import 期最早且确定，先于任何测试执行；不建共享库，各 conftest 重复几行可接受
+- 入库时必须有**负控制回归测试**：以牺牲仓注入 `GIT_DIR` 跑真实套件代码路径，断言牺牲仓 `rev-list --all --count == 0` 且真仓 `status --porcelain` 前后不变（范式见 `scripts/tests/test_hermetic_git.py`）。注意 `GIT_DIR` 须指向非裸 gitdir——裸仓只触发 fatal 假红，演示不了静默劫持
+- 新增含 git 调用的测试须同步登记到负控制用例表；CI/hook 链路验证密封的判定证据是 `env GIT_DIR=<牺牲仓> bash scripts/run_tests.sh` 全绿且牺牲仓零对象
+
 ### Tripwire：前提失效硬失败【强制】
 
 - 脚本依赖的环境前提（环境变量、缓存清理、工具版本）修复后必须留后验：前提不成立时直接 raise / 退出非零，禁止静默降级继续——静默降级的偏差方向永远是"虚假通过"，不会以红色形式暴露
