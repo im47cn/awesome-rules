@@ -70,6 +70,7 @@ gh issue view N（+label factory:triaging）
 bash .factory/dispatch.sh --dry-run        # 单轮演练（DRY=1 环境变量等价）
 bash .factory/dispatch.sh                  # 单轮：sync → PR结果 → 重派 → 队列
 bash .factory/dispatch.sh --watch          # 常驻，默认 1800s（或 cron */30 单轮）
+sh .factory/cron-dispatch.sh               # hub(LaunchAgent 600s) 的 kick 入口：锁 + triage + dispatch 单轮
 bash .factory/factory-state.sh sync --all  # 标签收敛（幂等，可随时/cron 跑）
 bash .factory/factory-state.sh sync 2 --plan   # 单 issue 计划模式（只打印）
 python3 -m pytest .factory/test_state.py -o addopts= -q   # 状态机测试
@@ -165,3 +166,7 @@ python3 .factory/mutations/run.py [--only G-01,G-03]
   丢失，对象在 gc（默认两周）前都可救。
 - **单写者推定**：人工侧会话不要跑 `.factory/` 脚本（watch 常驻实例
   互斥靠主树 `.factory/locks/dispatcher`，但 git 写入无互斥）。
+- **调度形态（2026-08-22 断档教训）**：本仓经 `~/.config/factory` hub
+  （LaunchAgent 600s）kick `cron-dispatch.sh` 单轮；`--watch` 常驻无
+  launchd 监管（崩了无人拉起、重启不自启），98bdabbc 删包装器换 watch
+  后断档 13h——勿再单用 watch 形态。
