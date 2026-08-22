@@ -158,5 +158,10 @@ python3 .factory/mutations/run.py [--only G-01,G-03]
 - **main 服务端保护**（唯一硬执行点）：require PR、禁 force push、
   禁删除；直推 main 一律被拒。链 auto-merge 用 `--admin` 合并。
   本地 git 无权限模型——任何本地约定对失控会话无执行力，服务端才有。
+- **历史重写后盘点孤儿**：任何 force push / 分支重置 / 快照压缩之后，
+  立即 `git fsck --lost-found` 列出全部失联提交对象，逐个鉴定
+  （`git show <sha> --stat`：真实工作 / 已被吸收 / 破坏 / 过时变体），
+  真实工作以文件级 patch 恢复走 PR，确认无价值才允许丢弃——失联 ≠
+  丢失，对象在 gc（默认两周）前都可救。
 - **单写者推定**：人工侧会话不要跑 `.factory/` 脚本（watch 常驻实例
   互斥靠主树 `.factory/locks/dispatcher`，但 git 写入无互斥）。
