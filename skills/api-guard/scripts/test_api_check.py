@@ -918,6 +918,27 @@ class TestModuleEntry(unittest.TestCase):
         self.assertEqual(r.returncode, 2)
 
 
+# ── 文档一致性 ────────────────────────────────────────────────────────────
+
+class TestReadmeRuleSync(unittest.TestCase):
+    """README 规则表与脚本检查语义的一致性（防 PR #4 式文档漂移复发，issue #5）。"""
+
+    def _rule_lines(self):
+        """读取脚本上一级 README 全文，返回含『路径命名』的行列表。"""
+        readme = os.path.join(os.path.dirname(__file__), os.pardir, "README.md")
+        with open(readme, encoding="utf-8") as f:
+            return [line for line in f if "路径命名" in line]
+
+    def test_readme_kebab_rule_covers_malformed_hyphens(self):
+        """路径命名行须含段首/段尾/连续三要素，对齐 check_kebab_case 畸形短横线语义。"""
+        lines = self._rule_lines()
+        self.assertTrue(lines, "README 规则表缺少『路径命名』行")
+        self.assertTrue(
+            any(all(kw in line for kw in ("段首", "段尾", "连续")) for line in lines),
+            f"README 路径命名行未覆盖段首/段尾/连续短横线禁止表述（与脚本语义失同步）；当前行：{lines!r}",
+        )
+
+
 # ── 运行 ──────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
