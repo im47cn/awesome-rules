@@ -12,8 +12,9 @@
 #     mutations kill-rate ≥80% 前不得开启——设计 A5"未证明的门不是门"）
 #   - 其余一切标签由 factory-state.sh sync 从事实推导（声明式）
 #
-# 固定优先级：PR 结果处理 > fix-issue 派发（§7：validate-pr > fix-issue > triage；
-# triage 在本形态内联于 fix-issue.sh，无独立批）
+# 固定优先级：PR 结果处理 > fix-issue 派发 > triage 批次（§7：validate-pr >
+# fix-issue > triage）；triage 批次补齐 S2 缺口"写 issue → 工厂自动看见"——
+# 每轮先对零 factory 标签的 open issue 物理隔离裁决，落标后当轮即可入队
 # 链失败（fix-issue.sh 非零退出）→ 其 trap 清 triaging/accepted/in-progress，
 # issue 回零标签态，人工重投或重开 issue（设计：失败清理，可观测非门）
 #
@@ -82,8 +83,8 @@ acquire_lock || exit 0
 say() { [ "$DRY" = 1 ] && echo "  [dry-run] $*" || echo "  $*"; }
 
 claim() {  # <issue-number>  消费 accepted → in-progress（幂等重试 ×2）
-  local N="$1" rc=0 try
-  for try in 1 2; do
+  local N="$1" rc=0
+  for _retry in 1 2; do
     if [ "$DRY" = 1 ]; then say "claim issue #$N: accepted → in-progress"; return 0; fi
     gh issue edit "$N" --repo "$REPO_SLUG" \
       --remove-label factory:accepted --add-label factory:in-progress >/dev/null 2>&1 && rc=0 || rc=$?
@@ -118,6 +119,14 @@ dispatch_once() {
   say "sync: factory-state.sh sync --all"
   [ "$DRY" = 0 ] && bash "$FACTORY/factory-state.sh" sync --all
 
+  echo "-- triage 批次（零标签 issue 裁决；失败不阻断派发） --"
+  if [ "$DRY" = 1 ]; then
+    say "triage-batch: 零 factory 标签 issue，≤MAX_TRIAGE 个"
+  else
+    bash "$FACTORY/triage-batch.sh" && rc=0 || rc=$?
+    echo "-- triage 批次结束（exit=${rc}） --"
+  fi
+
   echo "-- PR 结果处理（优先） --"
   # approved：sync 已打好标签；此处只做 A5 门内的 merge 动作
   # 注意：列表用命令替换读入、主 shell for 迭代——管道 while 子 shell
@@ -133,7 +142,7 @@ for pr in json.load(sys.stdin):
     set -- $entry; P="$1"; MERGEABLE="$2"
     if [ "$AUTO_MERGE" = 1 ] && [ "$MERGEABLE" = "MERGEABLE" ]; then
       say "merge PR #$P (--$MERGE_METHOD)"
-      [ "$DRY" = 0 ] && gh pr merge "$P" --repo "$REPO_SLUG" "--$MERGE_METHOD" --admin >/dev/null \
+      [ "$DRY" = 0 ] && gh pr merge "$P" --repo "$REPO_SLUG" "--$MERGE_METHOD" >/dev/null \
         && echo "  PR #$P 已合并；issue 由 GitHub 自动关闭"
     else
       echo "  PR #$P approved 但 A5 门未开（FACTORY_AUTO_MERGE + metrics/auto-merge-unlocked）→ 人工合并"
@@ -175,9 +184,6 @@ for pr in json.load(sys.stdin): print(pr["number"])')"
   if [ "$DRY" = 0 ]; then
     wait; echo "本轮链全部结束，收尾 sync"
     bash "$FACTORY/factory-state.sh" sync --all
-    # worktree 驻留分支归位（链后 HEAD 悬在 issue 分支上；归位让
-    # git worktree list 状态可预测，专属分支=专属 worktree 约定）
-    git -C "${REPO}" checkout -q factory/base 2>/dev/null || true
   fi
 }
 
