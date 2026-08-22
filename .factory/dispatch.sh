@@ -12,8 +12,9 @@
 #     mutations kill-rate ≥80% 前不得开启——设计 A5"未证明的门不是门"）
 #   - 其余一切标签由 factory-state.sh sync 从事实推导（声明式）
 #
-# 固定优先级：PR 结果处理 > fix-issue 派发（§7：validate-pr > fix-issue > triage；
-# triage 在本形态内联于 fix-issue.sh，无独立批）
+# 固定优先级：PR 结果处理 > fix-issue 派发 > triage 批次（§7：validate-pr >
+# fix-issue > triage）；triage 批次补齐 S2 缺口"写 issue → 工厂自动看见"——
+# 每轮先对零 factory 标签的 open issue 物理隔离裁决，落标后当轮即可入队
 # 链失败（fix-issue.sh 非零退出）→ 其 trap 清 triaging/accepted/in-progress，
 # issue 回零标签态，人工重投或重开 issue（设计：失败清理，可观测非门）
 #
@@ -112,6 +113,14 @@ dispatch_once() {
   echo "=== dispatch @ $(date '+%H:%M:%S') ==="
   say "sync: factory-state.sh sync --all"
   [ "$DRY" = 0 ] && bash "$FACTORY/factory-state.sh" sync --all
+
+  echo "-- triage 批次（零标签 issue 裁决；失败不阻断派发） --"
+  if [ "$DRY" = 1 ]; then
+    say "triage-batch: 零 factory 标签 issue，≤MAX_TRIAGE 个"
+  else
+    bash "$FACTORY/triage-batch.sh" && rc=0 || rc=$?
+    echo "-- triage 批次结束（exit=${rc}） --"
+  fi
 
   echo "-- PR 结果处理（优先） --"
   # approved：sync 已打好标签；此处只做 A5 门内的 merge 动作
