@@ -935,7 +935,7 @@ class TestReadmeRuleSync(unittest.TestCase):
         self.assertTrue(lines, "README 规则表缺少『路径命名』行")
         self.assertTrue(
             any(all(kw in line for kw in ("段首", "段尾", "连续")) for line in lines),
-            "README 路径命名行未覆盖段首/段尾/连续短横线禁止表述（与脚本语义失同步）",
+            f"README 路径命名行未覆盖段首/段尾/连续短横线禁止表述（与脚本语义失同步）；当前行：{lines!r}",
         )
 
 
