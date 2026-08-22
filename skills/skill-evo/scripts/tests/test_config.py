@@ -47,6 +47,8 @@ def test_repo_root_structural_anchor():
     root = C.repo_root()
     assert Path(C.__file__).resolve().is_relative_to(root)
     assert (root / "skills" / "skill-evo" / "SKILL.md").is_file()
+    # 负例：非根祖先（skills/ 目录）不含根 marker，marker 判据有区分度
+    assert not (Path(C.__file__).resolve().parents[2] / "skills" / "skill-evo" / "SKILL.md").is_file()
 
 
 def test_base_paths(tmp_path):
