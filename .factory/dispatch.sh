@@ -23,12 +23,12 @@
 set -u
 REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "不在 git 仓库" >&2; exit 2; }
 FACTORY="$REPO/.factory"
-REPO_SLUG="${GH_REPO:-$(git -C "$REPO" remote get-url github 2>/dev/null \
+REPO_SLUG="${GH_REPO:-$(git -C "$REPO" remote get-url origin 2>/dev/null \
   | sed -E 's#.*github\.com[:/]##; s#\.git$##')}"
 [ -n "$REPO_SLUG" ] || { echo "无法确定 GitHub 仓库 slug" >&2; exit 2; }
 
 DRY="${DRY:-0}"; WATCH=0; INTERVAL="${INTERVAL:-1800}"
-MAX_PARALLEL="${MAX_PARALLEL:-4}"
+MAX_PARALLEL="${MAX_PARALLEL:-4}"  # worktree 隔离(246cba05)+D1/D4 修复(e2e 2026-08-22 issue#64 全绿)后恢复并行
 MERGE_METHOD="${FACTORY_MERGE_METHOD:-merge}"
 AUTO_MERGE=0
 [ "${FACTORY_AUTO_MERGE:-0}" = 1 ] && [ -f "$FACTORY/metrics/auto-merge-unlocked" ] && AUTO_MERGE=1
@@ -51,12 +51,8 @@ gh >/dev/null 2>&1 || { echo "需要 gh CLI" >&2; exit 2; }
 
 # --- 双实例硬锁：mkdir 原子性 + PID 活性检测（macOS 无 flock(1)） ---
 # GitHub 换标签非原子，claim 互斥完全依赖单 dispatcher；此锁把"文档假设"
-# 跨 worktree 全局：链在独立 worktree 跑（人工侧隔离）后各树 locks/ 互不可见，
-# 锁若随树走，主树手动单轮与 worktree 常驻 watch 会绕开互斥双实例。
-# git-common-dir 在 worktree 中指向主 .git，据此回到主树 .factory。
-MAIN_FACTORY="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null \
-  | sed 's#/\.git$##')/.factory"
-LOCKDIR="${MAIN_FACTORY:-$FACTORY}/locks/dispatcher"
+# 变成进程级事实。cron 包装器（cron-dispatch.sh）与本脚本共用此锁。
+LOCKDIR="$FACTORY/locks/dispatcher"
 acquire_lock() {
   if mkdir "$LOCKDIR" 2>/dev/null; then
     echo $$ > "$LOCKDIR/pid"
@@ -70,7 +66,7 @@ acquire_lock() {
     mkdir "$LOCKDIR" && echo $$ > "$LOCKDIR/pid" \
       && trap 'rm -rf "$LOCKDIR"' EXIT && return 0
   fi
-  echo "另一 dispatcher 运行中（pid=$pid），退出" >&2; return 1
+  echo "另一 dispatcher 运行中（pid=${pid}），退出" >&2; return 1
 }
 acquire_lock || exit 0
 
@@ -89,7 +85,8 @@ claim() {  # <issue-number>  消费 accepted → in-progress（幂等重试 ×2�
 
 run_chain() {  # <issue-number>  占并发槽运行链
   if [ "$DRY" = 1 ]; then say "run: bash .factory/fix-issue.sh $1"; return 0; fi
-  bash "$FACTORY/fix-issue.sh" "$1" >> "$FACTORY/artifacts/issue-$1/dispatch.log" 2>&1 &
+  # FACTORY_DISPATCHED=1: 链知道自己已被 dispatcher 锁护，S1 手动互斥锁免获取(防自锁)
+  FACTORY_DISPATCHED=1 bash "$FACTORY/fix-issue.sh" "$1" >> "$FACTORY/artifacts/issue-$1/dispatch.log" 2>&1 &
   while [ "$(jobs -rp | wc -l | tr -d ' ')" -ge "$MAX_PARALLEL" ]; do sleep 5; done
 }
 
@@ -157,6 +154,12 @@ for pr in json.load(sys.stdin): print(pr["number"])')"
   QUEUE="$(gh issue list --repo "$REPO_SLUG" --state open --label factory:accepted \
     --json number,labels --limit 100 | sort_by_priority)"
   for N in $QUEUE; do
+    # D4(2026-08-21 实证双派): gh label 过滤是"含有"而非"仅有"，
+    # accepted+in-progress 双标签条目仍在队列，必须显式跳过在跑的
+    if gh issue view "$N" --repo "$REPO_SLUG" --json labels -q '.labels[].name' 2>/dev/null \
+       | grep -q '^factory:in-progress$'; then
+      echo "  issue #$N 已 in-progress，跳过"; continue
+    fi
     if claim "$N"; then say "issue #$N → 链"; run_chain "$N"; fi
   done
 
