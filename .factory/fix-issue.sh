@@ -242,8 +242,11 @@ if [ "${DRY}" = 0 ]; then
       kind=rejected
     else
       local changed
-      changed="$(git -C "${REPO}" diff --name-only main..."${BRANCH}" 2>/dev/null | true)"
-      [ -z "${changed}" ] && changed="$(git -C "${REPO}" diff --name-only HEAD~1 2>/dev/null | true)"
+      # || true 吞 exit code（无 merge-base 等场景）但保留 stdout；
+      # 曾误写 `| true`——管道把 diff 输出喂给 true，changed 恒空，
+      # 台账全记 no-diff（PR #9 审查评论1）
+      changed="$(git -C "${REPO}" diff --name-only main..."${BRANCH}" 2>/dev/null || true)"
+      [ -z "${changed}" ] && changed="$(git -C "${REPO}" diff --name-only HEAD~1 2>/dev/null || true)"
       if [ -n "${changed}" ]; then
         kind="$(python3 "${REPO}/.factory/factory_lib.py" classify ${changed})"
       else
@@ -323,7 +326,15 @@ if [ "${DRY}" = 0 ]; then
   python3 - "${DIR}" "${ROUND}" <<'PYA' >> "${DIR}/chain-history"
 import json, sys, pathlib
 d = json.loads(pathlib.Path(sys.argv[1], "holdout.json").read_text())
-print(f"holdout round={sys.argv[2]} verdict={d['verdict']} evidence={d['evidence'][:200]}")
+verdict = d.get("verdict") if isinstance(d, dict) else None
+evidence = d.get("evidence") if isinstance(d, dict) else None
+# parse_agent_json 只验 verdict；evidence 缺失时裸取会 KeyError 在
+# verdict 检查前炸链且 chain-history 无记录（PR #9 审查评论3）。
+# malformed 也先留档再 fail-closed——失败证据不可静默丢失
+if verdict not in ("PASS", "FAIL") or not isinstance(evidence, str) or not evidence:
+    print(f"holdout round={sys.argv[2]} verdict={verdict} evidence=<malformed>")
+    raise SystemExit("holdout 结果缺 verdict/evidence 字段")
+print(f"holdout round={sys.argv[2]} verdict={verdict} evidence={evidence[:200]}")
 PYA
   [ "$(json_field "${DIR}/holdout.json" 'd["verdict"]')" = PASS ] \
     || { echo "holdout=FAIL，链终止（不建 PR；evidence 已存 chain-history）"; exit 1; }
