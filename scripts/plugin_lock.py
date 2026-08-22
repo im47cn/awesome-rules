@@ -19,12 +19,20 @@ from __future__ import annotations  # 兼容 Python 3.9：延迟求值 PEP 604 �
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LOCK_FILE = Path(__file__).resolve().parent / "plugin-lock.json"
+
+# 环境密封（同各套件 conftest）：本脚本可能运行在 hook 注入的 GIT_DIR 下
+# （pre-push 链），显式环境变量会覆盖 `git -C REPO_ROOT` 的仓库发现，
+# hash-object 读错仓或报错 → 误触发 sha256 降级 → 锁定比对假红。
+for _k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+           "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE"):
+    os.environ.pop(_k, None)
 
 # 安装入口全集：各工具插件目录下的清单 + 共享 hooks 配置
 # （.agents 为 Codex 市场安装入口，见 docs/ai-coding-tools-setup.md）
