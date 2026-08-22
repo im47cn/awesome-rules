@@ -1,0 +1,7 @@
+{
+  "project_name": "demo",
+  "project_description": "COLA 架构示例项目(doc-gen 测试 fixture)",
+  "project_group_id": "com.example",
+  "project_repo": "",
+  "domain_names": {"demo": "示例域"}
+}
