@@ -1,6 +1,5 @@
 """evo_config 单测：默认值 / 极简 toml 解析 / scope 判定。"""
 import os
-from pathlib import Path
 
 import evo_config as C
 
@@ -39,11 +38,9 @@ def test_in_scope(tmp_path):
     assert not C.in_scope(None, cfg)
 
 
-def test_repo_root_is_repo_root():
+def test_repo_root_is_awesome_rules():
     root = C.repo_root()
-    # 检出目录名随环境变化（CI=awesome-rules、工厂 worktree=awesome-rules-factory），
-    # 锚定结构不变量而非目录名：repo_root 是 scripts/ 的祖先，且含 skill-evo 资产
-    assert root in Path(C.__file__).resolve().parents
+    assert root.name == "awesome-rules"
     assert (root / "skills" / "skill-evo" / "SKILL.md").is_file()
 
 
