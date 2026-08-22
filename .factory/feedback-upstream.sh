@@ -53,16 +53,26 @@ FREMOTE="${FREMOTE:-origin}"
 BASE="$("${GITUP[@]}" rev-parse --verify "$FREMOTE/main^{commit}")" \
   || die "无法解析 $FREMOTE/main"
 PUSH_URL="$("${GITUP[@]}" remote -v | awk -v repo="$UPSTREAM_REPO" \
-  '$0 ~ repo && $3 == "(push)" {print $2; exit}')"
-[ -n "$PUSH_URL" ] || die "上游 clone 无指向 ${UPSTREAM_REPO} 的 push url"
+  '$0 ~ /github\.com/ && $0 ~ repo && $3 == "(push)" {print $2; exit}')"
+[ -n "$PUSH_URL" ] || die "上游 clone 无指向 github.com/${UPSTREAM_REPO} 的 push url"
 # 跨仓对象：上游对象库没有本仓提交，cherry-pick 前临时挂源 remote 拉取
 # （结束移除；拉入对象随后不可达，交由上游 gc，无残留引用）
-"${GITUP[@]}" remote add feedback-src "$REPO" >/dev/null 2>&1 || true
+REMOTE_ADDED=0
+if "${GITUP[@]}" remote add feedback-src "$REPO" >/dev/null 2>&1; then
+  REMOTE_ADDED=1
+else
+  # 已存在则验证可用后复用；仅本次添加的才在 cleanup 移除
+  # （旧写法 || true 把"已存在"吞成成功，cleanup 又无条件删，
+  # 会误删用户既有同名 remote——PR #18 审查评论4）
+  "${GITUP[@]}" remote get-url feedback-src >/dev/null 2>&1 \
+    || die "feedback-src remote 已存在但不可用"
+fi
 "${GITUP[@]}" fetch -q feedback-src main
 cleanup() {
   git -C "$UPSTREAM_PATH" worktree remove --force "$WT" >/dev/null 2>&1 || true
   git -C "$UPSTREAM_PATH" branch -qD "$BRANCH" >/dev/null 2>&1 || true
-  git -C "$UPSTREAM_PATH" remote remove feedback-src >/dev/null 2>&1 || true
+  [ "$REMOTE_ADDED" = 1 ] \
+    && git -C "$UPSTREAM_PATH" remote remove feedback-src >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 abandon() { say "已放弃，分支与 worktree 已清理（产物: ${FB_DIR}）"; exit 1; }
