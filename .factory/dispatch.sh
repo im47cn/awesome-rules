@@ -78,8 +78,8 @@ acquire_lock || exit 0
 say() { [ "$DRY" = 1 ] && echo "  [dry-run] $*" || echo "  $*"; }
 
 claim() {  # <issue-number>  消费 accepted → in-progress（幂等重试 ×2）
-  local N="$1" rc=0 try
-  for try in 1 2; do
+  local N="$1" rc=0
+  for _retry in 1 2; do
     if [ "$DRY" = 1 ]; then say "claim issue #$N: accepted → in-progress"; return 0; fi
     gh issue edit "$N" --repo "$REPO_SLUG" \
       --remove-label factory:accepted --add-label factory:in-progress >/dev/null 2>&1 && rc=0 || rc=$?

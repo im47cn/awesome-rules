@@ -226,6 +226,7 @@ if [ "${DRY}" = 0 ]; then
   # 失败清理：非零退出时移除流转标签，issue 回到零 factory 标签态（可重试/人工接手）；
   # worktree 无论成败一并回收（分支推送后树内仅剩未跟踪产物）
   # D1: 本 trap 覆盖早期放锁 trap，故自带锁释放；派发链 MANUAL_LOCK=0 不动锁
+  # shellcheck disable=SC2154  # rc 于本 trap 行内由 rc=$? 赋值，shellcheck 不解析 trap 字符串
   trap 'rc=$?; git -C "${REPO}" worktree remove --force "${WT}" >/dev/null 2>&1 || true; [ $rc -ne 0 ] && { issue_label remove factory:triaging; issue_label remove factory:accepted; issue_label remove factory:in-progress; }; [ "${MANUAL_LOCK}" = 1 ] && rm -rf "${LOCKDIR:-}" 2>/dev/null' EXIT
 else
   echo "[dry-run] gh issue view #${ISSUE} → ${DIR}/issue.json"

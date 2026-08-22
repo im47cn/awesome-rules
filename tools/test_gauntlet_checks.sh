@@ -64,6 +64,64 @@ else
     bad "NC3 干净文件应存活到 echo（out3='$out3'）——errexit 吞掉 grep rc=1 好路径"
 fi
 
+# ── NC4 inline-python 负控制：`-c -` 事故原形必须被拦 ─────────────────
+# 回归（2026-08-22）：feedback 适配节点产出的内联 python 改形逃过全部
+# 既有检查。夹具覆盖 R1（-c -）、R2（-c+heredoc 并用）、R3（语法错误）。
+# 夹具经 printf 分段拼接：本脚本在 lint-factory-inline-python 扫描面内，
+# 源文件不得出现事故字面形态（与 NC2 的 $K 拼接同一原则）；%s 占位在
+printf '#!/usr/bin/env bash\n' >"$TMP/nc_inline.sh"
+{
+    # shellcheck disable=SC2016  # $(…) 与 $f 是夹具字面量，不得在生成期展开
+    printf 'a="$(python3 -c %s "$f" <<%s\n' '-' "'PYX'"
+    printf 'import sys\nprint(sys.argv[1])\n'
+    printf '%s\n)\n' 'PYX'
+    # shellcheck disable=SC2016  # 同上
+    printf 'b="$(python3 -c %simport sys print(%s)"\n' "'" "'"
+} >>"$TMP/nc_inline.sh"
+if "$PY" tools/check_inline_python.py "$TMP/nc_inline.sh" >"$TMP/out4" 2>&1; then
+    _rc4=0
+else
+    _rc4=$?
+fi
+if [ "$_rc4" -eq 1 ] && grep -q 'R1' "$TMP/out4" && grep -q 'R2' "$TMP/out4" \
+    && grep -q 'R3' "$TMP/out4"; then
+    ok "NC4 -c - 事故原形 + -c/heredoc 并用 + 语法错误全被拦（rc=1）"
+else
+    bad "NC4 期望 rc=1 且 R1/R2/R3 全报，实际 rc=${_rc4}: $(head -3 "$TMP/out4")"
+fi
+
+# ── NC5 inline-python 好路径：合法双引号形态不误伤 ─────────────────────
+# 本仓 .factory 合法形态（json_field 双引号 $2 展开块）必须放行——
+# 检查器边界是“静态可验证的才拦”，不是见 python 就拦。
+cat >"$TMP/nc_inline_ok.sh" <<'EOF'
+#!/usr/bin/env bash
+json_field() {
+  python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print($2)" "$1"
+}
+c="$(python3 - "$TMP/f" <<'PYX'
+import sys
+print(sys.argv[1])
+PYX
+)"
+EOF
+if "$PY" tools/check_inline_python.py "$TMP/nc_inline_ok.sh" >"$TMP/out5" 2>&1; then
+    ok "NC5 合法内联 python（双引号块 + heredoc）放行"
+else
+    bad "NC5 期望 rc=0，实际 rc=$?: $(head -3 "$TMP/out5")"
+fi
+
+# ── NC6 inline-python 检查器损坏路径：rc=2 绝不算通过 ──────────────────
+if "$PY" tools/check_inline_python.py "$TMP/definitely-missing" >"$TMP/out6" 2>&1; then
+    _rc6=0
+else
+    _rc6=$?
+fi
+if [ "$_rc6" -eq 2 ]; then
+    ok "NC6 路径不存在返回 rc=2（检查器损坏 ≠ 通过）"
+else
+    bad "NC6 期望 rc=2，实际 rc=${_rc6}"
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────
 if [ "$fails" -gt 0 ]; then
     echo "checker-self-test: $fails 项失败"

@@ -3,6 +3,12 @@
 # 语义契约：tools/test_gauntlet_orchestration.sh（编排自测）、
 # tools/test_gauntlet_checks.sh（检查器负控制）、
 # steering/testing-standards.md「自建关卡脚本的反作弊要求」。
+#
+# .factory/ shell 门（syntax-factory-sh / lint-factory-shellcheck /
+# lint-factory-inline-python）：2026-08-22 feedback 事故后补——适配
+# 节点产出的 BRANCH 未定义（SC2154）缺陷逃过纯 pytest 门禁
+# （scripts/run_tests.sh）。上游门禁应以本脚本为准；shell 层是其
+# 严格超集，pytest 层两者等价（同一套件清单）。
 set -e
 cd "$(dirname "$0")/.."
 
@@ -88,6 +94,17 @@ else
     # lint 范围只含本仓新增 tools/ 脚本：hooks/ 属既有代码，其基线告警不属本门范围
     run_layer lint-shellcheck shellcheck tools/gauntlet.sh tools/must_not_match.sh \
         tools/test_gauntlet_orchestration.sh tools/test_gauntlet_checks.sh
+
+    # ── .factory/ shell 门（2026-08-22 feedback 事故后补） ─────────────
+    # 事故：feedback 适配节点产出 BRANCH 未定义（SC2154）的 fix-issue.sh，
+    # run_tests.sh 纯 pytest 门禁全绿放行。三层封堵：
+    run_layer syntax-factory-sh bash -n .factory/dispatch.sh .factory/fix-issue.sh \
+        .factory/factory-state.sh .factory/triage-batch.sh .factory/validate-pr.sh
+    # -S warning：SC2154 正是事故形态（引用未赋值变量），不允许降级
+    run_layer lint-factory-shellcheck shellcheck -S warning \
+        .factory/dispatch.sh .factory/fix-issue.sh \
+        .factory/factory-state.sh .factory/triage-batch.sh .factory/validate-pr.sh
+    run_layer lint-factory-inline-python "$PY" tools/check_inline_python.py .factory tools scripts
 fi
 
 echo "gauntlet: 全部层通过"
