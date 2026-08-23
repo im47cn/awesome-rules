@@ -140,6 +140,62 @@ else
     bad "NC6 期望 rc=2，实际 rc=${_rc6}"
 fi
 
+# ── NC7 pipe-early-exit 负控制：三犯原形必须被拦 ──────────────────────
+# 夹具覆盖 R3（| true，PR #9/#23）、R1（grep -m1 中位，etf-radar#70）、
+# R2（head -n 中位）。夹具经 printf 分段拼接：本脚本在 lint-pipe-early-exit
+# 扫描面内，源码不得出现守卫的字面形态（与 NC2 的 $K 拼接同一原则）。
+NCP='|'; NCT='tru'; NCM='-m'; NCH='hea'; NCD='d'
+{
+    printf '#!/usr/bin/env bash\nset -euo pipefail\n'
+    # shellcheck disable=SC2016  # $(…) 是夹具字面量，不得在生成期展开
+    printf 'changed="$(git diff main %s %se)"\n' "$NCP" "$NCT"
+    # shellcheck disable=SC2016  # 同上
+    printf 'slug="$( { git remote; } %s grep %s1 x %s sed s/a/b/)"\n' "$NCP" "$NCM" "$NCP"
+    # shellcheck disable=SC2016  # 同上
+    printf 'top="$(cat list %s %s%s -n 3 %s wc -l)"\n' "$NCP" "$NCH" "$NCD" "$NCP"
+    # shellcheck disable=SC2016  # 同上
+    printf 'again="$(git diff %s %se)"\n' "$NCP" "$NCT"
+} >"$TMP/nc7_bad.sh"
+if "$PY" tools/check_pipe_early_exit.py "$TMP/nc7_bad.sh" >"$TMP/out7" 2>&1; then
+    _rc7=0
+else
+    _rc7=$?
+fi
+if [ "$_rc7" -eq 1 ] && grep -q 'R1' "$TMP/out7" && grep -q 'R2' "$TMP/out7" \
+    && grep -q 'R3' "$TMP/out7" && grep -q ':4:' "$TMP/out7" \
+    && grep -q ':5:' "$TMP/out7" && grep -q ':6:' "$TMP/out7"; then
+    ok "NC7 三犯原形全被拦（rc=1，行号+规则齐备）"
+else
+    bad "NC7 期望 rc=1 且 R1/R2/R3 与行号 4/5/6 全报，实际 rc=${_rc7}: $(head -3 "$TMP/out7")"
+fi
+
+# NC7b 安全等价形放行：|| true（逻辑或层）、sed -n '1p'（消费全量）、
+# head 末位（末位即目的）——检查器边界是"确定性早退"，不是见管道就拦
+cat >"$TMP/nc7_ok.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+out="$(git diff main 2>/dev/null || true)"
+first="$(printf '%s\n' "$x" | sed -n '1p')"
+top="$(cat list | head)"
+EOF
+if "$PY" tools/check_pipe_early_exit.py "$TMP/nc7_ok.sh" >"$TMP/out7b" 2>&1; then
+    ok "NC7b 安全等价形（|| true / sed -n 1p / head 末位）放行"
+else
+    bad "NC7b 期望 rc=0，实际 rc=$?: $(head -3 "$TMP/out7b")"
+fi
+
+# NC7c 检查器损坏路径：rc=2 绝不算通过（与 NC6 同一语义）
+if "$PY" tools/check_pipe_early_exit.py "$TMP/definitely-missing" >"$TMP/out7c" 2>&1; then
+    _rc7c=0
+else
+    _rc7c=$?
+fi
+if [ "$_rc7c" -eq 2 ]; then
+    ok "NC7c 路径不存在返回 rc=2（检查器损坏 ≠ 通过）"
+else
+    bad "NC7c 期望 rc=2，实际 rc=${_rc7c}"
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────
 if [ "$fails" -gt 0 ]; then
     echo "checker-self-test: $fails 项失败"

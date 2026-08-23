@@ -111,6 +111,10 @@ else
     run_layer lint-factory-shellcheck sh -c 'shellcheck -S warning $1' \
         sh "$FACTORY_SH"
     run_layer lint-factory-inline-python "$PY" tools/check_inline_python.py .factory tools scripts
+    # 管道早退静态门（issue #30 三犯成类）：pipefail 下非末位早退消费者
+    # （grep -m/head）与 true 管道段。扫描面 = tracked *.sh（67c2965b 原则）
+    run_layer lint-pipe-early-exit "$PY" tools/check_pipe_early_exit.py \
+        .factory tools scripts hooks skills arch-hawkeye .github
 fi
 
 echo "gauntlet: 全部层通过"
