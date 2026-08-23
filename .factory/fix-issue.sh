@@ -255,11 +255,20 @@ if [ "${DRY}" = 0 ]; then
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ISSUE}" "${ROUND}" "${kind}" "${rc}" \
       "$(( $(date +%s) - CHAIN_T0 ))" >> "${REPO}/.factory/locks/ledger.jsonl"
   }
-  # 失败清理 + 台账 + worktree 回收：非零退出移除流转标签回零标签态（可重试），
-  # 无论成败都记账；worktree 无论成败一并回收（分支推送后树内仅剩未跟踪产物）
+  # 失败清理 + 台账 + 产出抢救 + worktree 回收：
+  # - set +e 首动作（#23）：trap 是状态机复位的唯一保障，内部任一命令
+  #   非零不得中止清理链——trap 失败模式收敛为"多打日志"而非"静默中断"
+  #   （etf-radar#57 实证：write_ledger 内 git 竞态 141 → 标签/worktree/
+  #   台账三重残留 → 队列死锁）
+  # - 失败且分支有新提交 → push 抢救产出（#14：否则随 worktree 强删 +
+  #   下轮 -B 重置回 main 孤儿化，implement 成果湮灭）。--force：下轮
+  #   从 main 重跑后非 FF，远端镜像语义 = 最新一轮产出；推送失败仅告警
+  #   不阻断后续清理（网络故障不应二次放大为状态残留）
+  # - 非零退出移除流转标签回零标签态（可重试）；无论成败都记账；
+  #   worktree 无论成败一并回收
   # D1: 本 trap 覆盖早期放锁 trap，故自带锁释放；派发链 MANUAL_LOCK=0 不动锁
   # shellcheck disable=SC2154  # rc 于本 trap 行内由 rc=$? 赋值，shellcheck 不解析 trap 字符串
-  trap 'rc=$?; write_ledger "${rc}"; git -C "${REPO}" worktree remove --force "${WT}" >/dev/null 2>&1 || true; [ $rc -ne 0 ] && { issue_label remove factory:triaging; issue_label remove factory:accepted; issue_label remove factory:in-progress; }; [ "${MANUAL_LOCK}" = 1 ] && rm -rf "${LOCKDIR:-}" 2>/dev/null' EXIT
+  trap 'rc=$?; set +e; write_ledger "${rc}"; if [ "${rc}" -ne 0 ] && [ "$(git -C "${REPO}" rev-list --count main.."${BRANCH}" 2>/dev/null || echo 0)" -gt 0 ]; then git -C "${REPO}" push --force --no-verify origin "${BRANCH}" >/dev/null 2>&1 && echo "  [salvage] 失败链产出已推送 origin/${BRANCH}" || echo "  [warn] 失败链产出推送失败，产出仅在本地分支 ${BRANCH}" >&2; fi; git -C "${REPO}" worktree remove --force "${WT}" >/dev/null 2>&1 || true; [ "${rc}" -ne 0 ] && { issue_label remove factory:triaging; issue_label remove factory:accepted; issue_label remove factory:in-progress; }; [ "${MANUAL_LOCK}" = 1 ] && rm -rf "${LOCKDIR:-}" 2>/dev/null' EXIT
 else
   echo "[dry-run] gh issue view #${ISSUE} → ${DIR}/issue.json"
   echo "[dry-run] label: +factory:triaging（裁决后 → accepted|rejected）"
