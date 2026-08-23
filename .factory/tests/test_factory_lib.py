@@ -232,7 +232,7 @@ class TestRejectReceipt:
         md = reject_receipt(REAL_REJECT)
         assert "判据a（使命一致）" in md
         assert "判据b（可判定）" in md
-        assert "判据c（不触周界）" in md
+        assert "转人工 PR" in md  # #24：判据 b 指引含 doc-only 载体/人工 PR 出路
 
     def test_receipt_pass_criteria_get_no_guidance(self):
         """全通过措辞（通过/勉强通过）不触发指引——防噪音。"""
