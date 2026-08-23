@@ -1,6 +1,6 @@
 {
   "$schema": "https://awesome-rules.invalid/factory/mutations-v0.json",
-  "description": "S0 冒烟缺陷集：验证 guard 门对治理/周界篡改的拦截灵敏度与负例放行。tests 门缺陷集在 S1 扩充。",
+  "description": "S1 缺陷集：篡改类（guard 门）+ 行为破坏类 B-1xx（tests 门 run_tests.sh --no-lock）。行为类 kill 证据 = 注入后对应 pytest 套件/badcase 通道变红；负例（expect_block=false）验证门不全拒。证据留档 EVIDENCE-2026-08-24.md。",
   "defects": [
     {
       "id": "G-01",
@@ -63,6 +63,60 @@
       "find": "# Changelog",
       "replace": "# Changelog（工厂参与维护）",
       "gate": "guard",
+      "expect_block": false
+    },
+    {
+      "id": "B-101",
+      "description": "行为破坏：api_check 下划线检查短路——kebab-case 命名规则漏检（test_underscore_rejected 红）",
+      "target": "skills/api-guard/scripts/api_check.py",
+      "find": "        if \"_\" in seg:",
+      "replace": "        if False and \"_\" in seg:",
+      "gate": "tests",
+      "expect_block": true
+    },
+    {
+      "id": "B-102",
+      "description": "行为破坏：ddl_check 禁用子句放水——ENGINE= 子句漏检（test_forbidden_clauses_detected 红）",
+      "target": "skills/ddl-guard/scripts/ddl_check.py",
+      "find": "        if re.search(r\"ENGINE\\s*=\", upper):",
+      "replace": "        if False and re.search(r\"ENGINE\\s*=\", upper):",
+      "gate": "tests",
+      "expect_block": true
+    },
+    {
+      "id": "B-103",
+      "description": "行为破坏：governance 违规计数冻结——同点重复违规 occurrences 不再累计（test_baseline_preserves_duplicate_occurrences 红）",
+      "target": "arch-hawkeye/scripts/governance.py",
+      "find": "        e[\"occurrences\"] += 1",
+      "replace": "        e[\"occurrences\"] = 1",
+      "gate": "tests",
+      "expect_block": true
+    },
+    {
+      "id": "B-104",
+      "description": "行为破坏：评论出口防注入中和失效——[factory:rejected] 标记裸输出（TestNeutralizeMarker 红，PR #20 回归锚点）",
+      "target": ".factory/factory_lib.py",
+      "find": "    while \"[factory:rejected]\" in text:",
+      "replace": "    while False:",
+      "gate": "tests",
+      "expect_block": true
+    },
+    {
+      "id": "B-105",
+      "description": "行为破坏：badcase 判定恒不匹配——期望规则全部未检出（badcase 双通道红）",
+      "target": "scripts/badcase_runner.py",
+      "find": "        if expected_lower in actual_lower or actual_lower in expected_lower:\n            return True",
+      "replace": "        return False",
+      "gate": "tests",
+      "expect_block": true
+    },
+    {
+      "id": "B-106",
+      "description": "良性变更负例：api_check docstring 措辞调整（行为等价，88 用例仍绿），tests 门必须放行（防门全拒）",
+      "target": "skills/api-guard/scripts/api_check.py",
+      "find": "    \"\"\"路径全小写 kebab-case，禁止 camelCase、下划线及畸形短横线（段首/段尾/连续）。\"\"\"",
+      "replace": "    \"\"\"路径全小写 kebab-case，禁止 camelCase、下划线（负例：仅措辞变更）。\"\"\"",
+      "gate": "tests",
       "expect_block": false
     }
   ]
