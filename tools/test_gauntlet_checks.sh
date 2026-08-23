@@ -18,6 +18,8 @@ cat >"$TMP/dead.md" <<'EOF'
 # 负控制夹具
 [死链](./no-such-target.md)
 EOF
+# 扫描面 = tracked 面：夹具必须是真 git 仓（非 git 目录 fail-closed 拒判）
+git init -q "$TMP" && git -C "$TMP" add dead.md
 if "$PY" scripts/md_link_check.py "$TMP" >"$TMP/out1" 2>&1; then
     rc1=0
 else
@@ -35,13 +37,14 @@ fi
 # 实证：本机跑过链的人类推送被假阳性拦死）。死链仍须拦（NC1 同跑）。
 mkdir -p "$TMP/.factory/artifacts"
 printf '# t\n[产物](../blob/main/MISSION.md)\n' >"$TMP/.factory/artifacts/r.md"
+printf '.factory/artifacts/\n' >"$TMP/.gitignore" && git -C "$TMP" add .gitignore
 if "$PY" scripts/md_link_check.py "$TMP" >"$TMP/out1b" 2>&1; then :; fi
 if grep -q 'artifacts/r.md' "$TMP/out1b"; then
     bad "NC1b 期望 .factory/artifacts 被排除，实际被报告"
 elif ! grep -q 'no-such-target' "$TMP/out1b"; then
     bad "NC1b 排除扩面吞掉了真实死链检测"
 else
-    ok "NC1b 产物死链不误报，真实死链仍拦"
+    ok "NC1b 产物死链不误报，真实死链仍拦（tracked 面语义）"
 fi
 
 # ── NC2 秘密负控制：含假凭据字面量的文件必须被 must_not_match 拦下 ────

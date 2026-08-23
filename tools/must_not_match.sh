@@ -8,26 +8,69 @@
 # 模式本身，绝不属于排除清单。标识符内的括号（[e]）防止模式字面量自匹配。
 SECRET_PATTERN='((api[_-]?key|s[e]cret|passw[o]rd|pass[w]d|auth[_-]?t[o]ken|access[_-]?key)["'"'"']?[[:space:]]*[=:][[:space:]]*["'"'"'][^"'"'"']{8,}["'"'"'])|BEGIN[[:space:]]+[A-Z ]*PRIVATE'
 
-# must_not_match <pattern> <path>...：
-#   命中即失败（rc 1，grep 输出即命中证据）；
-#   无匹配通过（grep rc 1）；
-#   grep 自身损坏（rc >= 2：坏模式、不可读输入）是检查的硬失败（rc 2），绝不是通过。
+# 扫描面两层原则（2026-08-23 结构性修复）：
+# 1. 仓库内 = tracked 面：git ls-files 是唯一清单——gitignored 运行产物
+#   （.factory/artifacts、.crush …）与链 worktree 检出副本
+#   （.factory/worktrees 含 LLM implement 产物）天然出局。此前手工
+#   --exclude-dir 清单与 .gitignore 必然漂移（md_link_check 双实证同根因）。
+# 2. tracked vendored（doc-gen Astro 模板）用显式排除——dist/node_modules/
+#   template 里的 password:/token: 是字段名不是泄漏凭据，本仓不可能在那里
+#   引入凭据。排除是范围对准，不是刷分（与覆盖率排除生成代码同理）。
+# 仓库外（自测夹具等非 git 路径）：退化为对给定文件直查。
+# grep 的 rc 必须显式捕获：无匹配的 rc=1 是好路径，裸 grep 会触发
+# 调用方 set -e 直接杀死脚本（NC3 回归）。
+_EXCLUDE_TRACKED_VENDORED='^skills/doc-gen/scripts/template/'
+_SCAN_EXTS='\.py$|\.sh$|\.yml$|\.yaml$|\.js$'
+
+_all_args_inside_repo() {
+    # _all_args_inside_repo <repo-root> <path>...：每个 arg 都存在且位于 repo 内
+    _root=$1
+    shift
+    for _p in "$@"; do
+        [ -e "$_p" ] || return 1
+        case "$(cd "$_p" 2>/dev/null && pwd)" in
+            "$_root"|"$_root"/*) ;;
+            *) return 1 ;;
+        esac
+    done
+    return 0
+}
+
 must_not_match() {
     _pat=$1
     shift
-    # BSD grep 要求选项在 -- 终结符之前，否则 --include 被当文件操作数。
-    # --exclude-dir 排除生成/ vendored 产物：doc-gen template 整棵是 Astro
-    # 构建输出树（dist/public/scalar.js 等），其中的 password:/token: 是
-    # 字段名不是泄漏凭据，本仓不可能在那里引入凭据——排除是范围对准，
-    # 不是刷分（与覆盖率排除生成代码同理）。
-    # grep 的 rc 必须显式捕获：无匹配的 rc=1 是好路径，裸 grep 会触发
-    # 调用方 set -e 直接杀死脚本（NC3 回归）。
     _rc=0
-    grep -rEn \
-        --include='*.py' --include='*.sh' --include='*.yml' --include='*.yaml' --include='*.js' \
-        --exclude-dir='dist' --exclude-dir='node_modules' --exclude-dir='vendor' \
-        --exclude-dir='template' \
-        -- "$_pat" "$@" || _rc=$?
+    if _root=$(git rev-parse --show-toplevel 2>/dev/null) \
+        && _all_args_inside_repo "$_root" "$@"; then
+        # tracked 面：ls-files（受 _root 锚定，hook 注入的 GIT_* 不影响发现）
+        _files=$(git -C "$_root" ls-files -- "$@" \
+            | LC_ALL=C grep -Ev "$_EXCLUDE_TRACKED_VENDORED" \
+            | LC_ALL=C grep -E "$_SCAN_EXTS" || true)
+        if [ -n "$_files" ]; then
+            # 判定按输出而非 rc：多批 xargs 下 grep rc1（无命中）被聚合为
+            # 123，rc 通道不可分。命中 = stdout 非空；损坏 = 无命中且
+            # stderr 非空（grep 对不可读文件报 rc2 并写 stderr）。
+            _errf=$(mktemp) || { echo "must-not: mktemp 失败" >&2; return 2; }
+            _hits=$(printf '%s\n' "$_files" \
+                | (cd "$_root" && xargs grep -InE -- "$_pat" 2>"$_errf")) || :
+            if [ -n "$_hits" ]; then
+                echo "must-not 命中: ${_pat}" >&2
+                printf '%s\n' "$_hits" | sed -n '1,20p' >&2
+                rm -f "$_errf"
+                return 1
+            fi
+            if [ -s "$_errf" ]; then
+                echo "must-not 检查自身损坏（grep stderr）:" >&2
+                sed -n '1,5p' "$_errf" >&2
+                rm -f "$_errf"
+                return 2
+            fi
+            rm -f "$_errf"
+        fi
+        return 0
+    fi
+    # 仓库外路径（自测夹具）：rc 通道可分，沿用 rc 映射
+    grep -InE -- "$_pat" "$@" || _rc=$?
     if [ "$_rc" -eq 0 ]; then
         echo "must-not 命中: ${_pat}" >&2
         return 1

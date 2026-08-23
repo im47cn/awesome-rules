@@ -28,6 +28,7 @@ rc:  0 = 全部通过（或无内联 python）
 """
 import pathlib
 import re
+import subprocess
 import sys
 
 # 形态 1：python3 … -c '…'（单引号块，DOTALL 跨行；shell 单引号内无转义）
@@ -102,10 +103,20 @@ def main(argv):
     targets = []
     for arg in argv[1:]:
         p = pathlib.Path(arg)
-        if p.is_dir():
-            targets.extend(sorted(p.glob("*.sh")))
-        elif p.is_file():
+        if p.is_file():
             targets.append(p)
+        elif p.is_dir():
+            # tracked 面（任意深度）：此前 p.glob("*.sh") 只扫顶层——
+            # .factory/factory-lib.sh（链共享收口库）从未进过本门。
+            # gitignored 产物（链 worktree 检出副本）天然出局。
+            proc = subprocess.run(
+                ["git", "-C", str(p), "ls-files", "-z", "--", "*.sh"],
+                capture_output=True)
+            if proc.returncode != 0:
+                print(f"检查器自身失败: {p} 非 git 仓库（扫描面 = tracked 面）",
+                      file=sys.stderr)
+                return 2
+            targets.extend(p / f for f in proc.stdout.decode("utf-8").split("\0") if f)
         else:
             print(f"检查器自身失败: 路径不存在 {arg}", file=sys.stderr)
             return 2
