@@ -69,14 +69,26 @@ def _file_hash(path: Path) -> str | None:
 
 
 def discover() -> list[str]:
-    """发现全部应锁定的安装入口（目录扫描 + 显式清单）。"""
+    """发现全部应锁定的安装入口（tracked 面 + 显式清单）。
+
+    tracked 面（2026-08-23 结构性修复）：目录 rglob 与 gitignore 必然漂移
+    （同 md_link_check 实证根因）——锁定对象是"进入版本的安装入口"，
+    未 add 的本地试验文件不构成回归面。非 git 环境（hook 降级场景）
+    退回 rglob（_git_blob_sha 已有对应降级）。
+    """
     found = set(LOCKED_FILES)
-    for d in LOCKED_DIRS:
-        dp = REPO_ROOT / d
-        if not dp.is_dir():
-            continue
-        for p in sorted(dp.rglob("*.json")):
-            found.add(str(p.relative_to(REPO_ROOT)))
+    proc = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "ls-files", "-z", "--",
+         *[f"{d}/*.json" for d in LOCKED_DIRS]],
+        capture_output=True)
+    if proc.returncode == 0:
+        found.update(f for f in proc.stdout.decode("utf-8").split("\0") if f)
+    else:
+        for d in LOCKED_DIRS:
+            dp = REPO_ROOT / d
+            if dp.is_dir():
+                found.update(str(p.relative_to(REPO_ROOT))
+                             for p in dp.rglob("*.json"))
     return sorted(found)
 
 

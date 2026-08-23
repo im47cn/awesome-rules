@@ -1,22 +1,29 @@
-"""md_link_check 单测：死链/锚点/围栏豁免/外部链接跳过/产物目录排除。"""
+"""md_link_check 单测：死链/锚点/围栏豁免/外部链接跳过/tracked 面语义。"""
+import subprocess
 from pathlib import Path
 
 import md_link_check as M
 
 
+
 def make_repo(tmp_path: Path) -> Path:
+    """tracked 面夹具：git init + add。untracked 的 node_modules 展示
+    gitignore 真相源语义（gitignored 产物天然出局，无需逐目录登记）。"""
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "b.md").write_text(
         "# 标题乙\n\n## Sub Heading Here\n", encoding="utf-8")
     (tmp_path / "node_modules" / "pkg").mkdir(parents=True)
     (tmp_path / "node_modules" / "pkg" / "dead.md").write_text(
         "[死链](absent.md)\n", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True)
     return tmp_path
-
 
 def write_a(tmp_path: Path, body: str) -> Path:
     a = tmp_path / "docs" / "a.md"
     a.write_text(body, encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", str(a)], check=True)
     return a
 
 

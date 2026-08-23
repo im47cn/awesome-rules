@@ -185,6 +185,21 @@ for pr in json.load(sys.stdin): print(pr["number"])')"
     wait; echo "本轮链全部结束，收尾 sync"
     bash "$FACTORY/factory-state.sh" sync --all
   fi
+
+  # ── rejected 存量对账（reject→人工闭环缺口，2026-08-23 审计） ──────
+  # 链的 reject 语义是"不修"；人工修复后 issue 常忘关（4/4 实证）。此处
+  # 只报告不动作（铁律 4）：有 reject 后人工评论的 → 提示复核关闭；
+  # 零评论的 → 静默滞留计数。关闭决策永远归人类。
+  REJECTED_JSON="$(gh issue list --repo "$REPO_SLUG" --state open \
+    --label factory:rejected --json number,title,comments --limit 100 2>/dev/null || echo '[]')"
+  python3 "${FACTORY}/factory_lib.py" rejected-reconcile <<<"${REJECTED_JSON}" \
+    | while IFS=$'\t' read -r n c t; do
+        if [ "${c}" -gt 0 ]; then
+          echo "  [rejected] #${n} 裁决后有 ${c} 条人工评论——已处置？复核关闭（${t}）"
+        else
+          echo "  [rejected] #${n} 静默滞留（无后续人工评论，${t}）"
+        fi
+      done
 }
 
 if [ "$WATCH" = 1 ]; then
