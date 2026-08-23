@@ -111,8 +111,15 @@ def run_gate(gate: str, target: str) -> int | None:
         cmd = ["bash", str(TESTS), "--no-lock"]
         timeout = TESTS_TIMEOUT
     start = time.monotonic()
+    # 安全审计落档（PR #33 Sourcery/opengrep dangerous-subprocess-use-audit）：
+    # argv 列表形态、无 shell 解释（shell=False 显式）——不存在注入通道。
+    # 可执行位与固定参数为闭集（sys.executable / "bash" + __file__ 推导的
+    # 模块常量）；唯一外部数据 target 源自 defects.json（治理周界 .factory/
+    # 内，仅人类 PR 可改），且经 REPO_ROOT / d.target 与 is_file() 校验后
+    # 作为单个 argv 数据元素传入，不被任何 shell 解析。
     proc = subprocess.Popen(
-        cmd, cwd=str(REPO_ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        cmd, cwd=str(REPO_ROOT), shell=False,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, start_new_session=True)  # 新进程组：pgid == proc.pid
     try:
         out, err = proc.communicate(timeout=timeout)
