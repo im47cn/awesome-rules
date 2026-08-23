@@ -83,3 +83,24 @@ class TestLoadDefects:
         p = self._write(tmp_path, [asdict(_defect(gate="guard")),
                                    asdict(_defect(id="X-2", gate="tests"))])
         assert len(mut.load_defects(p)) == 2
+
+def test_timeout_kills_process_group(tmp_path, monkeypatch):
+    """超时杀整个进程组（PR #33 审查）：只杀 bash 直子会留孤儿继续读
+    注入中的 target，还原窗口被污染。夹具门自报 pgid（start_new_session
+    下 == 自身 pid）、派生 sleep 孙进程后挂起；断言超时后整组无存活。"""
+    import os
+    import time as _time
+    pgid_file = tmp_path / "pgid"
+    gate = tmp_path / "slow_gate.sh"
+    gate.write_text(
+        f"#!/bin/bash\necho $$ > {pgid_file}\nsleep 60 &\nwait\n",
+        encoding="utf-8")
+    gate.chmod(0o755)
+    monkeypatch.setattr(mut, "TESTS", gate)
+    monkeypatch.setattr(mut, "TESTS_TIMEOUT", 1)
+    t0 = _time.monotonic()
+    assert mut.run_gate("tests", "whatever") is None
+    assert _time.monotonic() - t0 < 30          # 未被孤儿管道挂死
+    pgid = int(pgid_file.read_text().strip())
+    with pytest.raises(ProcessLookupError):
+        os.killpg(pgid, 0)                       # 组内无存活成员（含 sleep 孙进程）

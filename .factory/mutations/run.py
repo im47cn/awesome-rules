@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import signal
 import subprocess
 import sys
 import time
@@ -96,7 +98,12 @@ def tracked_and_dirty(rel: str) -> bool:
 
 
 def run_gate(gate: str, target: str) -> int | None:
-    """跑门返回退出码；超时返回 None（无效运行，见 judge）。"""
+    """跑门返回退出码；超时返回 None（无效运行，见 judge）。
+
+    超时杀**整个进程组**（start_new_session + killpg）：run_tests.sh 会
+    派生 pytest 孙进程，只杀 bash 直子会留下孤儿继续读注入中的 target
+    ——finally 还原字节与孤儿运行并发，污染后续缺陷轮（PR #33 审查）。
+    """
     if gate == "guard":
         cmd = [sys.executable, str(GUARD), "--files", target]
         timeout = GUARD_TIMEOUT
@@ -104,23 +111,31 @@ def run_gate(gate: str, target: str) -> int | None:
         cmd = ["bash", str(TESTS), "--no-lock"]
         timeout = TESTS_TIMEOUT
     start = time.monotonic()
+    proc = subprocess.Popen(
+        cmd, cwd=str(REPO_ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, start_new_session=True)  # 新进程组：pgid == proc.pid
     try:
-        proc = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True,
-                              text=True, timeout=timeout)
+        out, err = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        print(f"    门超时（>{timeout}s）：无效运行")
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass  # 组已自行退出（竞态窗口）
+        try:
+            proc.communicate(timeout=10)  # 收尸并排干管道
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        print(f"    门超时（>{timeout}s）：已杀进程组，无效运行")
         return None
     elapsed = time.monotonic() - start
-    tail = (proc.stdout + proc.stderr).strip().splitlines()
+    tail = (out + err).strip().splitlines()
     if tail:
         print(f"    gate 输出末行: {tail[-1][:120]}")
-    print(f"    耗时 {elapsed:.1f}s（rc={proc.returncode}）")
     return proc.returncode
 
 
 def judge(defect: Defect, rc: int | None) -> tuple[str, str]:
     """门退出码 → (判定, 明细)。
-
     退出码语义（testing-standards）：rc=0 放行、rc=1 判定失败（击杀证据）；
     其他退出码 / 超时（None）一律**无效运行**——不计击杀也不计放行，
     直接 FAIL。guard 门例外：rc=2 是其 fail-closed 设计（门崩溃=拦截）。
