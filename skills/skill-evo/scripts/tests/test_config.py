@@ -1,5 +1,6 @@
 """evo_config 单测：默认值 / 极简 toml 解析 / scope 判定。"""
 import os
+from pathlib import Path
 
 import evo_config as C
 
@@ -38,10 +39,16 @@ def test_in_scope(tmp_path):
     assert not C.in_scope(None, cfg)
 
 
-def test_repo_root_is_awesome_rules():
+def test_repo_root_structural_anchor():
+    # 结构不变量：repo_root() 是 evo_config.py 的祖先且含 skill-evo 资产。
+    # 目录名不是不变量——worktree/CI checkout 目录名任意；旧断言
+    # root.name == "awesome-rules" 在任何 worktree 形态下都是假红源
+    # （feedback-upstream 曾被迫给上游 worktree 命名 awesome-rules 规避）。
     root = C.repo_root()
-    assert root.name == "awesome-rules"
+    assert Path(C.__file__).resolve().is_relative_to(root)
     assert (root / "skills" / "skill-evo" / "SKILL.md").is_file()
+    # 负例：非根祖先（skills/ 目录）不含根 marker，marker 判据有区分度
+    assert not (Path(C.__file__).resolve().parents[2] / "skills" / "skill-evo" / "SKILL.md").is_file()
 
 
 def test_base_paths(tmp_path):
