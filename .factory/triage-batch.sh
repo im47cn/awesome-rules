@@ -19,7 +19,8 @@ REPO_SLUG="${GH_REPO:-$(
   # 对齐 dispatch.sh：github remote 名优先，origin push 兜底；443 端口形态兼容
   { git -C "$REPO" remote get-url --all --push github 2>/dev/null
     git -C "$REPO" remote get-url --all --push origin 2>/dev/null
-  } | grep -m1 'github\.com' | sed -E 's#^.*github\.com(:[0-9]+)?[/:]##; s#\.git$##'
+  # grep 去 -m1（消费全量防 SIGPIPE，issue #30）；sed 1!d 语义同旧形态
+  } | grep 'github\.com' | sed -E '1!d; s#^.*github\.com(:[0-9]+)?[/:]##; s#\.git$##'
 )}"
 [ -n "$REPO_SLUG" ] || { echo "无法确定 GitHub 仓库 slug" >&2; exit 2; }
 MAX_TRIAGE="${MAX_TRIAGE:-5}"
