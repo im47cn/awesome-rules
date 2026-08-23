@@ -153,8 +153,8 @@ NCP='|'; NCT='tru'; NCM='-m'; NCH='hea'; NCD='d'
     printf 'slug="$( { git remote; } %s grep %s1 x %s sed s/a/b/)"\n' "$NCP" "$NCM" "$NCP"
     # shellcheck disable=SC2016  # 同上
     printf 'top="$(cat list %s %s%s -n 3 %s wc -l)"\n' "$NCP" "$NCH" "$NCD" "$NCP"
-    # shellcheck disable=SC2016  # 同上
-    printf 'again="$(git diff %s %se)"\n' "$NCP" "$NCT"
+    # shellcheck disable=SC2016  # `||` 后管道边界：true 仍是其后管道左端
+    printf 'x || %se | wc -l\n' "$NCT"
 } >"$TMP/nc7_bad.sh"
 if "$PY" tools/check_pipe_early_exit.py "$TMP/nc7_bad.sh" >"$TMP/out7" 2>&1; then
     _rc7=0
@@ -168,6 +168,11 @@ if [ "$_rc7" -eq 1 ] && grep -q 'R1' "$TMP/out7" && grep -q 'R2' "$TMP/out7" \
 else
     bad "NC7 期望 rc=1 且 R1/R2/R3 与行号 4/5/6 全报，实际 rc=${_rc7}: $(head -3 "$TMP/out7")"
 fi
+if [ "$_rc7" -eq 1 ] && grep -q ':4:' "$TMP/out7" && grep -q -c 'R3' "$TMP/out7" >/dev/null; then
+    ok "NC7 || 后管道边界 R3 报行 4（x || true | wc -l 形）"
+else
+    bad "NC7 期望 || 边界 R3 报行 4，实际 rc=${_rc7}: $(grep ':4:' "$TMP/out7" || echo 无)"
+fi
 
 # NC7b 安全等价形放行：|| true（逻辑或层）、sed -n '1p'（消费全量）、
 # head 末位（末位即目的）——检查器边界是"确定性早退"，不是见管道就拦
@@ -178,8 +183,13 @@ out="$(git diff main 2>/dev/null || true)"
 first="$(printf '%s\n' "$x" | sed -n '1p')"
 top="$(cat list | head)"
 EOF
+# 转义管道（\| 字面量）与行内注释（词首 #）不是命令——放行
+# shellcheck disable=SC2016  # 夹具字面量：转义管道在生成期不得被解释
+printf 'y="$(printf x \\| z)"\n' >>"$TMP/nc7_ok.sh"
+# shellcheck disable=SC2016  # 同上（注释行夹具）
+printf 'echo ok # %s %se is fine here\n' "$NCP" "$NCT" >>"$TMP/nc7_ok.sh"
 if "$PY" tools/check_pipe_early_exit.py "$TMP/nc7_ok.sh" >"$TMP/out7b" 2>&1; then
-    ok "NC7b 安全等价形（|| true / sed -n 1p / head 末位）放行"
+    ok "NC7b 安全等价形（|| true / sed -n 1p / head 末位 / 转义 / 注释）放行"
 else
     bad "NC7b 期望 rc=0，实际 rc=$?: $(head -3 "$TMP/out7b")"
 fi

@@ -71,7 +71,66 @@ def test_rc_semantics(tmp_path):
                           capture_output=True, text=True)
     assert r_ok.returncode == 0
 
-    r_missing = subprocess.run(
-        [sys.executable, checker, str(tmp_path / "no-such-file")],
-        capture_output=True, text=True)
-    assert r_missing.returncode == 2            # 检查器损坏 ≠ 通过
+
+
+def test_review_regressions_or_boundary(tmp_path):
+    """`||` 后管道边界保留（Sourcery #32 评论1）：`false || true | cat`
+    = false || (true | cat)，true 是真管道段 → R3；反向 `a | b || true`
+    与裸 `x || true` 的 true 无管道邻接 → 放行。"""
+    assert any(r == "R3" for r, _ in M.check_line("false || true | cat"))
+    assert M.check_line("a | b || true") == []
+    assert M.check_line("git diff || true") == []
+    # `cat || grep -m1 x | sed`：grep -m1 是其后管道左端 → R1
+    assert any(r == "R1" for r, _ in M.check_line("cat || grep -m1 x | sed s/a/b/"))
+    # `grep -m1 x || cat y`：grep 未接管道 → 放行（旧版按段首误判）
+    assert M.check_line("grep -m1 x || cat y") == []
+
+
+def test_review_regressions_escape_and_comment(tmp_path):
+    """转义管道与行内注释（评论2）：`\\|` 是字面量、词首 # 起注释；
+    词中 #（`true#c`）仍是字面量，管道照判。"""
+    assert M.check_line("printf x \\| true") == []
+    assert M.check_line("echo ok # | true") == []
+    assert any(r == "R3" for r, _ in M.check_line("cat f | true#c"))
+
+
+def test_review_regressions_heredoc_suffix(tmp_path):
+    """heredoc 起始带后缀（评论3）：`cat <<'EOF' | sed` 的体是数据，
+    体中违规形态不作数；起始行自身的违规照判；同行双 heredoc 按序消费。"""
+    f = tmp_path / "hd_ok.sh"
+    f.write_text("#!/bin/bash\ncat <<'EOF' | sed s/a/b/\nthis | true\n"
+                 "grep -m1 x | head\nEOF\necho done | wc -l\n", encoding="utf-8")
+    assert M.check_file(f) == []
+
+    f = tmp_path / "hd_bad.sh"
+    f.write_text("cat <<EOF | true\nbody\nEOF\n", encoding="utf-8")
+    v = M.check_file(f)
+    assert len(v) == 1 and v[0][0] == 1 and v[0][1].startswith("R3"), v
+
+    f = tmp_path / "hd_two.sh"
+    f.write_text("cat <<A <<B | wc -l\nx | true\nA\ny | true\nB\necho ok\n",
+                 encoding="utf-8")
+    assert M.check_file(f) == []
+
+
+def test_review_regression_non_utf8_dir_scan_rc2(tmp_path):
+    """非 UTF-8 文件名（评论4）：git ls-files 输出解码失败 → rc=2
+    （检查器损坏 ≠ 通过），不得裸 traceback。"""
+    import os
+    repo = tmp_path / "r"
+    repo.mkdir()
+    subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+    # macOS APFS 拒绝创建非 UTF-8 文件名，走 index 直插（hash-object +
+    sha = subprocess.run(["git", "-C", str(repo), "hash-object", "-w", "--stdin"],
+                         input=b"#!/bin/sh\n", capture_output=True,
+                         check=True).stdout.decode().strip()
+    bad_name = os.fsdecode(b"bad\xff.sh")
+    subprocess.run(["git", "-C", str(repo), "update-index", "--add", "--cacheinfo",
+                    f"100644,{sha},{bad_name}"],
+                   check=True, env={**os.environ, "GIT_CONFIG_NOSYSTEM": "1"})
+    checker = str(_TOOLS / "check_pipe_early_exit.py")
+    r = subprocess.run([sys.executable, checker, str(repo)],
+                       capture_output=True, text=True)
+    assert r.returncode == 2
+    assert "检查器自身失败" in r.stderr
+    assert "Traceback" not in r.stderr
