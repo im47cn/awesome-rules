@@ -71,7 +71,7 @@ acquire_lock() {
   fi
   local pid; pid="$(cat "$LOCKDIR/pid" 2>/dev/null || true)"
   if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
-    echo "锁持有者 pid=$pid 已死，接管陈锁" >&2
+    echo "锁持有者 pid=${pid} 已死，接管陈锁" >&2
     rm -rf "$LOCKDIR"
     mkdir "$LOCKDIR" && echo $$ > "$LOCKDIR/pid" \
       && trap 'rm -rf "$LOCKDIR"' EXIT && return 0
