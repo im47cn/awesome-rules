@@ -27,12 +27,22 @@ command -v gh >/dev/null || { echo "需要 gh CLI" >&2; exit 2; }
 # 链副作用共享库（契约：REPO/REPO_SLUG 已定义；ISSUE 为循环变量）
 source "${FACTORY}/factory-lib.sh"
 
-# 零 factory 标签的 open issue（json 一次取齐, python 过滤排序）
+# 零 factory 标签的 open issue（json 一次取齐, python 过滤排序）。
+# gh 瞬断（2026-08-23 22:27 实证：connection reset → 空输出）时给出可读
+# 降级信息退出 rc=1，而非 json.load 裸 traceback——批次失败由上游容忍
+# （cron 下一 tick 重试），但错误形态必须可诊断。
 QUEUE="$(gh issue list --repo "$REPO_SLUG" --state open --limit 100 \
   --json number,labels,title,body,comments \
   | python3 -c '
 import json, sys
-for i in json.load(sys.stdin):
+try:
+    issues = json.loads(sys.stdin.read())
+except ValueError:
+    issues = None
+if not isinstance(issues, list):
+    sys.stderr.write("triage 批次: gh issue list 输出非 JSON（gh 失败/网络瞬断），本轮跳过\n")
+    sys.exit(1)
+for i in issues:
     if not any(l["name"].startswith("factory:") for l in i["labels"]):
         print(i["number"])')"
 
@@ -41,7 +51,9 @@ for ISSUE in $QUEUE; do
   COUNT=$((COUNT+1)); [ "$COUNT" -gt "$MAX_TRIAGE" ] && { echo "达每轮上限 $MAX_TRIAGE, 余量下轮"; break; }
   DIR="${FACTORY}/artifacts/issue-${ISSUE}"
   mkdir -p "$DIR"
-  gh issue view "${ISSUE}" --repo "$REPO_SLUG" --json number,title,body,comments > "${DIR}/issue.json"
+  if ! gh issue view "${ISSUE}" --repo "$REPO_SLUG" --json number,title,body,comments > "${DIR}/issue.json"; then
+    echo "    issue #${ISSUE} 取回失败（gh 失败/网络瞬断），跳过" >&2; continue
+  fi
 
   mission="$(cat "${REPO}/MISSION.md")"
   title="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["title"])' "${DIR}/issue.json")"
