@@ -3,13 +3,9 @@
 候选契约（feedable = trailer ∨ bootstrap）、账本排除、cherry-pick 顺序、
 漂移分类的上游侧判定、账本读写往返。CLI 子进程路径由真跑（dry-run +
 首次反哺）覆盖，此处只测纯函数。
-运行：python3 -m pytest .factory/test_feedback.py -o addopts= -q
+运行：python3 -m pytest .factory/tests -q（conftest 注入 .factory 到 sys.path）
 """
-import pathlib
-import sys
-
-sys.path.insert(0, str(pathlib.Path(__file__).parent))
-import feedback  # noqa: E402
+import feedback
 
 RS = "\x1e"
 
