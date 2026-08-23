@@ -12,6 +12,7 @@ CLI:
   factory_lib.py parse   <logfile> <outjson> <allowed-csv>   # 解析 agent 输出 JSON
   factory_lib.py breaker <floor.json> <ledger.jsonl>         # 熔断检查（超限 exit 3）
   factory_lib.py suites  <file...>                           # 证据段套件清单
+  factory_lib.py sanitize <file...>                           # 标记中和（原地写回，幂等；评论出口必经）
 """
 
 from __future__ import annotations
