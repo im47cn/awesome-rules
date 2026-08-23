@@ -7,7 +7,7 @@ set -u
 MSG_FILE="${1:-}"
 
 # git 特殊提交放行（merge/revert/squash 自动生成，不适用规范）
-head -1 "$MSG_FILE" | grep -qE '^(Merge |Revert |Auto-Merged )' && exit 0
+sed -n '1p' "$MSG_FILE" | grep -qE '^(Merge |Revert |Auto-Merged )' && exit 0
 grep -vE '^\s*(#|$)' "$MSG_FILE" | grep -q . || exit 0
 
 # 无 commitlint → 有 npm 则自动安装；装完优先重新 command -v（Windows/非标
