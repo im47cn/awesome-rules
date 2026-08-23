@@ -218,8 +218,9 @@ if [ "${DRY}" = 0 ]; then
   gh issue view "${ISSUE}" --json number,title,body,comments > "${DIR}/issue.json" 2>/dev/null \
     || { echo "issue #${ISSUE} 不存在或不可读" >&2; exit 2; }
   # fail-closed：rc=0 但输出为空/非 JSON 的 gh（网络截断、代理 stub 等）不可信——
-  # 空数据流入 triage 会产出"空 issue 拒绝"+毒回执（run_triage 处于 `|| exit 1`
-  # 条件上下文，set -e 在函数体内豁免，json_field 崩溃被吞成空串，2026-08-23 实证）
+  # 空数据流入 triage 会产出"空 issue 拒绝"+毒回执（2026-08-23 实证；彼时
+  # run_triage 尚处 `|| exit 1` 条件上下文、set -e 体内豁免，json_field 崩溃
+  # 被吞成空串。豁免面已由裸调用纪律根治，本守卫保留为纵深防御+精确报错）
   python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get("title") else 3)' \
     "${DIR}/issue.json" 2>/dev/null || { echo "issue.json 无效（空/非 JSON/无 title），链终止" >&2; exit 2; }
   ensure_labels
@@ -266,7 +267,12 @@ fi
 
 echo "=== fix-issue #${ISSUE} → ${DIR} ==="
 # --- 1. triage ---
-run_triage || exit 1
+# 调用纪律（set-e 豁免面修复，2026-08-23）：节点函数必须**裸调用**。
+# `run_X || exit 1` 把函数置于条件上下文，set -e 在其体内整体失效——
+# 中间赋值失败（cat/json_field 崩溃）被吞成空串继续跑，triage 拿垃圾输入
+# 产出毒裁决（#59 空 issue.json 实证）。裸调用下 set -e 管函数体内每一步；
+# 函数内显式 return 1 语义不变（顶层简单命令失败即触发 errexit + EXIT trap）。
+run_triage
 if [ "${DRY}" = 0 ]; then
   VERDICT="$(json_field "${DIR}/triage.json" 'd["verdict"]')"
   if [ "${VERDICT}" = accept ]; then
@@ -294,12 +300,12 @@ if [ "${DRY}" = 0 ]; then
   git -C "${REPO}" worktree prune
   git -C "${REPO}" worktree add -B "${BRANCH}" "${WT}" main >/dev/null
 fi
-run_node prime    || exit 1
-run_node plan     || exit 1
-run_node implement|| exit 1
+run_node prime
+run_node plan
+run_node implement
 
 # --- 5. review ---
-run_node review   || exit 1
+run_node review
 
 # --- 6. 确定性门：周界 + 测试（tests-output.txt 由脚本生成，不依赖节点自觉） ---
 if [ "${DRY}" = 0 ]; then
@@ -322,7 +328,7 @@ else
 fi
 
 # --- 7. holdout（独立验证；输入白名单见 prompt） ---
-run_holdout || exit 1
+run_holdout
 if [ "${DRY}" = 0 ]; then
   # 裁决按 round 存档（失败证据永不覆盖丢失；下轮 prime 回流的输入源）
   python3 - "${DIR}" "${ROUND}" <<'PYA' >> "${DIR}/chain-history"
