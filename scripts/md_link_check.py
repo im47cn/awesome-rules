@@ -31,6 +31,10 @@ from urllib.parse import unquote
 
 # 产物/依赖目录：仓库自身文档之外的海量第三方 md，结构性排除
 _EXCLUDE_PARTS = {"node_modules", ".git", "dist", "build", ".codebase-memory"}
+# 链运行时产物（.gitignore 已排除，非仓库内容）：reject-receipt 等审计
+# 副本的 ../blob/main/ 链接只在发布目的地（issue 评论）可解析，磁盘上
+# 必为死链——不属文档链接门范围（本机跑过链的人类推送不得被假阳性拦截）
+_EXCLUDE_PART_PAIRS = {(".factory", "artifacts")}
 # 形如 http:// https:// mailto: 的目标不做网络校验
 _EXTERNAL_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", re.I)
 _FENCE_RE = re.compile(r"^```.*?^```", re.M | re.S)
@@ -62,7 +66,11 @@ def _anchors_of(text: str) -> set:
 
 def iter_md_files(root: Path):
     for p in sorted(root.rglob("*.md")):
-        if _EXCLUDE_PARTS & set(p.parts):
+        parts = p.parts
+        if _EXCLUDE_PARTS & set(parts):
+            continue
+        if any((parts[i], parts[i + 1]) in _EXCLUDE_PART_PAIRS
+               for i in range(len(parts) - 1)):
             continue
         yield p
 

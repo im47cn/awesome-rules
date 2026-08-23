@@ -29,6 +29,21 @@ else
     bad "NC1 期望 rc!=0 且输出含 no-such-target，实际 rc=$rc1: $(head -3 "$TMP/out1")"
 fi
 
+# ── NC1b 产物排除正控制：链运行时审计副本不属文档链接门范围 ────────────
+# reject-receipt 的 ../blob/main/ 链接只在发布目的地（issue 评论）可解析，
+# 磁盘上必为死链；.factory/artifacts 是 gitignored 运行时产物（2026-08-23
+# 实证：本机跑过链的人类推送被假阳性拦死）。死链仍须拦（NC1 同跑）。
+mkdir -p "$TMP/.factory/artifacts"
+printf '# t\n[产物](../blob/main/MISSION.md)\n' >"$TMP/.factory/artifacts/r.md"
+if "$PY" scripts/md_link_check.py "$TMP" >"$TMP/out1b" 2>&1; then :; fi
+if grep -q 'artifacts/r.md' "$TMP/out1b"; then
+    bad "NC1b 期望 .factory/artifacts 被排除，实际被报告"
+elif ! grep -q 'no-such-target' "$TMP/out1b"; then
+    bad "NC1b 排除扩面吞掉了真实死链检测"
+else
+    ok "NC1b 产物死链不误报，真实死链仍拦"
+fi
+
 # ── NC2 秘密负控制：含假凭据字面量的文件必须被 must_not_match 拦下 ────
 # 只认 rc=1（真拦截）；rc=2 是检查器自身损坏，同样判负——坏检查器不算通过。
 # 夹具经 $K 拼接：本脚本自身在被扫描面内，源码不得出现守卫的字面形态
