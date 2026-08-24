@@ -321,6 +321,19 @@ python3 scripts/badcase_runner.py --verbose
 
 维持现状即可，无需特殊处理。
 
+#### 版本发布纪律（消费者更新门控）
+
+插件安装是**版本号门控的快照**：`claude plugins update` 比较源仓 `plugin.json`
+的版本号，未 bump 则报 "already at the latest version" 拒绝刷新（实测：0.3.0
+快照滞后源仓 2 天 20+ 提交，update 不动）。因此合并影响分发内容的 PR
+（skills / steering / hooks）后：
+
+- 运行 `npm run release`（commit-and-tag-version 按 commit 类型推导 bump 级别，
+  更新 `package.json` 与 `CHANGELOG.md`）
+- `.claude-plugin/plugin.json` 等各平台清单无同步脚本，随 release 手工对齐版本
+- 消费者侧更新：源仓 `git pull` 后执行
+  `claude plugins update awesome-rules@awesome-rules`（市场限定名）
+
 ---
 
 ## 四、本地调试
@@ -337,14 +350,18 @@ claude plugins marketplace add ./
 claude plugins install awesome-rules
 ```
 
-安装后技能即刻生效。修改 `SKILL.md` 或脚本后无需重新安装（插件从源路径实时加载）。
+安装时按 `plugin.json` 版本号快照到
+`~/.claude/plugins/cache/awesome-rules/awesome-rules/<版本>/`，会话从快照加载——
+修改源仓文件**不会**实时生效，新增技能不 bump 版本则消费者不可见（实测：源仓
+新增技能未出现在已装会话）。修改 `SKILL.md`、脚本或 hooks 后，按
+「版本发布纪律」bump 版本，再执行下方更新命令。
 
 ```bash
 # 查看已安装插件
 claude plugins list
 
 # 更新插件（拉取最新代码后）
-claude plugins update awesome-rules
+claude plugins update awesome-rules@awesome-rules
 
 # 卸载
 claude plugins uninstall awesome-rules
