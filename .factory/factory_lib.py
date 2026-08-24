@@ -47,12 +47,19 @@ def parse_agent_json(text: str, allowed: set[str]) -> dict:
 
 
 def evidence_suites(changed_files: list[str]) -> list[str]:
-    """变更文件 → 需 verbose 证据段的测试套件（skills/<name>/scripts）。
+    """变更文件 → 需 verbose 证据段的测试套件（布局双适配，M4）。
 
-    非 skills/ 改动不产生证据段（其测试不在 skills 套件内）。
+    monorepo（backend|frontend）与 skills/<name>/scripts 两种布局都识别
+    （对齐 etf-radar 生产版）；套件名与测试门 --evidence <suite> 的取值
+    一一对应。不存在的套件由调用方（fix-issue.sh）的 -d 探测过滤，
+    引擎不做仓假设——双布局识别让本函数零本地化（full 分发）。
     """
     suites = set()
     for f in changed_files:
+        m = re.match(r"(backend|frontend)/", f)
+        if m:
+            suites.add(m.group(1))
+            continue
         m = re.match(r"(skills/[^/]+)/", f)
         if m:
             suites.add(f"{m.group(1)}/scripts")
@@ -137,14 +144,22 @@ def classify_task(files: list[str]) -> str:
     return "code"
 
 
-# 重投指引模板：键 = 未通过的 MISSION 判据（a 使命一致 / b 可判定 / c 不触周界）
-# 措辞锚定本仓 MISSION「Triage 判据」（规范/技能/审查工具链/文档）——移植方
-# 各自本地化，勿回传覆盖
-REJECT_GUIDANCE: dict[str, str] = {
-    "a": "判据a（使命一致）：写明落点——规范（steering/）、技能（skills/）、审查工具链或文档中的哪个文件/模块；",
-    "b": "判据b（可判定）：把完成标准写成可机械验证的形式——验收 = 具体测试/脚本的断言（公式、逐条清单、file:line 级差异），避免「持续 / 优化 / 失修」类开放措辞；doc-only（纯文档）改动在验证门零投影——补可执行验收载体（markdownlint / CI 链接检查 / 可断言测试）或转人工 PR；",
-    "c": "判据c（不触周界）：触及 PERIMETER 的部分拆成独立 issue 走人类 PR（清单见 MISSION.md）；",
-}
+# 重投指引模板：键 = 未通过的 MISSION 判据（a 使命一致 / b 可判定 / c 不触周界）。
+# M4 本地化外置（设计 §11.3）：措辞锚定各仓 MISSION，从 factory-local.json
+# 载入——本文件零本地化、跨仓 full 分发。fail-closed：配置缺失/缺键 →
+# RuntimeError（triage 回执生成失败，链侧 issue_reject 降级为回执告警）。
+def _load_reject_guidance() -> dict[str, str]:
+    import json
+    cfg_path = Path(__file__).resolve().parent / "factory-local.json"
+    try:
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        guidance = {k: str(cfg["reject_guidance"][k]) for k in ("a", "b", "c")}
+    except Exception as exc:
+        raise RuntimeError(f"factory-local.json reject_guidance 不可用: {exc}") from exc
+    return guidance
+
+
+REJECT_GUIDANCE: dict[str, str] = _load_reject_guidance()
 
 
 def neutralize_marker(text: str) -> str:

@@ -46,6 +46,39 @@ TESTS = REPO_ROOT / "scripts" / "run_tests.sh"
 GUARD_TIMEOUT = 300
 TESTS_TIMEOUT = 600
 
+# ── 周界证据指纹绑定（M4，设计 §11.3）────────────────────────────────
+# 「改配置 = 改门」：PERIMETER 数据化（factory-local.json）后，周界变更
+# 必须仍触发 kill rate 重证——否则门禁灵敏度退化为声明式。机制：全绿
+# 退出时把 factory-local.json 的 git blob hash 写入 evidence-stamp.json；
+# 下次启动比对，不一致 → 横幅宣告证据过期（本次全绿不构成 auto-merge
+# 依据的既有语义不变：人类看横幅决定是否采信）。
+LOCAL_CFG = REPO_ROOT / ".factory" / "factory-local.json"
+STAMP = REPO_ROOT / ".factory" / "mutations" / "evidence-stamp.json"
+
+
+def perimeter_blob() -> str | None:
+    """factory-local.json 的 git blob hash（未跟踪/异常 → None = 无法绑定）。"""
+    try:
+        rel = LOCAL_CFG.relative_to(REPO_ROOT)
+        out = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "ls-files", "-s", "--", str(rel)],
+            capture_output=True, text=True, check=True).stdout.split()
+        return out[1] if len(out) >= 2 else None
+    except Exception:
+        return None
+
+
+def stamp_stale_banner() -> None:
+    """启动时宣告上次证据对应的周界指纹与当前不一致（不改变退出码语义）。"""
+    try:
+        recorded = json.loads(STAMP.read_text(encoding="utf-8"))["perimeter_blob"]
+    except Exception:
+        return  # 无 stamp（首次运行/旧版本）不宣告
+    if recorded != perimeter_blob():
+        print("⚠ 周界指纹漂移：evidence-stamp.json 记录的 perimeter_blob 与当前"
+              " factory-local.json 不一致——上次证据已过期，本次全绿仅在本次"
+              "周界下有效；合并后 evidence-stamp.json 会随本次全绿刷新。")
+
 
 @dataclass
 class Defect:
@@ -185,6 +218,7 @@ def main() -> int:
     args = parser.parse_args()
 
     defects = load_defects(Path(args.defects))
+    stamp_stale_banner()
     if args.only:
         wanted = {x.strip() for x in args.only.split(",") if x.strip()}
         defects = [d for d in defects if d.id in wanted]
@@ -259,6 +293,15 @@ def main() -> int:
         print(f"  结论: 覆盖不完整（SKIP: {ids}），本次通过不构成 auto-merge 依据（铁律 5）")
         return 4
     print("  结论: 门灵敏度冒烟通过（auto-merge 的必要非充分条件）")
+    blob = perimeter_blob()
+    if blob:
+        STAMP.write_text(json.dumps({
+            "perimeter_blob": blob,
+            "evidence": "EVIDENCE-2026-08-24.md",
+            "generated_at": __import__("datetime").datetime.now(
+                __import__("datetime").timezone.utc).isoformat(timespec="seconds"),
+        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(f"  周界指纹已绑定: {blob[:12]}（evidence-stamp.json）")
     return 0
 
 

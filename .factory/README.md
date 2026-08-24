@@ -23,6 +23,9 @@
 | `feedback.py` + `feedback-upstream.sh` | etf-radar 工厂改进反哺上游仓（决策零 LLM，AI 仅适配内容） |
 | `breaker.sh` | R4 成本熔断门（fix-issue/dispatch/cron-dispatch/triage-batch 四入口共用接线点，透传 factory_lib breaker 码） |
 | `factory-lib.sh` + `factory_lib.py` | 链副作用共享库（issue 评论唯一出口/拒绝单一动作/租约围栏钩位）+ python 工具箱（timeout 分级预算/breaker/回执解析） |
+| `factory-local.json` | 工厂本地化配置（M4）：PERIMETER 与 REJECT_GUIDANCE 的数据载体——guard/factory_lib 零本地化的前提；改后须重跑 mutations 重证 |
+| `upstream-sync-check.sh` | M2 上游同步检查（dispatch 轮末）：full 漂移→确定性 PR 流；local 漂移→needs-human issue；无凭据降级仅报告 |
+| `sync-from-upstream.sh` + `DISTRIBUTION.json` | M1 上游同步：三态分发清单（full/local/skip）+ 下游拉取（--check 门禁/--apply 追平+锚点） |
 
 ## 前置条件
 - `omp` CLI（AI 节点引擎；每节点独立进程 = 物理级 fresh context）

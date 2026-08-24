@@ -22,10 +22,10 @@
     },
     {
       "id": "G-03",
-      "description": "篡改验证门自身：guard.py PERIMETER 定义改名致门崩溃（fail-closed 应视为拦截）",
+      "description": "篡改验证门自身：guard.py 周界配置载入改向不存在文件致门 fail-closed（exit 2 应视为拦截）",
       "target": ".factory/guard.py",
-      "find": "PERIMETER = (",
-      "replace": "PERIMETER_DISABLED = (",
+      "find": "cfg_path = Path(__file__).resolve().parent / \"factory-local.json\"",
+      "replace": "cfg_path = Path(__file__).resolve().parent / \"factory-local-DISABLED.json\"",
       "gate": "guard",
       "expect_block": true
     },
