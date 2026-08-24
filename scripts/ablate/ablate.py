@@ -323,6 +323,8 @@ def main():
                         help="未指定 --cases 时每技能取前 N 个 badcase")
     parser.add_argument("--max-time", default="5m", help="每次 omp 调用的 --max-time 预算")
     parser.add_argument("--dry-run", action="store_true", help="只打印将执行的调用与 prompt 概要，不调用 omp")
+    parser.add_argument("--arms", default="with,without",
+                        help="要跑的臂，逗号分隔（如只复测 WITH 臂传 --arms with）")
     parser.add_argument("--resident-cost-only", action="store_true",
                         help="只输出 11 个技能 frontmatter description 常驻成本表后退出")
     args = parser.parse_args()
@@ -362,15 +364,16 @@ def main():
                 continue
             plan.append((skill, name, cdir, expected))
 
-    total_calls = len(plan) * 2
-    print(f"计划: {len(plan)} 个 badcase × 2 臂 = {total_calls} 次 omp 调用（预算上限 6）")
+    arms = [a.strip() for a in args.arms.split(",") if a.strip()]
+    total_calls = len(plan) * len(arms)
+    print(f"计划: {len(plan)} 个 badcase × {len(arms)} 臂 = {total_calls} 次 omp 调用（预算上限 6）")
     if total_calls > 6:
-        print("错误: 计划调用次数超过 6 次预算，请用 --cases/--limit 收窄", file=sys.stderr)
+        print("错误: 计划调用次数超过 6 次预算，请用 --cases/--limit/--arms 收窄", file=sys.stderr)
         return 2
 
     if args.dry_run:
         for skill, name, cdir, expected in plan:
-            for arm in ("with", "without"):
+            for arm in arms:
                 prompt = build_prompt(skill, cdir, arm)
                 preview = prompt[:160].replace("\n", "⏎")
                 print(f"[dry-run] {skill}/{name} arm={arm:<7} prompt_chars={len(prompt)} "
@@ -379,7 +382,7 @@ def main():
 
     records = []
     for skill, name, cdir, expected in plan:
-        for arm in ("with", "without"):
+        for arm in arms:
             prompt = build_prompt(skill, cdir, arm)
             raw_path = RAW_DIR / f"{skill}__{name}__{arm}.log"
             print(f"→ 调用 omp: {skill}/{name} arm={arm} …", flush=True)
