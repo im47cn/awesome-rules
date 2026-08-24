@@ -227,7 +227,6 @@ python3 .factory/mutations/run.py [--only G-01,G-03]
 次级审计（提示词里的仓库引用）：
 `triage.md` 首行的仓库身份与判据表述、`prime.md` 的阅读范围
 （README/skills/steering/scripts）、`review.md` 的审查依据（steering/）。
-`fix-issue.sh` 基分支 `main` 与 PR 标签按目标仓库约定核对。
 
 ## 上游同步（移植后的增量维护）
 
@@ -249,6 +248,21 @@ python3 .factory/mutations/run.py [--only G-01,G-03]
 
 漂移闭环：下游热修 → feedback-upstream 反哺 PR → 上游合并 → 下游
 `--apply` 追平 → `--check` 归零。双向都有机器检查，分叉不再靠人工记忆。
+
+同步成熟度路线（M1–M4，完整设计见
+`docs/design/factory-harness-design.md` §11；M 编号与 Five Levels 的
+L4 无关）：
+
+- **M1 ✅** 三态清单 + sync 脚本 + 锚点（本节）。
+- **M2** dispatch 轮末自动 `--check`：full 漂移走确定性 PR 流
+  （apply → gauntlet → factory/sync-<锚点> 分支 → needs-review 人工
+  合并；**不走 fix-issue 链**——guard PERIMETER 含 .factory/，链按
+  设计拦工具链自变更）；local 漂移落 needs-human issue；apply 后
+  当轮即止（自我指涉护栏）。
+- **M3** 上游 merge 发 repository_dispatch，下游分钟级触发 M2。
+- **M4** 本地化外置 `factory-local.json`（perimeter/判据措辞/布局
+  全成数据），guard.py 等从 local → full，local 面归零；PERIMETER
+  blob 指纹绑定 EVIDENCE——改配置未重证 kill rate 即非绿。
 
 ## S1/S2 已知边界
 
