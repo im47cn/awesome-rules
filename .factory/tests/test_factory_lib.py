@@ -202,6 +202,23 @@ class TestClassifyTask:
     def test_empty(self):
         from factory_lib import classify_task
         assert classify_task([]) == "empty"
+    def test_frontend_test_conventions(self):
+        """前端 .test.* / .spec.* / __tests__ 约定识别为 test（etf-radar#69 审查）。"""
+        from factory_lib import classify_task
+        assert classify_task(["frontend/src/__tests__/tradingPage.test.tsx"]) == "test"
+        assert classify_task(["src/components/PositionsList.test.ts"]) == "test"
+        assert classify_task(["vitest/foo.spec.js"]) == "test"
+
+    def test_frontend_test_plus_src_is_code(self):
+        """测试与源码并存（无 md）→ code，不因 .test. 误判为 test-only。"""
+        from factory_lib import classify_task
+        assert classify_task(["src/foo.ts", "src/foo.test.ts"]) == "code"
+
+    def test_paths_with_spaces_stay_whole(self):
+        """空格路径是完整单元（配 fix-issue.sh NUL 传递，etf-radar#70 审查）。"""
+        from factory_lib import classify_task
+        assert classify_task(["docs/road map 2026.md", "src/a b/foo.test.ts"]) == "mixed"
+
 # ---- S2 issue #60 triage 的真实 reject 形态（三判据全有前缀，b 不通过）----
 REAL_REJECT = {
     "issue": 60, "verdict": "reject", "priority": None,
@@ -232,7 +249,7 @@ class TestRejectReceipt:
         md = reject_receipt(REAL_REJECT)
         assert "判据a（使命一致）" in md
         assert "判据b（可判定）" in md
-        assert "判据c（不触周界）" in md
+        assert "转人工 PR" in md  # #24：判据 b 指引含 doc-only 载体/人工 PR 出路
 
     def test_receipt_pass_criteria_get_no_guidance(self):
         """全通过措辞（通过/勉强通过）不触发指引——防噪音。"""

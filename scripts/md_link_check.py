@@ -25,12 +25,16 @@ B. README 索引零漂移（README.md 内以链接登记的资产须与磁盘一
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import unquote
 
-# 产物/依赖目录：仓库自身文档之外的海量第三方 md，结构性排除
-_EXCLUDE_PARTS = {"node_modules", ".git", "dist", "build", ".codebase-memory"}
+# 扫描面 = git tracked 面（gitignore 是运行时产物排除的唯一真相源）。
+# 结构性根因（2026-08-23 双实证）：手工排除集与 .gitignore 必然漂移——
+# .factory/artifacts 链运行时产物炸推送门（reject-receipt 的 ../blob/main/
+# 链接只在 issue 评论目的地可解析，磁盘必为死链）。tracked 面后一切
+# gitignored 产物（artifacts/locks/.crush/…）天然出局，无需逐目录登记。
 # 形如 http:// https:// mailto: 的目标不做网络校验
 _EXTERNAL_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", re.I)
 _FENCE_RE = re.compile(r"^```.*?^```", re.M | re.S)
@@ -61,10 +65,13 @@ def _anchors_of(text: str) -> set:
 
 
 def iter_md_files(root: Path):
-    for p in sorted(root.rglob("*.md")):
-        if _EXCLUDE_PARTS & set(p.parts):
-            continue
-        yield p
+    """tracked 面的 md 清单（任意深度）；非 git 目录返回 None（fail-closed）。"""
+    proc = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z", "--", "*.md"],
+        capture_output=True)
+    if proc.returncode != 0:
+        return None
+    return [root / f for f in proc.stdout.decode("utf-8").split("\0") if f]
 
 
 def check_file(md: Path, root: Path) -> list:
@@ -96,8 +103,12 @@ def check_file(md: Path, root: Path) -> list:
 
 
 def check_links(root: Path) -> list:
+    mds = iter_md_files(root)
+    if mds is None:
+        return [f"{root}: 非 git 仓库——门禁扫描面 = tracked 面（gitignore 唯一排除真相源），"
+                "无版本控制的目录不做链接判定（fail-closed）"]
     issues = []
-    for md in iter_md_files(root):
+    for md in mds:
         issues.extend(check_file(md, root))
     return issues
 
@@ -144,9 +155,14 @@ def check_readme_index(root: Path) -> list:
 def main() -> int:
     root = (Path(sys.argv[1]).resolve() if len(sys.argv) > 1
             else Path(__file__).resolve().parent.parent)
+    mds = iter_md_files(root)
+    if mds is None:
+        print(f"❌ {root}: 非 git 仓库——门禁扫描面 = tracked 面，"
+              "无版本控制的目录不做链接判定（fail-closed）")
+        return 1
     failed = False
-    n = len(list(iter_md_files(root)))
-    links = check_links(root)
+    n = len(mds)
+    links = [i for md in mds for i in check_file(md, root)]
     if links:
         print(f"❌ 链接有效性：{len(links)} 处失效（扫描 {n} 个 .md）：")
         for i in links:

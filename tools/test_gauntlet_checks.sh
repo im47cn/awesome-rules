@@ -18,6 +18,8 @@ cat >"$TMP/dead.md" <<'EOF'
 # 负控制夹具
 [死链](./no-such-target.md)
 EOF
+# 扫描面 = tracked 面：夹具必须是真 git 仓（非 git 目录 fail-closed 拒判）
+git init -q "$TMP" && git -C "$TMP" add dead.md
 if "$PY" scripts/md_link_check.py "$TMP" >"$TMP/out1" 2>&1; then
     rc1=0
 else
@@ -27,6 +29,22 @@ if [ "$rc1" -ne 0 ] && grep -q 'no-such-target' "$TMP/out1"; then
     ok "NC1 死链被拦且报告指明死链目标"
 else
     bad "NC1 期望 rc!=0 且输出含 no-such-target，实际 rc=$rc1: $(head -3 "$TMP/out1")"
+fi
+
+# ── NC1b 产物排除正控制：链运行时审计副本不属文档链接门范围 ────────────
+# reject-receipt 的 ../blob/main/ 链接只在发布目的地（issue 评论）可解析，
+# 磁盘上必为死链；.factory/artifacts 是 gitignored 运行时产物（2026-08-23
+# 实证：本机跑过链的人类推送被假阳性拦死）。死链仍须拦（NC1 同跑）。
+mkdir -p "$TMP/.factory/artifacts"
+printf '# t\n[产物](../blob/main/MISSION.md)\n' >"$TMP/.factory/artifacts/r.md"
+printf '.factory/artifacts/\n' >"$TMP/.gitignore" && git -C "$TMP" add .gitignore
+if "$PY" scripts/md_link_check.py "$TMP" >"$TMP/out1b" 2>&1; then :; fi
+if grep -q 'artifacts/r.md' "$TMP/out1b"; then
+    bad "NC1b 期望 .factory/artifacts 被排除，实际被报告"
+elif ! grep -q 'no-such-target' "$TMP/out1b"; then
+    bad "NC1b 排除扩面吞掉了真实死链检测"
+else
+    ok "NC1b 产物死链不误报，真实死链仍拦（tracked 面语义）"
 fi
 
 # ── NC2 秘密负控制：含假凭据字面量的文件必须被 must_not_match 拦下 ────
@@ -120,6 +138,72 @@ if [ "$_rc6" -eq 2 ]; then
     ok "NC6 路径不存在返回 rc=2（检查器损坏 ≠ 通过）"
 else
     bad "NC6 期望 rc=2，实际 rc=${_rc6}"
+fi
+
+# ── NC7 pipe-early-exit 负控制：三犯原形必须被拦 ──────────────────────
+# 夹具覆盖 R3（| true，PR #9/#23）、R1（grep -m1 中位，etf-radar#70）、
+# R2（head -n 中位）。夹具经 printf 分段拼接：本脚本在 lint-pipe-early-exit
+# 扫描面内，源码不得出现守卫的字面形态（与 NC2 的 $K 拼接同一原则）。
+NCP='|'; NCT='tru'; NCM='-m'; NCH='hea'; NCD='d'
+{
+    printf '#!/usr/bin/env bash\nset -euo pipefail\n'
+    # shellcheck disable=SC2016  # $(…) 是夹具字面量，不得在生成期展开
+    printf 'changed="$(git diff main %s %se)"\n' "$NCP" "$NCT"
+    # shellcheck disable=SC2016  # 同上
+    printf 'slug="$( { git remote; } %s grep %s1 x %s sed s/a/b/)"\n' "$NCP" "$NCM" "$NCP"
+    # shellcheck disable=SC2016  # 同上
+    printf 'top="$(cat list %s %s%s -n 3 %s wc -l)"\n' "$NCP" "$NCH" "$NCD" "$NCP"
+    # shellcheck disable=SC2016  # `||` 后管道边界：true 仍是其后管道左端
+    printf 'x || %se | wc -l\n' "$NCT"
+} >"$TMP/nc7_bad.sh"
+if "$PY" tools/check_pipe_early_exit.py "$TMP/nc7_bad.sh" >"$TMP/out7" 2>&1; then
+    _rc7=0
+else
+    _rc7=$?
+fi
+if [ "$_rc7" -eq 1 ] && grep -q 'R1' "$TMP/out7" && grep -q 'R2' "$TMP/out7" \
+    && grep -q 'R3' "$TMP/out7" && grep -q ':4:' "$TMP/out7" \
+    && grep -q ':5:' "$TMP/out7" && grep -q ':6:' "$TMP/out7"; then
+    ok "NC7 三犯原形全被拦（rc=1，行号+规则齐备）"
+else
+    bad "NC7 期望 rc=1 且 R1/R2/R3 与行号 4/5/6 全报，实际 rc=${_rc7}: $(head -3 "$TMP/out7")"
+fi
+if [ "$_rc7" -eq 1 ] && grep -q ':4:' "$TMP/out7" && grep -q -c 'R3' "$TMP/out7" >/dev/null; then
+    ok "NC7 || 后管道边界 R3 报行 4（x || true | wc -l 形）"
+else
+    bad "NC7 期望 || 边界 R3 报行 4，实际 rc=${_rc7}: $(grep ':4:' "$TMP/out7" || echo 无)"
+fi
+
+# NC7b 安全等价形放行：|| true（逻辑或层）、sed -n '1p'（消费全量）、
+# head 末位（末位即目的）——检查器边界是"确定性早退"，不是见管道就拦
+cat >"$TMP/nc7_ok.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+out="$(git diff main 2>/dev/null || true)"
+first="$(printf '%s\n' "$x" | sed -n '1p')"
+top="$(cat list | head)"
+EOF
+# 转义管道（\| 字面量）与行内注释（词首 #）不是命令——放行
+# shellcheck disable=SC2016  # 夹具字面量：转义管道在生成期不得被解释
+printf 'y="$(printf x \\| z)"\n' >>"$TMP/nc7_ok.sh"
+# shellcheck disable=SC2016  # 同上（注释行夹具）
+printf 'echo ok # %s %se is fine here\n' "$NCP" "$NCT" >>"$TMP/nc7_ok.sh"
+if "$PY" tools/check_pipe_early_exit.py "$TMP/nc7_ok.sh" >"$TMP/out7b" 2>&1; then
+    ok "NC7b 安全等价形（|| true / sed -n 1p / head 末位 / 转义 / 注释）放行"
+else
+    bad "NC7b 期望 rc=0，实际 rc=$?: $(head -3 "$TMP/out7b")"
+fi
+
+# NC7c 检查器损坏路径：rc=2 绝不算通过（与 NC6 同一语义）
+if "$PY" tools/check_pipe_early_exit.py "$TMP/definitely-missing" >"$TMP/out7c" 2>&1; then
+    _rc7c=0
+else
+    _rc7c=$?
+fi
+if [ "$_rc7c" -eq 2 ]; then
+    ok "NC7c 路径不存在返回 rc=2（检查器损坏 ≠ 通过）"
+else
+    bad "NC7c 期望 rc=2，实际 rc=${_rc7c}"
 fi
 
 # ── 汇总 ───────────────────────────────────────────────────────────────

@@ -4,8 +4,14 @@
 铁律 5 的机械化：未经本 runner 证明灵敏度的门，不得开启 auto-merge。
 "未证明的门不是门。"
 
+两种门：
+- guard（篡改类）：guard.py --files 单文件，秒级。
+- tests（行为破坏类）：run_tests.sh --no-lock 全量测试门（8 套件 +
+  badcase 双通道；--no-lock 跳过 plugin_lock/md_link_check——它们是
+  blob 锁与链接门，不消费被注入的行为面），单条分钟级，输出带耗时。
+
 用法:
-  python3 .factory/mutations/run.py [--only G-01,G-03] [--defects <path>]
+  python3 .factory/mutations/run.py [--only G-01,B-101] [--defects <path>]
 
 安全策略（重要，先读再跑）:
 - 原字节内存备份 + finally 写回；**绝不使用 git checkout / git restore**——
@@ -23,14 +29,22 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import signal
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 GUARD = REPO_ROOT / ".factory" / "guard.py"
 TESTS = REPO_ROOT / "scripts" / "run_tests.sh"
+
+# 门超时预算（run_tests.sh 自身无超时参数，此处兜底）。tests 门实测基线
+# ~10s；600s ≈ 60 倍余量，超时即无效运行（judge 判 FAIL，不计击杀/放行）。
+GUARD_TIMEOUT = 300
+TESTS_TIMEOUT = 600
 
 
 @dataclass
@@ -83,16 +97,64 @@ def tracked_and_dirty(rel: str) -> bool:
     return diff.returncode != 0
 
 
-def run_gate(gate: str, target: str) -> int:
+def run_gate(gate: str, target: str) -> int | None:
+    """跑门返回退出码；超时返回 None（无效运行，见 judge）。
+
+    超时杀**整个进程组**（start_new_session + killpg）：run_tests.sh 会
+    派生 pytest 孙进程，只杀 bash 直子会留下孤儿继续读注入中的 target
+    ——finally 还原字节与孤儿运行并发，污染后续缺陷轮（PR #33 审查）。
+    """
     if gate == "guard":
         cmd = [sys.executable, str(GUARD), "--files", target]
+        timeout = GUARD_TIMEOUT
     else:
         cmd = ["bash", str(TESTS), "--no-lock"]
-    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True)
-    tail = (proc.stdout + proc.stderr).strip().splitlines()
+        timeout = TESTS_TIMEOUT
+    start = time.monotonic()
+    # 安全审计落档（PR #33 Sourcery/opengrep dangerous-subprocess-use-audit）：
+    # argv 列表形态、无 shell 解释（shell=False 显式）——不存在注入通道。
+    # 可执行位与固定参数为闭集（sys.executable / "bash" + __file__ 推导的
+    # 模块常量）；唯一外部数据 target 源自 defects.json（治理周界 .factory/
+    # 内，仅人类 PR 可改），且经 REPO_ROOT / d.target 与 is_file() 校验后
+    # 作为单个 argv 数据元素传入，不被任何 shell 解析。
+    proc = subprocess.Popen(
+        cmd, cwd=str(REPO_ROOT), shell=False,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, start_new_session=True)  # 新进程组：pgid == proc.pid
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass  # 组已自行退出（竞态窗口）
+        try:
+            proc.communicate(timeout=10)  # 收尸并排干管道
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        print(f"    门超时（>{timeout}s）：已杀进程组，无效运行")
+        return None
+    elapsed = time.monotonic() - start
+    tail = (out + err).strip().splitlines()
     if tail:
         print(f"    gate 输出末行: {tail[-1][:120]}")
     return proc.returncode
+
+
+def judge(defect: Defect, rc: int | None) -> tuple[str, str]:
+    """门退出码 → (判定, 明细)。
+    退出码语义（testing-standards）：rc=0 放行、rc=1 判定失败（击杀证据）；
+    其他退出码 / 超时（None）一律**无效运行**——不计击杀也不计放行，
+    直接 FAIL。guard 门例外：rc=2 是其 fail-closed 设计（门崩溃=拦截）。
+    """
+    if rc is None:
+        return "FAIL", "门超时（无效运行：不构成击杀/放行证据）"
+    if defect.gate == "tests" and rc not in (0, 1):
+        return "FAIL", f"无效退出码 rc={rc}（run_tests.sh 域为 0/1）"
+    blocked = rc != 0
+    if blocked == defect.expect_block:
+        return "PASS", f"blocked={blocked}（rc={rc}）符合预期"
+    return "FAIL", f"blocked={blocked}（rc={rc}）不符合预期 expect_block={defect.expect_block}"
 
 
 def apply_defect(target: Path, defect: Defect) -> str:
@@ -121,7 +183,7 @@ def main() -> int:
     originals: dict[Path, str] = {}
 
     for d in defects:
-        print(f"[{d.id}] {d.description}")
+        print(f"[{d.id}] {d.description}（gate={d.gate}）")
         target = REPO_ROOT / d.target
         if not target.is_file():
             outcomes.append(Outcome(d, "FAIL-config", f"target 不存在: {d.target}"))
@@ -137,13 +199,7 @@ def main() -> int:
             original = apply_defect(target, d)
             originals[target] = original
             rc = run_gate(d.gate, d.target)
-            blocked = rc != 0
-            if blocked == d.expect_block:
-                verdict = "PASS"
-                detail = f"blocked={blocked}（rc={rc}）符合预期"
-            else:
-                verdict = "FAIL"
-                detail = f"blocked={blocked}（rc={rc}）不符合预期 expect_block={d.expect_block}"
+            verdict, detail = judge(d, rc)
             outcomes.append(Outcome(d, verdict, detail))
             print(f"    {verdict}: {detail}")
         except ValueError as exc:
@@ -163,17 +219,25 @@ def main() -> int:
               file=sys.stderr)
         return 3
 
-    # 汇总
-    positive = [o for o in outcomes if o.defect.expect_block]
+    # 汇总（正向按门分组：篡改类 guard / 行为破坏类 tests，负例整体计）
     negative = [o for o in outcomes if not o.defect.expect_block]
-    killed = [o for o in positive if o.status == "PASS"]
     passed_neg = [o for o in negative if o.status == "PASS"]
-    kill_rate = len(killed) / len(positive) if positive else float("nan")
 
     print("\n===== mutation 冒烟汇总 =====")
     for o in outcomes:
         print(f"  [{o.defect.id}] {o.status:10s} {o.detail}")
-    print(f"  正向缺陷拦截（kill rate）: {len(killed)}/{len(positive)} = {kill_rate:.0%}")
+    total_killed = total_positive = 0
+    for gate, label in (("guard", "篡改类拦截（guard 门）"),
+                        ("tests", "行为破坏类拦截（tests 门）")):
+        positive = [o for o in outcomes if o.defect.gate == gate and o.defect.expect_block]
+        killed = [o for o in positive if o.status == "PASS"]
+        total_killed += len(killed)
+        total_positive += len(positive)
+        if positive:
+            rate = len(killed) / len(positive)
+            print(f"  {label}: {len(killed)}/{len(positive)} = {rate:.0%}")
+    kill_rate = total_killed / total_positive if total_positive else float("nan")
+    print(f"  正向缺陷拦截（kill rate）: {total_killed}/{total_positive} = {kill_rate:.0%}")
     print(f"  负例放行: {len(passed_neg)}/{len(negative)}")
 
     skipped = [o for o in outcomes if o.status == "SKIP"]

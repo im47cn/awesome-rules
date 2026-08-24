@@ -25,7 +25,9 @@ REPO_SLUG="${GH_REPO:-$(
   # 逐条扫含 github.com 者（github remote 名优先）；443 端口形态兼容
   { git -C "$(dirname "$0")/.." remote get-url --all --push github 2>/dev/null
     git -C "$(dirname "$0")/.." remote get-url --all --push origin 2>/dev/null
-  } | grep -m1 'github\.com' | sed -E 's#^.*github\.com(:[0-9]+)?[/:]##; s#\.git$##'
+  # grep 不用 -m1：早退关读端会让 git 组 SIGPIPE（pipefail 下 141，
+  # etf-radar#70 审查）；sed -n 1p 取首行且消费全部输入，无早退
+  } | grep 'github\.com' | sed -n '1p' | sed -E 's#^.*github\.com(:[0-9]+)?[/:]##; s#\.git$##'
 )}"
 DIR="${REPO}/.factory/artifacts/issue-${ISSUE}"
 BRANCH="factory/issue-${ISSUE}"
@@ -241,7 +243,7 @@ if [ "${DRY}" = 0 ]; then
   # 心跳失约（被夺/吊销/过期）即被后台循环 TERM：exit 143 触发 EXIT trap 级联
   # （台账/清标/worktree 回收/放租约）。此处到 trap 升级之间无可失败语句，
   # 残余窗口由租约自然过期（默认 900s）自愈。
-  trap 'exit 143' TERM
+  trap "exit 143" TERM   # 双引号：test_fix_issue_trap 的 trap 提取正则按 ' EXIT 锚定，单引号形态会被截胡
   lease_heartbeat_loop "${LEASE_KEY}" "${LEASE_EPOCH}"
   echo "  [lease] ${LEASE_KEY} epoch=${LEASE_EPOCH} 已认领（心跳 ${FACTORY_HB_INTERVAL:-60}s）"
   ensure_labels
@@ -259,14 +261,20 @@ if [ "${DRY}" = 0 ]; then
     if [ -f "${DIR}/triage.json" ] && [ "$(json_field "${DIR}/triage.json" 'd["verdict"]' 2>/dev/null)" = reject ]; then
       kind=rejected
     else
-      local changed
-      # || true 吞 exit code（无 merge-base 等场景）但保留 stdout；
-      # 曾误写 `| true`——管道把 diff 输出喂给 true，changed 恒空，
-      # 台账全记 no-diff（PR #9 审查评论1）
-      changed="$(git -C "${REPO}" diff --name-only main..."${BRANCH}" 2>/dev/null || true)"
-      [ -z "${changed}" ] && changed="$(git -C "${REPO}" diff --name-only HEAD~1 2>/dev/null || true)"
-      if [ -n "${changed}" ]; then
-        kind="$(python3 "${REPO}/.factory/factory_lib.py" classify ${changed})"
+      local -a files=()
+      local f
+      # || true 吞 exit code（无 merge-base 等场景）但保留 stdout——吞错必须在
+      # 命令替换层，防 set -e 在 EXIT trap 内杀死 write_ledger（#23 根因；
+      # 曾误写 `| true`：diff 输出喂给 true，changed 恒空，台账全记 no-diff，
+      # PR #9 审查评论1）
+      # NUL 分隔读入数组（bash 3.2 无 mapfile）：文件名含空白/通配符不拆分
+      # （etf-radar#70 审查）；classify 失败降级 no-diff，trap 不因分类器死
+      while IFS= read -r -d '' f; do files+=("$f"); done \
+        < <(git -C "${REPO}" diff --name-only -z main..."${BRANCH}" 2>/dev/null || true)
+      [ "${#files[@]}" -eq 0 ] && while IFS= read -r -d '' f; do files+=("$f"); done \
+        < <(git -C "${REPO}" diff --name-only -z HEAD~1 2>/dev/null || true)
+      if [ "${#files[@]}" -gt 0 ]; then
+        kind="$(python3 "${REPO}/.factory/factory_lib.py" classify "${files[@]}")" || kind=no-diff
       else
         kind=no-diff
       fi
@@ -276,14 +284,24 @@ if [ "${DRY}" = 0 ]; then
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ISSUE}" "${ROUND}" "${kind}" "${rc}" \
       "$(( $(date +%s) - CHAIN_T0 ))" >> "${REPO}/.factory/locks/ledger.jsonl"
   }
-  # 失败清理 + 台账 + worktree 回收：非零退出移除流转标签回零标签态（可重试），
-  # 无论成败都记账；worktree 无论成败一并回收（分支推送后树内仅剩未跟踪产物）
-  # 清理顺序（PR#34 审查修复）：标签清理在 lease_cleanup **之前**——清理也是
-  # 副作用出口，须持有效租约过围栏；先放租约会让正常失败链的清标被拒（标签滞留）。
-  # 被夺/吊销链的清标被围栏跳过是正确行为：标签归新属主，或作为人工债务可见。
+  # 失败清理 + 台账 + 产出抢救 + worktree 回收：
+  # - set +e 首动作（#23）：trap 是状态机复位的唯一保障，内部任一命令
+  #   非零不得中止清理链——trap 失败模式收敛为"多打日志"而非"静默中断"
+  #   （etf-radar#57 实证：write_ledger 内 git 竞态 141 → 标签/worktree/
+  #   台账三重残留 → 队列死锁）
+  # - 失败且分支有新提交 → push 抢救产出（#14：否则随 worktree 强删 +
+  #   下轮 -B 重置回 main 孤儿化，implement 成果湮灭）。--force：下轮
+  #   从 main 重跑后非 FF，远端镜像语义 = 最新一轮产出；推送失败仅告警
+  #   不阻断后续清理（网络故障不应二次放大为状态残留）
+  # - 非零退出移除流转标签回零标签态（可重试）；无论成败都记账；
+  #   worktree 无论成败一并回收
+  # - 清理顺序（PR#34 审查修复）：标签清理在 lease_cleanup **之前**——清标
+  #   也是副作用出口，须持有效租约过围栏；先放租约会让正常失败链的清标被拒
+  #   （标签滞留）。被夺/吊销链的清标被围栏跳过是正确行为：标签归新属主，
+  #   或作为人工债务可见。lease_cleanup 收心跳+放租约，放清理链末尾。
   # D1: 本 trap 覆盖早期放锁 trap，故自带锁释放；派发链 MANUAL_LOCK=0 不动锁
   # shellcheck disable=SC2154  # rc 于本 trap 行内由 rc=$? 赋值，shellcheck 不解析 trap 字符串
-  trap 'rc=$?; write_ledger "${rc}"; git -C "${REPO}" worktree remove --force "${WT}" >/dev/null 2>&1 || true; [ $rc -ne 0 ] && { issue_label remove factory:triaging; issue_label remove factory:accepted; issue_label remove factory:in-progress; }; lease_cleanup; [ "${MANUAL_LOCK}" = 1 ] && rm -rf "${LOCKDIR:-}" 2>/dev/null' EXIT
+  trap 'rc=$?; set +e; write_ledger "${rc}"; if [ "${rc}" -ne 0 ] && [ "$(git -C "${REPO}" rev-list --count main.."${BRANCH}" 2>/dev/null || echo 0)" -gt 0 ]; then git -C "${REPO}" push --force --no-verify origin "${BRANCH}" >/dev/null 2>&1 && echo "  [salvage] 失败链产出已推送 origin/${BRANCH}" || echo "  [warn] 失败链产出推送失败，产出仅在本地分支 ${BRANCH}" >&2; fi; git -C "${REPO}" worktree remove --force "${WT}" >/dev/null 2>&1 || true; [ "${rc}" -ne 0 ] && { issue_label remove factory:triaging; issue_label remove factory:accepted; issue_label remove factory:in-progress; }; lease_cleanup; [ "${MANUAL_LOCK}" = 1 ] && rm -rf "${LOCKDIR:-}" 2>/dev/null' EXIT
 else
   echo "[dry-run] gh issue view #${ISSUE} → ${DIR}/issue.json"
   echo "[dry-run] label: +factory:triaging（裁决后 → accepted|rejected）"

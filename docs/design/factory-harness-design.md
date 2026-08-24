@@ -343,7 +343,7 @@ fix-issue 与 validate-PR 的 AI 评审节点**必须**是不同会话（A1）�
 | 阶段 | 出口判据（全部满足才晋级） |
 |---|---|
 | S0 治理 | ✅ 治理锁 + mutations 冒烟 kill rate 100%（篡改类） |
-| S1 → L3 | fix-issue 全链路人工触发可用；3+ issue 并行；PIV 循环零人工；行为破坏类缺陷集扩充后 kill rate ≥80% |
+| S1 → L3 | fix-issue 全链路人工触发可用；3+ issue 并行；PIV 循环零人工；行为破坏类缺陷集扩充后 kill rate ≥80% ——**已证**（2026-08-24：篡改类 6/6 + 行为破坏类 5/5 = 11/11 = 100%，负例 2/2 放行；逐条击杀证据 `.factory/mutations/EVIDENCE-2026-08-24.md`；A5 必要非充分，auto-merge 开启仍属人类治理动作） |
 | S2 → L4 | dispatcher 上线；连续 7 天无人干预 auto-merge ≥5 PR；holdout 误报率 <10%；cost/PR < 锁定上限 |
 | S3 → L4.5 | 周度自愈回归回灌 ≥1 个真实回归；模型路由经 benchmark 矩阵校准；skill-evo 元闭环跑通 |
 | **Shapiro 测试** | 离开 12 小时，回来 tests 全绿、PR 已合并、无 needs-human 堆积 |

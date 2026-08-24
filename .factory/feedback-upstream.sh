@@ -9,7 +9,8 @@
 # 用法: feedback-upstream.sh [--dry-run]
 #   --dry-run  只打印待反哺候选与上游漂移报告，零副作用
 # env: UPSTREAM_PATH(默认 ~/sources/awesome-rules)  UPSTREAM_REPO(默认 im47cn/awesome-rules)
-#      NODE_TIMEOUT(适配节点预算，默认 30m)
+#      NODE_TIMEOUT(适配节点预算，默认 30m)  GH_HOST(github 主机，默认 github.com)
+#      PUSH_URL(显式推送目标，最高优先)  FREMOTE(显式基点 remote，镜像拓扑用)
 set -euo pipefail
 
 REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "不在仓库内" >&2; exit 2; }
@@ -24,6 +25,17 @@ die() { printf '✗ %s\n' "$*" >&2; exit 1; }
 
 # --- 1. 待反哺候选（trailer ∨ bootstrap，− 账本；旧→新） ---
 PENDING="$(python3 "$FACTORY/feedback.py" pending)" || die "候选收集失败"
+# --- 1.5 疑似已随演化反哺（SHA 语义缺口）：内容经 cherry-pick+适配演化
+#        反哺、SHA 未直樱桃的提交会永久 pending（etf-radar#66 实证，曾靠人工识别
+#        孪生补录）。确定性文件集覆盖判定 → 跳过 + 亮清单，人工确认后
+#        feedback.py record 补录清账（不自动入账：覆盖是强信号非等价证明）
+SUPERSEDED="$(python3 "$FACTORY/feedback.py" superseded)" || die "superseded 收集失败"
+if [ -n "$SUPERSEDED" ]; then
+  say "疑似已随演化反哺 $(printf '%s\n' "$SUPERSEDED" | wc -l | tr -d ' ') 条（跳过；人工确认后 feedback.py record 补录）:"
+  printf '%s\n' "$SUPERSEDED" | sed 's/^/  /'
+  PENDING="$(printf '%s\n' "$PENDING" \
+    | grep -vFf <(printf '%s\n' "$SUPERSEDED" | cut -f1) || true)"
+fi
 [ -z "$PENDING" ] && { say "无待反哺候选（账本已覆盖全部标记提交）"; exit 0; }
 N_TOTAL="$(printf '%s\n' "$PENDING" | wc -l | tr -d ' ')"
 say "待反哺候选: ${N_TOTAL} 个"
@@ -45,28 +57,40 @@ mkdir -p "$FB_DIR/upstream-wt"
 GITUP=(git -C "$UPSTREAM_PATH")
 # remote 拓扑随用户工作流变化（2026-08-22 实测：github remote 并入 origin 双推送，
 # fetch=codeup 镜像 / push=codeup+github）。故不假设 remote 名：
-# - 拉基点用 origin（用户既定事实源；有专用 fetch remote 时优先）
-# - 推送显式解析 github push-URL 直推，避免多 pushurl 连带镜像
-FREMOTE="$("${GITUP[@]}" remote -v | awk -v repo="$UPSTREAM_REPO" \
-  '$0 ~ repo && $3 == "(fetch)" {print $1; exit}')"
-FREMOTE="${FREMOTE:-origin}"
+# - 拉基点（FREMOTE）：①环境变量显式指定（镜像拓扑逃生口）；②fetch URL 确指
+#   UPSTREAM_REPO 的 remote；③origin 兜底——其 fetch∨push URL 任一确指才可信
+#   （双推镜像：fetch=codeup 无 slug、push=github 有），无关 origin 的 main 会
+#   成为错误基点、PR 基于错误仓历史，故不可信即 fail（etf-radar#71 审查 1，fail-closed）
+# - 推送显式解析 github push-URL 直推（主机经 GH_HOST 配置，GHE/别名可用），
+#   避免多 pushurl 连带镜像
+FREMOTE="${FREMOTE:-}"
+if [ -z "$FREMOTE" ]; then
+  FREMOTE="$("${GITUP[@]}" remote -v | awk -v repo="$UPSTREAM_REPO" \
+    'index($0, repo) && $3 == "(fetch)" {print $1; exit}')"
+fi
+if [ -z "$FREMOTE" ]; then
+  if "${GITUP[@]}" remote -v | awk -v repo="$UPSTREAM_REPO" \
+      '$1 == "origin" && index($0, repo) {ok=1} END {exit !ok}'; then
+    FREMOTE=origin
+  else
+    die "无可信基点 remote：无 fetch URL 指向 ${UPSTREAM_REPO}，origin 的 URL 亦不含（镜像拓扑可用 FREMOTE 显式指定）"
+  fi
+fi
 "${GITUP[@]}" fetch "$FREMOTE" main --quiet
 BASE="$("${GITUP[@]}" rev-parse --verify "$FREMOTE/main^{commit}")" \
   || die "无法解析 $FREMOTE/main"
-PUSH_URL="$("${GITUP[@]}" remote -v | awk -v repo="$UPSTREAM_REPO" \
-  '$0 ~ /github\.com/ && $0 ~ repo && $3 == "(push)" {print $2; exit}')"
-[ -n "$PUSH_URL" ] || die "上游 clone 无指向 github.com/${UPSTREAM_REPO} 的 push url"
-# 跨仓对象：上游对象库没有本仓提交，cherry-pick 前临时挂源 remote 拉取
-# （结束移除；拉入对象随后不可达，交由上游 gc，无残留引用）
-REMOTE_ADDED=0
-if "${GITUP[@]}" remote add feedback-src "$REPO" >/dev/null 2>&1; then
-  REMOTE_ADDED=1
-else
-  # 已存在则验证可用后复用；仅本次添加的才在 cleanup 移除（防误删用户既有 remote）
-  "${GITUP[@]}" remote get-url feedback-src >/dev/null 2>&1 \
-    || die "feedback-src remote 已存在但不可用"
+# 主机不硬编码 github.com——GHE/SSH 别名经 GH_HOST 配置（与 gh CLI 同名同默认）；
+# 显式 PUSH_URL 环境变量最高优先（etf-radar#71 审查 3）。index() 字面匹配免转义
+if [ -z "${PUSH_URL:-}" ]; then
+  PUSH_URL="$("${GITUP[@]}" remote -v | awk -v repo="$UPSTREAM_REPO" -v host="${GH_HOST:-github.com}" \
+    'index($0, host) && index($0, repo) && $3 == "(push)" {print $2; exit}')"
 fi
-"${GITUP[@]}" fetch -q feedback-src main
+[ -n "$PUSH_URL" ] || die "上游 clone 无指向 github.com/${UPSTREAM_REPO} 的 push url（GH_HOST/PUSH_URL 可配置）"
+# 跨仓对象：上游对象库没有本仓提交，cherry-pick 前临时挂源 remote 拉取
+# （结束移除；拉入对象随后不可达，交由上游 gc，无残留引用）。
+# remote add 本体移至 dry-run 出口之后——dry-run 不做上游配置变更
+# （etf-radar#69 审查）；REMOTE_ADDED=0 先行初始化（cleanup 引用，set -u）
+REMOTE_ADDED=0
 cleanup() {
   git -C "$UPSTREAM_PATH" worktree remove --force "$WT" >/dev/null 2>&1 || true
   git -C "$UPSTREAM_PATH" branch -qD "$BRANCH" >/dev/null 2>&1 || true
@@ -85,6 +109,20 @@ say "上游 worktree: $WT 分支: $BRANCH (基点 $FREMOTE/main@${BASE:0:9})"
 #     上游 bare 无工作树，2026-08-22 前的磁盘直比已不可行） ---
 python3 "$FACTORY/feedback.py" report "$WT"
 [ "$DRY" = 1 ] && { say "[dry-run] 到此为止，未做任何变更"; exit 0; }
+
+# 跨仓对象：上游对象库没有本仓提交，cherry-pick 前临时挂源 remote 拉取
+# （结束移除；拉入对象随后不可达，交由上游 gc，无残留引用）。
+# dry-run 出口之后才做：remote add 属上游配置变更，只读模式不碰
+if "${GITUP[@]}" remote add feedback-src "$REPO" >/dev/null 2>&1; then
+  REMOTE_ADDED=1
+else
+  # 已存在则校验 URL 确指本仓后复用——存在≠正确，指向他仓会让 fetch/cherry-pick
+  # 读到错误对象源（etf-radar#71 审查 2）；仅本次添加的才 cleanup 移除（防误删用户配置）
+  EXISTING_SRC="$("${GITUP[@]}" remote get-url feedback-src 2>/dev/null || true)"
+  [ -n "$EXISTING_SRC" ] && [ "$EXISTING_SRC" = "$REPO" ] \
+    || die "既有 feedback-src 指向「${EXISTING_SRC:-空}」≠ 本仓 ${REPO}，拒绝复用（请手工处理）"
+fi
+"${GITUP[@]}" fetch -q feedback-src main
 
 # --- 3.6 依赖闭包（fail-closed）：候选脚本引用的 .factory 资产必须
 #     上游已有 ∨ 候选随行；防 PR #18 只带主脚本、配套件断链复演 ---
@@ -123,11 +161,19 @@ pathlib.Path(fb_dir, "manifest.json").write_text(
 PYEOF
 PROMPT="$(cat "$FACTORY/prompts/feedback-adapt.md")
 
+
 ——任务参数:
 - FEEDBACK_DIR: $FB_DIR
 - 上游 worktree: ${WT}（你在此工作树上操作；基点含上游最新 main）
 - 候选数: ${N_TOTAL}（manifest.json 为准）"
 say "==> 适配节点（fresh context 进程，预算 ${NODE_TIMEOUT:-30m}）"
+# 越界检测基线（源仓）：适配节点曾在源仓自行开分支/提交/开 PR（etf-radar#71
+# 事故——prompt 当时只约束上游 git）。节点自身的 push/PR 无法本地拦截
+# （凭据是环境态），此指纹保证脚本自身的推送/入账前发现越界并终止。
+# 分支表 = 硬判据（dispatcher 归位只 checkout 不建分支，零误报源）；
+# HEAD 漂移 = 仅告警（dispatcher factory/base 归位是已知良性源，不可区分）
+SRC_HEADS_BEFORE="$(git -C "$REPO" for-each-ref --format='%(refname)' refs/heads/ | sort)"
+SRC_HEAD_BEFORE="$(git -C "$REPO" rev-parse HEAD)"
 NODE_RC=0
 (cd "$WT" && omp -p "$PROMPT" --no-session \
       --max-time "${NODE_TIMEOUT:-30m}" </dev/null) > "$FB_DIR/adapt.log" 2>&1 || NODE_RC=$?
@@ -153,6 +199,19 @@ if [ -n "$BAD_FILES" ]; then
 fi
 [ -z "$("${GITW[@]}" status --porcelain)" ] || die "上游 worktree 残留未提交改动（adapt.md 说明见 ${FB_DIR}）"
 say "✓ 适配完成: ${N_COMMITS} commits，全部位于 .factory/"
+# 越界检测（源仓，etf-radar#71 事故收口）：分支表变动 = die（推送/入账前拦截）；
+# HEAD/分支漂移 = 告警（dispatcher 归位不可区分，人工甄别）；findings.md
+# = 节点按 prompt 契约上报的源仓/工具链缺陷，人工处置
+SRC_HEADS_AFTER="$(git -C "$REPO" for-each-ref --format='%(refname)' refs/heads/ | sort)"
+[ "$SRC_HEADS_BEFORE" = "$SRC_HEADS_AFTER" ] \
+  || die "适配节点越界：源仓分支表变动（git for-each-ref 甄别；产物 ${FB_DIR}）"
+if [ "$(git -C "$REPO" rev-parse HEAD)" != "$SRC_HEAD_BEFORE" ]; then
+  say "⚠ 源仓 HEAD 在节点运行期间漂移（或为 dispatcher 归位；请人工确认）"
+fi
+[ -f "$FB_DIR/findings.md" ] && {
+  say "⚑ 节点上报源仓/工具链缺陷（人工处置，findings.md）:"
+  sed 's/^/  /' "$FB_DIR/findings.md"
+}
 
 # --- 7. 上游门禁：红 → 不开 PR，只收报告 ---
 # gauntlet（不是 run_tests.sh）: 2026-08-22 事故——适配节点产出 BRANCH 未定义

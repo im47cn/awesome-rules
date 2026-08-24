@@ -98,13 +98,23 @@ else
     # ── .factory/ shell 门（2026-08-22 feedback 事故后补） ─────────────
     # 事故：feedback 适配节点产出 BRANCH 未定义（SC2154）的 fix-issue.sh，
     # run_tests.sh 纯 pytest 门禁全绿放行。三层封堵：
-    run_layer syntax-factory-sh bash -n .factory/dispatch.sh .factory/fix-issue.sh \
-        .factory/factory-state.sh .factory/triage-batch.sh .factory/validate-pr.sh
+    # 扫描面 = tracked .factory/*.sh（2026-08-23 结构性修复）：手工清单
+    # 与目录内容必然漂移——factory-lib.sh（链共享收口库）、feedback-upstream.sh、
+    # cron-dispatch.sh 曾全部漏扫。tracked 面后新增链脚本自动入门。
+    FACTORY_SH=$(git ls-files -- '.factory/*.sh')
+    [ -n "$FACTORY_SH" ] || { echo "gauntlet: tracked .factory/*.sh 为空（层清单漂移）" >&2; exit 1; }
+    # shellcheck disable=SC2016  # $1 刻意由内层 sh 展开（外层单引号防本层展开）
+    run_layer syntax-factory-sh sh -c 'for f in $1; do bash -n "$f" || exit 1; done' \
+        sh "$FACTORY_SH"
     # -S warning：SC2154 正是事故形态（引用未赋值变量），不允许降级
-    run_layer lint-factory-shellcheck shellcheck -S warning \
-        .factory/dispatch.sh .factory/fix-issue.sh \
-        .factory/factory-state.sh .factory/triage-batch.sh .factory/validate-pr.sh
+    # shellcheck disable=SC2016  # 同上：$1 由内层 sh 展开
+    run_layer lint-factory-shellcheck sh -c 'shellcheck -S warning $1' \
+        sh "$FACTORY_SH"
     run_layer lint-factory-inline-python "$PY" tools/check_inline_python.py .factory tools scripts
+    # 管道早退静态门（issue #30 三犯成类）：pipefail 下非末位早退消费者
+    # （grep -m/head）与 true 管道段。扫描面 = tracked *.sh（67c2965b 原则）
+    run_layer lint-pipe-early-exit "$PY" tools/check_pipe_early_exit.py \
+        .factory tools scripts hooks skills arch-hawkeye .github
 fi
 
 echo "gauntlet: 全部层通过"

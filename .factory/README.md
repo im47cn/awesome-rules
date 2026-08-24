@@ -1,6 +1,6 @@
 # .factory — 维护工厂（S2 派发形态：dispatch.sh + 状态同步器）
 
-> 状态：S1。人类只做两件事：**写 issue、合并 PR**。
+> 状态：S2（人工路径收口中；设计文档 §8 判据为准）。人类只做两件事：**写 issue、合并 PR**。
 > 治理依据：[MISSION.md](../MISSION.md)（宪法，工厂永不可改）。
 > 设计文档：[docs/design/factory-harness-design.md](../docs/design/factory-harness-design.md)。
 
@@ -221,8 +221,12 @@ python3 .factory/mutations/run.py [--only G-01,G-03]
 ## S1/S2 已知边界
 
 - S1 手动跑 `fix-issue.sh`；S2 用 `dispatch.sh`（本仓库现已内置）。
-  auto-merge 仍默认关闭（A5：mutations kill-rate 未证 ≥80%）。
   标签状态机唯一权威在 `state.py TRANSITIONS`（12 条边全覆盖有测试）。
+- S1→L3 出口判据「行为破坏类缺陷集扩充后 kill rate ≥80%」已证（2026-08-24）：
+  篡改类 6/6 + 行为破坏类 5/5，kill rate 11/11 = 100%，负例放行 2/2；
+  证据口径与逐条击杀明细见 `.factory/mutations/EVIDENCE-2026-08-24.md`。
+  A5 仍为必要非充分条件——`metrics/auto-merge-unlocked` 的开启/重签是治理
+  动作，由人类决定（其记录的 6/6 口径早于本扩充，开启与否人类复核）。
 - holdout 输入白名单是提示词纪律级约束，S2+ 换 SDK
   `restrictToolNames` 物理化（设计文档 §7）。
 - `--fill` 生成的 PR 标题质量依赖 implement 的 commit 信息。

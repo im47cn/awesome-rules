@@ -2,10 +2,10 @@
 # 变更行覆盖率红线（awesome-rules tools/git 分发，由 lefthook 调用）
 # 用法: bash .lefthook/coverage.sh light   # pre-commit 轻检：复用已有 coverage 产物，不跑测试
 #       bash .lefthook/coverage.sh full    # pre-push 兜底：跑 pytest --cov / vitest --coverage
-# 红线: 变更行测试覆盖率 ≥95%；无测试基础设施/无产物时提示后放行（全量兜底在 full）
+# 红线: 变更行测试覆盖率 ≥80%（issue #3：与 steering testing 分层标准对齐）；无测试基础设施/无产物时提示后放行（全量兜底在 full）
 set -u
 MODE="${1:-light}"
-FAIL_UNDER=95
+FAIL_UNDER=80
 
 REPO=$(git rev-parse --show-toplevel)
 cd "$REPO"

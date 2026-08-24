@@ -12,6 +12,8 @@ CLI:
   factory_lib.py parse   <logfile> <outjson> <allowed-csv>   # 解析 agent 输出 JSON
   factory_lib.py breaker <floor.json> <ledger.jsonl>         # 熔断检查（超限 exit 3）
   factory_lib.py suites  <file...>                           # 证据段套件清单
+  factory_lib.py sanitize <file...>                           # 标记中和（原地写回，幂等；评论出口必经）
+  factory_lib.py rejected-reconcile < issues.json            # rejected 存量对账报告（TSV）
 """
 
 from __future__ import annotations
@@ -116,7 +118,11 @@ def classify_task(files: list[str]) -> str:
         return "empty"
 
     def _is_test(f: str) -> bool:
-        return "/tests/" in f or f.startswith("tests/") or "/test_" in f or f.startswith("test_")
+        # 前端约定也算 test（etf-radar#69 审查）：.test.* / .spec.* / __tests__
+        return ("/tests/" in f or f.startswith("tests/")
+                or "/__tests__/" in f or f.startswith("__tests__/")
+                or "/test_" in f or f.startswith("test_")
+                or ".test." in f or ".spec." in f)
 
     md = [f for f in files if f.endswith((".md", ".mdx"))]
     code = [f for f in files if not f.endswith((".md", ".mdx"))]
@@ -136,7 +142,7 @@ def classify_task(files: list[str]) -> str:
 # 各自本地化，勿回传覆盖
 REJECT_GUIDANCE: dict[str, str] = {
     "a": "判据a（使命一致）：写明落点——规范（steering/）、技能（skills/）、审查工具链或文档中的哪个文件/模块；",
-    "b": "判据b（可判定）：把完成标准写成可机械验证的形式——验收 = 具体测试/脚本的断言（公式、逐条清单、file:line 级差异），避免「持续 / 优化 / 失修」类开放措辞；",
+    "b": "判据b（可判定）：把完成标准写成可机械验证的形式——验收 = 具体测试/脚本的断言（公式、逐条清单、file:line 级差异），避免「持续 / 优化 / 失修」类开放措辞；doc-only（纯文档）改动在验证门零投影——补可执行验收载体（markdownlint / CI 链接检查 / 可断言测试）或转人工 PR；",
     "c": "判据c（不触周界）：触及 PERIMETER 的部分拆成独立 issue 走人类 PR（清单见 MISSION.md）；",
 }
 
@@ -154,6 +160,43 @@ def neutralize_marker(text: str) -> str:
     while "[factory:rejected]" in text:
         text = text.replace("[factory:rejected]", "factory:rejected")
     return text
+
+def rejected_reconcile(issues: list[dict]) -> list[dict]:
+    """open+factory:rejected issue → 人工处置活动对账（纯函数）。
+
+    闭环缺口（2026-08-23 审计实证）：4 个 rejected issue 的修复已由人工
+    feedback PR 吸收进 main，但 issue 仍 open 挂 rejected——链的 reject
+    语义是"不修"，reject→人工路径有效但没有回写闭环，"已修未关"只能靠
+    人工审计发现。本函数不判定"是否已修复"（语义判断，机器不可判定），
+    只暴露处置信号：reject 回执之后的人工评论数（bot 回执标题为界）。
+    有后续人工评论 = 大概率已处置，提示复核关闭；零评论 = 静默滞留。
+    输出仅报告（dispatch 每轮尾部 echo），不动作——铁律 4：零 LLM 纯 bash
+    调用，关闭决策永远归人类。
+    """
+    out = []
+    for it in issues:
+        comments = [c for c in (it.get("comments") or [])
+                    if isinstance(c, dict)]
+        bot_idx = [i for i, c in enumerate(comments)
+                   if "工厂 triage 裁决：reject" in str(c.get("body") or "")]
+        after = comments[(max(bot_idx) + 1):] if bot_idx else comments
+        # 人工评论 = 有 author 且非 [bot] 后缀（GitHub bot 通用标识）且
+        # 非链回执；缺 author 的畸形条目不计（报告宁少勿多）
+        human = [c for c in after
+                 if str(c.get("author") or "") and not str(c.get("author")).endswith("[bot]")
+                 and "工厂 triage 裁决" not in str(c.get("body") or "")]
+        out.append({
+            "number": it.get("number"),
+            "title": str(it.get("title") or "")[:60],
+            "human_comments_after_reject": len(human),
+        })
+    return out
+
+
+RECEIPT_CLOSURE_NOTE = (
+    "> 处置协议：走人工 PR 修复本 issue 时，PR 描述请带 `Closes #<编号>`"
+    "——合并即自动关闭，避免「已修未关」滞留（reject→人工路径的闭环盲区）。"
+)
 
 
 def reject_receipt(triage: dict) -> str:
@@ -199,6 +242,8 @@ def reject_receipt(triage: dict) -> str:
         "  未覆盖: 仓库事实核对（裁决器无工具权限，不做代码 / 数据检索；重投前请补足具体事实）",
         "  置信度: 二值裁决基于 issue 文本与 MISSION 判据核对，无运行时验证",
         "",
+        RECEIPT_CLOSURE_NOTE,
+        "",
     ]
     return "\n".join(lines)
 
@@ -217,6 +262,12 @@ def main(argv: list[str]) -> int:
     if cmd == "receipt":
         # receipt <triage.json> —— 拒绝回执 markdown（确定性模板，零 LLM）
         print(reject_receipt(json.loads(Path(argv[2]).read_text(encoding="utf-8"))))
+        return 0
+    if cmd == "rejected-reconcile":
+        # rejected-reconcile < issues.json —— dispatch 尾部对账报告（TSV:
+        # number \t human_comments \t title）。见 rejected_reconcile
+        for r in rejected_reconcile(json.load(sys.stdin)):
+            print(f"{r['number']}\t{r['human_comments_after_reject']}\t{r['title']}")
         return 0
     if cmd == "sanitize":
         # sanitize <file>... —— 评论出口标记中和：原地写回（无变化则跳过，

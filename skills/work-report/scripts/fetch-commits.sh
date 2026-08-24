@@ -88,7 +88,7 @@ wip_signal() {
     raw=$(git -C "$repo" branch --no-merged "$main_branch" 2>/dev/null \
           | sed 's/^[* ]*//' | grep -v -E "^(main|master)$" || true)
     if [ -n "$raw" ]; then
-      unmerged=$(echo "$raw" | head -5 | tr '\n' ',' | sed 's/,$//')
+      unmerged=$(echo "$raw" | sed -n '1,5p' | tr '\n' ',' | sed 's/,$//')
     fi
   fi
 
