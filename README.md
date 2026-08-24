@@ -14,9 +14,11 @@ awesome-rules/
 │   ├── review-report-standards.md     # 审查报告输出规范
 │   └── gtsp/                          # GTSP 工程规范（Java/Spring Cloud，按维度拆分，含 DDD 架构）
 ├── skills/                            # AI Agent 技能
+│   ├── _shared/                       # guard 技能共享库（Severity/文件发现/报告骨架）
 │   ├── ddl-guard/                     # DDL 设计与审查
 │   ├── api-guard/                     # API 设计与审查
 │   ├── arch-guard/                    # DDD 架构分层审查
+│   ├── contract-guard/                # 跨仓契约兼容性设计与审查（japicmp + 下游编译门禁）
 │   ├── doc-gen/                       # DDD 技术文档自动生成（单项目）
 │   ├── impact-guard/                  # 变更影响分析（blast radius）
 │   ├── work-report/                   # 跨仓库工作日报/周报

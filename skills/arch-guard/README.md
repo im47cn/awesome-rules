@@ -115,6 +115,6 @@ python3 scripts/arch_check.py --mode graph
 
 - 技能定义：[`SKILL.md`](SKILL.md)
 - 检查脚本：[`scripts/arch_check.py`](scripts/arch_check.py)
-- 单元测试：[`scripts/tests/test_arch_check.py`](scripts/tests/test_arch_check.py)（53 条）
+- 单元测试：[`scripts/tests/test_arch_check.py`](scripts/tests/test_arch_check.py)（`pytest skills/arch-guard/scripts/tests -q`）
 - 架构规范：[`steering/gtsp/01-project-structure.md`](../../steering/gtsp/01-project-structure.md)
-- 审查样例：[`badcase/`](badcase/)（4 组场景，覆盖 9 处违规）
+- 审查样例：[`badcase/`](badcase/)（5 组场景）
