@@ -15,14 +15,14 @@
 | `artifacts/issue-N/` | 链产物（运行时输出，勿提交 git） |
 | `factory-lease.sh` | 租约仲裁客户端（claim/心跳/出口围栏；fail-closed，source 引入） |
 | `db/schema.sql` | 仲裁层 schema（Supabase/任何 Postgres，服务端原子，幂等迁移） |
-| `dispatch.sh` | S2 派发器（claim/重派/A5 门控 merge，零 LLM） |
+| `dispatch.sh` | S2 派发器入口 shim（编排下沉 `factory_lib.py dispatch` 子命令，ADR-005；CLI/env 契约不变，零 LLM） |
 | `cron-dispatch.sh` | hub kick 入口（LaunchAgent 600s → 锁 + dispatch 单轮） |
 | `factory-state.sh` | 标签同步器（GitHub 事实 → state.py 推导 → 幂等收敛） |
 | `validate-pr.sh` | S3 PR 门禁链（guard → tests → AI 评审 → holdout，人类合并前独立验证） |
 | `state.py` + `test_state.py` + `tests/` | 状态机权威（TRANSITIONS 唯一 spec）与全套测试 |
 | `feedback.py` + `feedback-upstream.sh` | etf-radar 工厂改进反哺上游仓（决策零 LLM，AI 仅适配内容） |
 | `breaker.sh` | R4 成本熔断门（fix-issue/dispatch/cron-dispatch/triage-batch 四入口共用接线点，透传 factory_lib breaker 码） |
-| `factory-lib.sh` + `factory_lib.py` | 链副作用共享库（issue 评论唯一出口/拒绝单一动作/租约围栏钩位）+ python 工具箱（timeout 分级预算/breaker/回执解析） |
+| `factory-lib.sh` + `factory_lib.py` | 链副作用共享库（issue 评论唯一出口/拒绝单一动作/租约围栏钩位）+ python 工具箱（timeout 分级预算/breaker/回执解析 + dispatch 进程编排：并发槽/收割/硬锁，ADR-005） |
 | `factory-local.json` | 工厂本地化配置（M4）：PERIMETER 与 REJECT_GUIDANCE 的数据载体——guard/factory_lib 零本地化的前提；改后须重跑 mutations 重证 |
 | `upstream-sync-check.sh` | M2 上游同步检查（dispatch 轮末）：full 漂移→确定性 PR 流；local 漂移→needs-human issue；无凭据降级仅报告 |
 | `sync-from-upstream.sh` + `DISTRIBUTION.json` | M1 上游同步：三态分发清单（full/local/skip）+ 下游拉取（--check 门禁/--apply 追平+锚点） |
@@ -101,7 +101,7 @@ triage 的输入，不是决策手势；标签才是）。
 ```bash
 bash .factory/dispatch.sh --dry-run        # 单轮演练（DRY=1 环境变量等价）
 bash .factory/dispatch.sh                  # 单轮：sync → PR结果 → 重派 → 队列
-bash .factory/dispatch.sh --watch          # 常驻，默认 1800s（或 cron */30 单轮）
+bash .factory/dispatch.sh --watch          # 常驻，默认 300s（或 cron 单轮；断档教训见文末）
 sh .factory/cron-dispatch.sh               # hub(LaunchAgent 600s) 的 kick 入口：锁 + triage + dispatch 单轮
 bash .factory/factory-state.sh sync --all  # 标签收敛（幂等，可随时/cron 跑）
 bash .factory/factory-state.sh sync 2 --plan   # 单 issue 计划模式（只打印）
