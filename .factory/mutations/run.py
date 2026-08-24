@@ -126,8 +126,11 @@ def run_gate(gate: str, target: str) -> int | None:
     except subprocess.TimeoutExpired:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass  # 组已自行退出（竞态窗口）
+        except (ProcessLookupError, PermissionError):
+            # ESRCH：组已自行退出（竞态窗口）。EPERM：macOS XNU 对含
+            # 待-reap 僵尸的进程组发信号报 EPERM（同 UID 亦然）——僵尸
+            # 无需再杀（SIGKILL 对僵尸本就是 no-op），等 init 收尸即可。
+            pass
         try:
             proc.communicate(timeout=10)  # 收尸并排干管道
         except subprocess.TimeoutExpired:
