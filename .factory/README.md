@@ -26,12 +26,14 @@
 | `factory-local.json` | 工厂本地化配置（M4）：PERIMETER 与 REJECT_GUIDANCE 的数据载体——guard/factory_lib 零本地化的前提；改后须重跑 mutations 重证 |
 | `upstream-sync-check.sh` | M2 上游同步检查（dispatch 轮末）：full 漂移→确定性 PR 流；local 漂移→needs-human issue；无凭据降级仅报告 |
 | `sync-from-upstream.sh` + `DISTRIBUTION.json` | M1 上游同步：三态分发清单（full/local/skip）+ 下游拉取（--check 门禁/--apply 追平+锚点） |
+| `decisions.md` | 工厂决策记录（ADR-001~005：租约仲裁/A3 记账/单写者降级/周回归/dispatch 下沉）；进程管理类缺陷须在此记账（ADR-002） |
+| `regression/` | 自挖掘周回归（ADR-004）：weekly-regression.sh 串联 badcase/gauntlet/doc-freshness 三层，失败自动开 `[factory-regression]` issue 走 triage |
 
 ## 前置条件
 - `omp` CLI（AI 节点引擎；每节点独立进程 = 物理级 fresh context）
 - `gh` 已认证（取 issue、建 PR）
 - `python3`（guard / mutations / JSON 解析）
-- `SUPABASE_DB` 仲裁层 PG 连接串（Supabase pooler 或自建 Postgres；未设 fail-closed，见「租约仲裁」）
+- `SUPABASE_DB` 仲裁层 PG 连接串（Supabase pooler 或自建 Postgres；未设 = 单写者模式本地锁降级，见「租约仲裁」）
 
 ## 快速开始
 
@@ -161,8 +163,9 @@ python3 -m pytest .factory/test_state.py -o addopts= -q   # 状态机测试
   fence 校验与 GitHub 写之间的秒级残窗由回执幂等键
   （`factory:receipt:issue-N:rR`，`issue_comment` 查重跳过）兜底。
 
-fail-closed 铁律：`SUPABASE_DB` 未设 / 仲裁不可达 = 链终止（exit 4），
-绝不降级裸跑——降级等于重新打开多写者竞态。
+双态铁律：`SUPABASE_DB` 已设但 psql 不可达 = 配置错误，fail-closed 链终止
+（exit 4），绝不降级——把配置错误伪装成单写者形态等于重新打开多写者竞态。
+`SUPABASE_DB` 未设 = 显式选择单写者形态，降级本地锁（见下节「单写者降级」）。
 
 链侧接线（fix-issue.sh）：打首个 issue 标签**前** claim `issue:N` → 后台
 心跳（默认 60s，租期 900s 的 1/15 余量）→ 失约（被夺/吊销/过期）被 TERM，
@@ -170,6 +173,20 @@ fail-closed 铁律：`SUPABASE_DB` 未设 / 仲裁不可达 = 链终止（exit 4
 重投 = 续约（epoch 不变）；他机接管须等过期（epoch+1，旧链 fence 必失败）。
 triage 批次无租约上下文（`LEASE_KEY` 未设出口不拦）：单 dispatcher 锁内
 运行且只挑零标签 issue，与链的竞态窗口秒级可忽略。
+
+### 单写者降级（SUPABASE_DB 未设）
+
+未设 `SUPABASE_DB` = 显式选择单写者形态：claim / heartbeat / release /
+fence 全部降级到本地锁文件（主树 `.factory/locks/leases/<key>.lock`，
+worktree 经 git-common-dir 共享），无 PG 也能跑——下游复制工厂的最小形态。
+语义对齐仲裁层：O_EXCL 判代、过期 = mtime+`FACTORY_LEASE_SECS`、过期可夺
+（epoch+1）、fence 校验 machine-id+epoch、心跳刷 mtime、过期不许复活。
+epoch 计数器（`<key>.epoch`）保证 fencing token 跨 release 单调不回零
+（对齐 PG 行常驻语义）。一处刻意从严：持有中二次 claim 即便同机也拒——
+本地锁的互斥对象就是同机进程，PG 的同机续约语义在此恰是要防的双链并发。
+跨机互斥不存在（本地锁互不可见），每个降级路径 stderr 显式告警
+single-writer mode。已设 `SUPABASE_DB` 但 psql 不可达不走此路径，
+仍是 fail-closed（配置错误 ≠ 显式选择）。
 
 ### 租户 onboarding（运维手册，管理员执行）
 
@@ -198,7 +215,7 @@ SECURITY DEFINER、租户经 `session_user` 解析。详见 `db/schema.sql` 头�
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `NODE_TIMEOUT` | `30m` | 单 AI 节点 `omp --max-time` 预算 |
-| `SUPABASE_DB` | — | 仲裁层 PG 连接串（必设；未设/不可达 fail-closed） |
+| `SUPABASE_DB` | — | 仲裁层 PG 连接串（未设=单写者降级；已设不可达 fail-closed） |
 | `FACTORY_LEASE_SECS` | `900` | 租期秒数（心跳间隔的 15 倍余量） |
 | `FACTORY_HB_INTERVAL` | `60` | 心跳间隔秒数 |
 
