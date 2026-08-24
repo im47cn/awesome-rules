@@ -41,6 +41,7 @@ git() {
   return 0
 }
 issue_label() { echo "label:$*" >> "$CALLS"; }
+lease_cleanup() { echo "lease:cleanup" >> "$CALLS"; }
 trap '__PAYLOAD__' EXIT
 exit __RC__
 """
@@ -112,3 +113,12 @@ def test_no_salvage_when_branch_has_no_commits():
     lines, _ = _run_trap(rc=1, count="0")
     assert not any(l.startswith("git:") and "push" in l for l in lines)
     assert "label" in _kinds(lines)
+
+
+def test_label_cleanup_before_lease_release():
+    """PR#34：失败清标在 lease_cleanup 之前——清标也是副作用出口，须持有效租约过围栏。"""
+    lines, _ = _run_trap(rc=1)
+    labels = [i for i, ln in enumerate(lines) if ln.startswith("label:")]
+    lease = [i for i, ln in enumerate(lines) if ln.startswith("lease:")]
+    assert labels and lease                       # 两者都执行
+    assert max(labels) < min(lease)               # 且清标先于放租约

@@ -86,7 +86,14 @@ ensure_labels() {
   done
 }
 
-issue_label() { # issue_label <add|remove> <name> —— 失败仅告警
+issue_label() { # issue_label <add|remove> <name> —— 失败仅告警；租约失效跳写
+  # 出口围栏（PR#34 审查修复）：诈尸链的标签写同样有毒，失效即跳写。
+  # 跳过而非终止：trap 清理路径必须永不中断（后续台账/回收/放锁依赖顺序）；
+  # 被跳过的链由下一处硬围栏（issue_label_swap/issue_comment）或心跳 TERM 终结。
+  if ! lease_guard; then
+    echo "  [warn] 租约 ${LEASE_KEY:-?} 已失效（epoch=${LEASE_EPOCH:-?}），${1} ${2} 跳过（围栏）" >&2
+    return 0
+  fi
   if gh issue edit "${ISSUE}" --"${1}-label" "${2}" >/dev/null 2>&1; then
     echo "  [label] ${1} ${2}"
   else
@@ -225,6 +232,20 @@ if [ "${DRY}" = 0 ]; then
   # 被吞成空串。豁免面已由裸调用纪律根治，本守卫保留为纵深防御+精确报错）
   python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get("title") else 3)' \
     "${DIR}/issue.json" 2>/dev/null || { echo "issue.json 无效（空/非 JSON/无 title），链终止" >&2; exit 2; }
+  # --- 租约认领（多写者仲裁，2026-08-24；README「租约仲裁」）---
+  # fail-closed：认领失败（他机链持有未过期租约 / 仲裁不可达 / SUPABASE_DB
+  # 未设）= 链终止——降级裸跑等于重新打开多写者竞态。LEASE_KEY/LEASE_EPOCH
+  # 是 factory-lib.sh 出口围栏的上下文：被夺/吊销的诈尸链在 label/评论出口被拒，
+  # 秒级残窗由回执幂等键兜底。claim 放在首个 issue 侧副作用（打 triaging）之前。
+  LEASE_KEY="issue:${ISSUE}"
+  LEASE_EPOCH="$(lease_claim "${LEASE_KEY}")" \
+    || { echo "[error] 租约 ${LEASE_KEY} 认领失败，fail-closed 终止（README「租约仲裁」）" >&2; exit 4; }
+  # 心跳失约（被夺/吊销/过期）即被后台循环 TERM：exit 143 触发 EXIT trap 级联
+  # （台账/清标/worktree 回收/放租约）。此处到 trap 升级之间无可失败语句，
+  # 残余窗口由租约自然过期（默认 900s）自愈。
+  trap "exit 143" TERM   # 双引号：test_fix_issue_trap 的 trap 提取正则按 ' EXIT 锚定，单引号形态会被截胡
+  lease_heartbeat_loop "${LEASE_KEY}" "${LEASE_EPOCH}"
+  echo "  [lease] ${LEASE_KEY} epoch=${LEASE_EPOCH} 已认领（心跳 ${FACTORY_HB_INTERVAL:-60}s）"
   ensure_labels
   issue_label add factory:triaging
   # 轮次：同 issue 的第 N 次链（chain-history 计数；首轮通过率的分母）
@@ -274,9 +295,13 @@ if [ "${DRY}" = 0 ]; then
   #   不阻断后续清理（网络故障不应二次放大为状态残留）
   # - 非零退出移除流转标签回零标签态（可重试）；无论成败都记账；
   #   worktree 无论成败一并回收
+  # - 清理顺序（PR#34 审查修复）：标签清理在 lease_cleanup **之前**——清标
+  #   也是副作用出口，须持有效租约过围栏；先放租约会让正常失败链的清标被拒
+  #   （标签滞留）。被夺/吊销链的清标被围栏跳过是正确行为：标签归新属主，
+  #   或作为人工债务可见。lease_cleanup 收心跳+放租约，放清理链末尾。
   # D1: 本 trap 覆盖早期放锁 trap，故自带锁释放；派发链 MANUAL_LOCK=0 不动锁
   # shellcheck disable=SC2154  # rc 于本 trap 行内由 rc=$? 赋值，shellcheck 不解析 trap 字符串
-  trap 'rc=$?; set +e; write_ledger "${rc}"; if [ "${rc}" -ne 0 ] && [ "$(git -C "${REPO}" rev-list --count main.."${BRANCH}" 2>/dev/null || echo 0)" -gt 0 ]; then git -C "${REPO}" push --force --no-verify origin "${BRANCH}" >/dev/null 2>&1 && echo "  [salvage] 失败链产出已推送 origin/${BRANCH}" || echo "  [warn] 失败链产出推送失败，产出仅在本地分支 ${BRANCH}" >&2; fi; git -C "${REPO}" worktree remove --force "${WT}" >/dev/null 2>&1 || true; [ "${rc}" -ne 0 ] && { issue_label remove factory:triaging; issue_label remove factory:accepted; issue_label remove factory:in-progress; }; [ "${MANUAL_LOCK}" = 1 ] && rm -rf "${LOCKDIR:-}" 2>/dev/null' EXIT
+  trap 'rc=$?; set +e; write_ledger "${rc}"; if [ "${rc}" -ne 0 ] && [ "$(git -C "${REPO}" rev-list --count main.."${BRANCH}" 2>/dev/null || echo 0)" -gt 0 ]; then git -C "${REPO}" push --force --no-verify origin "${BRANCH}" >/dev/null 2>&1 && echo "  [salvage] 失败链产出已推送 origin/${BRANCH}" || echo "  [warn] 失败链产出推送失败，产出仅在本地分支 ${BRANCH}" >&2; fi; git -C "${REPO}" worktree remove --force "${WT}" >/dev/null 2>&1 || true; [ "${rc}" -ne 0 ] && { issue_label remove factory:triaging; issue_label remove factory:accepted; issue_label remove factory:in-progress; }; lease_cleanup; [ "${MANUAL_LOCK}" = 1 ] && rm -rf "${LOCKDIR:-}" 2>/dev/null' EXIT
 else
   echo "[dry-run] gh issue view #${ISSUE} → ${DIR}/issue.json"
   echo "[dry-run] label: +factory:triaging（裁决后 → accepted|rejected）"

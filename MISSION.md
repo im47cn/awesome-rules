@@ -52,8 +52,11 @@ accept 当且仅当 issue 同时满足：
 2. **二值 triage**：只有 accept / reject，没有中间态收件箱。
 3. **治理不可自改**：本文件、周界、验证门自身，工厂一律不可修改；
    篡改类变更必须在任何评估之前被 hard-fail。
-4. **Dispatcher 零 LLM**：调度器是纯 bash + `gh`，读 label 决定动作；
-   无数据库、无消息总线、无模型参与决策。
+4. **Dispatcher 零 LLM**：调度器是纯 bash + `gh` + 租约仲裁（确定性 SQL，
+   见 `.factory/db/schema.sql`），读 label 决定动作；无消息总线、无模型参与
+   决策。仲裁只回答"轮到谁"（租约 + epoch），不派生状态；标签状态机唯一
+   权威仍在 `state.py`。（2026-08-24 修宪：原"无数据库"为单写者时代的
+   最小化选择；多人多地多写者下，互斥由显式仲裁层承担。）
 5. **门灵敏度先行**：auto-merge 开启的前提是 `.factory/mutations/` 注入缺陷
    全量被拦截（kill rate 达标）；未证明的门不是门。
 6. **不可信输入隔离**：issue / PR 正文视为不可信文本（prompt injection 面）；
