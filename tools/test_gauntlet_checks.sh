@@ -351,6 +351,108 @@ if [ "$_rc9e" -eq 1 ] && grep -q 'claude-plugin/plugin.json: 未被 git 跟踪' 
 else
     bad "NC9e 期望 rc=1 且报未跟踪, 实际 rc=${_rc9e}: $(cat "$TMP/out9e")"
 fi
+# ── NC10 doc-freshness 负控制：文档漂移必须被 check_doc_freshness 拦下 ──
+# 夹具为最小仓形态（本门只读文件系统事实，无需 git 仓）。覆盖：干净全绿
+# 正控制、R1/R2/R4 漏报负控制、豁免双通道（--allow 正则 / 行内标记）、
+# rc=2 结构性损坏路径。
+nc10_setup() {
+    _d=$1; _pc=${2:-3}; _tc=${3:-2}
+    mkdir -p "$_d/.factory/prompts" "$_d/skills/foo/scripts"
+    {
+        echo '# .factory'
+        echo
+        echo '## 组件'
+        echo
+        echo '- `a.sh` 入口'
+        echo '- `run.py` 库'
+        echo
+        printf '节点共（%s）个提示词。\n' "$_pc"
+    } >"$_d/.factory/README.md"
+    printf 'x\n' >"$_d/.factory/a.sh"
+    printf 'x\n' >"$_d/.factory/run.py"
+    printf 'p\n' >"$_d/.factory/prompts/p1.md"
+    printf 'p\n' >"$_d/.factory/prompts/p2.md"
+    printf 'p\n' >"$_d/.factory/prompts/p3.md"
+    printf '# T\n' >"$_d/README.md"
+    printf '状态：测试 %s 项。\n' "$_tc" >"$_d/skills/foo/README.md"
+    printf 'def test_a():\n    pass\n\n\ndef test_b():\n    pass\n' \
+        >"$_d/skills/foo/scripts/test_x.py"
+}
+
+NC10="$TMP/nc10"; nc10_setup "$NC10"
+if "$PY" tools/check_doc_freshness.py "$NC10" >"$TMP/out10" 2>&1; then
+    ok "NC10 干净 fixture 全绿"
+else
+    bad "NC10 干净 fixture 期望 rc=0: $(cat "$TMP/out10")"
+fi
+
+# R1 漏报：顶层新增未提及组件 zz.sh
+NC10A="$TMP/nc10a"; nc10_setup "$NC10A"; printf 'x\n' >"$NC10A/.factory/zz.sh"
+if "$PY" tools/check_doc_freshness.py "$NC10A" >"$TMP/out10a" 2>&1; then
+    _rc10a=0
+else
+    _rc10a=$?
+fi
+if [ "$_rc10a" -eq 1 ] && grep -q 'R1' "$TMP/out10a" && grep -q 'zz.sh' "$TMP/out10a"; then
+    ok "NC10a R1 组件漏报检出"
+else
+    bad "NC10a 期望 rc=1+R1+zz.sh, 实际 rc=${_rc10a}: $(cat "$TMP/out10a")"
+fi
+
+# R2 数字不符：陈述 （9）个 vs 实际 3
+NC10B="$TMP/nc10b"; nc10_setup "$NC10B" 9
+if "$PY" tools/check_doc_freshness.py "$NC10B" >"$TMP/out10b" 2>&1; then
+    _rc10b=0
+else
+    _rc10b=$?
+fi
+if [ "$_rc10b" -eq 1 ] && grep -q 'R2' "$TMP/out10b" && grep -q '陈述 9 vs 实际 3' "$TMP/out10b"; then
+    ok "NC10b R2 提示词计数漂移检出"
+else
+    bad "NC10b 期望 rc=1+R2+陈述 9 vs 实际 3, 实际 rc=${_rc10b}: $(cat "$TMP/out10b")"
+fi
+
+# R4 数字不符：陈述 测试 7 项 vs 实际 2（test_x.py 两个 def test_）
+NC10C="$TMP/nc10c"; nc10_setup "$NC10C" 3 7
+if "$PY" tools/check_doc_freshness.py "$NC10C" >"$TMP/out10c" 2>&1; then
+    _rc10c=0
+else
+    _rc10c=$?
+fi
+if [ "$_rc10c" -eq 1 ] && grep -q 'R4' "$TMP/out10c" && grep -q '陈述 7 vs 实际 2' "$TMP/out10c"; then
+    ok "NC10c R4 技能测试数漂移检出"
+else
+    bad "NC10c 期望 rc=1+R4+陈述 7 vs 实际 2, 实际 rc=${_rc10c}: $(cat "$TMP/out10c")"
+fi
+
+# 豁免通道 1：--allow 正则命中证据行 → 同样的 R4 漂移放行
+NC10D="$TMP/nc10d"; nc10_setup "$NC10D" 3 7
+if "$PY" tools/check_doc_freshness.py "$NC10D" --allow 'skills/foo.*R4' >"$TMP/out10d" 2>&1; then
+    ok "NC10d --allow 正则豁免生效"
+else
+    bad "NC10d --allow 期望 rc=0: $(cat "$TMP/out10d")"
+fi
+
+# 豁免通道 2：行内豁免标记 → 同样的 R4 漂移放行
+NC10E="$TMP/nc10e"; nc10_setup "$NC10E" 3 7
+printf '状态：测试 7 项。 <!-- doc-freshness:allow -->\n' >"$NC10E/skills/foo/README.md"
+if "$PY" tools/check_doc_freshness.py "$NC10E" >"$TMP/out10e" 2>&1; then
+    ok "NC10e 行内豁免标记生效"
+else
+    bad "NC10e 行内标记期望 rc=0: $(cat "$TMP/out10e")"
+fi
+
+# 结构性损坏路径：缺 .factory 等必需面 rc=2 绝不算通过（NC6/NC7c 同语义）
+if "$PY" tools/check_doc_freshness.py "$TMP/definitely-missing" >"$TMP/out10f" 2>&1; then
+    _rc10f=0
+else
+    _rc10f=$?
+fi
+if [ "$_rc10f" -eq 2 ]; then
+    ok "NC10f 结构性损坏 rc=2 拒判"
+else
+    bad "NC10f 期望 rc=2, 实际 rc=${_rc10f}"
+fi
 # ── 汇总 ───────────────────────────────────────────────────────────────
 if [ "$fails" -gt 0 ]; then
     echo "checker-self-test: $fails 项失败"

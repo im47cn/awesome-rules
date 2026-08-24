@@ -79,6 +79,8 @@ else
     run_layer pytest-doc-gen "$PY" -m pytest skills/doc-gen/scripts/tests -q
     run_layer pytest-arch-hawkeye "$PY" -m pytest arch-hawkeye/scripts/tests -q
     run_layer plugin-versions "$PY" tools/check_plugin_versions.py
+    # 实现↔文档一致性（数字/清单/指向漂移，R1-R5 语义见脚本头注释）
+    run_layer doc-freshness "$PY" tools/check_doc_freshness.py
     run_layer md-link-check "$PY" scripts/md_link_check.py .
 
     layer_must_not_secrets() {
