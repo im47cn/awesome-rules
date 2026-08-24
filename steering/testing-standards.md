@@ -120,6 +120,7 @@ inclusion: always
 - **杀组路径**：`killpg(SIGKILL)` 的 except 须同时容忍 `(ProcessLookupError, PermissionError)`——僵尸无需再杀（SIGKILL 对僵尸是 no-op），未捕获的 `EPERM` 会炸掉调用方而非走"超时=无效运行"语义
 - **探活断言**：禁止 `pytest.raises(ProcessLookupError)` 单发判定；须带 deadline 轮询等组消失——`EPERM` = 组内仅剩待-reap 僵尸（同 UID 下真活进程不可能 `EPERM`）复探等收尸，`ESRCH` = 组彻底消失；探活成功（rc=0）仅表示信号调用成功、组仍有成员（Linux 上未收尸僵尸同样探活成功），不得据此断言真活成员，需区分真活/僵尸时用显式子进程状态（waitpid/ps）判定，组未在 deadline 内消失才判失败
 - **时序窗口 mock 化**：真实僵尸窗口依赖 launchd 收尸时序无法稳定复现，规格须以确定性 mock 锁定（`EPERM→…→ESRCH` 序列通过 + 探活持续成功超时失败），范式见 `.factory/tests/test_mutations_run.py::_assert_group_dead`
+- **机器执行层**：`tools/check_killpg_strict.py`（gauntlet 层 `lint-killpg-strict`，扫描面 = tracked *.py）静态拦截 K1（`os.killpg` 缺 EPERM 容忍）与 K2（`raises(ProcessLookupError)` 单发探活）；负控制 NC8 见 `tools/test_gauntlet_checks.sh`
 
 ### Tripwire：前提失效硬失败【强制】
 

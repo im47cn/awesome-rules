@@ -115,6 +115,11 @@ else
     # （grep -m/head）与 true 管道段。扫描面 = tracked *.sh（67c2965b 原则）
     run_layer lint-pipe-early-exit "$PY" tools/check_pipe_early_exit.py \
         .factory tools scripts hooks skills arch-hawkeye .github
+    # 进程组信号平台语义门（PR #36 flake 沉淀，约定见 steering/testing-standards.md
+    # 「进程组信号的平台语义」）：os.killpg 缺 EPERM 容忍 / raises 单发探活。
+    # 扫描面 = tracked *.py（67c2965b 原则）
+    run_layer lint-killpg-strict "$PY" tools/check_killpg_strict.py \
+        .factory tools scripts hooks skills arch-hawkeye .github
 fi
 
 echo "gauntlet: 全部层通过"
