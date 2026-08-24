@@ -126,8 +126,18 @@ def run_gate(gate: str, target: str) -> int | None:
     except subprocess.TimeoutExpired:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass  # 组已自行退出（竞态窗口）
+        except (ProcessLookupError, PermissionError) as e:
+            # ESRCH：组已自行退出（竞态窗口）。EPERM：macOS XNU 对含
+            # 待-reap 僵尸的进程组发信号报 EPERM（同 UID 亦然）——僵尸
+            # 无需再杀（SIGKILL 对僵尸本就是 no-op），等 init 收尸即可。
+            # 诚实边界（PR #36 审查）：killpg 语义无法区分「仅剩僵尸的
+            # EPERM」与「组内有本进程无权发信号的真活进程」；前者成立
+            # 的前提是组成员与本进程同 UID——由 argv 闭集（PR #33 安全
+            # 审计：无 shell 解释、无 sudo/setuid 通道）保证。若未来
+            # gate 获得提权通道，此吞掉点必须复检组内进程状态。
+            if isinstance(e, PermissionError):
+                print("    killpg=EPERM（僵尸窗口，前提：组成员同 UID，"
+                      "见 argv 闭集审计）")
         try:
             proc.communicate(timeout=10)  # 收尸并排干管道
         except subprocess.TimeoutExpired:
