@@ -36,6 +36,69 @@ WT="${REPO}/.factory/worktrees/issue-${ISSUE}"   # 链独立 worktree（多驱�
 source "${REPO}/.factory/factory-lib.sh"
 node_timeout() { python3 "${REPO}/.factory/factory_lib.py" timeout "$1"; }  # 分级预算：裁决器5m/工作节点15m/implement 30m
 
+# --- 状态机标签：S1 issue 侧 triaging → accepted|rejected → in-review；S2 加
+#     in-progress（dispatcher 抢占锁）与 PR 侧 needs-fix/needs-human/approved。
+#     完整转移表唯一权威在 state.py TRANSITIONS；标签派生/收敛见 factory-state.sh ---
+FACTORY_LABELS=(
+  "factory:triaging fbca04 工厂链triage裁决中"
+  "factory:accepted 0e8a16 triage通过，待派发"
+  "factory:rejected d73a4a triage拒绝，链已终止"
+  "factory:in-review 5319e7 PR已开，issue状态由PR接管"
+  "factory:in-progress d4c5f9 dispatcher已抢占，链运行中"
+  "factory:needs-fix fbca04 PR被打回待修（≤2轮）"
+  "factory:needs-human e99695 需人工接管（轮次耗尽/R4熔断）"
+  "factory:approved 2cbe4e 审查通过（merge受A5门控）"
+  "factory:needs-review 1d76db PR已开待人工审查"
+)
+
+ensure_labels() {
+  local entry name color desc
+  for entry in "${FACTORY_LABELS[@]}"; do
+    read -r name color desc <<<"${entry}"
+    gh label create "${name}" --color "${color}" --description "${desc}" --force >/dev/null 2>&1 || true
+  done
+}
+
+issue_label() { # issue_label <add|remove> <name> —— 失败仅告警；租约失效跳写
+  # 出口围栏（PR#34 审查修复）：诈尸链的标签写同样有毒，失效即跳写。
+  # 跳过而非终止：trap 清理路径必须永不中断（后续台账/回收/放锁依赖顺序）；
+  # 被跳过的链由下一处硬围栏（issue_label_swap/issue_comment）或心跳 TERM 终结。
+  if ! lease_guard; then
+    echo "  [warn] 租约 ${LEASE_KEY:-?} 已失效（epoch=${LEASE_EPOCH:-?}），${1} ${2} 跳过（围栏）" >&2
+    return 0
+  fi
+  if gh issue edit "${ISSUE}" --"${1}-label" "${2}" >/dev/null 2>&1; then
+    echo "  [label] ${1} ${2}"
+  else
+    echo "  [warn] 标签操作失败：${1} ${2}（可观测性降级，链继续）" >&2
+  fi
+}
+
+# --- R4 成本熔断：任何 AI 节点/租约/锁副作用之前（fail-closed）---
+# DRY 干跑无副作用不检查。退出码 5 = R4 熔断停摆：factory_lib breaker
+# 约定码 3 与本脚本「另一链运行中」的 exit 3（下方锁竞争）语义冲突，
+# 1/2/4/143 亦已占用，故本地映射为 5；熔断/门故障明细见 breaker.sh 的
+# stderr。放行路径零新增副作用，熔断时不写 ledger（无链运行即无成本）。
+# 熔断/门故障（3/1）= 机器无法继续、需人工：exit 5 前把 issue 落标
+# needs-human（breaker_tripped 边，spec 在 state.py）——否则链死对
+# GitHub 侧不可见：S2 下 issue 滞留 in-progress（本点 trap 未装、sync
+# 不碰锁）被派发器永久跳过。落标走 issue_label 唯一出口（warn 不
+# fail：熔断才是终点，落标失败只降级可观测性）；add 在前、remove 在
+# 后——中途断裂 needs-human 也先可见。时序：此刻租约未认领
+# （LEASE_KEY 未设，围栏不拦）、EXIT trap 未安装（早期放锁 trap 在
+# 下方锁块、主 trap 在预备段）——落标后无人剥除，存续到人工接管。
+# 检查点保持在锁获取之前：熔断状态连互斥锁都不占。
+if [ "${DRY}" = 0 ]; then
+  if ! bash "${REPO}/.factory/breaker.sh" "${REPO}/.factory/locks"; then
+    ensure_labels   # 首链即熔断时 needs-human 标签可能尚未建（--force 幂等）
+    issue_label add factory:needs-human
+    issue_label remove factory:in-progress   # S2 已 claim；S1 零标签，remove-absent 安全
+    issue_label remove factory:triaging
+    issue_label remove factory:accepted
+    exit 5
+  fi
+fi
+
 # --- 互斥与环境标记（2026-08-21 三链并发事故修复） ---
 # D2: 链内所有子进程(omp 节点)可见，仓库 pre-push 钩子据此禁推 main
 export FACTORY_CHAIN=1
@@ -63,43 +126,6 @@ if [ "${FACTORY_DISPATCHED:-0}" != 1 ] && [ "${DRY}" = 0 ]; then
   # 早期退出(设下方链 trap 前)也要放锁
   trap '[ "${MANUAL_LOCK}" = 1 ] && rm -rf "${LOCKDIR}" 2>/dev/null' EXIT
 fi
-# --- 状态机标签：S1 issue 侧 triaging → accepted|rejected → in-review；S2 加
-#     in-progress（dispatcher 抢占锁）与 PR 侧 needs-fix/needs-human/approved。
-#     完整转移表唯一权威在 state.py TRANSITIONS；标签派生/收敛见 factory-state.sh ---
-FACTORY_LABELS=(
-  "factory:triaging fbca04 工厂链triage裁决中"
-  "factory:accepted 0e8a16 triage通过，待派发"
-  "factory:rejected d73a4a triage拒绝，链已终止"
-  "factory:in-review 5319e7 PR已开，issue状态由PR接管"
-  "factory:in-progress d4c5f9 dispatcher已抢占，链运行中"
-  "factory:needs-fix fbca04 PR被打回待修（≤2轮）"
-  "factory:needs-human e99695 轮次耗尽，人工接管"
-  "factory:approved 2cbe4e 审查通过（merge受A5门控）"
-  "factory:needs-review 1d76db PR已开待人工审查"
-)
-
-ensure_labels() {
-  local entry name color desc
-  for entry in "${FACTORY_LABELS[@]}"; do
-    read -r name color desc <<<"${entry}"
-    gh label create "${name}" --color "${color}" --description "${desc}" --force >/dev/null 2>&1 || true
-  done
-}
-
-issue_label() { # issue_label <add|remove> <name> —— 失败仅告警；租约失效跳写
-  # 出口围栏（PR#34 审查修复）：诈尸链的标签写同样有毒，失效即跳写。
-  # 跳过而非终止：trap 清理路径必须永不中断（后续台账/回收/放锁依赖顺序）；
-  # 被跳过的链由下一处硬围栏（issue_label_swap/issue_comment）或心跳 TERM 终结。
-  if ! lease_guard; then
-    echo "  [warn] 租约 ${LEASE_KEY:-?} 已失效（epoch=${LEASE_EPOCH:-?}），${1} ${2} 跳过（围栏）" >&2
-    return 0
-  fi
-  if gh issue edit "${ISSUE}" --"${1}-label" "${2}" >/dev/null 2>&1; then
-    echo "  [label] ${1} ${2}"
-  else
-    echo "  [warn] 标签操作失败：${1} ${2}（可观测性降级，链继续）" >&2
-  fi
-}
 
 
 run_node() {  # run_node <name> — 拼接静态 prompt + 任务参数，独立进程执行

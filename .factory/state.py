@@ -34,6 +34,11 @@ TRANSITIONS = [
     ("triage_reject",           "triaging",   "verdict=reject",  "rejected",    "chain"),
     ("dispatch_claim",          "accepted",   "dispatcher抢占",  "in-progress", "dispatcher"),
     ("chain_fail",              "in-progress", "链失败(trap)",    "",            "dispatcher"),
+    # breaker_tripped：issue 侧 needs-human 是命令式落标（链 exit 5 前写，
+    # 熔断/门故障=机器无法继续需人工），sync 永不触碰——plan_phase 无 PR
+    # 分支只认 LOCKS|QUEUE|rejected，stray needs-human 不清除（fixture 钉死）；
+    # 解除仍走 human_takeover（人工删标/接管），无自动化出口。
+    ("breaker_tripped",         "in-progress", "R4熔断(exit 5)",  "needs-human", "chain"),
     ("pr_open",                 "in-progress", "PR创建",          "in-review",   "sync"),
     ("changes_requested",       "in-review",  "CHANGES_REQUESTED", "needs-fix", "sync"),
     ("redispatch",              "needs-fix",  "rounds<MAX重派",  "in-progress", "dispatcher"),

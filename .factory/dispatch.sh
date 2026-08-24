@@ -15,8 +15,11 @@
 # 固定优先级：PR 结果处理 > fix-issue 派发 > triage 批次（§7：validate-pr >
 # fix-issue > triage）；triage 批次补齐 S2 缺口"写 issue → 工厂自动看见"——
 # 每轮先对零 factory 标签的 open issue 物理隔离裁决，落标后当轮即可入队
-# 链失败（fix-issue.sh 非零退出）→ 其 trap 清 triaging/accepted/in-progress，
-# issue 回零标签态，人工重投或重开 issue（设计：失败清理，可观测非门）
+# 链失败（fix-issue.sh 非零退出）→ 其 trap 清 triaging/accepted/in-progress
+# （枚举式；终态 rejected/needs-human 不清），issue 回零标签态，人工重投或
+# 重开 issue（设计：失败清理，可观测非门）；例外 R4 熔断（exit 5）：
+# fix-issue 落 needs-human 后退出（breaker_tripped 边，spec 在 state.py），
+# 人工接管前不被下轮重派
 #
 # 用法: dispatch.sh [--dry-run] [--watch] [--interval SEC]
 #   默认单轮；--watch 常驻（默认 300s = 5min；2026-08-22 从 1800s 收紧：
@@ -118,6 +121,18 @@ for _, n in sorted(rows): print(n)'
 
 dispatch_once() {
   echo "=== dispatch @ $(date '+%H:%M:%S') ==="
+  # --- R4 成本熔断：每轮派发前检查（R4「超限熔断停摆」的唯一执行点）---
+  # DRY 干跑无副作用不检查。熔断/门故障 → 透传 breaker.sh 退出码
+  # （3=熔断，factory_lib breaker 约定码；1=floor 缺失/损坏 fail-closed），
+  # 直接终止整个脚本：单轮退出，--watch 循环一并停摆，cron 侧记进
+  # dispatch.log。恢复 = 人工复核 locks/floor.json 与 ledger.jsonl。
+  # dispatch 级熔断无具体 issue 可标，不落 needs-human（边界维持现状，
+  # 只在日志停摆）；链级熔断的落标在 fix-issue.sh exit 5 路径
+  # （breaker_tripped 边）。锁路径对齐上方 dispatcher 硬锁：git-common-dir 锚定
+  # 主树，worktree 内启动也能读到主台账。
+  if [ "$DRY" = 0 ]; then
+    bash "${FACTORY}/breaker.sh" "${MAIN_FACTORY:-$FACTORY}/locks" || exit $?
+  fi
   say "sync: factory-state.sh sync --all"
   [ "$DRY" = 0 ] && bash "$FACTORY/factory-state.sh" sync --all
 

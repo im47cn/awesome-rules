@@ -23,6 +23,11 @@ if ! /usr/bin/shlock -f "$LOCK" -p $$; then
 fi
 trap 'rm -f "$LOCK"' EXIT INT TERM
 {
+  # R4 成本熔断（fail-closed）：本 wrapper 先跑 triage-batch 再跑 dispatch，
+  # dispatch.sh 入口另有同款门——此处为 triage 批次而设（cron 路径的
+  # LLM 裁决在 dispatch 之前跑）。退出码透传 breaker.sh（3=熔断），
+  # 停摆信息随块重定向落 dispatch.log。
+  bash "${REPO}/.factory/breaker.sh" "${REPO}/.factory/locks" || exit $?
   echo "── $(ts) triage 批次开始"
   "${REPO}/.factory/triage-batch.sh" && rc=0 || rc=$?
   echo "── $(ts) triage 批次结束（exit=${rc}）"
