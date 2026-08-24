@@ -19,7 +19,9 @@ ck() { # ck <名称> <期望> <实得>
 }
 
 command -v initdb >/dev/null || { echo "缺 initdb（postgresql-server 未装）" >&2; exit 2; }
-[ "$(id -u)" = 0 ] || { echo "需 root（runuser -u postgres）" >&2; exit 2; }
+
+# REPO 解析必须在下方 cd /tmp 之前（$0 相对路径 cd 后即失效）
+REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 
 # --- 一次性实例 ---
 rm -rf "$PGDATA"
@@ -32,15 +34,14 @@ trap 'runuser -u postgres -- pg_ctl -D "$PGDATA" stop -m immediate >/dev/null 2>
 PG() { runuser -u postgres -- psql -h 127.0.0.1 -p $PORT -U postgres -d postgres -X -q -tA "$@"; }
 W()  { runuser -u postgres -- psql -h 127.0.0.1 -p $PORT -U factory-e2e -d postgres -X -q -tA "$@"; }
 
-REPO="$(git -C "$(dirname "$0")/../.." rev-parse --show-toplevel)"
 # schema 以 owner=postgres 建立并 apply（幂等迁移走一遍即可）。
 # postgres 用户读不了 /root 下的仓库 —— /tmp 副本过桥
-cp "$REPO/.factory/db/schema.sql" /tmp/lease-test-schema.sql && chmod 644 /tmp/lease-test-schema.sql
+cp "$REPO/.factory/db/schema.sql" /tmp/lease-test-schema.sql && chmod 644 /tmp/lease-test-schema.sql \
+  || { echo "schema 拷贝失败（REPO=${REPO}）" >&2; exit 2; }
 PG -v ON_ERROR_STOP=1 -f /tmp/lease-test-schema.sql >/dev/null || { echo "schema apply 失败" >&2; exit 2; }
 # 租户 onboarding（README 运维手册同款）：role + grant + 租户行
 PG -c "create role \"factory-e2e\" login; grant factory_worker to \"factory-e2e\";
        insert into factory_tenants (tenant, rolname) values ('e2e','factory-e2e');" >/dev/null
-
 # --- 1-6：claim / 续约 / fence / heartbeat / 抢占 ---
 ck "新键认领 t|1"          "t|1"  "$(W -c "select * from factory_claim('issue:1','machA',900)")"
 ck "同机续约 epoch 不变"    "t|1"  "$(W -c "select * from factory_claim('issue:1','machA',900)")"
@@ -91,6 +92,28 @@ out=$(runuser -u postgres -- psql -h 127.0.0.1 -p $PORT -U nobody_e2e -d postgre
 ck "无租户行 claim 拒"      "f|-1" "$out"
 ck "审计事件有痕"           "y"    "$(PG -c "select case when count(*)>0 then 'y' else 'n' end from factory_events" | tr -d ' ')"
 
+# --- 23：配额并发串行化（for update 行锁，PR#34 审查修复）---
+# 4 台机器并发 claim 4 个不同键，cap=2 → 恰好 2 赢。无行锁时是 TOCTOU：
+# 并发 count 双双看到余量 → 超配。行锁下串行化，断言确定性成立。
+PG -c "truncate factory_leases;" >/dev/null
+for i in 1 2 3 4; do
+  ( W -c "select * from factory_claim('issue:c${i}','machD${i}',900)" > "/tmp/lease-cc-${i}.out" 2>/dev/null ) &
+done
+wait
+wins=$(grep -hc '^t|' /tmp/lease-cc-{1,2,3,4}.out 2>/dev/null | paste -sd+ | bc 2>/dev/null)
+[ -z "$wins" ] && wins=$(cat /tmp/lease-cc-{1,2,3,4}.out 2>/dev/null | grep -c '^t|')
+ck "并发 claim 恰满配额"    "2"    "${wins}"
+rm -f /tmp/lease-cc-{1,2,3,4}.out
+
+LEASE_SH="${REPO}/.factory/factory-lease.sh"
+tp="$(mktemp -d)"; git -C "$tp" init -q; mkdir -p "$tp/.factory/var"
+printf "x'); drop table factory_leases;--" > "$tp/.factory/var/machine-id"
+rc=$(REPO="$tp" SUPABASE_DB=unused bash -c "source '${LEASE_SH}'; lease_machine_id >/dev/null 2>&1; echo \$?" 2>/dev/null)
+ck "machine-id 篡改拒"      "1"    "$rc"
+printf '%s' "$(python3 -c 'import uuid; print(uuid.uuid4().hex)')" > "$tp/.factory/var/machine-id"
+rc=$(REPO="$tp" SUPABASE_DB=unused bash -c "source '${LEASE_SH}'; lease_machine_id >/dev/null 2>&1; echo \$?" 2>/dev/null)
+ck "machine-id 合法过"      "0"    "$rc"
+rm -rf "$tp"
 echo "-----"
 echo "PASS=$PASS FAIL=$FAIL"
 [ $FAIL -eq 0 ]

@@ -84,7 +84,14 @@ ensure_labels() {
   done
 }
 
-issue_label() { # issue_label <add|remove> <name> —— 失败仅告警
+issue_label() { # issue_label <add|remove> <name> —— 失败仅告警；租约失效跳写
+  # 出口围栏（PR#34 审查修复）：诈尸链的标签写同样有毒，失效即跳写。
+  # 跳过而非终止：trap 清理路径必须永不中断（后续台账/回收/放锁依赖顺序）；
+  # 被跳过的链由下一处硬围栏（issue_label_swap/issue_comment）或心跳 TERM 终结。
+  if ! lease_guard; then
+    echo "  [warn] 租约 ${LEASE_KEY:-?} 已失效（epoch=${LEASE_EPOCH:-?}），${1} ${2} 跳过（围栏）" >&2
+    return 0
+  fi
   if gh issue edit "${ISSUE}" --"${1}-label" "${2}" >/dev/null 2>&1; then
     echo "  [label] ${1} ${2}"
   else
@@ -271,9 +278,12 @@ if [ "${DRY}" = 0 ]; then
   }
   # 失败清理 + 台账 + worktree 回收：非零退出移除流转标签回零标签态（可重试），
   # 无论成败都记账；worktree 无论成败一并回收（分支推送后树内仅剩未跟踪产物）
+  # 清理顺序（PR#34 审查修复）：标签清理在 lease_cleanup **之前**——清理也是
+  # 副作用出口，须持有效租约过围栏；先放租约会让正常失败链的清标被拒（标签滞留）。
+  # 被夺/吊销链的清标被围栏跳过是正确行为：标签归新属主，或作为人工债务可见。
   # D1: 本 trap 覆盖早期放锁 trap，故自带锁释放；派发链 MANUAL_LOCK=0 不动锁
   # shellcheck disable=SC2154  # rc 于本 trap 行内由 rc=$? 赋值，shellcheck 不解析 trap 字符串
-  trap 'rc=$?; lease_cleanup; write_ledger "${rc}"; git -C "${REPO}" worktree remove --force "${WT}" >/dev/null 2>&1 || true; [ $rc -ne 0 ] && { issue_label remove factory:triaging; issue_label remove factory:accepted; issue_label remove factory:in-progress; }; [ "${MANUAL_LOCK}" = 1 ] && rm -rf "${LOCKDIR:-}" 2>/dev/null' EXIT
+  trap 'rc=$?; write_ledger "${rc}"; git -C "${REPO}" worktree remove --force "${WT}" >/dev/null 2>&1 || true; [ $rc -ne 0 ] && { issue_label remove factory:triaging; issue_label remove factory:accepted; issue_label remove factory:in-progress; }; lease_cleanup; [ "${MANUAL_LOCK}" = 1 ] && rm -rf "${LOCKDIR:-}" 2>/dev/null' EXIT
 else
   echo "[dry-run] gh issue view #${ISSUE} → ${DIR}/issue.json"
   echo "[dry-run] label: +factory:triaging（裁决后 → accepted|rejected）"

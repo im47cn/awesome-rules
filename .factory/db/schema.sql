@@ -60,9 +60,12 @@ language plpgsql security definer set search_path = public as $$
 declare
   v_tenant text; v_cap int; v_e bigint;
 begin
+  -- for update：串行化同租户并发 claim（行锁持到事务尾），否则
+  -- 配额 count-then-insert 是 TOCTOU——两机同时观察到余量并双双插入。
   select t.tenant, t.max_parallel into v_tenant, v_cap
     from factory_tenants t
-   where t.rolname = session_user and t.status = 'active';
+   where t.rolname = session_user and t.status = 'active'
+   for update;
   if not found then
     return query select false, -1::bigint; return;
   end if;

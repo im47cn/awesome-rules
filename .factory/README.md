@@ -141,9 +141,10 @@ python3 -m pytest .factory/test_state.py -o addopts= -q   # 状态机测试
   （fencing token）。迁移幂等：`psql "$SUPABASE_DB" -f .factory/db/schema.sql`。
 - **投影** = GitHub labels + `state.py`：声明式收敛——标签只是事实的
   纯函数，sync 多写者安全（漂移自愈，见上节）。
-- **围栏** = 出口围栏 + git refs 服务端保护：链副作用（label/评论）经
-  `factory-lib.sh` 出口在发送前校验 epoch（`lease_guard`）——被夺/吊销的
-  诈尸链在出口被拒；fence 校验与 GitHub 写之间的秒级残窗由回执幂等键
+- **围栏** = 出口围栏 + git refs 服务端保护：链副作用（label/评论）经出口
+  （`issue_label_swap` / `issue_comment` / `issue_label`，PR#34 后全量覆盖）
+  在发送前校验 epoch（`lease_guard`）——被夺/吊销的诈尸链在出口被拒；
+  fence 校验与 GitHub 写之间的秒级残窗由回执幂等键
   （`factory:receipt:issue-N:rR`，`issue_comment` 查重跳过）兜底。
 
 fail-closed 铁律：`SUPABASE_DB` 未设 / 仲裁不可达 = 链终止（exit 4），

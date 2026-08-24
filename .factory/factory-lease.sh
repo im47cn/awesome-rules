@@ -26,8 +26,11 @@ lease_db() {  # 打印连接串；未配置即失败（fail-closed，不降级�
   printf '%s' "$SUPABASE_DB"
 }
 
-lease_psql() {  # lease_psql <sql> —— 单语句执行；任何错误都是失败
-  psql "$(lease_db)" -X -q -tA -v ON_ERROR_STOP=1 -c "$1"
+lease_psql() {  # lease_psql <sql> [psql-args...] —— 单语句执行；任何错误都是失败
+  # 额外参数透传：调用方用 -v k=... + SQL :'k' 参数化（PR#34 审查修复），
+  # 杜绝值字符串拼接进 SECURITY DEFINER 函数的注入面。
+  local sql="$1"; shift
+  psql "$(lease_db)" -X -q -tA -v ON_ERROR_STOP=1 "$@" -c "$sql"
 }
 
 lease_key_sane() {  # 键/机器 ID 白名单 [A-Za-z0-9._:-]（SQL 注入面收口）
@@ -41,7 +44,7 @@ lease_key_sane() {  # 键/机器 ID 白名单 [A-Za-z0-9._:-]（SQL 注入面收
 lease_machine_id() {  # 稳定机器身份：主树 .factory/var/machine-id（非 PID）
   # PID 是机器局部命名空间，跨机不可判活性；machine-id 跟主 .git 走，
   # worktree 共享（git-common-dir 锚定，对齐 dispatch.sh 硬锁路径解析）。
-  local mf f tmp
+  local mf f tmp mid
   mf="$(git -C "${REPO}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null \
     | sed 's#/\.git$##' || true)"
   mf="${mf:-${REPO}}/.factory"
@@ -52,14 +55,19 @@ lease_machine_id() {  # 稳定机器身份：主树 .factory/var/machine-id（�
     ( umask 077; python3 -c 'import uuid; print(uuid.uuid4().hex)' > "$tmp" ) \
       && mv "$tmp" "$f" || { rm -f "$tmp"; echo "[error] machine-id 生成失败" >&2; return 1; }
   fi
-  cat "$f"
+  mid="$(cat "$f")"
+  # 内容校验（同键白名单，PR#34 审查修复）：文件被篡改含引号/SQL 语法 =
+  # 完整性事故，fail-closed 拒绝——不静默重生成（那会掩盖事故并遗孤儿租约）
+  lease_key_sane "$mid" || { echo "[error] machine-id 内容非法（疑似篡改）：${f}" >&2; return 1; }
+  printf '%s\n' "$mid"
 }
 
 lease_claim() {  # lease_claim <key> [secs] —— 成功打印 epoch，失败 return 1
   local key="$1" secs="${2:-${FACTORY_LEASE_SECS:-900}}" mid out epoch
   lease_key_sane "$key" || { echo "[error] 非法租约键: ${key}" >&2; return 1; }
+  case "$secs" in ''|*[!0-9]*) echo "[error] 非法租期秒数: ${secs}" >&2; return 1 ;; esac
   mid="$(lease_machine_id)" || return 1
-  out="$(lease_psql "select * from factory_claim('${key}','${mid}',${secs})")" \
+  out="$(lease_psql "select * from factory_claim(:'k',:'m',${secs})" -v k="$key" -v m="$mid")" \
     || { echo "[error] 租约仲裁不可达（key=${key}），fail-closed" >&2; return 1; }
   # 输出形如 "t|3"（o_won|o_epoch）；未赢（f|-1）与解析异常一律 return 1
   [ "${out%%|*}" = "t" ] || return 1
@@ -72,22 +80,23 @@ lease_claim() {  # lease_claim <key> [secs] —— 成功打印 epoch，失败 r
 lease_heartbeat() {  # lease_heartbeat <key> <epoch> [secs] —— 0=活 1=已被夺走
   local key="$1" epoch="$2" secs="${3:-${FACTORY_LEASE_SECS:-900}}" mid
   lease_key_sane "$key" && lease_key_sane "$epoch" || return 1
+  case "$secs" in ''|*[!0-9]*) return 1 ;; esac
   mid="$(lease_machine_id)" || return 1
-  lease_psql "select factory_heartbeat('${key}','${mid}',${epoch},${secs})" | grep -qx t
+  lease_psql "select factory_heartbeat(:'k',:'m',${epoch},${secs})" -v k="$key" -v m="$mid" | grep -qx t
 }
 
 lease_fence_ok() {  # lease_fence_ok <key> <epoch> —— 0=仍持有 1=已被夺走
   local key="$1" epoch="$2" mid
   lease_key_sane "$key" && lease_key_sane "$epoch" || return 1
   mid="$(lease_machine_id)" || return 1
-  lease_psql "select factory_fence_ok('${key}','${mid}',${epoch})" | grep -qx t
+  lease_psql "select factory_fence_ok(:'k',:'m',${epoch})" -v k="$key" -v m="$mid" | grep -qx t
 }
 
 lease_release() {  # lease_release <key> <epoch> —— 尽力释放（幂等）
   local key="$1" epoch="$2" mid
   lease_key_sane "$key" && lease_key_sane "$epoch" || return 1
   mid="$(lease_machine_id)" || return 1
-  lease_psql "select factory_release('${key}','${mid}',${epoch})" >/dev/null
+  lease_psql "select factory_release(:'k',:'m',${epoch})" -v k="$key" -v m="$mid" >/dev/null
 }
 
 lease_guard() {  # 副作用出口围栏：租约失效即拒绝（诈尸/被吊销防护）
