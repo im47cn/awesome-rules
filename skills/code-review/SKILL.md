@@ -1,0 +1,117 @@
+---
+name: code-review
+description: >
+  两轴代码审查：Standards（规范轴——代码是否符合仓库书面规范+坏味道基线）与
+  Spec（规格轴——变更是否忠实实现 MR 标题/工单/PRD 所要求的内容）并行子代理
+  审查，聚合时对事实断言抽验。当用户提到：审查 PR、审查合并请求、审查 MR、
+  review 代码、代码评审、CR、帮我审一下这个分支、review since X、规范审查、
+  规格对照、这个 MR 能不能合时激活。支持 GitHub 与云效 Codeup 两种托管平台。
+---
+
+# 两轴代码审查 (code-review)
+
+对 `HEAD` 与固定点（commit/分支/tag/merge-base）之间的 diff 做两轴审查，两轴
+由**并行子代理**独立执行，避免互相污染上下文；聚合方对可验证断言抽验后按
+[审查报告输出规范](../../steering/review-report-standards.md)五段式输出。
+
+## 为什么两轴
+
+一次变更可以过一轴而挂另一轴：完全合规但实现错了东西（Standards 过、Spec 挂）；
+精确实现工单但破坏项目约定（Spec 过、Standards 挂）。分轴报告防止一轴掩盖另一轴。
+
+## 流程
+
+### 1. 钉死固定点
+
+- 用户给了固定点就用它；没给就问。MR/PR 号先解析：GitHub 用 `pr://N`；
+  解析失败时看 `git remote -v`——云效 Codeup（codeup.aliyun.com）走
+  [alibabacloud-devops](../alibabacloud-devops/SKILL.md) 技能（mcporter 动态查询，
+  先 `mcporter list` 确认工具名，不硬编码），GitHub 用 `gh`。
+- 记录一次 diff 命令：`git diff <fixed-point>...HEAD`（三点，比较 merge-base），
+  以及 `git log <fixed-point>..HEAD --format='%h %s%n%b'`（正文含工单引用）。
+- **进入下一步前**确认固定点可解析（`git rev-parse`）且 diff 非空——坏引用/空
+  diff 必须在这里失败，而不是在两个并行子代理里失败。
+
+### 2. 识别规格源
+
+按顺序找：① commit 正文中的工单引用（`#123`、`Closes #45`、Codeup MR 描述）；
+② 用户传入的路径；③ `docs/`、`specs/` 下的 PRD；④ 兜底——**MR 标题 + 全部
+commit 正文**（多数团队现实：没有独立规格文档）。都没有则 Spec 轴跳过并声明
+「无规格可用」。
+
+### 3. 识别标准源
+
+仓库中任何描述「代码该怎么写」的文件：`AGENTS.md`、`CONTRIBUTING.md`、
+`.editorconfig`、`steering/` 规范、`docs/` 架构约束。识别时注意坑位清单
+（如密钥禁入 bootstrap、重试幂等、DI 约定）。
+
+在仓库标准之上叠加下方**坏味道基线**。两条规则：① 仓库书面标准覆盖基线
+（仓库背书的写法不判味道）；② 每条味道都是判断性意见（标注「判断性」），
+不是硬违规；工具已强制的跳过。
+
+### 4. 并行派发两个子代理
+
+单批 `tasks[]` 同时发出。两个 prompt 都必须包含：
+
+**可证伪性条款（强制）**
+
+> 任何存在性/否定性断言（「X 已无引用」「Y 是死配置」「Z 未配置」）必须先
+> 全仓 grep 验证并附命令输出；diff 里看不到 ≠ 仓库没有。每条发现标注
+> `verified: yes/no` 与 evidence（命令输出或 file:line）。
+
+**输出契约（强制）**
+
+> 最终输出必须是完整报告（结构化 JSON：`findings[]`，每项含
+> `title/severity(hard-violation|judgement-call)/confidence/file/line/
+> evidence/verified` + `summary`），禁止 yield 占位符或空增量段。
+
+- **Standards 轴 prompt**：diff 命令 + commit 清单 + 标准源文件列表 + 坏味道
+  基线全文（子代理看不到本文件）+ 可证伪性条款 + 输出契约。要求报告：
+  (a) 每处违反书面标准——引用标准（文件+条款）与 diff 位置 file:line；
+  (b) 每个基线味道——点名并引用 hunk。硬违规与判断性分开。
+- **Spec 轴 prompt**：diff 命令 + commit 清单 + 规格原文（逐字）+ 可证伪性
+  条款 + 输出契约。要求报告：(a) 规格要求缺失/部分实现（规格里每个可核对
+  断言逐条验证，如「支持动态刷新」→ 检查注解是否真实存在、「5 个文件」→
+  数一遍）；(b) 超出规格的行为（scope creep）；(c) 已实现但疑似有误（单位、
+  语义静默变化、调用方默认值漂移）。每条发现引用规格原句。
+
+规格断言核对清单在 prompt 里**预置为显式列表**（实测：清单内断言全部验证
+正确，出错的恰是清单外自主冒出的否定性断言——用可证伪性条款兜底）。
+
+### 4.5 交付恢复（子代理失败时）
+
+任一子代理返回空、占位符（如 `"..."`）或 failed 时：
+
+1. **先考古再重派**：读 `history://<agent名>` 提取其最终 yield——子代理通常
+   已完成工作，结论完整存在于 transcript（实测恢复成本秒级 vs 重派 3 分钟+）。
+2. 考古无果才重派，重派 prompt 附上前次失败原因。
+
+### 5. 聚合与抽验
+
+- 两轴报告**分轴呈现**（`## Standards` / `## Spec`），不合并、不跨轴排序。
+- **抽验环（强制）**：聚合方对子代理发现中可 grep 验证的事实断言逐条抽验
+  （全仓搜索引用、数文件个数、比对旧值）。未通过的保留原文并附
+  「⚠ 核证后修正：实际是 …」标注。抽验不改变两轴独立性，只拦截事实错误。
+  实测依据：曾有「旧配置键已成死配置」的错误发现，若照登会诱导删除仍被
+  4 个类消费的配置，造成三环境超时静默回退。
+- 收尾对齐[审查报告输出规范](../../steering/review-report-standards.md)：
+  结论先行（🔴🟠🟡🟢 定级）→ 依据 → 证据 file:line → 关联 →
+  **证据边界段（强制）**：`已验证 / 未覆盖 / 置信度`，抽验结果归入已验证。
+- 汇总一行：两轴各几条发现、各轴最重问题（不跨轴选唯一赢家）。
+
+## 坏味道基线（Fowler《重构》ch.3）
+
+每条格式：是什么 → 怎么修。对着 diff 匹配：
+
+- **Mysterious Name** — 名字不揭示意图 → 重命名；起不出诚实名字说明设计混浊
+- **Duplicated Code** — 同一逻辑形状出现在多个 hunk/文件 → 提取共享形状
+- **Feature Envy** — 方法更多触碰别的对象的数据 → 把方法搬到它羡慕的数据上
+- **Data Clumps** — 同几个字段/参数总是结伴 → 捆成一个类型传递
+- **Primitive Obsession** — 原始类型顶替领域概念 → 给概念自己的小类型
+- **Repeated Switches** — 同一类型上的 switch/if 级联反复出现 → 多态或共享 map
+- **Shotgun Surgery** — 一个逻辑变更迫使 diff 散落多文件 → 聚拢到一个模块
+- **Divergent Change** — 一个模块因多个不相关原因被改 → 拆分，单一变化原因
+- **Speculative Generality** — 为规格没有的需求造抽象/参数/钩子 → 删除内联
+- **Message Chains** — 长 `a.b().c().d()` 导航 → 在首对象上藏一个方法
+- **Middle Man** — 类/函数大多只是转发 → 砍掉，直调真目标
+- **Refused Bequest** — 子类/实现者无视大部分继承物 → 改组合
