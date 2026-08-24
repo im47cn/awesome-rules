@@ -224,6 +224,11 @@ def kill_strict(pgid):
 def test_flaky_probe(pgid):
     with pytest.raises(ProcessLookupError):
         os.killpg(pgid, 0)
+
+
+def test_flaky_probe_kw(pgid):
+    with pytest.raises(expected_exception=ProcessLookupError):
+        os.killpg(pgid, 0)
 EOF
 if "$PY" tools/check_killpg_strict.py "$TMP/nc8_bad.py" >"$TMP/out8" 2>&1; then
     _rc8=0

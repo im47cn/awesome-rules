@@ -40,6 +40,11 @@ def kill_unguarded(pgid):
 def test_flaky_probe(pgid):
     with pytest.raises(ProcessLookupError):
         os.killpg(pgid, 0)
+
+
+def test_flaky_probe_keyword(pgid):
+    with pytest.raises(expected_exception=ProcessLookupError):
+        os.killpg(pgid, 0)
 """
 
 # 安全等价形：元组容忍 / OSError 家族超集 / 裸 except / deadline 轮询
@@ -91,13 +96,14 @@ def test_incident_forms_flagged_with_line_and_rule(tmp_path):
     f.write_text(BAD, encoding="utf-8")
     v = M.check_file(f)
     rules_msgs = [msg for _, msg in v]
-    # K1 三处：strict except、unguarded、探活调用也无 try（deadline 轮询
-    # 形态才局部容忍）；K2 一处：探活处于 raises 单发判定内
-    assert sum(1 for m in rules_msgs if m.startswith("K1")) == 3
-    assert any(m.startswith("K2") for m in rules_msgs)      # 测试侧 flake 原形
-    # 行号指明（1 基）：kill_strict 第 8 行、unguarded 第 14 行、探活第 19 行
+    # K1 四处：strict except、unguarded、两处探活调用均无 try 容忍；
+    # K2 两处：位置参数与 expected_exception= 关键字形式的 raises 单发判定
+    assert sum(1 for m in rules_msgs if m.startswith("K1")) == 4
+    assert sum(1 for m in rules_msgs if m.startswith("K2")) == 2
+    # 行号指明（1 基）：kill_strict 第 8 行、unguarded 第 14 行、
+    # 探活第 19/24 行（位置与关键字形式）
     linenos = {ln for ln, _ in v}
-    assert {8, 14, 19} <= linenos, v
+    assert {8, 14, 19, 24} <= linenos, v
 
 
 def test_safe_equivalents_pass(tmp_path):

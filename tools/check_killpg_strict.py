@@ -14,7 +14,8 @@ launchd 异步收尸，窗口内 macOS XNU 对含待-reap 僵尸的进程组发�
       祖先同样违规（PR #36 生产侧隐患原形：EPERM 炸调用方而非走
       "超时=无效运行"语义）。
   K2  单发探活判定：with pytest.raises(ProcessLookupError)（无 or /
-      元组交替）体内出现缺乏容忍的 os.killpg(..., 0) 探活 → 违规
+      元组交替；位置参数与 expected_exception= 关键字形式等价）体内
+      出现缺乏容忍的 os.killpg(..., 0) 探活 → 违规
       （僵尸窗口 EPERM 逃出 raises 即 flake，PR #36 测试侧原形）。
       合规形态是 deadline 轮询（根本不用 raises 单发判定）。
 
@@ -102,6 +103,23 @@ def is_sig0_probe(call):
             and call.args[1].value is not False)
 
 
+def _raises_ple_only(expr):
+    """pytest.raises(...) 的目标异常是否恰为 ProcessLookupError（单异常，
+    无 or/元组交替）。位置参数与 expected_exception= 关键字形式等价
+    （PR #38 审查：关键字形式漏检会放走单发探活）。"""
+    if not (isinstance(expr, ast.Call)
+            and isinstance(expr.func, ast.Attribute)
+            and expr.func.attr == "raises"
+            and isinstance(expr.func.value, ast.Name)
+            and expr.func.value.id == "pytest"):
+        return False
+    if expr.args:
+        return _exc_name(expr.args[0]) == "ProcessLookupError"
+    return any(kw.arg == "expected_exception"
+               and _exc_name(kw.value) == "ProcessLookupError"
+               for kw in expr.keywords)
+
+
 def in_raises_ple_only(tree, call):
     """K2 判定：调用是否处于 with pytest.raises(ProcessLookupError)
     （单异常、无 or/元组交替）的体内。"""
@@ -109,14 +127,7 @@ def in_raises_ple_only(tree, call):
         if not isinstance(node, ast.With):
             continue
         for item in node.items:
-            expr = item.context_expr
-            if not (isinstance(expr, ast.Call)
-                    and isinstance(expr.func, ast.Attribute)
-                    and expr.func.attr == "raises"
-                    and isinstance(expr.func.value, ast.Name)
-                    and expr.func.value.id == "pytest"
-                    and expr.args
-                    and _exc_name(expr.args[0]) == "ProcessLookupError"):
+            if not _raises_ple_only(item.context_expr):
                 continue
             if id(call) in _body_ids(node.body):
                 return True
