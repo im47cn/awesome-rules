@@ -214,6 +214,14 @@ git diff --name-only base...head | python3 .factory/guard.py # stdin 模式
 python3 .factory/mutations/run.py [--only G-01,G-03]
 ```
 
+mutations 时序约束：**全绿证明必须在工作树干净时做**（相对 index 无
+未提交修改）。target 处于人工编辑中时该缺陷 SKIP（防交叠护栏，设计
+使然）——带 SKIP 的退出码 4「通过」不构成 auto-merge 依据，且容易被
+误读为全绿。正确流程：提交/贮藏 → `run.py` 全绿（stamp 随之刷新）→
+再依据证据推进。周界变更（factory-local.json 的 perimeter）后必跑：
+stamp 指纹绑定会宣告旧证据过期（M4，设计 §11.3）。
+```
+
 ## 移植到其他仓库（适配清单）
 
 本工厂默认绑定 awesome-rules。移植（如 etf-radar）需改四处：
@@ -266,6 +274,39 @@ L4 无关）：
 - **M4** 本地化外置 `factory-local.json`（perimeter/判据措辞/布局
   全成数据），guard.py 等从 local → full，local 面归零；PERIMETER
   blob 指纹绑定 EVIDENCE——改配置未重证 kill rate 即非绿。
+
+### 下游采纳 M2/M4 checklist（顺序不可倒）
+
+前置：本仓已按「移植到其他仓库」完成首次移植（MISSION/PERIMETER/
+测试门四步）。此后增量采纳：
+
+1. **拉新版 full 面**（含数据化后的 guard.py / factory_lib.py /
+   upstream-sync-check.sh）：
+   ```bash
+   .factory/sync-from-upstream.sh <awesome-rules 路径> --apply
+   ```
+   此时 guard 会因缺 factory-local.json fail-closed（exit 2）——
+   这是正确行为，继续下一步。
+2. **建本仓的 factory-local.json**（skip 分发，每仓一份）：
+   `perimeter` 从本仓 MISSION.md「周界（PERIMETER）」逐条誊抄
+   （guard.self_check 每次运行强制核对一致性——两边不一致 = exit 2）；
+   `reject_guidance` a/b/c 措辞按本仓 MISSION 判据本地化。
+3. **验证配置**：`python3 .factory/guard.py --files <任意文件>` 退出码
+   正常（0 或 1，非 2）；gauntlet（若有）factory-local-validity 层绿。
+4. **重证 kill rate（关键，不可跳）**：工作树干净时跑
+   `python3 .factory/mutations/run.py` 全绿——stamp（evidence-stamp.json）
+   随之绑定本仓周界指纹；此后改 factory-local.json 未重证 = 启动即宣告
+   证据过期。defects.json 锚点若因仓差异失效（如目标文件行文不同），
+   本地化锚点后重跑。
+5. **启用 M2**：`.factory/upstream-lock.json` 写入
+   `{"upstream": "<awesome-rules 路径>"}`（或 dispatch 环境设
+   `FACTORY_UPSTREAM`）；下一轮 dispatch 轮末自动生效——full 漂移开
+   needs-review PR（人工合并）、local 漂移落 needs-human issue、
+   无 gh 凭据降级为日志报告。
+
+顺序不可倒的原因：先改配置后拉脚本（步骤 2 先于 1）会让旧 guard 读到
+它不认识的配置静默放行；先启用 M2 后建配置（步骤 5 先于 2）会让每轮
+dispatch 在 fail-closed 上空转。
 
 ## S1/S2 已知边界
 

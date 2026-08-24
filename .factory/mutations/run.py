@@ -46,6 +46,20 @@ TESTS = REPO_ROOT / "scripts" / "run_tests.sh"
 GUARD_TIMEOUT = 300
 TESTS_TIMEOUT = 600
 
+def write_stamp(evidence: str = "EVIDENCE-2026-08-24.md") -> str | None:
+    """全绿出口调用：当前周界 blob 写入 stamp（None = 无法绑定，不写）。"""
+    import datetime
+    blob = perimeter_blob()
+    if not blob:
+        return None
+    STAMP.write_text(json.dumps({
+        "perimeter_blob": blob,
+        "evidence": evidence,
+        "generated_at": datetime.datetime.now(
+            datetime.timezone.utc).isoformat(timespec="seconds"),
+    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return blob
+
 # ── 周界证据指纹绑定（M4，设计 §11.3）────────────────────────────────
 # 「改配置 = 改门」：PERIMETER 数据化（factory-local.json）后，周界变更
 # 必须仍触发 kill rate 重证——否则门禁灵敏度退化为声明式。机制：全绿
@@ -293,14 +307,8 @@ def main() -> int:
         print(f"  结论: 覆盖不完整（SKIP: {ids}），本次通过不构成 auto-merge 依据（铁律 5）")
         return 4
     print("  结论: 门灵敏度冒烟通过（auto-merge 的必要非充分条件）")
-    blob = perimeter_blob()
+    blob = write_stamp()
     if blob:
-        STAMP.write_text(json.dumps({
-            "perimeter_blob": blob,
-            "evidence": "EVIDENCE-2026-08-24.md",
-            "generated_at": __import__("datetime").datetime.now(
-                __import__("datetime").timezone.utc).isoformat(timespec="seconds"),
-        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(f"  周界指纹已绑定: {blob[:12]}（evidence-stamp.json）")
     return 0
 
