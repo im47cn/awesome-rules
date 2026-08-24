@@ -206,6 +206,66 @@ else
     bad "NC7c 期望 rc=2，实际 rc=${_rc7c}"
 fi
 
+# ── NC8 killpg-strict 负控制：PR #36 两侧原形必须被拦 ─────────────────
+# 夹具为单引号 heredoc 字符串：ast 只看语法节点，源码字面形态不自匹配
+# （本脚本在 pytest-scripts 扫描面外的 sh 面，Python 夹具经 heredoc 落盘）。
+cat >"$TMP/nc8_bad.py" <<'EOF'
+import os
+import pytest
+
+
+def kill_strict(pgid):
+    try:
+        os.killpg(pgid, 9)
+    except ProcessLookupError:
+        pass
+
+
+def test_flaky_probe(pgid):
+    with pytest.raises(ProcessLookupError):
+        os.killpg(pgid, 0)
+EOF
+if "$PY" tools/check_killpg_strict.py "$TMP/nc8_bad.py" >"$TMP/out8" 2>&1; then
+    _rc8=0
+else
+    _rc8=$?
+fi
+if [ "$_rc8" -eq 1 ] && grep -q 'K1' "$TMP/out8" && grep -q 'K2' "$TMP/out8"; then
+    ok "NC8 killpg-strict 拦 K1/K2 原形"
+else
+    bad "NC8 期望 rc=1+K1+K2, 实际 rc=${_rc8}, 输出: $(cat "$TMP/out8")"
+fi
+
+# NC8b 安全等价形放行：元组容忍 / 裸 except——检查器边界是确定性缺失，
+# 不是见 killpg 就拦
+cat >"$TMP/nc8_ok.py" <<'EOF'
+import os
+
+
+def kill_tuple(pgid):
+    try:
+        os.killpg(pgid, 9)
+    except (ProcessLookupError, PermissionError):
+        pass
+EOF
+if "$PY" tools/check_killpg_strict.py "$TMP/nc8_ok.py" >"$TMP/out8b" 2>&1; then
+    ok "NC8b killpg-strict 放行容忍形态"
+else
+    bad "NC8b 期望 rc=0, 实际输出: $(cat "$TMP/out8b")"
+fi
+
+# NC8c 检查器损坏路径：rc=2 绝不算通过（与 NC6/NC7c 同一语义）
+if "$PY" tools/check_killpg_strict.py "$TMP/definitely-missing" >"$TMP/out8c" 2>&1; then
+    :
+else
+    _rc8c=$?
+fi
+if [ "$_rc8c" -eq 2 ]; then
+    ok "NC8c killpg-strict 损坏路径 rc=2"
+else
+    bad "NC8c 期望 rc=2, 实际 rc=${_rc8c:-0}"
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────
 if [ "$fails" -gt 0 ]; then
     echo "checker-self-test: $fails 项失败"
