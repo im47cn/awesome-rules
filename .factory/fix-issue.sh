@@ -113,6 +113,10 @@ if [ "${FACTORY_DISPATCHED:-0}" != 1 ] && [ "${DRY}" = 0 ]; then
   MAIN_FACTORY="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null \
     | sed 's#/\.git$##' || true)/.factory"
   LOCKDIR="${MAIN_FACTORY:-${REPO}/.factory}/locks/dispatcher"
+  # 父目录预建：下方 mkdir 是单级原子声明（-p 会吞 EEXIST 破坏互斥），
+  # 父缺时 ENOENT 被 2>/dev/null 吞成"锁被持"假象（派发器机器 locks/
+  # 常驻故未暴露，净克隆首跑必现——etf-radar PR#79）
+  mkdir -p "${LOCKDIR%/*}" 2>/dev/null || true
   if mkdir "$LOCKDIR" 2>/dev/null; then
     echo $$ > "$LOCKDIR/pid"; MANUAL_LOCK=1
   else

@@ -227,7 +227,7 @@ async function runNode(spec: NodeSpec): Promise<NodeResult>;
 
 | 层 | 机制 | 状态 |
 |---|---|---|
-| 语义层 | `.factory/guard.py`：周界前缀匹配，触碰即 exit 1；**fail-closed**（内部异常 exit 2 = 拦截） | ✅ S0 已落地 |
+| 语义层 | `.factory/guard.py`：周界前缀匹配，触碰即 exit 1；**fail-closed**（内部异常 exit 2 = 拦截）。PERIMETER 计划外置为数据 `factory-local.json`，证据文件指纹绑定强制重证（§11.3） | ✅ S0 已落地 |
 | 仓库层 | `scripts/plugin_lock.py` 安装入口 blob 锁（既有 zero-regression 体系） | ✅ 既有 |
 | 平台层 | GitHub 分支保护 + CODEOWNERS：周界路径强制人审 | ⬜ S1 配置 |
 
@@ -382,7 +382,81 @@ mutation kill rate 回归。
 
 ---
 
-## 11. 参考资料
+## 11. 上游同步与本地化外置（M1 已落地；M2–M4 设计定稿）
+
+> 术语防撞：本节 M1–M4 是**同步成熟度**分级，与本仓"Five Levels 的 L4
+> 自举工厂"无关。
+
+### 11.1 问题与 M1 现状
+
+`.factory` 工具链以副本形式散布于消费仓（etf-radar 等），双向漂移
+2026-08-24 实证：本仓领先 lease 围栏/R4 熔断，下游领先反哺三缺陷/锁
+预建——各自修各自的洞。M1 已落地根治「复制维护」：
+`DISTRIBUTION.json` 三态（full/local/skip）+ `sync-from-upstream.sh`
+（--check 门禁 / --apply 追平 + 锚点），用法见 `.factory/README.md`
+「上游同步」。
+
+### 11.2 M2：工厂机制自动消费上游修复（设计定稿，未实现）
+
+**核心张力（设计发现）**：fix-issue 链不能修工具链自身——`guard.py`
+PERIMETER 含 `.factory/`（质检线纪律），链内任何工具链改动都会被周界
+门拦下。这不是缺陷而是设计：工具链自变更必须走人工把关通道。因此
+M2 **不复用 fix-issue 链**，而用与 validate-pr 同构的确定性 PR 流
+（机器执行、人类合并）：
+
+1. **发现**：dispatch 每轮末尾（rejected 对账后）跑 `sync --check`
+   （上游路径来自 `upstream-lock.json` 新增 `upstream` 字段）。
+2. **分诊（零 LLM，确定性）**：full 漂移 → 机器可执行；local 漂移 →
+   `gh issue create` 落 needs-human（正文附 diff 摘要）——local 面是
+   语义决策，不可自动合并，等于 triage 判据 c 的周界语义在同步面的投影。
+3. **执行（full 漂移）**：`sync --apply` → 本仓 gauntlet → 独立分支
+   `factory/sync-<锚点短SHA>` push --no-verify → `gh pr create`
+   （factory:needs-review）→ 人工合并。
+4. **护栏**：
+   - 自我指涉：apply 后 dispatch 当轮即止——后续派发仍会运行内存中的
+     旧脚本；下一轮生效。
+   - 幂等：PR head 分支名含锚点 SHA，同锚点重跑 push 同分支（PR 自动
+     更新），不叠加 PR。
+   - fail-closed：gauntlet 红不 push，漂移保留人工介入。
+   - 成本：全程零 LLM 节点，只有 git/gh/gauntlet。
+5. **M3 触发升级**：上游 merge 的 GitHub Action 发 `repository_dispatch`，
+   下游收即跑一轮 M2 检查——漂移窗口从「下个 cron tick」缩到分钟级。
+
+### 11.3 M4：本地化外置（结构性根治，设计定稿）
+
+目标：local 面 6 → 0，全量 full 自动覆盖无冲突。**本地化应该是数据，
+不是代码 fork。** 载体 `.factory/factory-local.json`（每仓一份，skip
+分发）：`perimeter` / `reject_guidance` / `evidence_layout`
+（skills | monorepo）/ `upstream_repo` / `feedback_branch_prefix`。
+guard.py、factory_lib.py、feedback-upstream.sh 随之 local → full
+（读配置，缺键 fail-closed exit 2）。
+
+**与 kill-rate 纪律的调和（关键设计）**：PERIMETER 数据化后「改配置
+= 改门」必须仍触发重证，否则门禁灵敏度退化为声明式。机制 = **证据
+文件指纹绑定**：
+
+- `mutations/run.py` 生成 EVIDENCE-*.md 时头部记录 factory-local.json
+  的 git blob hash；
+- run.py 每次启动比对：当前 hash ≠ 证据记录 → 判「周界变更未重证」
+  exit 4（与 SKIP 同级，计入非绿）；
+- 效果：配置漂移自动作废旧证据，kill rate ≥80% 的判定永远绑定当前
+  周界；重证动作不变（改配置 → 跑 run.py）。
+
+gauntlet 增层 `factory-local-validity`（JSON 可解析 + guard.py 冒烟
+加载）。测试布局统一随源走（tests/ 子目录），消灭平铺分叉。
+
+### 11.4 阶段与验收
+
+| 阶段 | 内容 | 验收 |
+|---|---|---|
+| M1 ✅ | 三态清单 + sync 脚本 + 锚点 | fixture 端到端 check→apply→check 闭环 |
+| M2 | dispatch 集成确定性 PR 流 | 漂移注入演练：自动 PR 开出；gauntlet 红 fail-closed 不 push；apply 后当轮停止 |
+| M3 | repository_dispatch 推送触发 | 上游 merge → 下游同步 PR ≤5min |
+| M4 | factory-local.json 外置 | local 面 = 0；PERIMETER hash 绑定 EVIDENCE；改配置未重证 → run.py 非绿 |
+
+---
+
+## 12. 参考资料
 
 - Dan Shapiro, *Five Levels: from Spicy Autocomplete to Dark Factory*（2026-01）
 - github.com/coleam00/dark-factory-experiment（四铁律、GitHub 状态机、holdout）
