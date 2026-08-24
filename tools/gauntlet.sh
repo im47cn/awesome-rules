@@ -78,7 +78,7 @@ else
     run_layer pytest-skill-evo "$PY" -m pytest skills/skill-evo/scripts/tests -q
     run_layer pytest-doc-gen "$PY" -m pytest skills/doc-gen/scripts/tests -q
     run_layer pytest-arch-hawkeye "$PY" -m pytest arch-hawkeye/scripts/tests -q
-
+    run_layer plugin-versions "$PY" tools/check_plugin_versions.py
     run_layer md-link-check "$PY" scripts/md_link_check.py .
 
     layer_must_not_secrets() {

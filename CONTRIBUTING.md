@@ -330,7 +330,10 @@ python3 scripts/badcase_runner.py --verbose
 
 - 运行 `npm run release`（commit-and-tag-version 按 commit 类型推导 bump 级别，
   更新 `package.json` 与 `CHANGELOG.md`）
-- `.claude-plugin/plugin.json` 等各平台清单无同步脚本，随 release 手工对齐版本
+- 各平台清单版本对齐由门禁 `tools/check_plugin_versions.py` 拦截（gauntlet
+  `plugin-versions` 层）：以 `package.json` 为单源锚，六处插件清单漂移即红；
+  新平台接入须登记到检查器的 `PLUGIN_MANIFESTS`（或 `EXCLUDED_MANIFESTS`
+  并注明语义不同的理由），未登记的清单文件属硬失败
 - 对齐清单后运行 `python3 scripts/plugin_lock.py --update`，并提交生成的 `scripts/plugin-lock.json` 更新
 - 消费者侧更新：源仓 `git pull` 后执行
   `claude plugins update awesome-rules@awesome-rules`（市场限定名）
