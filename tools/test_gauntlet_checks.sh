@@ -363,7 +363,9 @@ nc10_setup() {
         echo
         echo '## 组件'
         echo
+        # shellcheck disable=SC2016  # 字面 markdown 反引号，刻意单引号防展开
         echo '- `a.sh` 入口'
+        # shellcheck disable=SC2016
         echo '- `run.py` 库'
         echo
         printf '节点共（%s）个提示词。\n' "$_pc"

@@ -229,6 +229,27 @@ python3 .factory/mutations/run.py [--only G-01,G-03]
 （README/skills/steering/scripts）、`review.md` 的审查依据（steering/）。
 `fix-issue.sh` 基分支 `main` 与 PR 标签按目标仓库约定核对。
 
+## 上游同步（移植后的增量维护）
+
+本仓是 `.factory` 工具链的唯一真相源（`DISTRIBUTION.json` 分类）；
+下游仓（etf-radar 等）用 `sync-from-upstream.sh` 追增量，不再手工 diff 对账：
+
+```bash
+# 漂移检查（full 面漂移 exit 1，可挂 CI/gauntlet；local 面只报告）
+.factory/sync-from-upstream.sh <upstream-path> --check
+
+# 追平：full 文件直接覆盖 + 锚点写 upstream-lock.json；local 只给 diff 摘要
+.factory/sync-from-upstream.sh <upstream-path> --apply
+```
+
+三态语义：**full**（零本地化，blob 直接覆盖，漂移=门禁失败）；
+**local**（含仓特定区——guard.py PERIMETER、factory_lib.py 判据措辞等，
+永不覆盖，漂移的正道是 `feedback-upstream.sh` 反哺后追平，不是静默分叉）；
+**skip**（仓特定/运行时产物）。上游可为 bare 仓（经 git 对象库读）。
+
+漂移闭环：下游热修 → feedback-upstream 反哺 PR → 上游合并 → 下游
+`--apply` 追平 → `--check` 归零。双向都有机器检查，分叉不再靠人工记忆。
+
 ## S1/S2 已知边界
 
 - S1 手动跑 `fix-issue.sh`；S2 用 `dispatch.sh`（本仓库现已内置）。
