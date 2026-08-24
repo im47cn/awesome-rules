@@ -378,7 +378,7 @@ mutation kill rate 回归。
 | 元技能闭环 | `skills/skill-evo/`（会话经验提炼 → 人工审核 → GEPA 自进化） | 对应 drift/ablate/scan/evolution-review 四件套；decisions.md 喂入 |
 | triage 依据 | `steering/*.md`（唯一真相源，人工维护） | fix-issue 的 prime 上下文 + 评审节点的规范依据 |
 | AI 评审节点 | `skills/api-guard` `ddl-guard` `arch-guard` | validate-PR 按 PR 触及面选配的并行评审器 |
-| hooks 注入 | `hooks/omp/load-steering.sh` | AI 节点会话自动携带治理上下文 |
+| hooks 注入 | `hooks/load-steering.sh` | AI 节点会话自动携带治理上下文 |
 
 ---
 

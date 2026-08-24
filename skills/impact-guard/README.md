@@ -2,7 +2,7 @@
 
 变更影响分析技能 — 给定变更点，沿图谱计算受影响范围，按「直接/间接」+ GTSP 业务边界分级。
 
-> **状态**：✅ v1 已实现（quick = Tier 1 import 索引独立可用；graph = Tier 2 Cypher 生成由 Agent 编排执行）。测试 43 项 / 覆盖率 95%，fixture `fixtures/ddd-sample` 覆盖 5 通道边界。
+> **状态**：✅ v1 + v2 已实现（quick = Tier 1 import 索引独立可用；graph = Tier 2 Cypher 生成由 Agent 编排执行；v2 = 方法级 diff + 跨服务契约传播）。测试：`pytest skills/impact-guard/scripts/tests -q`；fixture `fixtures/ddd-sample` 覆盖 5 通道边界。
 
 ## 架构
 

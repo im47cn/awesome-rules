@@ -10,7 +10,7 @@ description: >
 
 # 变更影响分析 (impact-guard)
 
-> **状态**：✅ v1 + v2 已实现（v2：方法级 diff + 跨服务契约传播，56 测试 / 覆盖率 94%）。技术设计见 [`DESIGN.md`](DESIGN.md)、完整论证见[评审稿](../../docs/design/impact-guard-design.md)。
+> **状态**：✅ v1 + v2 已实现（v2：方法级 diff + 跨服务契约传播）。技术设计见 [`DESIGN.md`](DESIGN.md)、完整论证见[评审稿](../../docs/design/impact-guard-design.md)。
 
 ## 定位
 
@@ -22,7 +22,7 @@ description: >
 | doc-gen | 架构长什么样？ | 项目快照 |
 | **impact-guard** | **这次改动会影响谁？** | **变更增量** |
 
-底层复用 arch-guard `JavaScanner` / `LayerIdentifier`，Tier 2 复用 `codebase-memory-mcp` 图谱。
+底层复用 doc-gen `JavaScanner` / `LayerIdentifier`（经 `scripts/_compat.py` 桥接），Tier 2 复用 `codebase-memory-mcp` 图谱。
 
 ## 架构：Tier 2 主 + Tier 1 fallback
 
@@ -102,4 +102,4 @@ python3 scripts/impact_check.py --mode graph --config .impact-guard.json
 - 快速使用：[`README.md`](README.md)
 - 完整论证 / 评审稿（含 grill 决策）：[`../../docs/design/impact-guard-design.md`](../../docs/design/impact-guard-design.md)
 - 架构规范：[`../../steering/gtsp/01-project-structure.md`](../../steering/gtsp/01-project-structure.md)
-- 复用来源：[`../arch-guard/scripts/arch_check.py`](../arch-guard/scripts/arch_check.py)
+- 复用来源：[`../doc-gen/scripts/scanner/java.py`](../doc-gen/scripts/scanner/java.py) 与 [`../doc-gen/scripts/generator/layers.py`](../doc-gen/scripts/generator/layers.py)（经 [`scripts/_compat.py`](scripts/_compat.py) sys.path 桥接）

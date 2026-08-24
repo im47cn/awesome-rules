@@ -2,7 +2,7 @@
 
 会话经验自动总结与规范/技能进化 — 参考 Hermes self-evolution 的闭环：会话结束后自动提炼「用户纠正 / 失败模式 / 成功模式」，生成对 `skills/*/SKILL.md` 与 `steering/*.md` 的进化提案，人工审核后应用。
 
-> **状态**：✅ v2 已实现（CC SessionEnd hook + omp 原生 hook 双端自动触发；GEPA 进化引擎待标注积累）。测试 51 项（LLM 调用全 mock）。
+> **状态**：✅ v2 已实现（CC SessionEnd hook + omp 原生 hook 双端自动触发；GEPA 进化引擎待标注积累）。测试：`pytest skills/skill-evo/scripts/tests -q`（LLM 调用全 mock）。
 
 ## 架构
 

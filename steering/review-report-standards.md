@@ -34,7 +34,7 @@ inclusion: manual
 
 ### 2. 依据（违反的不变量）
 
-- 引用**具体规范条款**：steering 文件 + 条款标识（如 `04-database-mybatis §索引`、
+- 引用**具体规范条款**：steering 文件 + 条款标识（如 `database-design-specification §六、索引`、
   `rule_code=DEP_DIRECTION`），不接受「不符合最佳实践」这类无出处依据
 - 一句话陈述应然状态（该成立的不变量），再指出偏离点
 

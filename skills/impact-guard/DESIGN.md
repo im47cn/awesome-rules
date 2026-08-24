@@ -59,7 +59,7 @@ class ChangePoint:
 
 ### 2.2 Tier 1 fallback：import 反向索引
 
-**索引构建**（一次性，复用 arch-guard `JavaScanner`，含 `project_package_prefix` 过滤）：
+**索引构建**（一次性，复用 doc-gen `JavaScanner`，含 `project_package_prefix` 过滤）：
 
 ```
 扫描所有 .java 的 import → reverse_index[被import的类] = {依赖方集合}
@@ -128,7 +128,7 @@ python3 scripts/impact_check.py --mode graph --config .impact-guard.json
 ## 3. 技术栈
 
 - Python 3（对齐 arch-guard / doc-gen）。
-- `arch-guard.JavaScanner` / `LayerIdentifier` / `SUFFIX_TYPE_MAP`（复用，见 §6）。
+- doc-gen `JavaScanner` / `LayerIdentifier` / `SUFFIX_TYPE_MAP`（复用，见 §6 与 §7.1 实施注记）。
 - `codebase-memory-mcp`（Tier 2 + reindex 编排）。
 - 测试：pytest，覆盖率 >90%。
 
@@ -220,15 +220,18 @@ scripts/
 ## 6. 与现有技能的复用
 
 ```
-arch-guard (审查)          impact-guard (影响)
+doc-gen (代码复用)         impact-guard (影响)
 ─────────────              ─────────────────
 JavaScanner        ──共享──► impact_scanner.py（import 提取 + 包前缀过滤）
 LayerIdentifier    ──共享──► change_extractor.py（变更点分层归属）
 SUFFIX_TYPE_MAP    ──共享──► critical_ranker.py（后缀 → 层/聚合根）
+
+arch-guard (惯例对齐)      impact-guard (影响)
+─────────────              ─────────────────
 --mode graph 惯例  ──对齐──► 动态 Cypher 生成（不手抄）
 退出码 0/1/2       ──对齐──► 0/1/2 语义一致
 
-doc-gen (文档)            impact-guard (影响)
+doc-gen (风格对齐)         impact-guard (影响)
 ─────────────              ─────────────────
 cola-sample 风格  ──对齐──► fixtures/ddd-sample
 状态标记惯例      ──对齐──► v1 范围表
@@ -242,7 +245,7 @@ cola-sample 风格  ──对齐──► fixtures/ddd-sample
 
 ### 7.1 v1 范围
 
-> 2026-08-16 v1 已实施 ✅（43 测试 / 覆盖率 95%）。
+> 2026-08-16 v1 已实施 ✅。
 
 | 功能 | 状态 |
 |---|---|
@@ -291,4 +294,4 @@ cola-sample 风格  ──对齐──► fixtures/ddd-sample
 - 快速使用：[`README.md`](README.md)
 - 完整论证 / 评审稿（含 grill 决策）：[`../../docs/design/impact-guard-design.md`](../../docs/design/impact-guard-design.md)
 - 架构规范：[`../../steering/gtsp/01-project-structure.md`](../../steering/gtsp/01-project-structure.md)
-- 复用来源：[`../arch-guard/scripts/arch_check.py`](../arch-guard/scripts/arch_check.py)
+- 复用来源：[`../doc-gen/scripts/scanner/java.py`](../doc-gen/scripts/scanner/java.py) 与 [`../doc-gen/scripts/generator/layers.py`](../doc-gen/scripts/generator/layers.py)（经 [`scripts/_compat.py`](scripts/_compat.py) sys.path 桥接）
