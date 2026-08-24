@@ -4,6 +4,23 @@
 基线）与 **Spec**（规格轴：MR 标题/工单/PRD 对照），聚合时抽验事实断言，
 按 [审查报告输出规范](../../steering/review-report-standards.md) 五段式输出。
 
+## 上游参考源（定期对齐）
+
+本技能 fork 自 [mattpocock/skills](https://github.com/mattpocock/skills) 的
+`code-review`（MIT，两轴+并行子代理设计的原始出处），演进已分叉：本版叠加了
+可证伪性条款、结构化输出契约、交付恢复、聚合抽验环、云效适配与五段式报告
+对齐，与上游不保持文件级同步。
+
+定期（季度或上游大版本）参考以下两个上游的演进，评估值得吸收的设计：
+
+| 上游 | 地址 | 关注点 |
+|---|---|---|
+| mattpocock/skills | https://github.com/mattpocock/skills | 两轴流程本源；规格源识别、smell 基线的演进 |
+| claude-plugins-official code-review | https://github.com/anthropics/claude-code 下 `plugins/code-review` | 官方多代理置信度 PR 审查；置信度过滤误报的机制设计 |
+
+对齐时保持本仓库约束：单一数据源（本目录），不回拷文件覆盖；吸收的设计
+先落 badcase 验证再合入。
+
 ## 快速使用
 
 对话中说「审查 PR #167」「review since origin/develop」「帮我审一下这个分支」
