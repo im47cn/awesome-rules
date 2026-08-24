@@ -318,6 +318,39 @@ else
     bad "NC9c 期望 rc=2, 实际 rc=${_rc9c}"
 fi
 
+# ── NC9d 父仓子目录：路径基线错位拒判（PR #41 review 3）────────────────
+# git 向父目录找仓 → ls-files 相对父仓根，allowlist 相对 root 比较即错位。
+mkdir -p "$NC9DIR/sub" && printf '{"version": "0.4.0"}' >"$NC9DIR/sub/package.json"
+if "$PY" tools/check_plugin_versions.py "$NC9DIR/sub" >"$TMP/out9d" 2>&1; then
+    _rc9d=0
+else
+    _rc9d=$?
+fi
+if [ "$_rc9d" -eq 2 ] && grep -q '不是 git 仓库顶层' "$TMP/out9d"; then
+    ok "NC9d 父仓子目录拒判 rc=2 且指明错位"
+else
+    bad "NC9d 期望 rc=2 且报顶层错位, 实际 rc=${_rc9d}: $(cat "$TMP/out9d")"
+fi
+
+# ── NC9e 未跟踪 allowlist：发布面漂移（PR #41 review 4）─────────────────
+# gitignored 同名清单不参与发布——读了也不算数，未跟踪本身即漂移。
+NC9E="$TMP/nc9e"
+git init -q "$NC9E"
+printf '{"version": "1.0.0"}' >"$NC9E/package.json"
+mkdir -p "$NC9E/.claude-plugin"
+printf '{"version": "1.0.0"}' >"$NC9E/.claude-plugin/plugin.json"
+printf '.claude-plugin/\n' >"$NC9E/.gitignore"
+git -C "$NC9E" add -A
+if "$PY" tools/check_plugin_versions.py "$NC9E" >"$TMP/out9e" 2>&1; then
+    _rc9e=0
+else
+    _rc9e=$?
+fi
+if [ "$_rc9e" -eq 1 ] && grep -q 'claude-plugin/plugin.json: 未被 git 跟踪' "$TMP/out9e"; then
+    ok "NC9e 未跟踪 allowlist 报发布面漂移（不静默跳过）"
+else
+    bad "NC9e 期望 rc=1 且报未跟踪, 实际 rc=${_rc9e}: $(cat "$TMP/out9e")"
+fi
 # ── 汇总 ───────────────────────────────────────────────────────────────
 if [ "$fails" -gt 0 ]; then
     echo "checker-self-test: $fails 项失败"
