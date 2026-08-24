@@ -11,13 +11,20 @@
 | `fix-issue.sh` | 全链入口：一个 issue 进，一个待人工合并的 PR 出 |
 | `guard.py` | 周界锁（前缀匹配，fail-closed，铁律 3） |
 | `mutations/run.py` | 门灵敏度冒烟（注入缺陷→断言拦截→字节还原，铁律 5） |
-| `prompts/*.md` | 六个 AI 节点提示词（版本化、引擎无关，禁内联） |
+| `prompts/*.md` | 八个 AI 节点提示词（triage/prime/plan/implement/review/holdout/pr-review/feedback-adapt；版本化、引擎无关，禁内联） |
 | `artifacts/issue-N/` | 链产物（运行时输出，勿提交 git） |
 | `factory-lease.sh` | 租约仲裁客户端（claim/心跳/出口围栏；fail-closed，source 引入） |
 | `db/schema.sql` | 仲裁层 schema（Supabase/任何 Postgres，服务端原子，幂等迁移） |
+| `dispatch.sh` | S2 派发器（claim/重派/A5 门控 merge，零 LLM） |
+| `cron-dispatch.sh` | hub kick 入口（LaunchAgent 600s → 锁 + dispatch 单轮） |
+| `factory-state.sh` | 标签同步器（GitHub 事实 → state.py 推导 → 幂等收敛） |
+| `validate-pr.sh` | S3 PR 门禁链（guard → tests → AI 评审 → holdout，人类合并前独立验证） |
+| `state.py` + `test_state.py` + `tests/` | 状态机权威（TRANSITIONS 唯一 spec）与全套测试 |
+| `feedback.py` + `feedback-upstream.sh` | etf-radar 工厂改进反哺上游仓（决策零 LLM，AI 仅适配内容） |
+| `breaker.sh` | R4 成本熔断门（fix-issue/dispatch/cron-dispatch/triage-batch 四入口共用接线点，透传 factory_lib breaker 码） |
+| `factory-lib.sh` + `factory_lib.py` | 链副作用共享库（issue 评论唯一出口/拒绝单一动作/租约围栏钩位）+ python 工具箱（timeout 分级预算/breaker/回执解析） |
 
 ## 前置条件
-
 - `omp` CLI（AI 节点引擎；每节点独立进程 = 物理级 fresh context）
 - `gh` 已认证（取 issue、建 PR）
 - `python3`（guard / mutations / JSON 解析）
@@ -53,7 +60,7 @@ NODE_TIMEOUT=30m .factory/fix-issue.sh 42           # 重跑链，triage 全新�
 ```
   → triage（裁决 accept|reject；落标 factory:accepted|rejected，
            reject 附判据明细回执评论到 issue 后终止）
-  → git checkout -b factory/issue-N
+  → git worktree add -B factory/issue-N .factory/worktrees/issue-N（基 main）
   → prime（研究笔记，不做设计）
   → plan（任务级计划 plan.json，含每任务 verify 命令）
   → implement（逐任务执行，周界任务跳过标 blocked，
@@ -126,7 +133,11 @@ python3 -m pytest .factory/test_state.py -o addopts= -q   # 状态机测试
   in-progress）的单机互斥仍由 dispatcher 锁保证；跨机互斥由租约仲裁层
   接管（`issue:N` 认领 + epoch fencing，见「租约仲裁」节），sync 收敛并发漂移。
 - **链失败**：fix-issue.sh 非零退出 → trap 清 triaging/accepted/
-  in-progress → issue 回零标签态，人工重投。
+  in-progress（枚举式，终态 rejected/needs-human 不清）→ issue 回零
+  标签态，人工重投。例外 R4 熔断（exit 5，`breaker_tripped` 边）：
+  熔断/门故障=机器无法继续需人工，链 exit 前落 needs-human——
+  GitHub 侧可见，sync 无 PR 分支不清除 stray needs-human，解除走
+  人工接管；dispatch 级熔断无具体 issue 可标，只在日志停摆。
 
 派发器环境变量：`MAX_PARALLEL=4`、`FACTORY_MERGE_METHOD=merge`、
 `INTERVAL=1800`、`GH_REPO=<owner/repo>`（无 github remote 时显式指定）。
@@ -221,7 +232,8 @@ python3 .factory/mutations/run.py [--only G-01,G-03]
 ## S1/S2 已知边界
 
 - S1 手动跑 `fix-issue.sh`；S2 用 `dispatch.sh`（本仓库现已内置）。
-  标签状态机唯一权威在 `state.py TRANSITIONS`（12 条边全覆盖有测试）。
+  标签状态机唯一权威在 `state.py TRANSITIONS`（转移表全覆盖有测试，
+  meta-test 强制每条边有场景 fixture）。
 - S1→L3 出口判据「行为破坏类缺陷集扩充后 kill rate ≥80%」已证（2026-08-24）：
   篡改类 6/6 + 行为破坏类 5/5，kill rate 11/11 = 100%，负例放行 2/2；
   证据口径与逐条击杀明细见 `.factory/mutations/EVIDENCE-2026-08-24.md`。
@@ -230,14 +242,14 @@ python3 .factory/mutations/run.py [--only G-01,G-03]
 - holdout 输入白名单是提示词纪律级约束，S2+ 换 SDK
   `restrictToolNames` 物理化（设计文档 §7）。
 - `--fill` 生成的 PR 标题质量依赖 implement 的 commit 信息。
-- needs-fix 重派复用 `fix-issue.sh`（`checkout -b || true` 落在既有分支），
+- needs-fix 重派复用 `fix-issue.sh`（`worktree add -B` 重置既有分支），
   全节点重跑；链内断点续跑（resume）未实现。
 
 ## 多会话并行协议（worktree 隔离 + 分支约定）
 
-工厂链在独立 worktree（`../awesome-rules-factory`）跑，人工侧工作树不受
-链的 checkout/commit 影响。但 worktree 共享 refs 与 git config——它隔离
-文件层，不隔离历史层。硬边界约定：
+工厂链在独立 worktree（`${仓库}/.factory/worktrees/issue-N`，fix-issue.sh
+`worktree add -B`）跑，人工侧工作树不受链的 checkout/commit 影响。但 worktree
+共享 refs 与 git config——它隔离文件层，不隔离历史层。硬边界约定：
 
 - **专属分支**：每个 worktree/会话一个专属分支提交（工厂链分支
   `factory/issue-N`，worktree 空闲驻留 `factory/base`）；链基线取

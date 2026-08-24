@@ -33,6 +33,8 @@ SCENARIOS = {
     "triage_start": (_issue(["factory:triaging"]), None, None),
     "dispatch_claim": (_issue(["factory:accepted"]), None, None),   # claim 属 dispatcher
     "chain_fail": (_issue([]), None, None),                          # trap 清理后零标签
+    # R4 熔断（exit 5）：链死前命令式落标 needs-human（breaker_tripped 边）
+    "breaker_tripped": (_issue(["factory:needs-human"]), None, None),
     # rejected：链标记评论推导，清一切残留
     "triage_reject": (_issue(["factory:triaging"], comments=["[factory:rejected] 理由"]), None, None),
     # PR 打开 → in-review/needs-review（pr_open）
@@ -66,6 +68,7 @@ def test_phases():
         "triage_start": "labeled:['factory:triaging']",
         "dispatch_claim": "labeled:['factory:accepted']",
         "chain_fail": "idle",
+        "breaker_tripped": "idle",   # needs-human 非锁/队列，sync 无事可做（ops 钉死在专项测试）
         "triage_reject": "rejected",
         "pr_open": "in-review",
         "triage_accept": "in-review",
@@ -127,6 +130,13 @@ def test_rounds_boundary():
         events = [{"event": "labeled", "label": {"name": "factory:needs-fix"}}] * n
         phase, _ = F(issue, pr, events)
         assert phase == want, f"rounds={n}: {phase} != {want}"
+
+def test_breaker_needs_human_stray_not_cleared():
+    """breaker_tripped 行为面：无 PR + issue 带 needs-human（链 exit 5 前
+    命令式落标）→ sync ops 为空。无 PR 分支只认 LOCKS|QUEUE|rejected，
+    stray needs-human 不清除——清除即回零标签态 → dispatch 重派 → 链再
+    熔断，死循环对人类重新隐形化。解除只走人工（human_takeover）。"""
+    assert F(_issue(["factory:needs-human"]), None, None) == ("idle", [])
 
 
 def test_table_full_coverage():

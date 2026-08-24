@@ -114,6 +114,17 @@ def test_no_salvage_when_branch_has_no_commits():
     assert not any(l.startswith("git:") and "push" in l for l in lines)
     assert "label" in _kinds(lines)
 
+def test_failure_cleanup_keeps_needs_human():
+    """R4 熔断（exit 5）标签存续：链失败清理（dispatch 委托给本 trap，
+    自身不动标签）是枚举式 triaging/accepted/in-progress——needs-human
+    终态不清（同 rejected 待遇）。剥掉它 = issue 回零标签态 → dispatch
+    下轮重派 → 链再熔断，死循环对人类重新隐形化。"""
+    lines, _ = _run_trap(rc=5, count="0")
+    ops = {ln.split(":", 1)[1] for ln in lines if ln.startswith("label:")}
+    assert ops == {"remove factory:triaging",
+                   "remove factory:accepted",
+                   "remove factory:in-progress"}
+
 
 def test_label_cleanup_before_lease_release():
     """PR#34：失败清标在 lease_cleanup 之前——清标也是副作用出口，须持有效租约过围栏。"""

@@ -27,6 +27,12 @@ MAX_TRIAGE="${MAX_TRIAGE:-5}"
 command -v gh >/dev/null || { echo "需要 gh CLI" >&2; exit 2; }
 # 链副作用共享库（契约：REPO/REPO_SLUG 已定义；ISSUE 为循环变量）
 source "${FACTORY}/factory-lib.sh"
+# --- R4 成本熔断：批次是 LLM 成本入口之一（手动直跑路径此前无门，
+# 2026-08-24 收口）。透传 breaker 码：3=熔断 / 1=门故障 fail-closed，
+# set -e 下均直接停摆，明细见 breaker.sh stderr。---
+if [ "${DRY:-0}" = 0 ]; then
+  bash "${FACTORY}/breaker.sh" "${FACTORY}/locks"
+fi
 
 # 零 factory 标签的 open issue（json 一次取齐, python 过滤排序）。
 # gh 瞬断（2026-08-23 22:27 实证：connection reset → 空输出）时给出可读
