@@ -110,3 +110,69 @@ class TestPerimeterStamp:
         monkeypatch.setattr(mut, "STAMP", stamp)
         mut.stamp_stale_banner()
         assert capsys.readouterr().out == ""
+
+
+class TestStampRoundtrip:
+    """stamp 的 git 往返闭环（完整周期，临时仓模拟）：
+    全绿写 stamp → 改 factory-local.json（blob 变）→ 启动宣告过期 →
+    重证写新 stamp → 再启动安静。「改配置 = 改门」的可执行证明。
+    monkeypatch STAMP/LOCAL_CFG 指向 tmp git 仓（perimeter_blob 走
+    REPO_ROOT 相对路径——一并 patch 到临时仓根）。"""
+
+    def _git(self, cwd, *args):
+        return subprocess.run(["git", "-C", str(cwd), *args],
+                              capture_output=True, text=True, check=True)
+
+    def test_full_cycle_announce_then_refresh(self, tmp_path, capsys, monkeypatch):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        self._git(repo, "init", "-q")
+        self._git(repo, "config", "user.email", "t@t")
+        self._git(repo, "config", "user.name", "t")
+        cfg = repo / "factory-local.json"
+        cfg.write_text('{"perimeter": ["a/"]}', encoding="utf-8")
+        self._git(repo, "add", "-A")
+        self._git(repo, "commit", "-qm", "init")
+
+        stamp = repo / "evidence-stamp.json"
+        monkeypatch.setattr(mut, "STAMP", stamp)
+        monkeypatch.setattr(mut, "LOCAL_CFG", cfg)
+        monkeypatch.setattr(mut, "REPO_ROOT", repo)
+
+        # ① 无 stamp：安静（首次运行不宣告）
+        mut.stamp_stale_banner()
+        assert capsys.readouterr().out == ""
+
+        # ② 全绿：stamp 落盘，blob 与当前配置一致
+        blob1 = mut.write_stamp(evidence="EVIDENCE-test.md")
+        assert blob1 and json.loads(stamp.read_text())["perimeter_blob"] == blob1
+        # stamp 与配置匹配 → 仍安静
+        mut.stamp_stale_banner()
+        assert capsys.readouterr().out == ""
+
+        # ③ 改周界配置并入库（stamp 绑定 index blob——工作树未提交编辑
+        #    不构成周界事实，不宣告）→ 启动宣告过期
+        cfg.write_text('{"perimeter": ["a/", "b/"]}', encoding="utf-8")
+        self._git(repo, "add", "-A")
+        self._git(repo, "commit", "-qm", "perimeter change")
+        mut.stamp_stale_banner()
+        assert "周界指纹漂移" in capsys.readouterr().out
+
+        # ④ 重证（全绿）：stamp 刷新为新 blob → 再启动安静
+        blob2 = mut.write_stamp(evidence="EVIDENCE-test.md")
+        assert blob2 and blob2 != blob1
+        mut.stamp_stale_banner()
+        assert capsys.readouterr().out == ""
+
+    def test_untracked_config_still_binds_via_write(self, tmp_path, monkeypatch):
+        """git add 后 blob 才可取；未跟踪时 perimeter_blob=None（不写不宣告）。
+        git ls-files -s 只看 index——设计上 stamp 绑定的是已入库的周界。"""
+        repo = tmp_path / "repo2"
+        repo.mkdir()
+        self._git(repo, "init", "-q")
+        cfg = repo / "factory-local.json"
+        cfg.write_text('{"perimeter": ["a/"]}', encoding="utf-8")
+        monkeypatch.setattr(mut, "LOCAL_CFG", cfg)
+        monkeypatch.setattr(mut, "REPO_ROOT", repo)
+        assert mut.perimeter_blob() is None  # 未 add：无法绑定
+        assert mut.write_stamp() is None     # 不写 stamp
