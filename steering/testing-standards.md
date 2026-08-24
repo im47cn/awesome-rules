@@ -112,6 +112,15 @@ inclusion: always
 - 入库时必须有**负控制回归测试**：以牺牲仓注入 `GIT_DIR` 跑真实套件代码路径，断言牺牲仓 `rev-list --all --count == 0` 且真仓 `status --porcelain` 前后不变（范式见 `scripts/tests/test_hermetic_git.py`）。注意 `GIT_DIR` 须指向非裸 gitdir——裸仓只触发 fatal 假红，演示不了静默劫持
 - 新增含 git 调用的测试须同步登记到负控制用例表；CI/hook 链路验证密封的判定证据是 `env GIT_DIR=<牺牲仓> bash scripts/run_tests.sh` 全绿且牺牲仓零对象
 
+### 进程组信号的平台语义（macOS 僵尸窗口）【强制】
+
+> 适用：任何调用 `os.killpg` / `kill -pgid` / 探活信号（sig=0）的测试与门禁脚本（变异 harness 杀组、超时兜底等）。
+> 背景：2026-08-24 PR #36——孙进程被 SIGKILL 后变僵尸、由 launchd 异步收尸，窗口内 macOS XNU 对含僵尸的进程组发信号（含 sig=0 探活）报 `EPERM` 而非 `ESRCH`，同 UID 亦然；Linux 上僵尸不触发此差异。
+
+- **杀组路径**：`killpg(SIGKILL)` 的 except 须同时容忍 `(ProcessLookupError, PermissionError)`——僵尸无需再杀（SIGKILL 对僵尸是 no-op），未捕获的 `EPERM` 会炸掉调用方而非走"超时=无效运行"语义
+- **探活断言**：禁止 `pytest.raises(ProcessLookupError)` 单发判定；须带 deadline 轮询——`EPERM` = 组内仅剩待-reap 僵尸（同 UID 下真活进程不可能 `EPERM`）复探等收尸，`ESRCH` = 组彻底消失，探活成功（rc=0）= 仍有真活成员，超时才判失败
+- **时序窗口 mock 化**：真实僵尸窗口依赖 launchd 收尸时序无法稳定复现，规格须以确定性 mock 锁定（`EPERM→…→ESRCH` 序列通过 + 探活持续成功超时失败），范式见 `.factory/tests/test_mutations_run.py::_assert_group_dead`
+
 ### Tripwire：前提失效硬失败【强制】
 
 - 脚本依赖的环境前提（环境变量、缓存清理、工具版本）修复后必须留后验：前提不成立时直接 raise / 退出非零，禁止静默降级继续——静默降级的偏差方向永远是"虚假通过"，不会以红色形式暴露
