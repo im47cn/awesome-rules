@@ -220,6 +220,22 @@ for pr in json.load(sys.stdin): print(pr["number"])')"
           echo "  [rejected] #${n} 静默滞留（无后续人工评论，${t}）"
         fi
       done
+
+  # ── M2 上游同步检查（设计 §11.2）：零 LLM、不占 R4 预算 ──────────────
+  # 不复用 fix-issue 链（guard PERIMETER 含 .factory/，链按设计拦工具链
+  # 自变更）——full 漂移走确定性 PR 流（apply→gauntlet→factory/sync-<锚点>
+  # →needs-review 人工合并）；local 漂移落 needs-human issue；无凭据降级
+  # 仅报告（exit 3）。exit 0 = 同步已推进 → 当轮即止（自我指涉护栏：
+  # 后续派发仍跑内存旧脚本，下一轮生效）。
+  if [ -x "$FACTORY/upstream-sync-check.sh" ] \
+     && [ -f "$FACTORY/upstream-lock.json" ]; then
+    if bash "$FACTORY/upstream-sync-check.sh"; then
+      echo "上游同步已推进，本轮派发即止（下轮生效）"
+      return 0
+    fi
+    # 1=推进失败（人工介入）/ 2=配置缺 / 3=无凭据降级：不阻断本轮派发
+    echo "（upstream-sync 未推进，继续本轮派发）"
+  fi
 }
 
 if [ "$WATCH" = 1 ]; then

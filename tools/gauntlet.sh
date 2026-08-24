@@ -122,6 +122,16 @@ else
     # 扫描面 = tracked *.py（67c2965b 原则）
     run_layer lint-killpg-strict "$PY" tools/check_killpg_strict.py \
         .factory tools scripts hooks skills arch-hawkeye .github
+    # 工厂本地化配置有效性门（M4 本地化外置，设计 §11.3）：
+    # factory-local.json = guard.py PERIMETER 与 REJECT_GUIDANCE 的数据载体。
+    # JSON 可解析 + 必需键 + guard 实际加载自检（含 MISSION 一致性）。
+    # 缺文件也拦——周界门不能在配置缺失下静默放行（fail-closed）。
+    run_layer factory-local-validity "$PY" -c 'import sys
+sys.path.insert(0, ".factory")
+import guard, factory_lib
+n = len(guard.PERIMETER)
+assert n > 0 and len(factory_lib.REJECT_GUIDANCE) == 3, "配置载入不完整"
+print(f"factory-local-validity: perimeter {n} 条 / guidance a,b,c 就绪")'
 fi
 
 echo "gauntlet: 全部层通过"

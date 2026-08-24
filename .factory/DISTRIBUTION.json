@@ -1,5 +1,5 @@
 {
-  "description": ".factory 工具链分发清单。awesome-rules 是唯一上游真相源；下游仓库（etf-radar 等）用 sync-from-upstream.sh 按本清单拉取，替代手工拷贝（README 移植四步的持续维护部分）。分类语义——full: 零本地化，blob 可直接覆盖（漂移=门禁失败）；local: 含仓特定区（同步只报告不覆盖，漂移经 feedback-upstream 反哺管线收敛）；skip: 仓特定或运行时产物，永不跨仓。",
+  "description": ".factory 工具链分发清单。awesome-rules 是唯一上游真相源；下游仓库（etf-radar 等）用 sync-from-upstream.sh 按本清单拉取，替代手工拷贝（README 移植四步的持续维护部分）。分类语义——full: 零本地化，blob 可直接覆盖（漂移=门禁失败）；local: 含仓特定区（同步只报告不覆盖，漂移经 feedback-upstream 反哺管线收敛）；skip: 仓特定或运行时产物，永不跨仓。M4 后（guard.py/factory_lib.py 周界与判据措辞数据化到 factory-local.json）local 面仅剩下游视角命名与测试布局。",
   "full": [
     "cron-dispatch.sh",
     "dispatch.sh",
@@ -11,11 +11,12 @@
     "breaker.sh",
     "validate-pr.sh",
     "state.py",
-    "feedback.py"
+    "feedback.py",
+    "guard.py",
+    "factory_lib.py",
+    "upstream-sync-check.sh"
   ],
   "local": {
-    "factory_lib.py": "REJECT_GUIDANCE 判据 a/c 措辞锚定各仓 MISSION；evidence_suites 布局（本仓 skills/<name>/scripts，下游可能 backend|frontend）",
-    "guard.py": "PERIMETER 周界清单完全仓特定（本仓：治理/质检线/发布面）；改过周界必须重跑 mutations/run.py 重证 kill rate",
     "feedback-upstream.sh": "UPSTREAM_REPO/BRANCH 前缀/PR 文案从下游视角命名，每仓指向自己的上游；上游这份是模板真相源",
     "tests/": "测试布局已分叉（本仓 tests/ 子目录 + conftest 注入，下游平铺 + sys.path hack）；用例宜随源文件走，人工对齐（目录项不做 blob 级处理）",
     "test_state.py": "state.py 的测试，语义通用但断言措辞可能含仓特定锚"
@@ -23,6 +24,7 @@
   "skip": [
     "README.md",
     "MISSION.md",
+    "factory-local.json",
     "mutations/",
     "prompts/",
     "artifacts/",
@@ -33,5 +35,5 @@
     "DISTRIBUTION.json",
     "sync-from-upstream.sh"
   ],
-  "anchor_policy": "下游 .factory/upstream-lock.json 记录上次同步的上游 commit；--check 对比该锚点与上游 HEAD 的 full 文件 blob，漂移即提醒（追平或反哺二选一），对齐 scripts/plugin-lock.json 的 blob 锁定模式"
+  "anchor_policy": "下游 .factory/upstream-lock.json 记录上次同步的上游 commit（M2 起含 upstream 路径字段）；--check 对比该锚点与上游 HEAD 的 full 文件 blob，漂移即提醒（追平或反哺二选一），对齐 scripts/plugin-lock.json 的 blob 锁定模式"
 }

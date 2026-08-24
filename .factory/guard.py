@@ -27,35 +27,29 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# 与 MISSION.md「周界（PERIMETER）」一节保持同步：MISSION.md 是唯一真相源，
-# 此处是机械化副本；每次运行由 self_check 自动核对一致性（漂移即 fail-closed）。
-PERIMETER = (
-    # 治理
-    "MISSION.md",
-    "steering/",
-    "CONTRIBUTING.md",
-    "docs/design/",
-    # 质检线
-    ".factory/",
-    "scripts/",
-    "hooks/",
-    ".github/",
-    # 发布面
-    ".claude-plugin/",
-    ".codex-plugin/",
-    ".cursor-plugin/",
-    ".kimi-plugin/",
-    ".grok-plugin/",
-    ".opencode/",
-    ".pi/",
-    ".crush/",
-    ".agents/",
-    ".vscode/",
-    "package.json",
-    ".versionrc.js",
-    "lefthook.yml",
-    ".gitignore",
-)
+# 周界数据外置（M4，设计 §11.3）：PERIMETER 从 factory-local.json 载入——
+# 本文件零本地化、跨仓 full 分发；每仓的周界是数据（skip 分发）。
+# fail-closed：配置缺失/损坏/缺键 → 异常 → exit 2（门坏等同拦截）。
+# MISSION.md 仍是唯一真相源：self_check 每次运行核对一致性（下方）。
+def _load_perimeter() -> tuple[str, ...]:
+    import json
+    cfg_path = Path(__file__).resolve().parent / "factory-local.json"
+    try:
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        perimeter = cfg["perimeter"]
+        if not isinstance(perimeter, list) or not perimeter \
+                or not all(isinstance(p, str) and p.strip() for p in perimeter):
+            raise ValueError("perimeter 须为非空字符串列表")
+        return tuple(perimeter)
+    except Exception as exc:
+        raise RuntimeError(f"factory-local.json 不可用（fail-closed）: {exc}") from exc
+PERIMETER: tuple[str, ...] = ()
+_LOAD_ERROR: RuntimeError | None = None
+try:
+    PERIMETER = _load_perimeter()
+except RuntimeError as exc:
+    # 库导入不崩（测试可用）；CLI 路径在 main 首行 raise → exit 2
+    _LOAD_ERROR = exc
 
 def self_check() -> None:
     """核对 PERIMETER 副本与 MISSION.md 周界清单一致，且每条路径真实存在。
@@ -114,11 +108,13 @@ def diff_names(base: str, head: str) -> list[str]:
         text=True,
     )
     if proc.returncode != 0:
-        raise RuntimeError(f"git diff 失败: {proc.stderr.strip()}")
+        raise RuntimeError(f"git diff 失败: rc={proc.returncode}")
     return [line for line in proc.stdout.splitlines() if line.strip()]
 
 
 def main(argv: list[str]) -> int:
+    if _LOAD_ERROR is not None:
+        raise _LOAD_ERROR  # fail-closed：配置坏 → __main__ except → exit 2
     self_check()
     paths: list[str]
     if len(argv) >= 3 and argv[1] == "--base":
