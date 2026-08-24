@@ -57,6 +57,15 @@ if [ "${1:-}" != "--no-lock" ]; then
   fi
 fi
 
+# 文档新鲜度（实现↔文档一致性，R1-R5 见 tools/check_doc_freshness.py 头注释）。
+# 刻意放在 --no-lock 分支外：工厂链 final_gate 跑的就是本脚本 --no-lock 形态
+# （.factory/prompts/plan.md），文档漂移必须在链内被拦——不能随发布面门
+# （plugin_lock/md_link_check）一起被 --no-lock 跳过。
+echo "── doc_freshness"
+if ! "$PY" tools/check_doc_freshness.py; then
+  FAILED+=("doc_freshness")
+fi
+
 if [ "${#FAILED[@]}" -gt 0 ]; then
   echo "❌ 门禁失败: ${FAILED[*]}" >&2
   exit 1
