@@ -22,3 +22,4 @@ target/
 **/.coverage
 .factory/artifacts/
 .factory/locks/
+.factory/var/

@@ -223,6 +223,20 @@ if [ "${DRY}" = 0 ]; then
   # 被吞成空串。豁免面已由裸调用纪律根治，本守卫保留为纵深防御+精确报错）
   python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get("title") else 3)' \
     "${DIR}/issue.json" 2>/dev/null || { echo "issue.json 无效（空/非 JSON/无 title），链终止" >&2; exit 2; }
+  # --- 租约认领（多写者仲裁，2026-08-24；README「租约仲裁」）---
+  # fail-closed：认领失败（他机链持有未过期租约 / 仲裁不可达 / SUPABASE_DB
+  # 未设）= 链终止——降级裸跑等于重新打开多写者竞态。LEASE_KEY/LEASE_EPOCH
+  # 是 factory-lib.sh 出口围栏的上下文：被夺/吊销的诈尸链在 label/评论出口被拒，
+  # 秒级残窗由回执幂等键兜底。claim 放在首个 issue 侧副作用（打 triaging）之前。
+  LEASE_KEY="issue:${ISSUE}"
+  LEASE_EPOCH="$(lease_claim "${LEASE_KEY}")" \
+    || { echo "[error] 租约 ${LEASE_KEY} 认领失败，fail-closed 终止（README「租约仲裁」）" >&2; exit 4; }
+  # 心跳失约（被夺/吊销/过期）即被后台循环 TERM：exit 143 触发 EXIT trap 级联
+  # （台账/清标/worktree 回收/放租约）。此处到 trap 升级之间无可失败语句，
+  # 残余窗口由租约自然过期（默认 900s）自愈。
+  trap 'exit 143' TERM
+  lease_heartbeat_loop "${LEASE_KEY}" "${LEASE_EPOCH}"
+  echo "  [lease] ${LEASE_KEY} epoch=${LEASE_EPOCH} 已认领（心跳 ${FACTORY_HB_INTERVAL:-60}s）"
   ensure_labels
   issue_label add factory:triaging
   # 轮次：同 issue 的第 N 次链（chain-history 计数；首轮通过率的分母）
@@ -259,7 +273,7 @@ if [ "${DRY}" = 0 ]; then
   # 无论成败都记账；worktree 无论成败一并回收（分支推送后树内仅剩未跟踪产物）
   # D1: 本 trap 覆盖早期放锁 trap，故自带锁释放；派发链 MANUAL_LOCK=0 不动锁
   # shellcheck disable=SC2154  # rc 于本 trap 行内由 rc=$? 赋值，shellcheck 不解析 trap 字符串
-  trap 'rc=$?; write_ledger "${rc}"; git -C "${REPO}" worktree remove --force "${WT}" >/dev/null 2>&1 || true; [ $rc -ne 0 ] && { issue_label remove factory:triaging; issue_label remove factory:accepted; issue_label remove factory:in-progress; }; [ "${MANUAL_LOCK}" = 1 ] && rm -rf "${LOCKDIR:-}" 2>/dev/null' EXIT
+  trap 'rc=$?; lease_cleanup; write_ledger "${rc}"; git -C "${REPO}" worktree remove --force "${WT}" >/dev/null 2>&1 || true; [ $rc -ne 0 ] && { issue_label remove factory:triaging; issue_label remove factory:accepted; issue_label remove factory:in-progress; }; [ "${MANUAL_LOCK}" = 1 ] && rm -rf "${LOCKDIR:-}" 2>/dev/null' EXIT
 else
   echo "[dry-run] gh issue view #${ISSUE} → ${DIR}/issue.json"
   echo "[dry-run] label: +factory:triaging（裁决后 → accepted|rejected）"

@@ -13,12 +13,15 @@
 | `mutations/run.py` | 门灵敏度冒烟（注入缺陷→断言拦截→字节还原，铁律 5） |
 | `prompts/*.md` | 六个 AI 节点提示词（版本化、引擎无关，禁内联） |
 | `artifacts/issue-N/` | 链产物（运行时输出，勿提交 git） |
+| `factory-lease.sh` | 租约仲裁客户端（claim/心跳/出口围栏；fail-closed，source 引入） |
+| `db/schema.sql` | 仲裁层 schema（Supabase/任何 Postgres，服务端原子，幂等迁移） |
 
 ## 前置条件
 
 - `omp` CLI（AI 节点引擎；每节点独立进程 = 物理级 fresh context）
 - `gh` 已认证（取 issue、建 PR）
 - `python3`（guard / mutations / JSON 解析）
+- `SUPABASE_DB` 仲裁层 PG 连接串（Supabase pooler 或自建 Postgres；未设 fail-closed，见「租约仲裁」）
 
 ## 快速开始
 
@@ -119,19 +122,70 @@ python3 -m pytest .factory/test_state.py -o addopts= -q   # 状态机测试
 - **auto-merge 受 A5 门控**：`FACTORY_AUTO_MERGE=1` 且
   `.factory/metrics/auto-merge-unlocked` 存在才 merge；否则 approved
   只打标签，人类合并。mutations kill-rate ≥80% 前不得开启。
-- **单实例假设**：GitHub 无原子换标签，claim（accepted→in-progress）
-  的互斥由单 dispatcher 部署保证，sync 收敛并发漂移。
+- **单实例假设 → 租约仲裁**：GitHub 无原子换标签，claim（accepted→
+  in-progress）的单机互斥仍由 dispatcher 锁保证；跨机互斥由租约仲裁层
+  接管（`issue:N` 认领 + epoch fencing，见「租约仲裁」节），sync 收敛并发漂移。
 - **链失败**：fix-issue.sh 非零退出 → trap 清 triaging/accepted/
   in-progress → issue 回零标签态，人工重投。
 
 派发器环境变量：`MAX_PARALLEL=4`、`FACTORY_MERGE_METHOD=merge`、
 `INTERVAL=1800`、`GH_REPO=<owner/repo>`（无 github remote 时显式指定）。
 
+## 租约仲裁（多写者化，2026-08-24）
+
+单机时代互斥靠本地锁（`locks/dispatcher`）；多写者（多机/多租户）下本地锁
+互不可见，"轮到谁"必须有唯一权威。三层架构：
+
+- **仲裁** = `db/schema.sql`（Supabase/任何 Postgres，线性化）：claim /
+  heartbeat / release / fence 全部服务端原子，epoch 每次易主 +1
+  （fencing token）。迁移幂等：`psql "$SUPABASE_DB" -f .factory/db/schema.sql`。
+- **投影** = GitHub labels + `state.py`：声明式收敛——标签只是事实的
+  纯函数，sync 多写者安全（漂移自愈，见上节）。
+- **围栏** = 出口围栏 + git refs 服务端保护：链副作用（label/评论）经
+  `factory-lib.sh` 出口在发送前校验 epoch（`lease_guard`）——被夺/吊销的
+  诈尸链在出口被拒；fence 校验与 GitHub 写之间的秒级残窗由回执幂等键
+  （`factory:receipt:issue-N:rR`，`issue_comment` 查重跳过）兜底。
+
+fail-closed 铁律：`SUPABASE_DB` 未设 / 仲裁不可达 = 链终止（exit 4），
+绝不降级裸跑——降级等于重新打开多写者竞态。
+
+链侧接线（fix-issue.sh）：打首个 issue 标签**前** claim `issue:N` → 后台
+心跳（默认 60s，租期 900s 的 1/15 余量）→ 失约（被夺/吊销/过期）被 TERM，
+`exit 143` 触发 EXIT trap 级联（台账/清标/worktree 回收/release）。同机
+重投 = 续约（epoch 不变）；他机接管须等过期（epoch+1，旧链 fence 必失败）。
+triage 批次无租约上下文（`LEASE_KEY` 未设出口不拦）：单 dispatcher 锁内
+运行且只挑零标签 issue，与链的竞态窗口秒级可忽略。
+
+### 租户 onboarding（运维手册，管理员执行）
+
+```sql
+create role "factory-<tenant>" login password '...';  -- 身份=连接串自证，客户端不可自报
+grant factory_worker to "factory-<tenant>";           -- 仅 EXECUTE 四个 worker 函数，无表权限
+insert into factory_tenants (tenant, rolname)
+  values ('<tenant>', 'factory-<tenant>');            -- max_parallel 默认 2（配额=公平）
+-- 机器免注册：首次 claim 自动登记 machine-id（观测标签；授权在 role 层）
+```
+
+### 应急 runbook（仅 postgres / supabase_admin）
+
+```sql
+select factory_revoke('<tenant>');                   -- 吊销租户：活跃租约立即过期 + epoch+1
+select factory_machine_disable('<machine-id>');      -- 停用单机（精确止损：失控的是一台机器）
+select key, machine_id, epoch, expires_at from factory_leases;   -- 现场盘点
+select * from factory_events order by ts desc limit 20;          -- 审计追溯（claim/reclaim/release/revoke）
+```
+
+安全模型：RLS 全开且不建任何 policy（直表读写全拒）、worker 函数
+SECURITY DEFINER、租户经 `session_user` 解析。详见 `db/schema.sql` 头注释。
+
 ## 环境变量
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `NODE_TIMEOUT` | `30m` | 单 AI 节点 `omp --max-time` 预算 |
+| `SUPABASE_DB` | — | 仲裁层 PG 连接串（必设；未设/不可达 fail-closed） |
+| `FACTORY_LEASE_SECS` | `900` | 租期秒数（心跳间隔的 15 倍余量） |
+| `FACTORY_HB_INTERVAL` | `60` | 心跳间隔秒数 |
 
 ## 门单独使用
 
