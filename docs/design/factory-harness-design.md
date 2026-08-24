@@ -76,7 +76,9 @@ dispatcher 无状态化（一切状态在仓库可见处）。
 1. **label 状态机存在竞态窗口**。两个 cron tick 可能同时 pick 同一 issue。
    其以 `.factory/locks` + 固定优先级串行缓解。我们的 S2 dispatcher 必须先原子
    抢占 label（`gh issue edit --add-label factory:in-progress` 幂等重试，失败即
-   放弃本 tick），再 dispatch；绝不"读后即走"。
+   放弃本 tick），再 dispatch；绝不"读后即走"。（2026-08-24 修正：实证 gh
+   换标签是读-改-写整集替换，非 CAS——同机由 dispatcher 锁串行兜住；跨机
+   互斥由租约仲裁层接管，claim `issue:N` + epoch fencing，README「租约仲裁」。）
 2. **周界清单是利益权衡，不是真理**。过宽的代价 = 多走人审（低）；过窄的代价 =
    被绕过（高）。风险不对称 → 选宽。本库周界因此连 `design/`、`hooks/`、全部
    插件 manifest 一并锁入（见 MISSION）。
@@ -270,12 +272,11 @@ PR:   factory:needs-review → factory:approved | factory:needs-fix | factory:ne
 `factory-state.sh`（同步器）、`dispatch.sh`（派发器）、
 `test_state.py`（8 测试：12 条边全覆盖 + meta-test 双向漂移检测）。
 
-与骨架的三处分歧及理由：
-
 1. **claim 用 add+remove 而非仅 add**。GitHub 换标签非原子，骨架的
    `--add-label || continue` 会把 accepted 滞留为双标签态（accepted+
-   in-progress 并存 → 队列重复派发）。实现为单实例 dispatcher + sync
-   收敛漂移；单实例是 claim 互斥的真实保证（README 已声明假设）。
+   in-progress 并存 → 队列重复派发）。同机由 dispatcher 锁 + sync 收敛
+   漂移；跨机互斥由租约仲裁层接管（`issue:N` claim + epoch fencing，
+   2026-08-24 多写者化，README「租约仲裁」）——单实例假设就此退役。
 2. **状态判定不是 dispatcher 内联 if，而是独立纯函数**。骨架让 dispatcher
    "读 label 做决策"，实现把"读"整体抽成 `plan_phase(事实) → (phase, ops)`
    并配转移表 + 全边覆盖测试——理由见下方第一性原理。
@@ -291,12 +292,11 @@ PR:   factory:needs-review → factory:approved | factory:needs-fix | factory:ne
 - 可观测标签 = 仓库事实的纯函数（派生状态）。事实是 PR/reviewDecision/
   label 事件/标记评论，推导是 `plan_phase`，收敛是幂等 sync。"忘写转移"
   在此模型下不可表达——没有转移可忘写，只有状态函数可测（且已全边覆盖）。
-- 链内即时打标降级为新鲜度优化：写错了、漏写了，下一次 sync 自动收敛。
-  可观测性 fail-open，不影响门（guard/holdout fail-closed）。
 - 例外即规则显式化：锁（triaging/in-progress）无法从事实推导——它是
   "正在运行"的声明，事实里只有结果没有进行时。锁必须命令式且单一属主
   （chain 写 triaging、dispatch 写 in-progress），sync 永不触碰（终态清理
-  除外）。`test_ops_invariants` 断言非终态 ops 永不含锁。
+  除外）。跨机的"单一属主"由租约 epoch 裁定（fencing），锁标签只是
+  其投影（2026-08-24）。`test_ops_invariants` 断言非终态 ops 永不含锁。
 - 转移表即 spec：TRANSITIONS 是唯一权威，meta-test 强制 SCENARIOS 与表
   集合双向相等——新增转移忘配 fixture、或 fixture 引用不存在的转移，
   测试即红。表、代码、场景三方锁死。
