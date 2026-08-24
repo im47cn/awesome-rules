@@ -328,8 +328,12 @@ python3 scripts/badcase_runner.py --verbose
 快照滞后源仓 2 天 20+ 提交，update 不动）。因此合并影响分发内容的 PR
 （skills / steering / hooks）后：
 
-- 运行 `npm run release`（commit-and-tag-version 按 commit 类型推导 bump 级别，
-  更新 `package.json` 与 `CHANGELOG.md`）
+- 运行 `npm run release`（首次前 `npm install` 安装 devDependencies）。版本工具
+  `commit-and-tag-version` **锁定为 devDependency 精确版本**（13.1.2，npm script
+  经 `npx --no-install` 只用本地安装，不回落全局）——v0.4.0 发布实证：全局
+  homebrew 版对 `feat` 提交不升 minor（44 个 feat 推导出 patch）。已知问题：
+  该版本 recommended-bump 对 feat 不升 minor，需 `--release-as` 显式定级；
+  升级新版本时先验证再移除此说明
 - 各平台清单版本对齐由门禁 `tools/check_plugin_versions.py` 拦截（gauntlet
   `plugin-versions` 层）：以 `package.json` 为单源锚，六处插件清单漂移即红；
   新平台接入须登记到检查器的 `PLUGIN_MANIFESTS`（或 `EXCLUDED_MANIFESTS`
