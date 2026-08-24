@@ -66,11 +66,14 @@ NODE_TIMEOUT=30m .factory/fix-issue.sh 42           # 重跑链，triage 全新�
   → git worktree add -B factory/issue-N .factory/worktrees/issue-N（基 main）
   → prime（研究笔记，不做设计）
   → plan（任务级计划 plan.json，含每任务 verify 命令）
-  → implement（逐任务执行，周界任务跳过标 blocked，
-               末尾跑 final_gate 存 tests-output.txt，提交不推送）
-  → review（链内自审，修小问题；独立判断不在此）
+  → implement ↔ review ralph 修复轮（implement 逐任务执行，周界任务
+               跳过标 blocked，末尾跑 final_gate 存 tests-output.txt，
+               提交不推送；review 链内自审修小问题，可行动发现落
+               ralph-todo.md——非空即回流 implement 再修再审，
+               ≤FACTORY_RALPH_MAX 轮（默认 2），耗尽的残留随 review.md
+               进 PR；独立判断不在此，在 holdout）
   → 确定性门：guard.py --files <main...分支改动> 
-  → holdout（独立验证器：omp --no-tools，输入白名单
+  → holdout（独立验证器：omp --no-tools + --config omp-isolated.yml
              issue 标题 + tests-output.txt，全部内联）
   → PASS → gh pr create --label factory:needs-review（人类合并）
   → FAIL → 不建 PR，链终止
@@ -92,6 +95,7 @@ triage 的输入，不是决策手势；标签才是）。
 | `plan.json` | plan | tasks[] 每项含 verify 命令；forbidden 周界清单 |
 | `implement.md` | implement | 执行日志（每任务改动与 verify 结果） |
 | `review.md` | review | 自审报告（已修复 / 待人类） |
+| `ralph-todo.md` | review | 可行动发现回流清单（非空触发修复轮；审查通过即删除；轮次耗尽的残留见 review.md） |
 | `reject-receipt.md` | 链脚本 | 拒绝回执正文（已评论到 issue；评论失败时手动补发源） |
 
 ## S2 派发器与标签同步器
@@ -201,6 +205,7 @@ SECURITY DEFINER、租户经 `session_user` 解析。详见 `db/schema.sql` 头�
 | `SUPABASE_DB` | — | 仲裁层 PG 连接串（必设；未设/不可达 fail-closed） |
 | `FACTORY_LEASE_SECS` | `900` | 租期秒数（心跳间隔的 15 倍余量） |
 | `FACTORY_HB_INTERVAL` | `60` | 心跳间隔秒数 |
+| `FACTORY_RALPH_MAX` | `2` | implement↔review 修复轮上限（`0` = 单遍旧行为） |
 
 ## 门单独使用
 
