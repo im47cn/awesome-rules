@@ -1,6 +1,9 @@
-"""mutations/run.py 单测 —— 判定（judge）与配置校验（load_defects）的退出码语义。
+"""mutations/run.py 单测 —— 判定（judge）与配置校验（load_defects）的退出码
+语义 + run_gate 超时杀组的进程组生命周期行为。
 
-不跑真实门（guard/tests 均为外部进程）：只锁纯函数契约——
+judge/load_defects 锁纯函数契约（不跑外部进程）。run_gate 超时路径
+（test_timeout_* 系列）例外：启动真实 bash 子进程组并断言其被杀透——
+平台敏感（macOS XNU 僵尸窗口 EPERM 语义，见 PR #36）。
 testing-standards「退出码语义」：0=放行、1=击杀证据；其他退出码/超时
 一律无效运行，既不奖励击杀也不奖励放行。
 """
@@ -85,12 +88,14 @@ class TestLoadDefects:
         assert len(mut.load_defects(p)) == 2
 
 def _assert_group_dead(pgid: int, *, timeout: float = 10.0) -> None:
-    """探活直到进程组消失（macOS 僵尸窗口安全）。
+    """探活直到进程组消失（跨平台僵尸语义安全）。
 
     EPERM = 组内仅剩待-reap 僵尸（macOS XNU 对含僵尸的组发信号报
     EPERM，同 UID 亦然；真活进程不会）——活进程已被杀，等 init 收尸
-    后复探。ESRCH = 组彻底消失。探活成功 = 仍有真活成员，轮询至
-    deadline 后判失败。
+    后复探。ESRCH = 组彻底消失。探活成功（rc=0）仅表示信号调用成功、
+    组仍有成员——Linux 上未收尸僵尸同样探活成功，不据此断言真活
+    （区分真活/僵尸须用显式子进程状态，此处不需要：等待组消失本身
+    即断言语义）。组未在 deadline 内消失才判失败。
     """
     import os
     import time as _time
@@ -103,7 +108,7 @@ def _assert_group_dead(pgid: int, *, timeout: float = 10.0) -> None:
         except PermissionError:
             pass                                 # 仅剩待-reap 僵尸，复探等收尸
         _time.sleep(0.05)
-    pytest.fail(f"进程组 {pgid} 在 {timeout}s 后仍有存活成员")
+    pytest.fail(f"进程组 {pgid} 在 {timeout}s 后未消失（仍有成员）")
 
 def _slow_gate(tmp_path):
     """夹具门：自报 pgid、派生 sleep 孙进程后挂起。"""
@@ -176,5 +181,5 @@ def test_probe_fails_when_group_still_alive(monkeypatch):
     判失败，而非误判通过。"""
     import os
     monkeypatch.setattr(os, "killpg", lambda pgid, sig: None)
-    with pytest.raises(pytest.fail.Exception, match="存活"):
+    with pytest.raises(pytest.fail.Exception, match="未消失"):
         _assert_group_dead(4242, timeout=0.2)
