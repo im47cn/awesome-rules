@@ -43,15 +43,29 @@
 
 另有输出对齐：聚合报告遵守 steering 审查报告五段式（结论先行 + 证据边界强制段）。
 
+### G — 可视化输出（2026-08-24 gtsp-wop-service 审查沉淀）
+
+用户要求图形化或审查对象为跨层调用链时，聚合报告附 mermaid 时序图：
+参与者按架构分层，风险 `Note over` 钉在确切触发消息上（全局编号与正文清单
+共用），已验证防线（行锁/CAS/事务）用 ✅ 同标。实测教训两条入档：
+① 图比文字更易被当成事实——落图前必须过聚合抽验环（初判「8 域未发事件」
+被全量 grep 推翻为 4 域有事件，误报若落图会随图扩散）；② sequenceDiagram
+的 `Note` 文本含半角分号会截断解析，交付前 `mmdc` 逐块渲染验证。
+画法与语法坑详见 [visual-output.md](visual-output.md)。
+
 ## 检查覆盖
 
 - Standards 轴：仓库书面标准（AGENTS.md / CONTRIBUTING / .editorconfig /
   steering）+ Fowler 坏味道基线 12 条（判断性，仓库标准覆盖基线）
 - Spec 轴：规格断言逐条核对、scope creep、实现疑点（单位/语义静默变化/默认值漂移）
 - 聚合：分轴呈现不合并排序、跨轴不选唯一赢家、事实断言抽验
+- 可视化输出（可选）：跨层链路 mermaid 时序图、风险 Note 定位、
+  证据链核查环、增量图维护（见 [visual-output.md](visual-output.md)）
+
 
 ## 相关文件
 
 - [SKILL.md](SKILL.md) — 技能定义（AI 入口）
 - [steering/review-report-standards.md](../../steering/review-report-standards.md) — 输出结构规范（五段式/证据边界）
 - [skills/alibabacloud-devops](../alibabacloud-devops/SKILL.md) — 云效 MR 查询依赖
+- [visual-output.md](visual-output.md) — 可视化审查输出（时序图画法/风险标注/语法坑）
