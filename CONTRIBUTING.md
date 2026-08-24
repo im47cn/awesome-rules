@@ -331,6 +331,7 @@ python3 scripts/badcase_runner.py --verbose
 - 运行 `npm run release`（commit-and-tag-version 按 commit 类型推导 bump 级别，
   更新 `package.json` 与 `CHANGELOG.md`）
 - `.claude-plugin/plugin.json` 等各平台清单无同步脚本，随 release 手工对齐版本
+- 对齐清单后运行 `python3 scripts/plugin_lock.py --update`，并提交生成的 `scripts/plugin-lock.json` 更新
 - 消费者侧更新：源仓 `git pull` 后执行
   `claude plugins update awesome-rules@awesome-rules`（市场限定名）
 
