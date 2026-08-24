@@ -5,7 +5,10 @@
   "scripts": {
     "test": "bash scripts/run_tests.sh",
     "setup:hooks": "lefthook install",
-    "release": "commit-and-tag-version",
-    "release:dry": "commit-and-tag-version --dry-run"
+    "release": "npx --no-install commit-and-tag-version",
+    "release:dry": "npx --no-install commit-and-tag-version --dry-run"
+  },
+  "devDependencies": {
+    "commit-and-tag-version": "13.1.2"
   }
 }

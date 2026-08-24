@@ -151,9 +151,20 @@ def check() -> int:
                           f"实际 {str(actual)[:16]}…"
                           f"（有意变更请 --update，意外漂移请排查）")
 
-    # 4. 版本一致性：插件清单版本须与 package.json（release 单源）同步，
-    #    防止发布 3 个 minor 后插件侧仍停留在旧版本的双轨漂移
-    errors.extend(check_version_sync(current_files))
+    # 4. 版本一致性：委托 tools/check_plugin_versions（单一真相源）。
+    #    本脚本原有一份独立的版本比对逻辑，与 gauntlet plugin-versions
+    #    层是同一不变量的两处实现——清单增删要改两处、必然漂移。委托后
+    #    语义还更强（tracked 面未登记清单硬失败 / 未跟踪发布面漂移 /
+    #    非 git 仓 fail-closed，见该检查器 docstring）。
+    #    子进程退出码即结论：0=一致；1/2 归入本脚本的 errors 报告。
+    proc = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "tools" / "check_plugin_versions.py"),
+         str(REPO_ROOT)],
+        capture_output=True, text=True)
+    if proc.returncode != 0:
+        errors.append("版本一致性（check_plugin_versions）:\n    "
+                      + "\n    ".join(
+                          (proc.stdout + proc.stderr).strip().splitlines()))
 
     if errors:
         print(f"❌ 安装入口锁定校验失败（{len(errors)} 处）:", file=sys.stderr)
@@ -163,37 +174,6 @@ def check() -> int:
     print(f"✅ {len(locked)} 个安装入口与锁定一致（zero-regression）")
     return 0
 
-
-def check_version_sync(current_files: list) -> list:
-    """插件清单版本与 package.json 不一致 → 错误。
-
-    只比对语义化版本字段：plugin.json 的 version、marketplace.json 的
-    metadata.version。marketplace.json 顶层 version 是清单 schema 版本
-    （如 kimi 的 "2"），不参与比对。
-    """
-    pkg = REPO_ROOT / "package.json"
-    try:
-        expected = json.loads(pkg.read_text(encoding="utf-8")).get("version")
-    except (OSError, json.JSONDecodeError):
-        return [f"package.json 不可读，无法校验版本同步"]
-    if not expected:
-        return []
-
-    errors = []
-    for rel in current_files:
-        try:
-            data = json.loads((REPO_ROOT / rel).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue  # 内容漂移已由 blob 锁定报告
-        actual = None
-        if rel.endswith("plugin.json"):
-            actual = data.get("version")
-        elif rel.endswith("marketplace.json"):
-            actual = (data.get("metadata") or {}).get("version")
-        if actual and actual != expected:
-            errors.append(f"版本不同步: {rel} 为 {actual}，package.json 为 "
-                          f"{expected}（发布时同步递增）")
-    return errors
 
 
 def main():
