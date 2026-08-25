@@ -98,6 +98,20 @@ class TestOverreachFails:
         r = run(repo, mf, "--base", "HEAD~1")
         assert r.returncode == 1 and "factory_lib.py" in r.stdout
 
+    def test_base_mode_rename_both_sides_required(self, repo, tmp_path):
+        """--base 重命名双侧（PR #53 审查⑥）：rename 检测下 --name-only 只报
+        新路径，删除侧（旧路径）逃过清单比对——只声明新路径即可掩盖对旧
+        文件的删除；--no-renames 后两侧各自成行，旧路径必须被声明。"""
+        (repo / ".factory" / "decisions.md").write_text("内容保持相似度\n" * 10)
+        git(repo, "add", "-A")
+        git(repo, "commit", "-qm", "add decisions")          # 第 2 提交
+        git(repo, "mv", ".factory/decisions.md", "moved.md")  # 暂存重命名
+        mf = manifest(tmp_path / "m.json",
+                      [{"name": "deci2", "allow": ["moved.md"]}])  # 只声明新侧
+        r = run(repo, mf, "--base", "HEAD")                   # HEAD = 第 2 提交
+        assert r.returncode == 1
+        assert "decisions.md" in r.stdout, "删除侧（旧路径）必须被点名"
+
 
 class TestPassBoundaries:
     """放行边界：声明完整即 0。"""

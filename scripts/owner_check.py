@@ -82,7 +82,10 @@ def changed_paths(root: Path, base: Optional[str], exclude: Optional[Path] = Non
     匹配一律用 raw 路径（is_orig 仅用于展示加注）。清单文件自豁免（门的 spec
     非产品改动）。"""
     if base:
-        out = _git(root, ["diff", "--name-only", "-z", base])
+        # --no-renames（PR #53 审查⑥）：关 rename/copy 检测，新旧两侧各自
+        # 成行进入比对——R 状态的 --name-only 只报新路径，只声明了旧路径的
+        # 重命名会绕门；diff.renames 用户配置也一并压平。
+        out = _git(root, ["diff", "--name-only", "-z", "--no-renames", base])
         paths = [p for p in out.decode("utf-8", "replace").split("\0") if p]
         if exclude is not None:
             ex = _rel_or_abs(exclude, root)

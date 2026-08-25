@@ -11,7 +11,7 @@ bash .factory/regression/weekly-regression.sh --dry-run  # 真跑三层，只打
 ```
 
 定时触发：`~/Library/LaunchAgents/com.im47cn.factory.weekly.plist`
-（`StartCalendarInterval` Weekday=1, Hour=3；**加载由人类决定**：
+（`StartCalendarInterval` Weekday=0, Hour=3（launchd 语义 0/7=周日）；**加载由人类决定**：
 `launchctl load ~/Library/LaunchAgents/com.im47cn.factory.weekly.plist`）。
 
 ## 三层语义
@@ -90,5 +90,5 @@ stdout/stderr 落 `.factory/artifacts/regression/launchd.log`。
 
 ```bash
 bash .factory/regression/weekly-regression.sh --dry-run   # 周回归预演（真跑三层，不开 issue）
-# 定时：LaunchAgent com.im47cn.factory.weekly（周一 03:00，加载由人类决定）；详见 regression/README.md
+# 定时：LaunchAgent com.im47cn.factory.weekly（周日 03:00，加载由人类决定）；详见 regression/README.md
 ```

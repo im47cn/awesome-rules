@@ -365,6 +365,13 @@ def main():
             plan.append((skill, name, cdir, expected))
 
     arms = [a.strip() for a in args.arms.split(",") if a.strip()]
+    # 臂名白名单（PR #53 审查⑧）：build_prompt 把一切非 "with" 值当 WITHOUT
+    # 臂——拼错（如 witih）会静默跑错实验还以错名记录，必须在计划期拒绝。
+    invalid_arms = [a for a in arms if a not in ("with", "without")]
+    if invalid_arms:
+        print(f"错误: 臂 {', '.join(invalid_arms)} 无效（已支持: with, without）",
+              file=sys.stderr)
+        return 2
     total_calls = len(plan) * len(arms)
     print(f"计划: {len(plan)} 个 badcase × {len(arms)} 臂 = {total_calls} 次 omp 调用（预算上限 6）")
     if total_calls > 6:
