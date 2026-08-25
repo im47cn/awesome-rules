@@ -6,6 +6,8 @@
 
 - `$ISSUE_DIR/plan.json`（plan 已吸收 issue 评论中的整改要求；
   若任务与 `$ISSUE_DIR/issue.json` 评论冲突，停止并声明 blocked）
+- `$ISSUE_DIR/ralph-todo.md`（若存在且非空 = 修复轮：上一轮 review
+  回流的可行动发现清单，见「修复轮」节；首轮不存在）
 
 ## 纪律（违反任何一条 = 本节点失败）
 
@@ -19,6 +21,13 @@
    holdout 只见此文件且不允许推测，静默点号输出无法建立测试与诉求的
    对应关系（证据饥饿），测试名与参数化用例名是必需证据
 5. 完成后把改动提交到当前分支（不 push、不开 PR——那是链脚本的事）
+
+## 修复轮（`$ISSUE_DIR/ralph-todo.md` 存在且非空时）
+
+本轮不重跑 plan 全量任务，只消化清单：逐条修复、跑该条目的验收命令、
+在清单中勾掉该条；全部消化后执行纪律 4（final_gate + 刷新
+tests-output.txt 含 -v 证据）与纪律 5（提交）。执行日志以
+「## 修复轮 N」为题**追加**到 `$ISSUE_DIR/implement.md`，不重写既有内容。
 
 ## 输出
 

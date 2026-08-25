@@ -3,7 +3,9 @@
 #
 # 用法: .factory/fix-issue.sh <issue-number> [--dry-run]
 #
-# 链: triage → (accept) → prime → plan → implement → review → holdout → PR
+# 链: triage → (accept) → prime → plan → implement ↔ review（ralph 修复轮：
+#     review 把可行动发现落 ralph-todo.md，非空即回流 implement 再修再审，
+#     ≤FACTORY_RALPH_MAX 轮，默认 2、0=单遍旧行为）→ holdout → PR
 # 每节点 = 独立 omp 进程（物理级 fresh context，A1）。
 # holdout 与实现链无共享上下文：--no-tools 无工具形态，白名单输入（issue
 # 标题 + tests-output.txt）由本脚本内联进 prompt，issue 正文不进验证器。
@@ -177,7 +179,7 @@ json_field() {  # json_field <file> <python-expr-on-d>
 run_triage() {  # 物理隔离裁决器：--no-tools --no-session，输入全部内联
   echo "==> 节点 triage（物理隔离：--no-tools，白名单内联）"
   if [ "${DRY}" = 1 ]; then
-    echo "    [dry-run] omp -p <prompts/triage.md + 内联 MISSION/issue 标题正文> --no-tools --max-time $(node_timeout triage)"
+    echo "    [dry-run] omp -p <prompts/triage.md + 内联 MISSION/issue 标题正文> --no-tools --config .factory/omp-isolated.yml --max-time $(node_timeout triage)"
     echo "    产物: ${DIR}/triage.(json|log)"
     return 0
   fi
@@ -209,7 +211,7 @@ ${body}
 ${cmts}
 ——评论结束——"
   local t0; t0=$(date +%s)
-  if ! (cd "${REPO}" && omp -p "${prompt}" --no-tools --no-session --max-time "$(node_timeout triage)" < /dev/null) \
+  if ! (cd "${REPO}" && omp -p "${prompt}" --no-tools --no-session --config "${REPO}/.factory/omp-isolated.yml" --max-time "$(node_timeout triage)" < /dev/null) \
       > "${DIR}/triage.log" 2>&1; then
     _node_metric triage "${t0}" "fail" >> "${DIR}/node-metrics.jsonl"
     echo "    triage 节点失败（详见 ${DIR}/triage.log）" >&2; return 1
@@ -222,7 +224,7 @@ ${cmts}
 run_holdout() {  # 物理隔离验证器：--no-tools + 输入全部内联，agent 无任何工具
   echo "==> 节点 holdout（物理隔离：--no-tools，白名单内联）"
   if [ "${DRY}" = 1 ]; then
-    echo "    [dry-run] omp -p <prompts/holdout.md + 内联 title/tests-output> --no-tools --max-time $(node_timeout holdout)"
+    echo "    [dry-run] omp -p <prompts/holdout.md + 内联 title/tests-output> --no-tools --config .factory/omp-isolated.yml --max-time $(node_timeout holdout)"
     echo "    产物: ${DIR}/holdout.json"
     return 0
   fi
@@ -239,7 +241,7 @@ run_holdout() {  # 物理隔离验证器：--no-tools + 输入全部内联，age
 ${out}
 ——tests-output.txt 结束——"
   local t0; t0=$(date +%s)
-  if ! (cd "${REPO}" && omp -p "${prompt}" --no-tools --no-session --max-time "$(node_timeout holdout)" < /dev/null) \
+  if ! (cd "${REPO}" && omp -p "${prompt}" --no-tools --no-session --config "${REPO}/.factory/omp-isolated.yml" --max-time "$(node_timeout holdout)" < /dev/null) \
       > "${DIR}/holdout.log" 2>&1; then
     _node_metric holdout "${t0}" "fail" >> "${DIR}/node-metrics.jsonl"
     echo "    holdout 节点失败（详见 ${DIR}/holdout.log）" >&2; return 1
@@ -374,10 +376,34 @@ if [ "${DRY}" = 0 ]; then
 fi
 run_node prime
 run_node plan
-run_node implement
 
-# --- 5. review ---
-run_node review
+# --- 4-5. implement ↔ review（ralph 修复轮）---
+# review 把可行动发现落盘 ralph-todo.md；脚本以文件非空为确定性回流信号：
+# 非空 → 再跑 implement（消化清单）→ review（重审重写清单）→ ……
+# 清单空（或轮次耗尽）→ 放行，残留发现随 review.md 进 PR 交人类。
+# 终止判断是文件非空检查，零 LLM 决策（铁律 4 同源）。
+RALPH=0
+RALPH_MAX="${FACTORY_RALPH_MAX:-2}"
+case "${RALPH_MAX}" in
+  ''|*[!0-9]*) echo "FACTORY_RALPH_MAX 须为非负整数（得到: ${RALPH_MAX}）" >&2; exit 2 ;;
+esac
+rm -f "${DIR}/ralph-todo.md"
+while :; do
+  run_node implement
+  run_node review
+  if [ "${DRY}" = 1 ]; then
+    break   # 干跑单遍，保持旧输出形态
+  fi
+  if [ "${RALPH_MAX}" -gt 0 ] && [ -s "${DIR}/ralph-todo.md" ] && [ "${RALPH}" -lt "${RALPH_MAX}" ]; then
+    RALPH=$((RALPH + 1))
+    echo "    [ralph] review 存在可行动发现（ralph-todo.md）→ 修复轮 ${RALPH}/${RALPH_MAX}"
+    continue
+  fi
+  if [ -s "${DIR}/ralph-todo.md" ]; then
+    echo "    [ralph] 修复轮耗尽，残留发现随 review.md 进 PR（人类裁决）"
+  fi
+  break
+done
 
 # --- 6. 确定性门：周界 + 测试（tests-output.txt 由脚本生成，不依赖节点自觉） ---
 if [ "${DRY}" = 0 ]; then
@@ -430,7 +456,7 @@ if [ "${DRY}" = 0 ]; then
   # remote 解析 GitHub 仓库（dispatch5 实测 "could not resolve remote origin"）
   gh pr create --repo "$REPO_SLUG" --head "$BRANCH" --fill \
     --label "factory:needs-review" \
-    --body-file <(echo "Closes #${ISSUE}"; echo; echo "工厂链产物见 ${DIR}"; echo; echo "链: triage → prime → plan → implement → review → guard → holdout")
+    --body-file <(echo "Closes #${ISSUE}"; echo; echo "工厂链产物见 ${DIR}"; echo; echo "链: triage → prime → plan → implement ↔ review（ralph ≤${RALPH_MAX} 轮）→ guard → holdout")
   # PR 落地后 issue 侧转移：accepted → in-review（PR 状态接管 issue，§7）。
   # in-progress 由链属主自清：锁不进 PR 阶段，避免 in-review+in-progress
   # 双标签滞留到 closed（锁单一属主原则，链是 in-progress 生命周期的终点）
