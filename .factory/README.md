@@ -26,7 +26,7 @@
 | `factory-local.json` | 工厂本地化配置（M4）：PERIMETER 与 REJECT_GUIDANCE 的数据载体——guard/factory_lib 零本地化的前提；改后须重跑 mutations 重证 |
 | `upstream-sync-check.sh` | M2 上游同步检查（dispatch 轮末）：full 漂移→确定性 PR 流；local 漂移→needs-human issue；无凭据降级仅报告 |
 | `sync-from-upstream.sh` + `DISTRIBUTION.json` | M1 上游同步：三态分发清单（full/local/skip）+ 下游拉取（--check 门禁/--apply 追平+锚点） |
-| `decisions.md` | 工厂决策记录（ADR-001~005：租约仲裁/A3 记账/单写者降级/周回归/dispatch 下沉）；进程管理类缺陷须在此记账（ADR-002） |
+| `decisions.md` | 工厂决策记录（ADR-001~006：租约仲裁/A3 记账/单写者降级/周回归/dispatch 下沉/触发器计数口径）；进程管理类缺陷须在此记账（ADR-002，合并前自愈不计数，ADR-006） |
 | `regression/` | 自挖掘周回归（ADR-004）：weekly-regression.sh 串联 badcase/gauntlet/doc-freshness 三层，失败自动开 `[factory-regression]` issue 走 triage |
 
 ## 前置条件
@@ -110,6 +110,8 @@ sh .factory/cron-dispatch.sh               # hub(LaunchAgent 600s) 的 kick 入�
 bash .factory/factory-state.sh sync --all  # 标签收敛（幂等，可随时/cron 跑）
 bash .factory/factory-state.sh sync 2 --plan   # 单 issue 计划模式（只打印）
 python3 -m pytest .factory/test_state.py -o addopts= -q   # 状态机测试
+bash .factory/regression/weekly-regression.sh --dry-run  # 周回归预演（真跑三层，不开 issue）
+# 定时：LaunchAgent com.im47cn.factory.weekly（周日 03:00，加载由人类决定）；详见 regression/README.md
 ```
 
 架构（防"转移实现一半"）：

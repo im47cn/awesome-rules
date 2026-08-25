@@ -73,22 +73,3 @@ stdout/stderr 落 `.factory/artifacts/regression/launchd.log`。
   shebang 查找歧义。日志目录若被清空，首跑会自建，但 launchd 打开
   `launchd.log` 需目录先存在——加载前确保
   `.factory/artifacts/regression/` 存在（任何一次手动/dry-run 运行都会建好）。
-
----
-
-## `.factory/README.md` 增补段落草稿（集成 owner 合并用）
-
-> ⚠️ 本节是草稿，本任务不改动 `.factory/README.md` 本身。
-
-「组件」表追加一行：
-
-```markdown
-| `regression/weekly-regression.sh` | 自挖掘周回归（badcase 严格 + gauntlet + doc-freshness 三层；失败开 `[factory-regression]` 零标签 issue 走 triage，全绿记 `metrics/weekly-regression.jsonl`） |
-```
-
-「S2 派发器与标签同步器」用法块追加两行：
-
-```bash
-bash .factory/regression/weekly-regression.sh --dry-run   # 周回归预演（真跑三层，不开 issue）
-# 定时：LaunchAgent com.im47cn.factory.weekly（周日 03:00，加载由人类决定）；详见 regression/README.md
-```
