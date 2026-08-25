@@ -65,13 +65,22 @@ def _anchors_of(text: str) -> set:
 
 
 def iter_md_files(root: Path):
-    """tracked 面的 md 清单（任意深度）；非 git 目录返回 None（fail-closed）。"""
+    """tracked 面 ∩ 磁盘存在的 md 清单（任意深度）。
+
+    - 扫描面 = git tracked 面（gitignore 是运行时产物排除的唯一真相源）。
+    - tracked-but-deleted（工作树中已删除、删除尚未提交）不参与本轮校验：
+      与 plugin_lock 的 tracked 面哲学对齐——门禁判定的是将进入提交的面，
+      删除落定（提交）后该文件自然出局。若按读取失败红，并发会话的
+      未提交删除会误伤无关推送（2026-08-25 share-docs 迁移实证）。
+    - 非 git 目录返回 None（fail-closed）。
+    """
     proc = subprocess.run(
         ["git", "-C", str(root), "ls-files", "-z", "--", "*.md"],
         capture_output=True)
     if proc.returncode != 0:
         return None
-    return [root / f for f in proc.stdout.decode("utf-8").split("\0") if f]
+    return [p for f in proc.stdout.decode("utf-8").split("\0")
+            if f and (p := root / f).exists()]
 
 
 def check_file(md: Path, root: Path) -> list:
