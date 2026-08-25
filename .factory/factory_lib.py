@@ -416,7 +416,7 @@ def release_dispatch_lock(lock_dir: Path) -> None:
 
 
 _SLUG_RE = re.compile(
-    r"^(?:[A-Za-z0-9_.-]+@)?github\.com(?::\d+)?[/:]"
+    r"^(?:[A-Za-z0-9_.-]+@)?(?:github\.com|ssh\.github\.com)(?::\d+)?[/:]"
     r"(?P<slug>[^/]+/[^/]+?)(?:\.git)?/?$")
 _SLUG_VALID = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 
@@ -426,10 +426,12 @@ def extract_slug(urls: list[str]) -> str:
     （github remote 名优先由调用方注入顺序保证）；grep -m1 的 SIGPIPE
     早退缺陷（a4d81930，issue #30）在清单消费下不可表达。
 
-    只认 github.com 为 URL 权威主机（前缀至多 userinfo@、scheme 已剥离）：
-    凭子串位置剪裁会把 evil.com/github.com/o/r 之类伪装主机剪成可用 slug
-    （CodeQL：incomplete URL substring sanitization）；产出再过 owner/repo
-    字符白名单，双闸。GH_REPO 显式指定不经此函数（显式覆盖即信任）。"""
+    只认 github.com / ssh.github.com 为 URL 权威主机（后者是 GitHub 官方
+    443 端口 SSH 端点；前缀至多 userinfo@、scheme 已剥离）：凭子串位置剪裁
+    会把 evil.com/github.com/o/r 之类伪装主机剪成可用 slug（CodeQL：
+    incomplete URL substring sanitization）；主机锚定后仍以 [/:] 定界，
+    ssh.github.com.evil.com 形态同样被拒。产出再过 owner/repo 字符白名单，
+    双闸。GH_REPO 显式指定不经此函数（显式覆盖即信任）。"""
     for u in urls:
         t = re.sub(r"^(?:ssh|git|https?)://", "", u.strip())
         m = _SLUG_RE.match(t)
@@ -670,6 +672,19 @@ def dispatch_main(args: list[str]) -> int:
             interval = float(args[i + 1])
             i += 1
         i += 1
+    # MAX_PARALLEL 配置错误 fail-fast（PR #53 审查②）：0/负/非整数值会让
+    # ChainPool 槽满等待永久为真——挂起而非报错。config-error = 退出码 2。
+    # 前置于 git/gh/slug 环境探测：纯 env 校验与仓库环境无关，配置错误
+    # 的报错不应被 slug 解析失败遮蔽（测试环境无 github remote 时先红错处）。
+    mp_raw = os.environ.get("MAX_PARALLEL") or "4"
+    try:
+        int(mp_raw)
+    except ValueError:
+        print(f"MAX_PARALLEL 非整数: {mp_raw!r}", file=sys.stderr)
+        return 2
+    if int(mp_raw) < 1:
+        print(f"MAX_PARALLEL 须为正整数（得到 {mp_raw!r}）", file=sys.stderr)
+        return 2
 
     r = subprocess.run(["git", "rev-parse", "--show-toplevel"],
                        capture_output=True, text=True)
@@ -685,17 +700,6 @@ def dispatch_main(args: list[str]) -> int:
     if subprocess.run(["gh"], stdout=subprocess.DEVNULL,
                       stderr=subprocess.DEVNULL).returncode != 0:
         print("需要 gh CLI", file=sys.stderr)
-        return 2
-    # MAX_PARALLEL 配置错误 fail-fast（PR #53 审查②）：0/负/非整数值会让
-    # ChainPool 槽满等待永久为真——挂起而非报错。config-error = 退出码 2。
-    mp_raw = os.environ.get("MAX_PARALLEL") or "4"
-    try:
-        int(mp_raw)
-    except ValueError:
-        print(f"MAX_PARALLEL 非整数: {mp_raw!r}", file=sys.stderr)
-        return 2
-    if int(mp_raw) < 1:
-        print(f"MAX_PARALLEL 须为正整数（得到 {mp_raw!r}）", file=sys.stderr)
         return 2
     # 主树锚定：git-common-dir 在 worktree 中指向主 .git，据此回到主树
     # .factory（39b6b8ec 硬锁语义）；非 git 环境退回 CWD 仓 .factory

@@ -208,6 +208,23 @@ class TestDispatchParsers:
         assert extract_slug(["git@gitlab.com:a/b.git",
                              "https://github.com/o/r.git"]) == "o/r"
 
+    def test_extract_slug_ssh_dot_github_host(self):
+        """ssh.github.com 是 GitHub 官方 443 端口 SSH 端点（insteadOf 改写后
+        git remote get-url --push 的真实产出形态）。2026-08-25 回归：a7d52b7d
+        加固只认 github.com，本形态被误拒 → dispatch 全形态 exit 2 停摆。"""
+        assert extract_slug(
+            ["ssh://git@ssh.github.com:443/im47cn/awesome-rules.git"]
+        ) == "im47cn/awesome-rules"
+        assert extract_slug(["ssh://ssh.github.com/o/r.git"]) == "o/r"
+
+    def test_extract_slug_spoof_hosts_rejected(self):
+        """伪装主机负控制：权威主机锚定后以 [/:] 定界，子串/后缀伪装全拒。"""
+        assert extract_slug(["https://evil.com/github.com/o/r"]) == ""
+        assert extract_slug(["ssh://git@github.com.evil.com:22/o/r.git"]) == ""
+        assert extract_slug(["ssh://git@ssh.github.com.evil.com:443/o/r.git"]) == ""
+        assert extract_slug(["https://ssh.github.com.evil.com/o/r"]) == ""
+        assert extract_slug(["git@notssh.github.com:o/r.git"]) == ""
+
 class TestDispatchConfig:
     """MAX_PARALLEL 配置错误必须 fail-fast（PR #53 审查②）：0/负/非整数
     使 ChainPool 槽满等待永真——挂起而非配置错误。config-error = rc 2。"""
