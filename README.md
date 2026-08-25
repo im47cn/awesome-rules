@@ -102,12 +102,15 @@ Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分�
 | [Factory Harness 设计](docs/design/factory-harness-design.md) | L4 自举工厂：第一性原理推导、方案 B（omp headless）、治理锁与 mutation 门（S0 已落地） |
 | [Gauntlet 门禁入口 SPEC](docs/design/spec-2026-08-21-gauntlet-entry.md) | 单一门禁入口 tools/gauntlet.sh：层编排 fail-closed + 检查器负控制 + 手动变异冒烟 |
 | [Gauntlet 门禁入口 EVIDENCE](docs/design/evidence-2026-08-21-gauntlet-entry.md) | 15 层全绿（927 tests / 4/4 变异击杀）证据报告，含三次门拦真问题与 errexit 缺陷修复记录 |
+| [Factory Harness 设计](docs/design/factory-harness-design.md) | L4 自举工厂：治理层（MISSION 宪法 + guard.py 周界锁）与 S1 节点链（omp headless + 薄 dispatcher）分层设计 |
 
 ## 安装
 
 本仓库已适配多种 AI 编程工具的插件格式，支持一行命令安装。详见 [插件安装指南](docs/ai-coding-tools-setup.md)。
 
 ## 贡献
+
+- 新增工具链/脚本资产（如 `.factory/`）时，必须同步交付配套 README：涵盖快速使用、链/组件结构、已知边界与移植说明；不得只交付代码，等用户索要时再补文档。
 - 技能 description 触发词须带领域语境限定（如「画审查流程图/风险标注时序图」而非裸「画流程图/时序图」），避免无相关意图的请求误激活技能；新增或修改 description 后对照官方 Skill authoring best practices 自检触发面是否过宽（triggers too often → make it more specific）
 
 - **插件 manifest 约定**：`.claude-plugin/plugin.json` 不要显式声明 `"hooks": "./hooks/hooks.json"`——新版 Claude Code 自动加载标准路径的 hooks 文件，显式声明会触发 Duplicate hooks file 使整插件加载失败（且失败是静默的，可用 `claude plugin list` 或 `evo.py patrol` 检出）。
