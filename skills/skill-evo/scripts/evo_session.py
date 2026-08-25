@@ -14,10 +14,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from contextlib import contextmanager
 from typing import Iterator, List, Optional
 
 
@@ -260,6 +262,53 @@ def save_state(state_path: Path, state: dict) -> None:
     tmp = state_path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
     tmp.replace(state_path)  # 原子替换
+
+
+LOCK_STALE_SECONDS = 3600  # 总结含 LLM 慢调用（claude_timeout 默认 180s），宽限 1h
+
+
+@contextmanager
+def session_lock(paths: dict, key: str,
+                 stale_seconds: int = LOCK_STALE_SECONDS) -> Iterator[bool]:
+    """单会话跨进程互斥锁：原子 O_EXCL 创建；撞锁 yield False（让位跳过）。
+
+    背景（2026-08-21 实测竞态）：多个 hook 并发 run 时各自的 state 快照均未含
+    对方即将写入的提案，session_proposal_exists 的 TOCTOU 窗口 + 秒级 LLM 延迟
+    使同一会话被并发总结 6 次、产出 6 份重复提案。锁把「查重 → 总结 → 记账」
+    串行化：持锁者独占处理，撞锁者跳过（下次扫描时单提案守卫/state 兜底）。
+    过期死锁（持锁进程崩溃）按 mtime 超时窃取一次。
+    """
+    lock_dir: Path = paths["locks"]
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock = lock_dir / (key.replace("/", "_") + ".lock")
+    acquired = False
+    for _ in range(2):  # 第二轮：清理过期死锁后重试一次
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            try:
+                age = time.time() - lock.stat().st_mtime
+            except OSError:
+                continue  # 锁恰被持锁者释放：立即重试
+            if age < stale_seconds:
+                break            # 活锁：让位
+            try:                 # 过期死锁：窃取后重试
+                lock.unlink()
+            except OSError:
+                pass
+            continue
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(f"pid={os.getpid()} ts={time.time():.0f}\n")
+        acquired = True
+        break
+    try:
+        yield acquired
+    finally:
+        if acquired:
+            try:
+                lock.unlink()
+            except OSError:
+                pass
 
 
 def content_digest(path: Path) -> str:

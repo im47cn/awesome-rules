@@ -384,3 +384,49 @@ def test_archive_orig_moves_snapshot(tmp_path):
     assert dest.is_file() and not orig.exists()
     assert PR.archive_orig(tmp_path / "pending" / "absent.md",
                            tmp_path / "applied") is None       # 无快照容错
+
+
+def test_verify_evidence_paraphrase(tmp_path):
+    """转述拼接：整段未逐字命中，但最长连续命中 ≥ 阈值 → paraphrase（不拦 apply）。"""
+    corpus = "用户当时说'不要用 select *，明确列名'并且要求改掉全部查询"
+    # 真实片段（连续 ≥16 字）+ 连接词缝合 → 整段不命中但片段命中
+    stitched = "用户提到过'不要用 select *，明确列名'所以需要新增禁止条款"
+    p = make_proposal(tmp_path, lessons=[
+        make_lesson(evidence=stitched),
+        make_lesson(evidence="完全编造的引用内容根本不存在于语料"),
+    ])
+    assert PR.verify_evidence(p, corpus) == [(1, "paraphrase"), (2, "miss")]
+
+
+def test_longest_match_len_threshold():
+    """阈值边界：恰 16 字降级、15 字仍 miss。"""
+    from evo_proposal import _norm_quote, _longest_match_len
+    frag = "一二三四五六七八九十123456"          # 16 字
+    corpus = f"前缀{frag}后缀"
+    quote = f"改写开头{frag}改写结尾"
+    assert _longest_match_len(_norm_quote(quote), _norm_quote(corpus)) >= 16
+    frag15 = frag[:-1]
+    quote15 = f"改写开头{frag15}改写结尾"
+    assert _longest_match_len(_norm_quote(quote15), _norm_quote(corpus)) == 15
+
+
+def test_apply_append_under_h3_anchor(tmp_path):
+    """### 子节锚点：插在子节标题下；文件内重复的 ### 锚点整体拒绝（不唯一）。"""
+    repo = make_repo(tmp_path)
+    spec = repo / "steering" / "demo-spec.md"
+    spec.write_text(spec.read_text(encoding="utf-8")
+                    + "\n### 基础要求\n\n- b1\n", encoding="utf-8")
+    p = make_proposal(tmp_path, lessons=[make_lesson(change=PR.Change(
+        action="append_under", heading="### 基础要求", new_text="- 新子节条款"))])
+    PR.apply_proposal(p, repo)
+    text = spec.read_text(encoding="utf-8")
+    assert "- b1" in text                       # 既有子节内容保留
+    assert text.index("### 基础要求") < text.index("- 新子节条款") < text.index("- b1")
+
+    spec.write_text(spec.read_text(encoding="utf-8")
+                    + "\n### 基础要求\n\n- b2\n", encoding="utf-8")
+    with pytest.raises(PR.ApplyError, match="不唯一"):
+        PR.apply_proposal(make_proposal(tmp_path, pid="20260818-000009-cc-h3dupe01",
+                                        lessons=[make_lesson(change=PR.Change(
+                                            action="append_under", heading="### 基础要求",
+                                            new_text="- 再一条"))]), repo)

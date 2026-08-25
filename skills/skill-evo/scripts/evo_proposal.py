@@ -233,11 +233,43 @@ def _norm_quote(text: str) -> str:
     return "".join(text.split()).translate(_QUOTE_NORM)
 
 
+PARAPHRASE_MIN_CHARS = 16
+"""miss 降级阈值：最长连续命中 ≥ 该字数判 paraphrase（转述），不再拦 apply。
+
+实测（2026-08-24 预审 59 条 miss 全量核验）：总结器常把会话真实原文片段用
+连接词缝合成整段 evidence，整段逐字核验必 miss，但最长连续命中普遍 ≥16 字
+（编造型通常只有 <8 字的公共短语命中）。转述降级为 ⚠ 由人复核，不阻断应用。
+"""
+
+
+def _longest_match_len(quote: str, corpus: str, floor: int = 4) -> int:
+    """归一化后 quote 在 corpus 中的最长连续命中长度（二分扩展 + 短窗预筛）。
+
+    只在 miss 分支调用（quote 已确认非子串），evidence 量级 ~百字、语料 ~MB，
+    预筛使无命中起点的位置近乎零成本。
+    """
+    best = 0
+    for start in range(len(quote)):
+        if quote[start:start + floor] not in corpus:
+            continue
+        lo, hi = floor, len(quote) - start
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if quote[start:start + mid] in corpus:
+                lo = mid
+            else:
+                hi = mid - 1
+        best = max(best, lo)
+    return best
+
+
 def verify_evidence(p: Proposal, corpus: str) -> List[Tuple[int, str]]:
     """逐 lesson 核验 evidence 是否逐字命中来源会话原文（空白不敏感）。
 
-    返回 (lesson 序号, 状态)：hit=命中 / miss=未命中（可疑编造）/
-    no_corpus=语料缺失无法核验。把人工抽查 evidence 真实性变成脚本核验。
+    返回 (lesson 序号, 状态)：hit=命中 / paraphrase=未整段命中但最长连续
+    命中 ≥ PARAPHRASE_MIN_CHARS（LLM 缝合转述，大概率真实，不拦 apply）/
+    miss=未命中（可疑编造，apply 拦截） / no_corpus=语料缺失无法核验。
+    把人工抽查 evidence 真实性变成脚本核验。
     """
     norm_corpus = _norm_quote(corpus)
     results: List[Tuple[int, str]] = []
@@ -246,7 +278,12 @@ def verify_evidence(p: Proposal, corpus: str) -> List[Tuple[int, str]]:
             results.append((i, "no_corpus"))
             continue
         quote = _norm_quote(ls.evidence)
-        results.append((i, "hit" if quote and quote in norm_corpus else "miss"))
+        if quote and quote in norm_corpus:
+            results.append((i, "hit"))
+        elif quote and _longest_match_len(quote, norm_corpus) >= PARAPHRASE_MIN_CHARS:
+            results.append((i, "paraphrase"))
+        else:
+            results.append((i, "miss"))
     return results
 
 

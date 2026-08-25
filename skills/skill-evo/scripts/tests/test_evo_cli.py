@@ -315,3 +315,26 @@ def test_find_latest_omp_sessions(tmp_path):
     assert [p.name for p in hits] == ["2099-01-02T00-00-00-000Z_0b.jsonl",
                                       "2099-01-01T00-00-00-000Z_0a.jsonl"]
     assert S.find_latest_omp_sessions(cfg, "/absent", limit=5) == []
+
+
+def test_apply_evidence_paraphrase_passes(tmp_path, monkeypatch, capsys):
+    """转述型 evidence（片段命中 ≥16 字）→ list 标 ⚠、apply 不需 force 直接通过。"""
+    cfg, base, repo = make_env(tmp_path, monkeypatch)
+    src = tmp_path / "s-evpara.jsonl"
+    cc_fixture(src, cwd=str(tmp_path / "demo-repo"), extra_users=2, sid=src.stem)
+    # 会话原文含 "Error: no such table"（fixture 固定），用连接词缝进转述句
+    stitched = ("实测中工具报错提示 Error: no such table 因此确认"
+                "需要沉淀该教训到规范中")
+    p = PR.Proposal(id="20260818-160000-cc-eeee7777", source_agent="cc",
+                    source_session="s", source_path=str(src), created="T",
+                    lessons=[PR.Lesson(
+                        type="failure", evidence=stitched,
+                        target_file="steering/demo-spec.md",
+                        confidence="High", reason="r", change=PR.Change(
+                            action="append_end", new_text="- 转述证据测试条款"))])
+    PR.write_proposal(p, base / "proposals" / "pending")
+    assert evo.cmd_list(SimpleNamespace()) == 0
+    out = capsys.readouterr().out
+    assert "⚠" in out and "✗" not in out
+    assert evo.cmd_apply(SimpleNamespace(id="20260818-16", dry_run=False, force=False)) == 0
+    assert "- 转述证据测试条款" in (repo / "steering" / "demo-spec.md").read_text(encoding="utf-8")

@@ -157,21 +157,31 @@ def cmd_run(args) -> int:
                 targets.append(sess)
 
     for sess in targets:
+        # held=本进程持有会话锁（含锁内异常路径）；撞锁/取锁失败为 False。
+        # 记账语义与旧版一致：非 dry-run 且持锁即记账（error 也记，防失败会话
+        # 反复重试）；唯一不记的是撞锁让位——该会话由持锁 worker 负责记账。
+        held = False
         try:
-            # 单会话单提案守卫：已有提案（任意状态）则跳过总结，防重复整包提案
-            if not args.dry_run and PR.session_proposal_exists(
-                    paths, sess.agent, sess.session_id):
-                result = "skip: 该会话已有提案（单会话单提案守卫）"
-            else:
-                result = process_session(sess, cfg, repo, args.dry_run)
+            with S.session_lock(paths, sess.key) as locked:
+                held = bool(locked)
+                # 单会话锁：查重→总结→记账 串行化，堵 session_proposal_exists 的
+                # TOCTOU 窗口（并发 hook 各自快照都未见对方提案 → 同会话重复总结）
+                if args.dry_run:
+                    result = process_session(sess, cfg, repo, True)
+                elif not locked:
+                    result = "skip: 并发 worker 正在处理该会话（会话锁）"
+                elif PR.session_proposal_exists(
+                        paths, sess.agent, sess.session_id):
+                    # 单会话单提案守卫：已有提案（任意状态）则跳过总结，防重复整包提案
+                    result = "skip: 该会话已有提案（单会话单提案守卫）"
+                else:
+                    result = process_session(sess, cfg, repo, args.dry_run)
         except Exception as e:  # 后台失败静默：写日志，不影响其他会话
             result = f"error: {type(e).__name__}: {e}"
-        _log(cfg, f"run {sess.key} cwd={sess.cwd} → {result}")
-        # 处理过即记账（内容哈希；含 error，防失败会话反复重试；no_signal 同样不重提）。
-        # dry-run 例外：预演不记账，否则会话被跳过导致之后不真正总结。
-        if not args.dry_run:
+        if not args.dry_run and held:
             state.setdefault("processed", {})[sess.key] = S.content_digest(sess.path)
             S.save_state(state_path, state)
+        _log(cfg, f"run {sess.key} cwd={sess.cwd} → {result}")
 
     # 4) 搭车：插件哑故障巡检（节流在模块内，异常静默不影响主流程）
     if not getattr(args, "no_patrol", False):
@@ -239,6 +249,7 @@ def _session_corpus(p: PR.Proposal) -> str:
 
 
 def _evidence_warnings(checks: list) -> list:
+    """阻断级 evidence 警告：仅 miss（可疑编造）。paraphrase 转述不拦 apply。"""
     return [f"lesson {i}: evidence 未在来源会话中命中（可疑编造，需人工核实，--force 可越过）"
             for i, status in checks if status == "miss"]
 
@@ -261,7 +272,7 @@ def cmd_list(args) -> int:
         for w in p.warnings():
             print(f"  ⚠ {w}")
         checks = dict(PR.verify_evidence(p, _session_corpus(p)))
-        marks = {"hit": "✓", "miss": "✗", "no_corpus": "?"}
+        marks = {"hit": "✓", "paraphrase": "⚠", "miss": "✗", "no_corpus": "?"}
         for i, ls in enumerate(p.lessons, 1):
             mark = marks.get(checks.get(i, "no_corpus"), "?")
             print(f"  - {mark} {ls.lesson_id or PR.derive_lesson_id(ls)} "
@@ -279,6 +290,9 @@ def cmd_apply(args) -> int:
     for i, status in checks:
         if status == "no_corpus":
             print(f"ℹ lesson {i}: 来源会话缺失（{proposal.source_path}），evidence 无法核验")
+        elif status == "paraphrase":
+            print(f"ℹ lesson {i}: evidence 为转述拼接（最长连续命中 ≥{PR.PARAPHRASE_MIN_CHARS} 字），"
+                  "非逐字引用但不拦应用，人工抽查可关注")
     try:
         report = PR.apply_proposal(proposal, C.repo_root(),
                                    dry_run=args.dry_run, force=args.force,

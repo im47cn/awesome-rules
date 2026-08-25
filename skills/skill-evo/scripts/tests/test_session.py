@@ -133,3 +133,42 @@ def test_iter_omp_sessions_lookback(tmp_path, monkeypatch):
     (new_dir / "not-jsonl.txt").write_text("", encoding="utf-8")
     names = [f.name for f in S.iter_omp_sessions(cfg)]
     assert names == ["2099-01-01T00-00-00-000Z_new-new.jsonl"]
+
+
+# ── 会话锁（并发互斥）───────────────────────────────────────────────────────
+
+def _paths(tmp_path: Path) -> dict:
+    return {"locks": tmp_path / "locks"}
+
+
+def test_session_lock_exclusive(tmp_path):
+    """同 key 二次获取：让位 False，锁文件仍在；释放后可再获取。"""
+    with S.session_lock(_paths(tmp_path), "cc:s-1") as first:
+        assert first
+        with S.session_lock(_paths(tmp_path), "cc:s-1") as second:
+            assert not second                      # 撞锁让位
+        assert any((tmp_path / "locks").glob("cc:s-1.lock"))  # 让位者不误删锁
+    with S.session_lock(_paths(tmp_path), "cc:s-1") as again:
+        assert again                                # 释放后可重入
+    assert not any((tmp_path / "locks").glob("*.lock"))        # 全部释放
+
+
+def test_session_lock_different_keys_independent(tmp_path):
+    with S.session_lock(_paths(tmp_path), "cc:s-1"):
+        with S.session_lock(_paths(tmp_path), "cc:s-2") as other:
+            assert other                            # 不同会话不互斥
+
+
+def test_session_lock_stale_steal(tmp_path):
+    """过期死锁（mtime 超时）被窃取：可重新获取。"""
+    import os, time
+    paths = _paths(tmp_path)
+    with S.session_lock(paths, "cc:s-dead"):
+        pass                                        # 正常释放
+    lock = paths["locks"] / "cc:s-dead.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("pid=1 ts=0\n", encoding="utf-8")
+    os.utime(lock, (0, 0))                          # 模拟远古死锁
+    with S.session_lock(paths, "cc:s-dead", stale_seconds=100) as got:
+        assert got                                  # 过期 → 窃取成功
+    # 撞锁异常路径让位后释放不误删他人锁：直接持有者持有中释放让位者的锁不存在
