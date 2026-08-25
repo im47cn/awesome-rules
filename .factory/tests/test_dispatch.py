@@ -12,12 +12,16 @@
 
 import os
 import subprocess
+import pytest
 from pathlib import Path
 
+import factory_lib
 from factory_lib import (
     ChainPool,
+    _DispatchCfg,
     acquire_dispatch_lock,
     approved_prs,
+    dispatch_main,
     extract_slug,
     release_dispatch_lock,
     sort_by_priority,
@@ -203,3 +207,64 @@ class TestDispatchParsers:
                              "https://github.com/b/two.git"]) == "a/one"
         assert extract_slug(["git@gitlab.com:a/b.git",
                              "https://github.com/o/r.git"]) == "o/r"
+
+class TestDispatchConfig:
+    """MAX_PARALLEL 配置错误必须 fail-fast（PR #53 审查②）：0/负/非整数
+    使 ChainPool 槽满等待永真——挂起而非配置错误。config-error = rc 2。"""
+
+    def test_chain_pool_rejects_nonpositive(self, tmp_path):
+        with pytest.raises(ValueError):
+            ChainPool(tmp_path, 0)
+        with pytest.raises(ValueError):
+            ChainPool(tmp_path, -1)
+
+    def test_max_parallel_zero_is_config_error(self, monkeypatch, capsys):
+        monkeypatch.setenv("MAX_PARALLEL", "0")
+        assert dispatch_main([]) == 2
+        assert "MAX_PARALLEL" in capsys.readouterr().err
+
+    def test_max_parallel_garbage_is_config_error(self, monkeypatch, capsys):
+        monkeypatch.setenv("MAX_PARALLEL", "abc")
+        assert dispatch_main([]) == 2
+        assert "MAX_PARALLEL" in capsys.readouterr().err
+
+
+class TestChainPoolShutdown:
+    """TERM 出口收尸（PR #53 审查④）：孤儿链在锁释放后仍跑会与新
+    dispatcher 并发——shutdown 必须 SIGTERM → 限期收割 → SIGKILL 兜底，
+    且先于放锁完成。"""
+
+    def test_shutdown_terminates_and_reaps_active(self, tmp_path):
+        f = tmp_path / "factory"
+        (f / "artifacts").mkdir(parents=True)
+        (f / "fix-issue.sh").write_text("#!/usr/bin/env bash\nsleep 60\n")
+        (f / "fix-issue.sh").chmod(0o755)
+        pool = ChainPool(f, 2, poll_secs=0.05)
+        pool.spawn(7)
+        assert pool._active, "链应在跑"
+        stuck = pool.shutdown(grace=1.0)
+        assert stuck == []
+        assert pool._active == []
+        assert [n for n, _ in pool.done] == [7]
+        assert pool.done[0][1] != 0, "被终止的链退出码必须非 0（信号）"
+
+    def test_shutdown_empty_pool_is_noop(self, tmp_path):
+        assert ChainPool(tmp_path, 1).shutdown() == []
+
+
+class TestGhJson:
+    """_gh_json 失败可见（PR #53 审查⑤）：rc!=0 / 坏 JSON 都必须有 stderr
+    告警 + 空列表降级——静默空轮 = 整轮空转还报成功。"""
+
+    def test_nonzero_rc_warns_and_skips(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(factory_lib, "_gh", lambda cfg, *a: (1, ""))
+        cfg = _DispatchCfg(tmp_path, tmp_path, "o/r", True)
+        assert factory_lib._gh_json(cfg, "pr", "list") == []
+        err = capsys.readouterr().err
+        assert "rc=1" in err and "跳过该批" in err
+
+    def test_bad_json_warns_and_skips(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(factory_lib, "_gh", lambda cfg, *a: (0, "not-json"))
+        cfg = _DispatchCfg(tmp_path, tmp_path, "o/r", True)
+        assert factory_lib._gh_json(cfg, "pr", "list") == []
+        assert "输出异常" in capsys.readouterr().err

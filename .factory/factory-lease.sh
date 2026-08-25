@@ -74,8 +74,10 @@ lease_machine_id() {  # 稳定机器身份：主树 .factory/var/machine-id（�
 }
 
 # ── 单写者降级（SUPABASE_DB 未设 = 显式单写者形态，2026-08-24）───────
-# 本地锁镜像仲裁层语义：O_EXCL 判代、过期 = mtime+FACTORY_LEASE_SECS、
-# 过期可夺（epoch+1）、fence 校验 machine-id+epoch、heartbeat 刷 mtime
+# 本地锁镜像仲裁层语义：O_EXCL 判代、过期 = mtime+锁内租期（内容第 5
+# 字段，缺省回退 FACTORY_LEASE_SECS——旧 4 字段锁兼容）、过期可夺
+# （epoch+1，rename 单赢家接管——rm 后建新有双赢家窗口）、fence 校验
+# machine-id+epoch、heartbeat 续租写回新租期+刷 mtime
 # （过期不许复活，须重新 claim——对齐 PG）。锁锚定主树
 # .factory/locks/leases/（lease_main_factory，worktree 共享）。两处刻意
 # 差异：①持有中二次 claim 即便同机也拒——本地锁的互斥对象就是同机进程，
@@ -99,28 +101,52 @@ _lease_sw_path() {  # _lease_sw_path <key> <后缀 .lock|.epoch> → 主树锁�
   printf '%s/locks/leases/%s%s' "$(lease_main_factory)" "$1" "$2"
 }
 
-_lease_sw_read() {  # _lease_sw_read <lock> → 置 _SW_MID/_SW_EPOCH；缺文件/坏内容 return 1
-  local line
+_lease_sw_read() {  # _lease_sw_read <lock> → 置 _SW_MID/_SW_EPOCH/_SW_SECS；缺文件/坏内容 return 1
+  local line _pid _ts
   IFS= read -r line < "$1" 2>/dev/null || return 1
   _SW_MID="${line%%|*}"; _SW_EPOCH="${line#*|}"; _SW_EPOCH="${_SW_EPOCH%%|*}"
   case "${_SW_EPOCH}" in ''|*[!0-9]*) return 1 ;; esac
+  # 第 5 字段 = 本租约租期（claim/hb 写入）。旧 4 字段锁（mid|epoch|pid|ts）
+  # 无此字段 → 空 = 回退 FACTORY_LEASE_SECS 判过期（PR #53 审查③）。
+  IFS='|' read -r _pid _ts _SW_SECS <<< "${line#*|*|}"
+  case "${_SW_SECS}" in ''|*[!0-9]*) _SW_SECS="" ;; esac
   [ -n "$_SW_MID" ] || return 1
+}
+
+_lease_sw_fresh() {  # _lease_sw_fresh <mtime> → 0=未过期 1=已过期；租期=锁内 _SW_SECS，缺省回退全局默认
+  local now; now="$(date +%s)"
+  [ $(( $1 + ${_SW_SECS:-${FACTORY_LEASE_SECS:-900}} )) -gt "$now" ]
 }
 
 _lease_sw_claim() {  # <key> <secs> <mid> → 成功打印 epoch，失败 return 1
   local key="$1" secs="$2" mid="$3"
-  local lock ctr mt now held last new_ep
+  local lock ctr mt held last new_ep stale
   _lease_sw_notice
   lock="$(_lease_sw_path "$key" .lock)"; ctr="$(_lease_sw_path "$key" .epoch)"
   mkdir -p "${lock%/*}" || return 1
-  held=0
+  held=0; _SW_MID=; _SW_EPOCH=; _SW_SECS="$secs"   # 读失败时新鲜度按本 claim 租期判（原语义）
   if [ -f "$lock" ]; then
-    mt="$(_lease_mtime "$lock")"; now="$(date +%s)"
+    _lease_sw_read "$lock" || true     # 坏内容 → held=0（判代退回计数器）
+    [ -n "${_SW_EPOCH}" ] && held="$_SW_EPOCH"
+    mt="$(_lease_mtime "$lock")"
     case "$mt" in ''|*[!0-9]*) return 1 ;; esac
     # 未过期 = 拒（同机并发也拒，见上方差异①）
-    [ $(( mt + secs )) -gt "$now" ] && return 1
-    _lease_sw_read "$lock" && held="$_SW_EPOCH"   # 坏内容→held=0：判代退回计数器
-    rm -f "$lock"                                  # 过期可夺：删旧建新，判代仍靠 O_EXCL
+    _lease_sw_fresh "$mt" && return 1
+    # 原子接管（单赢家，PR #53 审查①）：rename 是唯一通道——并发竞争者
+    # 只有一个 mv 成功，输者 mv 失败（源路径已不在）即拒。绝不能 rm 后
+    # 再建：rm-建新窗口里后来者会删掉先来者刚建的锁，双赢家破坏单写者。
+    stale="${lock}.stale.$$.$RANDOM"
+    mv "$lock" "$stale" 2>/dev/null || return 1
+    # 防偷鲜锁：过期检查与 mv 之间可能有人刚换上未过期新锁——对搬走的
+    # 文件重验新鲜度（内容随 inode 走，_SW_* 仍有效）；偷到鲜锁则放回
+    # 并拒（放回位已有新锁则弃残本——输者 hb/fence 自毙，单写者仍成立）。
+    mt="$(_lease_mtime "$stale")"
+    if _lease_sw_fresh "$mt"; then
+      [ -e "$lock" ] || mv "$stale" "$lock" 2>/dev/null
+      rm -f "$stale"
+      return 1
+    fi
+    rm -f "$stale"
   fi
   ( set -C; : > "$lock" ) 2>/dev/null || return 1  # 原子判代（noclobber = O_EXCL）
   # fencing token 单调：max(计数器, 旧锁 epoch)+1（见上方差异②）
@@ -132,33 +158,46 @@ _lease_sw_claim() {  # <key> <secs> <mid> → 成功打印 epoch，失败 return
   [ "$held" -gt "$last" ] && last="$held"
   new_ep=$(( last + 1 ))
   printf '%s\n' "$new_ep" > "$ctr" 2>/dev/null || { rm -f "$lock"; return 1; }
-  printf '%s|%s|%s|%s\n' "$mid" "$new_ep" "$$" "$(date +%s)" > "$lock"
+  printf '%s|%s|%s|%s|%s\n' "$mid" "$new_ep" "$$" "$(date +%s)" "$secs" > "$lock"
   printf '%s\n' "$new_ep"
 }
 
-_lease_sw_hb() {  # <key> <epoch> <mid> <secs> → 0=活（touch 刷 mtime 续租）1=失效
-  local key="$1" epoch="$2" mid="$3" secs="$4" lock mt now
+_lease_sw_hb() {  # <key> <epoch> <mid> <secs> → 0=活 1=失效
+  local key="$1" epoch="$2" mid="$3" secs="$4" lock mt tmp
   _lease_sw_notice
   lock="$(_lease_sw_path "$key" .lock)"
   [ -f "$lock" ] || return 1
   _lease_sw_read "$lock" || return 1
   [ "$_SW_MID" = "$mid" ] && [ "$_SW_EPOCH" = "$epoch" ] || return 1
-  mt="$(_lease_mtime "$lock")"; now="$(date +%s)"
+  mt="$(_lease_mtime "$lock")"
   case "$mt" in ''|*[!0-9]*) return 1 ;; esac
-  [ $(( mt + secs )) -gt "$now" ] || return 1  # 过期不许复活，须重新 claim（对齐 PG）
-  touch "$lock"
+  _lease_sw_fresh "$mt" || return 1  # 过期不许复活，须重新 claim（对齐 PG）
+  # 续租租期写回锁内（hb 的 secs 即新租期，对齐 PG heartbeat(p_secs)；
+  # 兼职把旧 4 字段锁升级为带租期格式）：temp+mv 原子替换防撕裂读，mv
+  # 保留 temp 的 mtime，故随后 touch 刷活。重写失败退化为纯 touch 续租
+  # （旧租期继续生效）——续租写失败不该杀活链。
+  tmp="${lock}.hb.$$.$RANDOM"
+  if printf '%s|%s|%s|%s|%s\n' "$mid" "$epoch" "$$" "$(date +%s)" "$secs" \
+       > "$tmp" 2>/dev/null && mv -f "$tmp" "$lock" 2>/dev/null; then
+    touch "$lock"
+  else
+    rm -f "$tmp" 2>/dev/null
+    touch "$lock"
+  fi
 }
 
 _lease_sw_fence() {  # <key> <epoch> <mid> → 0=仍持有 1=已被夺走/过期
-  local key="$1" epoch="$2" mid="$3" lock mt now
+  local key="$1" epoch="$2" mid="$3" lock mt
   _lease_sw_notice
   lock="$(_lease_sw_path "$key" .lock)"
   [ -f "$lock" ] || return 1
   _lease_sw_read "$lock" || return 1
   [ "$_SW_MID" = "$mid" ] && [ "$_SW_EPOCH" = "$epoch" ] || return 1
-  mt="$(_lease_mtime "$lock")"; now="$(date +%s)"
+  mt="$(_lease_mtime "$lock")"
   case "$mt" in ''|*[!0-9]*) return 1 ;; esac
-  [ $(( mt + ${FACTORY_LEASE_SECS:-900} )) -gt "$now" ]  # 过期即失效（对齐 PG fence expires_at>now）
+  # 过期即失效（对齐 PG fence expires_at>now）：租期取锁内实际值——短租期
+  # 租约不被全局默认租期撑腰（PR #53 审查③）；旧 4 字段锁回退默认。
+  _lease_sw_fresh "$mt"
 }
 
 _lease_sw_release() {  # <key> <epoch> <mid> → 尽力释放（幂等）：持有者匹配才删锁，计数器留档

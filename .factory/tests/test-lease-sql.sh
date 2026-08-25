@@ -155,11 +155,30 @@ ck "SW heartbeat 过期拒"       "1" "$(SW 'lease_heartbeat issue:sw 3 >/dev/nu
 ck "SW 重claim后 heartbeat 活" "0" "$(SW 'lease_claim issue:sw >/dev/null; lease_heartbeat issue:sw 4 >/dev/null 2>&1; echo $?')"
 printf 'othermach|4|%s|%s\n' "$$" "$(date +%s)" > "$swlock"   # 伪造异机持有者（mtime=now 未过期）
 ck "SW fence 异机拒"           "1" "$(SW 'lease_fence_ok issue:sw 4 >/dev/null 2>&1; echo $?')"
+# ⑥ 过期接管单赢家（rename 原子接管，PR #53 审查①）：并发双 claim 恰一胜
+SW 'lease_claim issue:cc >/dev/null'
+touch -t 200001010000 "$tp/.factory/locks/leases/issue:cc.lock"
+for i in 1 2; do
+  ( env -u SUPABASE_DB REPO="$tp" FACTORY_LEASE_SECS=900 \
+      bash -c "source '${LEASE_SH}'; lease_claim issue:cc >/dev/null 2>&1; echo \$? > '$tp/cc$i'" ) &
+done
+wait
+wins=0; for i in 1 2; do if [ "$(cat "$tp/cc$i" 2>/dev/null)" = 0 ]; then wins=$((wins+1)); fi; done
+ck "SW 并发过期接管恰一胜"   "1"    "$wins"
+# ⑦ fence 用锁内实租期（PR #53 审查③）：2s 短租期过期后，全局默认 900s 不撑腰
+SW 'lease_claim issue:short 2 >/dev/null'
+sleep 3
+ck "SW 短租期 fence 过期拒"  "1"    "$(SW 'lease_fence_ok issue:short 1 >/dev/null 2>&1; echo $?')"
+# ⑧ hb 显式租期写回锁内：hb 2s 生效后按实租期判过期（反向判别：按全局
+#    默认判的实现此处会误过——正是审查③指出的形态）
+SW 'lease_claim issue:hbs >/dev/null; sleep 1; lease_heartbeat issue:hbs 1 2 >/dev/null 2>&1'
+sleep 3
+ck "SW hb 短租期生效后过期"  "1"    "$(SW 'lease_fence_ok issue:hbs 1 >/dev/null 2>&1; echo $?')"
 
 # 双态边界：已设 SUPABASE_DB 但 psql 不可达 = 配置错误，仍 fail-closed（不降级）
 if command -v psql >/dev/null; then
   rc="$(REPO="$tp" SUPABASE_DB="postgresql://127.0.0.1:1/x?connect_timeout=2" \
-    bash -c "source '${LEASE_SH}'; lease_claim issue:fc >/dev/null 2>&1; echo $?" 2>/dev/null)"
+    bash -c "source '${LEASE_SH}'; lease_claim issue:fc >/dev/null 2>&1; echo \$?" 2>/dev/null)"
   ck "PG 不可达仍 fail-closed" "1" "$rc"
 else
   PG_SKIPPED=$((PG_SKIPPED+1))

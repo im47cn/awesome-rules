@@ -289,6 +289,11 @@ class ChainPool:
     """
 
     def __init__(self, factory: Path, max_parallel: int, poll_secs: float = 5.0):
+        # 防御性校验（PR #53 审查②）：0/负并发使 spawn 的槽满等待永久为真，
+        # 调度挂起而非配置错误——直接拒绝构造。
+        if max_parallel < 1:
+            raise ValueError(
+                f"max_parallel 须为正整数（得到 {max_parallel}）——0/负值使并发槽永久等待")
         self.factory = factory
         self.max_parallel = max_parallel
         self.poll_secs = poll_secs
@@ -326,6 +331,32 @@ class ChainPool:
             if not self._active:
                 return
             time.sleep(self.poll_secs)
+
+    def shutdown(self, grace: float = 10.0) -> list[int]:
+        """终止并收割活跃链（TERM/HUP 出口的对应物，PR #53 审查④）。
+
+        孤儿链会在锁释放后与新 dispatcher 并发，故必须先收尸再放锁：
+        先全体 SIGTERM，限期内收割，逾期 SIGKILL 兜底。返回未在限期内
+        自行退出的 issue 号列表（尽力语义，正常路径 wait_all 后为空）。
+        """
+        for _n, p in self._active:
+            if p.poll() is None:
+                p.terminate()
+        deadline = time.monotonic() + grace
+        while self._active and time.monotonic() < deadline:
+            self._reap()
+            if self._active:
+                time.sleep(self.poll_secs)
+        stuck: list[int] = []
+        for n, p in self._active:
+            try:
+                p.kill()
+                p.wait(timeout=5)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+            stuck.append(n)
+        self._active = []
+        return stuck
 
 
 def _pid_alive(pid: int) -> bool:
@@ -384,17 +415,26 @@ def release_dispatch_lock(lock_dir: Path) -> None:
     shutil.rmtree(lock_dir, ignore_errors=True)
 
 
-_SLUG_STRIP = re.compile(r"^.*github\.com(:[0-9]+)?[/:]")
+_SLUG_RE = re.compile(
+    r"^(?:[A-Za-z0-9_.-]+@)?github\.com(?::\d+)?[/:]"
+    r"(?P<slug>[^/]+/[^/]+?)(?:\.git)?/?$")
+_SLUG_VALID = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 
 
 def extract_slug(urls: list[str]) -> str:
     """remote URL 清单 → GitHub slug（owner/repo）。首条 github.com 者胜出
     （github remote 名优先由调用方注入顺序保证）；grep -m1 的 SIGPIPE
-    早退缺陷（a4d81930，issue #30）在清单消费下不可表达。"""
+    早退缺陷（a4d81930，issue #30）在清单消费下不可表达。
+
+    只认 github.com 为 URL 权威主机（前缀至多 userinfo@、scheme 已剥离）：
+    凭子串位置剪裁会把 evil.com/github.com/o/r 之类伪装主机剪成可用 slug
+    （CodeQL：incomplete URL substring sanitization）；产出再过 owner/repo
+    字符白名单，双闸。GH_REPO 显式指定不经此函数（显式覆盖即信任）。"""
     for u in urls:
-        if "github.com" in u:
-            slug = _SLUG_STRIP.sub("", u, count=1)
-            return slug[:-4] if slug.endswith(".git") else slug
+        t = re.sub(r"^(?:ssh|git|https?)://", "", u.strip())
+        m = _SLUG_RE.match(t)
+        if m and _SLUG_VALID.fullmatch(m.group("slug")):
+            return m.group("slug")
     return ""
 
 
@@ -460,8 +500,14 @@ def _gh_json(cfg: _DispatchCfg, *args: str) -> list:
     """gh JSON 查询；瞬断/输出异常 → 可诊断跳过该批（对齐 triage 批次
     c22130df 的降级形态：失败可见，不静默也不炸轮）。"""
     rc, out = _gh(cfg, *args)
+    if rc != 0:
+        # rc!=0 必须有痕（PR #53 审查⑤）：GitHub 故障/权限失败若无告警，
+        # 空队列会被当成「无事可做」，整轮静默空转还报成功。
+        print(f"  [warn] gh {args[0]} {args[1]} 失败（rc={rc}），跳过该批"
+              "——若是持续故障请检查 gh auth / GitHub 状态", file=sys.stderr)
+        return []
     try:
-        return json.loads(out) if rc == 0 else []
+        return json.loads(out)
     except json.JSONDecodeError:
         print(f"  [warn] gh {args[0]} {args[1]} 输出异常（rc={rc}），跳过该批",
               file=sys.stderr)
@@ -640,6 +686,17 @@ def dispatch_main(args: list[str]) -> int:
                       stderr=subprocess.DEVNULL).returncode != 0:
         print("需要 gh CLI", file=sys.stderr)
         return 2
+    # MAX_PARALLEL 配置错误 fail-fast（PR #53 审查②）：0/负/非整数值会让
+    # ChainPool 槽满等待永久为真——挂起而非报错。config-error = 退出码 2。
+    mp_raw = os.environ.get("MAX_PARALLEL") or "4"
+    try:
+        int(mp_raw)
+    except ValueError:
+        print(f"MAX_PARALLEL 非整数: {mp_raw!r}", file=sys.stderr)
+        return 2
+    if int(mp_raw) < 1:
+        print(f"MAX_PARALLEL 须为正整数（得到 {mp_raw!r}）", file=sys.stderr)
+        return 2
     # 主树锚定：git-common-dir 在 worktree 中指向主 .git，据此回到主树
     # .factory（39b6b8ec 硬锁语义）；非 git 环境退回 CWD 仓 .factory
     g = subprocess.run(["git", "rev-parse", "--path-format=absolute",
@@ -667,6 +724,13 @@ def dispatch_main(args: list[str]) -> int:
             print("提示: --watch 常驻（或 cron */30 调用单轮）")
         return rc
     finally:
+        # 先收尸再放锁（PR #53 审查④）：孤儿链在锁释放后仍跑，会与新
+        # dispatcher 并发；TERM/HUP → SystemExit 走到此，正常路径此处
+        # 已被 wait_all 收空，shutdown 为空操作。
+        stuck = cfg.pool.shutdown()
+        if stuck:
+            print(f"  [warn] {len(stuck)} 条链未限期退出已 SIGKILL: {stuck}",
+                  file=sys.stderr)
         release_dispatch_lock(lock_dir)
 
 
