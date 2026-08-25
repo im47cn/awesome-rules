@@ -22,6 +22,7 @@ inclusion: always
 3. **破坏性变更必须显式**：无法兼容时，走豁免声明（可审计），不允许静默合入。
 
 ## 跨仓契约模块的认定
+- 认定契约模块时只解析 pom 的 `<description>` 标签内容，禁止全文 grep「契约」字样：聚合父 pom（packaging=pom）的 description 与各模块注释中出现的「契约」表述均会造成误命中（两类误报源均实测复现过）
 
 同时满足以下条件的 Maven 模块即为本规范约束的**跨仓契约模块**：
 
@@ -87,6 +88,7 @@ inclusion: always
 | 破坏性变更（删除/改签名 public 成员） | japicmp `<excludes>` 显式豁免 + MR 描述注明受影响下游 + 迁移说明 |
 | 契约对应的存储结构变更（如表拆分） | 发布顺序强制：先建表 → 迁数据 → 下游升级切换新接口 → 清理旧字段 |
 | 新增跨仓契约模块 | pom description 含"契约"；登记进下游触发配置 |
+- 契约变更的断裂可能被 SNAPSHOT 缓存静默掩盖：下游拉到新 SNAPSHOT 则编译失败，沿用本地 m2 旧缓存则编译通过但运行时反序列化错位、功能整体失效（实测：上游单方把契约返回类型 ResultMode 改为 ResponseMessage，下游网关零同步）。因此不得以「下游暂未编译报错」认定契约兼容，契约变更必须同批联动下游仓库或被门禁拦截。
 
 豁免记录每季度复盘一次：豁免后下游是否完成迁移、豁免是否可回收。
 
@@ -122,6 +124,7 @@ commit hook 仅做防呆提示（检测到契约模块 diff 时打印提醒"走 
 不承担拦截职责。提示脚本见 `skills/contract-guard/scripts/check-contract.sh`。
 
 ## 外部依赖假设（接入前须确认）
+- SHA 重建 baseline 不受依赖快照漂移影响存在前提：契约模块依赖须全为 `provided`（不进 jar）且 japicmp 开启 `ignoreMissingClasses=true`；一旦契约模块引入 compile 期 SNAPSHOT 依赖，重建产物会渗入依赖漂移，须重新评估该方案可靠性
 
 1. ~~云效私服保留历史 SNAPSHOT~~——已由 sha 重建方案消灭（baseline 只依赖 git）；
 2. 云效 Flow 允许组织内跨仓流水线触发（需组织级权限配置）；

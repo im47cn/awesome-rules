@@ -20,6 +20,7 @@ scenario: bootstrap/application.yml
 - `wlyd.trace.enabled: true` — 链路追踪必须开启
 
 ## 3. bootstrap.yml 与敏感信息
+- 凭证按权限级别专用：面向客户端的公开凭证（如前端 anon key）不得用于服务端/CI 任务，服务端须使用对应的特权凭证（service_role/secret key）；行级安全（RLS）场景下低权限凭证会静默返回空数据集而非报错，此类静默错误比显式失败更难发现
 
 - Nacos：`server-addr`（环境变量 `${NACOS_SERVER_ADDR:localhost:8848}`）、`discovery.namespace`、`config.file-extension: yaml`、`config.namespace`
 - 敏感信息（Nacos 账密等）不硬编码，通过环境变量或配置中心注入；`bootstrap-local.yml` 本地密码不得提交生产分支

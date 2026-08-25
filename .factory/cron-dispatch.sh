@@ -7,6 +7,9 @@ SELF=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
 REPO=$(CDPATH='' cd -- "$(dirname -- "$SELF")/.." && pwd)
 LOG="${REPO}/.factory/locks/dispatch.log"
 LOCK="${REPO}/.factory/locks/dispatch.lock"
+METRICS="${REPO}/.factory/metrics"
+STREAK="${REPO}/.factory/locks/dispatch-fail-streak"
+STALLED_MARK="${METRICS}/dispatch-stalled"
 PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 cd "$REPO" || { echo "无法进入 ${REPO}" >&2; exit 2; }
 export PATH HOME="${HOME:?cron 环境未设置 HOME}"
@@ -33,6 +36,21 @@ trap 'rm -f "$LOCK"' EXIT INT TERM
   "${REPO}/.factory/triage-batch.sh" && rc=0 || rc=$?
   echo "── $(ts) triage 批次结束（exit=${rc}）"
   echo "── $(ts) dispatch 开始"
-  "${REPO}/.factory/dispatch.sh"
-  echo "── $(ts) dispatch 结束（exit=$?）"
+  "${REPO}/.factory/dispatch.sh"; drc=$?
+  echo "── $(ts) dispatch 结束（exit=${drc}）"
+  # 停摆可见性（2026-08-25 ssh.github.com slug 回归：LaunchAgent 每轮
+  # exit 2 静默停摆 4h 无人察觉——日志是唯一信号，没人盯日志）。仅计
+  # exit 2（环境/配置错误：非 git/无 slug/无 gh/MAX_PARALLEL 非法）；
+  # breaker rc 3 是 R4 的显式停机语义，不计。连击 ≥3 轮（默认 45min
+  # @600s 间隔）写标记；恢复（rc 0）清零并摘标记。
+  if [ "$drc" -eq 2 ]; then
+    n=$(cat "$STREAK" 2>/dev/null || echo 0)
+    n=$((n + 1)); printf '%s\n' "$n" > "$STREAK"
+    if [ "$n" -ge "${DISPATCH_STALLED_N:-3}" ]; then
+      mkdir -p "$METRICS"
+      printf 'dispatch 停摆：连续 %s 轮 exit 2（自 %s）；见 locks/dispatch.log 尾部与环境自检\n' "$n" "$(ts)" > "$STALLED_MARK"
+    fi
+  elif [ "$drc" -eq 0 ]; then
+    rm -f "$STREAK" "$STALLED_MARK"
+  fi
 } >> "${LOG}" 2>&1

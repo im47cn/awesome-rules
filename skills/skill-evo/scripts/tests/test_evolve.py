@@ -52,3 +52,54 @@ def test_load_proposal_roundtrips_verdict_fields(tmp_path):
     # 注入后读回
     PR.finalize_review(path, ["anchor_defect"], rejected=False)
     assert PR.load_proposal(path).lessons[0].verdict == "applied"
+
+
+def test_validate_candidate_protects_subsection_contract():
+    """进化候选重写掉 ### 子节锚点指引 → 拒绝（防退化回二级标题堆叠）。"""
+    check = V.validate_candidate(baseline_len=2000)
+    good = ('"no_signal"' in '') or 'x "no_signal" "lessons" append_under append_end '
+    base = 'k: "no_signal" "lessons" append_under append_end evidence'
+    assert check(base + " heading: ##/### 逐字选取") is True
+    assert check(base + " heading: ## 级标题") is False        # 丢子节契约 → 拒绝
+
+
+def test_build_dataset_reference_carries_heading_and_evidence(tmp_path, monkeypatch):
+    """归档案例的 reference 携带 heading 与 evidence_check（judge 据此评锚点与证据质量）。"""
+    import json as _json
+    import evo_config as C
+    import evo_prompt as P
+    import evo_proposal as PR
+    import evo_session as S
+
+    S_write = lambda p, lines: p.write_text(
+        "\n".join(_json.dumps(x, ensure_ascii=False) for x in lines) + "\n", encoding="utf-8")
+    # 6 个会话各 1 提案（越过 holdout≥4 与 train≥2 下限）
+    for n in range(6):
+        src = tmp_path / f"s-gepa{n}.jsonl"
+        S_write(src, [
+            {"type": "user", "cwd": str(tmp_path), "sessionId": src.stem,
+             "message": {"role": "user", "content": [{"type": "text", "text": f"真实会话原话{n}出现在这里供核验"}]}},
+            {"type": "assistant", "message": {"role": "assistant",
+             "content": [{"type": "text", "text": "收到"}]}},
+        ])
+        ls = PR.Lesson(type="success", evidence=f"真实会话原话{n}出现在这里供核验",
+                       target_file="steering/demo-spec.md", confidence="High", verdict="applied",
+                       change=PR.Change(action="append_under", heading="### 子节",
+                                        new_text=f"- z{n}"))
+        p = PR.Proposal(id=f"20260821-00000{n}-cc-gepa000{n}", source_agent="cc",
+                        source_session=f"s{n}", source_path=str(src), created="T", lessons=[ls])
+        PR.write_proposal(p, tmp_path / "ar" / "proposals" / "applied")
+    cfg = dict(C.DEFAULTS)
+    cfg["base_dir"] = str(tmp_path / "ar")
+    cfg["scope_dirs"] = [str(tmp_path)]
+    cfg["gepa_min_cases"] = 1
+    (tmp_path / "ar" / "proposals" / "applied").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "steering").mkdir(exist_ok=True)
+    (tmp_path / "steering" / "demo-spec.md").write_text("# t\n\n## a\n\n### 子节\n", encoding="utf-8")
+    monkeypatch.setattr(C, "repo_root", lambda: tmp_path)
+    train, holdout = V.build_dataset(cfg)
+    cases = train + holdout
+    assert len(cases) == 6
+    ref_lesson = cases[0].reference["lessons"][0]
+    assert ref_lesson["heading"] == "### 子节"
+    assert ref_lesson["evidence_check"] == "hit"          # 逐字命中被核验进引用

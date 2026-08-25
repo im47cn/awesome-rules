@@ -56,7 +56,9 @@ def _mk_repo(tmp_path):
         encoding="utf-8")
     (tmp_path / "steering").mkdir(parents=True)
     (tmp_path / "steering" / "demo-spec.md").write_text(
-        "---\ntitle: 测试规范\nscenario: 测试\n---\n# 测试规范\n\n## 强制条款\n\n1. 【强制】条款 A\n",
+        "---\ntitle: 测试规范\nscenario: 测试\n---\n# 测试规范\n\n## 强制条款\n\n"
+        "1. 【强制】条款 A\n\n### 子节条款\n\n- s1\n\n### 重复节\n\n- a\n\n"
+        "### 重复节\n\n- b\n\n```\n## 围栏伪标题\n```\n",
         encoding="utf-8")
     (tmp_path / "README.md").write_text("# 索引\n\n## 技能\n\n| a | b |\n", encoding="utf-8")
     (tmp_path / "CLAUDE.md").write_text("# 指引\n\n## 审查技能\n\n- x\n", encoding="utf-8")
@@ -68,6 +70,9 @@ def test_build_target_index(tmp_path):
     assert "skills/demo/SKILL.md" in idx and "steering/demo-spec.md" in idx
     assert "README.md" in idx and "CLAUDE.md" in idx   # 根级索引/指引资产已纳入
     assert "## 工作流" in idx                 # 标题锚点已列出（append_under 可用）
+    assert "### 子节条款" in idx              # 子节锚点已列出（新条款可精确落点）
+    assert "## 围栏伪标题" not in idx         # 代码围栏内伪标题不进锚点清单
+    assert idx.count("### 重复节") == 0       # 文件内重复标题被排除（apply 要求唯一）
     assert "测试规范" in idx                  # frontmatter title 生效
 
 

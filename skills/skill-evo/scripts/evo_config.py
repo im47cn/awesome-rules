@@ -100,6 +100,7 @@ def base_paths(cfg: dict) -> dict:
         "rejected": base / "proposals" / "rejected",
         "state": base / "state.json",
         "logs": base / "logs",
+        "locks": base / "locks",
     }
 
 

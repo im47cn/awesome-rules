@@ -1,4 +1,4 @@
-# regression/ — 自挖掘周回归
+# regression/ — 自挖掘日回归
 
 借鉴 dark-factory comprehensive-test 模式：机器自己每周把全仓三层检查跑一遍，
 红了自动开 issue 走工厂 triage 链，绿了记账。人类只看 issue / 合并 PR。
@@ -6,13 +6,15 @@
 ## 用法
 
 ```bash
-bash .factory/regression/weekly-regression.sh            # 真跑：失败开 issue / 全绿记 metrics
-bash .factory/regression/weekly-regression.sh --dry-run  # 真跑三层，只打印将开的 issue 标题与正文预览
+bash .factory/regression/daily-regression.sh            # 真跑：失败开 issue / 全绿记 metrics
+bash .factory/regression/daily-regression.sh --dry-run  # 真跑三层，只打印将开的 issue 标题与正文预览
 ```
 
-定时触发：`~/Library/LaunchAgents/com.im47cn.factory.weekly.plist`
-（`StartCalendarInterval` Weekday=0, Hour=3（launchd 语义 0/7=周日）；**加载由人类决定**：
-`launchctl load ~/Library/LaunchAgents/com.im47cn.factory.weekly.plist`）。
+定时触发：`~/Library/LaunchAgents/com.im47cn.factory.daily.plist`
+（`StartCalendarInterval` Hour=3, Minute=0，每日；**加载由人类决定**：
+`launchctl load ~/Library/LaunchAgents/com.im47cn.factory.daily.plist`）。
+2026-08-25 周频提至日频：停摆/断档类故障（slug 回归实测 4h 静默、LaunchAgent
+断档实测 13h）在周频下的发现延迟最坏 7d+，日频收至 ≤1d。
 
 ## 三层语义
 
@@ -31,7 +33,7 @@ stdout/stderr 落 `.factory/artifacts/regression/launchd.log`。
 
 - **三层全部顺序执行，不短路**：任一层失败后其余层照跑——三层结果表
   完整是 triage 节点的输入，也避免"修好第一层才发现第二层也红"的两段式。
-- **失败 → issue**：标题 `[factory-regression] <date> 周回归失败：<首失败层>`；
+- **失败 → issue**：标题 `[factory-regression] <date> 日回归失败：<首失败层>`；
   正文 = 三层结果表 + 全部日志路径 + 首失败层日志尾部 30 行 + 复跑命令。
 - **零标签（有意）**：`triage-batch.sh` 只拾取零 `factory:*` 标签的 open issue，
   `dispatch.sh` 消费 `factory:accepted`。不打标签 = 走设计的
@@ -41,12 +43,12 @@ stdout/stderr 落 `.factory/artifacts/regression/launchd.log`。
 - **幂等**：已有 open 的标题含 `[factory-regression]` 的 issue 时只
   `gh issue comment` 追加本次结果，不重复开；该 issue 被关闭后，下次失败重开。
 - **全绿 → 记账**：追加一行
-  `{"ts":…,"result":"pass","layers":{…}}` 到 `.factory/metrics/weekly-regression.jsonl`。
+  `{"ts":…,"result":"pass","layers":{…}}` 到 `.factory/metrics/daily-regression.jsonl`。
 - **`--dry-run`**：三层真实执行、日志照落，但不执行任何 gh 写操作、
   不追加 metrics（预演不产生台账）。
 - **退出码**：`0` 全绿（或另一实例持锁静默退出）；`1` 有层失败（issue 已开/已评）；
   `2` 基础设施错误（无 gh / 无 slug / gh 写失败）。
-- **单实例锁**：`.factory/locks/weekly-regression`（mkdir 原子 + PID 活性检测，
+- **单实例锁**：`.factory/locks/daily-regression`（mkdir 原子 + PID 活性检测，
   形态对齐 `dispatch.sh`）——防手动跑与 launchd 定时跑并发执行 gauntlet
   互踩 `.coverage` 清理。
 
@@ -65,8 +67,9 @@ stdout/stderr 落 `.factory/artifacts/regression/launchd.log`。
   ③ 相邻两次同日运行 `diff -r` 即 flake 检测（同代码两次结果不同
   = 非确定性，比"红了又绿"的印象可靠）。磁盘成本可忽略：
   每次运行三个纯文本日志（百行级），周频 ≈ 52 目录/年，无需清理策略。
-- **调度点**：`StartCalendarInterval` `Weekday=0, Hour=3` = **周日凌晨
-  03:00**（launchd 语义 0/7=周日、1=周一；曾按规格字面取 1=周一，
+- **调度点**：`StartCalendarInterval` `Hour=3, Minute=0` = **每日凌晨
+  03:00**（历史：曾为周日凌晨 Weekday=0，2026-08-25 提频；launchd 语义
+  0/7=周日、1=周一，曾按规格字面取 1=周一，
   已修正为 0）。
 - **launchd 环境自足**：脚本内显式注入 PATH（对齐 `cron-dispatch.sh`），
   不依赖登录 shell 环境；plist 用 `/bin/bash <绝对路径>` 调起，规避

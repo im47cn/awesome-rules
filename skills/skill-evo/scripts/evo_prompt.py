@@ -80,7 +80,13 @@ def _frontmatter_title(content: str, fallback: str) -> str:
 
 
 def build_target_index(repo_root: Path) -> str:
-    """进化目标清单：根 README/CLAUDE.md + skills 下全部 .md + steering/**.md（标题 + 二级标题锚点）。"""
+    """进化目标清单：根 README/CLAUDE.md + skills 下全部 .md + steering/**.md（##/### 标题锚点）。
+
+    锚点含子节（###）级：apply 的 append_under 插在锚点行后、下一标题前，
+    只给 ## 级锚点会使全部新条款堆在二级标题顶部、子节语义失效。仅收录
+    文件内唯一的锚点行（apply 要求锚点唯一，重复行直接排除）；代码围栏内
+    的伪标题剔除。每文件上限 30 个锚点控制 prompt 体积。
+    """
     rows: List[str] = []
     targets: List[Path] = [p for p in (repo_root / "README.md", repo_root / "CLAUDE.md")
                            if p.is_file()]
@@ -92,9 +98,12 @@ def build_target_index(repo_root: Path) -> str:
             content = p.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        headings = re.findall(r"^##\s+(.+)$", content, re.M)[:15]
+        prose = re.sub(r"```.*?```", "", content, flags=re.S)
+        heading_lines = [ln.rstrip() for ln in
+                         re.findall(r"^(?:##|###)\s+.+$", prose, re.M)]
+        anchors = [ln for ln in heading_lines if heading_lines.count(ln) == 1][:30]
         rows.append(f"- {rel}（{_frontmatter_title(content, rel)}）"
-                    + (f"；可用标题锚点: {'、'.join(f'## {h}' for h in headings)}" if headings else ""))
+                    + (f"；可用标题锚点: {'、'.join(anchors)}" if anchors else ""))
     return "\n".join(rows)
 
 
@@ -122,7 +131,7 @@ SYSTEM_PROMPT = """你是研发规范仓库 awesome-rules 的「经验提炼器�
       "reason": "为什么要改这个文件（一句话）",
       "change": {
         "action": "append_under | append_end",
-        "heading": "append_under 时必填：目标文件中已存在的 ## 级标题（从清单锚点中选，逐字一致）",
+        "heading": "append_under 时必填：目标文件中已存在的 ##/### 级标题（从清单锚点中逐字选取；语义匹配时优先选最具体的子节锚点，避免全部堆在二级标题下）",
         "new_text": "要插入的 markdown 片段（1-5 行的条款/要点，格式与目标文件风格一致，中文）"
       }
     }

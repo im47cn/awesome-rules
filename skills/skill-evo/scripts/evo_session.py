@@ -15,9 +15,13 @@ import hashlib
 import json
 import os
 import re
+import threading
+import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from contextlib import contextmanager
 from typing import Iterator, List, Optional
 
 
@@ -256,10 +260,122 @@ def load_state(state_path: Path) -> dict:
 
 
 def save_state(state_path: Path, state: dict) -> None:
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = state_path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
-    tmp.replace(state_path)  # 原子替换
+    """合并式原子写（PR #58 审查①）：读-改-写全程持 state 文件锁。
+
+    会话锁是 per-session 粒度——两个进程处理不同会话时合法并发，但旧实现
+    各自快照全量覆盖 save：后写者抹掉先写者的 processed 条目，已处理会话
+    在下轮扫描被重复处理。state 体积小（数 KB），锁内重读合并的代价可忽略。
+    复用 session_lock 的 token+心跳语义；撞锁短暂让位重试（state 写不该跳过）。
+    """
+    lock_path = state_path.with_suffix(".json.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    for _ in range(50):  # 撞锁退避重试（写不可跳过）；上限 50×0.2s=10s
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            try:
+                if time.time() - lock_path.stat().st_mtime > LOCK_STALE_SECONDS:
+                    lock_path.unlink()  # 过期死锁窃取
+                    continue
+            except OSError:
+                pass
+            time.sleep(0.2)
+            continue
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(f"pid={os.getpid()} ts={time.time():.0f}\n")
+        break
+    else:
+        raise RuntimeError("state 文件锁获取超时（10s）")  # fail loud：宁可炸不静默丢
+    try:
+        # 锁内重读合并（dict 深合并不浅覆盖）：他人条目 survives，
+        # 本进程同键子项以最新为准。先 update 会把磁盘 dict 整个替换掉，
+        # 必须先按 key 深合并再写回顶层。
+        merged = load_state(state_path)
+        for k, v in state.items():
+            if isinstance(v, dict) and isinstance(merged.get(k), dict):
+                merged[k] = {**merged[k], **v}
+            else:
+                merged[k] = v
+        tmp = state_path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(merged, ensure_ascii=False, indent=1), encoding="utf-8")
+        tmp.replace(state_path)  # 原子替换
+    finally:
+        try:
+            lock_path.unlink()
+        except OSError:
+            pass
+
+
+LOCK_STALE_SECONDS = 3600  # 总结含 LLM 慢调用（claude_timeout 默认 180s），宽限 1h
+_LOCK_HEARTBEAT = 60      # 持锁期间刷 mtime 的间隔（PR #58 审查②）
+
+
+@contextmanager
+def session_lock(paths: dict, key: str,
+                 stale_seconds: int = LOCK_STALE_SECONDS) -> Iterator[bool]:
+    """单会话跨进程互斥锁：原子 O_EXCL 创建；撞锁 yield False（让位跳过）。
+
+    背景（2026-08-21 实测竞态）：多个 hook 并发 run 时各自的 state 快照均未含
+    对方即将写入的提案，session_proposal_exists 的 TOCTOU 窗口 + 秒级 LLM 延迟
+    使同一会话被并发总结 6 次、产出 6 份重复提案。锁把「查重 → 总结 → 记账」
+    串行化：持锁者独占处理，撞锁者跳过（下次扫描时单提案守卫/state 兜底）。
+    过期死锁（持锁进程崩溃）按 mtime 超时窃取一次。
+
+    PR #58 审查②：mtime 仅创建时写入 + 释放无 owner 校验，两个缺陷叠加
+    会破坏互斥——worker 慢于 stale_seconds 时锁被窃，旧 worker 结束还会
+    误删新持有者的锁。修复：token=pid+随机后缀写入锁内容；持锁期间后台
+    线程每 _LOCK_HEARTBEAT 秒 touch 刷 mtime（活锁不超时）；释放仅当锁
+    内容仍含本 token（token 比对，避免竞态窗口内误删他人锁）。
+    """
+    lock_dir: Path = paths["locks"]
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock = lock_dir / (key.replace("/", "_") + ".lock")
+    token = f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    acquired = False
+    stop = threading.Event()
+    hb: Optional[threading.Thread] = None
+    for _ in range(2):  # 第二轮：清理过期死锁后重试一次
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            try:
+                age = time.time() - lock.stat().st_mtime
+            except OSError:
+                continue  # 锁恰被持锁者释放：立即重试
+            if age < stale_seconds:
+                break            # 活锁：让位
+            try:                 # 过期死锁：窃取后重试
+                lock.unlink()
+            except OSError:
+                pass
+            continue
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(f"token={token} pid={os.getpid()} ts={time.time():.0f}\n")
+        acquired = True
+        break
+
+    def _heartbeat() -> None:
+        while not stop.wait(_LOCK_HEARTBEAT):
+            try:
+                os.utime(lock, None)
+            except OSError:
+                pass  # 锁被窃：心跳失效即退（token 校验在释放端把关）
+
+    try:
+        if acquired:
+            hb = threading.Thread(target=_heartbeat, daemon=True)
+            hb.start()
+        yield acquired
+    finally:
+        stop.set()
+        if hb:
+            hb.join(timeout=_LOCK_HEARTBEAT * 2)
+        if acquired:
+            try:
+                if lock.read_text(encoding="utf-8").find(token) != -1:
+                    lock.unlink()
+            except OSError:
+                pass  # 已被窃/已消失：不误删他人锁
 
 
 def content_digest(path: Path) -> str:
