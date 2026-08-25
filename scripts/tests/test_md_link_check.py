@@ -70,6 +70,14 @@ def test_non_md_anchor_not_checked(tmp_path):
     write_a(tmp_path, "# 甲\n\n[html](x.html#任意锚)\n")
     assert M.check_links(root) == []
 
+def test_tracked_but_deleted_skipped(tmp_path):
+    """tracked-but-deleted（删除未提交）不参与校验（2026-08-25 share-docs
+    迁移实证：并发会话未提交的删除不应误伤无关推送的门禁）。"""
+    root = make_repo(tmp_path)
+    dead = tmp_path / "docs" / "b.md"
+    dead.unlink()  # 删除已发生、未提交
+    assert M.check_links(root) == []   # 不报「读取失败」
+
 
 # ── README 索引零漂移（吸收自 readme_index_check）────────────────────────────
 
