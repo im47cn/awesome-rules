@@ -265,10 +265,12 @@ if [ "${DRY}" = 0 ]; then
   python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get("title") else 3)' \
     "${DIR}/issue.json" 2>/dev/null || { echo "issue.json 无效（空/非 JSON/无 title），链终止" >&2; exit 2; }
   # --- 租约认领（多写者仲裁，2026-08-24；README「租约仲裁」）---
-  # fail-closed：认领失败（他机链持有未过期租约 / 仲裁不可达 / SUPABASE_DB
-  # 未设）= 链终止——降级裸跑等于重新打开多写者竞态。LEASE_KEY/LEASE_EPOCH
-  # 是 factory-lib.sh 出口围栏的上下文：被夺/吊销的诈尸链在 label/评论出口被拒，
-  # 秒级残窗由回执幂等键兜底。claim 放在首个 issue 侧副作用（打 triaging）之前。
+  # 认领失败（他机链持有未过期租约 / 仲裁不可达 / 单写者本地锁被占）
+  # = 链终止——降级裸跑等于重新打开多写者竞态。SUPABASE_DB 未设 = 显式
+  # 单写者形态：claim 走本地锁降级（同机互斥生效、跨机无保护，README
+  # 「单写者降级」）。LEASE_KEY/LEASE_EPOCH 是 factory-lib.sh 出口围栏的
+  # 上下文：被夺/吊销的诈尸链在 label/评论出口被拒，秒级残窗由回执幂等键
+  # 兜底。claim 放在首个 issue 侧副作用（打 triaging）之前。
   LEASE_KEY="issue:${ISSUE}"
   LEASE_EPOCH="$(lease_claim "${LEASE_KEY}")" \
     || { echo "[error] 租约 ${LEASE_KEY} 认领失败，fail-closed 终止（README「租约仲裁」）" >&2; exit 4; }

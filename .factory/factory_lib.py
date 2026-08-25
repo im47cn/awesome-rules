@@ -7,21 +7,29 @@
 2. 证据饥饿: -q 点号输出让 holdout 无法引用测试名 → 永远 FAIL。
    evidence_suites 保证触及的 skills 套件必产出 verbose 证据段。
 3. 熔断判定曾藏于 dispatch.sh heredoc，无法独立验证边界（跨天/重置/上限）。
+4. dispatch 进程编排（后台链/wait/并发槽/硬锁）曾为 bash 进程原语，缺陷类
+   聚集（decisions.md ADR-002）；2026-08-24 下沉本文件（ADR-005）。
 
 CLI:
   factory_lib.py parse   <logfile> <outjson> <allowed-csv>   # 解析 agent 输出 JSON
   factory_lib.py breaker <floor.json> <ledger.jsonl>         # 熔断检查（超限 exit 3）
   factory_lib.py suites  <file...>                           # 证据段套件清单
-  factory_lib.py sanitize <file...>                           # 标记中和（原地写回，幂等；评论出口必经）
+  factory_lib.py sanitize <file...>                          # 标记中和（原地写回，幂等；评论出口必经）
   factory_lib.py rejected-reconcile < issues.json            # rejected 存量对账报告（TSV）
+  factory_lib.py dispatch [--dry-run] [--watch] [--interval N]  # S2 派发器（dispatch.sh shim 的实现体）
 """
 
 from __future__ import annotations
 
 import datetime
 import json
+import os
 import re
+import shutil
+import signal
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -262,12 +270,478 @@ def reject_receipt(triage: dict) -> str:
     ]
     return "\n".join(lines)
 
+# ═════════════════════════════════════════════════════════════════════
+# dispatch 进程编排（2026-08-24 自 dispatch.sh 下沉，decisions.md ADR-005）
+#
+# 动机：ADR-002 记账的缺陷类——jobs 表/wait 落空（0d947f60）、管道吞码
+# （61c119c2）、管道早退（a4d81930）、trap 吞错（c749ac5e）——全部是
+# bash 进程原语的边角语义。子进程句柄收敛到本模块后，该类缺陷
+# 在结构上不可表达：Popen 对象即作业表，poll 即收割，returncode 可观测。
+# dispatch.sh 退为入口 shim，CLI/env/退出码契约逐项等价。
+# ═════════════════════════════════════════════════════════════════════
+
+
+class ChainPool:
+    """链并发槽：spawn 占槽（满则阻塞让位），wait_all 收割全部。
+
+    bash 时代的「后台链不进 job 表致 wait 落空」（0d947f60）与
+    `jobs -rp | wc -l` 竞态清点在此结构性消灭。
+    """
+
+    def __init__(self, factory: Path, max_parallel: int, poll_secs: float = 5.0):
+        # 防御性校验（PR #53 审查②）：0/负并发使 spawn 的槽满等待永久为真，
+        # 调度挂起而非配置错误——直接拒绝构造。
+        if max_parallel < 1:
+            raise ValueError(
+                f"max_parallel 须为正整数（得到 {max_parallel}）——0/负值使并发槽永久等待")
+        self.factory = factory
+        self.max_parallel = max_parallel
+        self.poll_secs = poll_secs
+        self._active: list[tuple[int, subprocess.Popen]] = []
+        self.done: list[tuple[int, int]] = []  # (issue, returncode) 收割记录
+
+    def _reap(self) -> None:
+        for n, p in self._active:
+            if p.poll() is not None:
+                self.done.append((n, p.returncode))
+        self._active = [(n, p) for n, p in self._active if p.poll() is None]
+
+    def spawn(self, issue: int) -> None:
+        """占并发槽运行链。FACTORY_DISPATCHED=1：链知道锁已由父持有，
+        S1 手动互斥锁免获取（防自锁）。日志尾追 artifacts/issue-N/dispatch.log，
+        父目录先建——bash `>>` 对缺目录静默死链是既证缺陷形态。"""
+        log_dir = self.factory / "artifacts" / f"issue-{issue}"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log = open(log_dir / "dispatch.log", "ab")
+        try:
+            proc = subprocess.Popen(
+                ["bash", str(self.factory / "fix-issue.sh"), str(issue)],
+                stdout=log, stderr=subprocess.STDOUT,
+                env={**os.environ, "FACTORY_DISPATCHED": "1"})
+        finally:
+            log.close()
+        self._active.append((issue, proc))
+        while len(self._active) >= self.max_parallel:  # 槽满让位（对齐 bash 轮询节奏）
+            time.sleep(self.poll_secs)
+            self._reap()
+
+    def wait_all(self) -> None:
+        while True:
+            self._reap()
+            if not self._active:
+                return
+            time.sleep(self.poll_secs)
+
+    def shutdown(self, grace: float = 10.0) -> list[int]:
+        """终止并收割活跃链（TERM/HUP 出口的对应物，PR #53 审查④）。
+
+        孤儿链会在锁释放后与新 dispatcher 并发，故必须先收尸再放锁：
+        先全体 SIGTERM，限期内收割，逾期 SIGKILL 兜底。返回未在限期内
+        自行退出的 issue 号列表（尽力语义，正常路径 wait_all 后为空）。
+        """
+        for _n, p in self._active:
+            if p.poll() is None:
+                p.terminate()
+        deadline = time.monotonic() + grace
+        while self._active and time.monotonic() < deadline:
+            self._reap()
+            if self._active:
+                time.sleep(self.poll_secs)
+        stuck: list[int] = []
+        for n, p in self._active:
+            try:
+                p.kill()
+                p.wait(timeout=5)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+            stuck.append(n)
+        self._active = []
+        return stuck
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # 进程存在但非属主；bash kill -0 同样 EPERM 却按死接管——此处取 POSIX 正确语义
+    except ValueError:
+        return False  # 垃圾 pid：kill -0 报错，bash 语义按死处理
+
+
+def acquire_dispatch_lock(lock_dir: Path, pid: int) -> bool:
+    """双实例硬锁：mkdir 原子占锁 + PID 活性检测（macOS 无 flock(1)）。
+
+    锁挂主树 .factory（调用方以 git-common-dir 锚定，39b6b8ec：worktree
+    隔离后各树 locks/ 互不可见，锁随树走会绕开互斥）；父目录预建——父缺
+    ENOENT 会被误读为「另一 dispatcher 运行中」（etf-radar PR#79）。
+    cron 重叠是常态：忙时返回 False，调用方 exit 0。
+    """
+    lock_dir.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        lock_dir.mkdir()
+    except FileExistsError:
+        old = ""
+        try:
+            old = (lock_dir / "pid").read_text(encoding="ascii").strip()
+        except (OSError, ValueError):
+            pass
+        alive = False
+        if old:
+            try:
+                alive = _pid_alive(int(old))
+            except ValueError:
+                alive = False
+        if old and not alive:
+            print(f"锁持有者 pid={old} 已死，接管陈锁", file=sys.stderr)
+            shutil.rmtree(lock_dir, ignore_errors=True)
+            try:
+                lock_dir.mkdir()
+            except FileExistsError:
+                print("另一 dispatcher 运行中，退出", file=sys.stderr)
+                return False
+        else:
+            print(f"另一 dispatcher 运行中（pid={old}），退出", file=sys.stderr)
+            return False
+    (lock_dir / "pid").write_text(str(pid), encoding="ascii")
+    return True
+
+
+def release_dispatch_lock(lock_dir: Path) -> None:
+    """放锁（幂等）。bash EXIT trap 的对应物；TERM/HUP 处理器转 SystemExit
+    保证 finally 路径执行。"""
+    shutil.rmtree(lock_dir, ignore_errors=True)
+
+
+_SLUG_RE = re.compile(
+    r"^(?:[A-Za-z0-9_.-]+@)?github\.com(?::\d+)?[/:]"
+    r"(?P<slug>[^/]+/[^/]+?)(?:\.git)?/?$")
+_SLUG_VALID = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+
+
+def extract_slug(urls: list[str]) -> str:
+    """remote URL 清单 → GitHub slug（owner/repo）。首条 github.com 者胜出
+    （github remote 名优先由调用方注入顺序保证）；grep -m1 的 SIGPIPE
+    早退缺陷（a4d81930，issue #30）在清单消费下不可表达。
+
+    只认 github.com 为 URL 权威主机（前缀至多 userinfo@、scheme 已剥离）：
+    凭子串位置剪裁会把 evil.com/github.com/o/r 之类伪装主机剪成可用 slug
+    （CodeQL：incomplete URL substring sanitization）；产出再过 owner/repo
+    字符白名单，双闸。GH_REPO 显式指定不经此函数（显式覆盖即信任）。"""
+    for u in urls:
+        t = re.sub(r"^(?:ssh|git|https?)://", "", u.strip())
+        m = _SLUG_RE.match(t)
+        if m and _SLUG_VALID.fullmatch(m.group("slug")):
+            return m.group("slug")
+    return ""
+
+
+def resolve_repo_slug(repo: Path) -> str:
+    """GH_REPO 显式指定优先；否则双 remote 布局逐条扫（github remote 名
+    优先，origin push 兜底；443 端口形态兼容——双仓镜像布局实证）。"""
+    if os.environ.get("GH_REPO"):
+        return os.environ["GH_REPO"]
+    urls: list[str] = []
+    for remote in ("github", "origin"):
+        r = subprocess.run(
+            ["git", "-C", str(repo), "remote", "get-url", "--all", "--push", remote],
+            capture_output=True, text=True)
+        urls += [ln for ln in r.stdout.splitlines() if ln.strip()]
+    return extract_slug(urls)
+
+
+_PRIORITY_RANK = {"priority:critical": 0, "priority:high": 1,
+                  "priority:medium": 2, "priority:low": 3}
+
+
+def sort_by_priority(issues: list[dict]) -> list[int]:
+    """accepted issue 号按 priority:* 排序（critical>high>medium>low；
+    无 priority 垫底，同 rank 按号升序）。"""
+    rows = sorted(
+        (min((_PRIORITY_RANK.get(l["name"], 9) for l in i["labels"]), default=9),
+         i["number"])
+        for i in issues)
+    return [n for _, n in rows]
+
+
+def approved_prs(prs: list[dict]) -> list[tuple[int, str]]:
+    """open+factory:approved PR → (number, mergeable)，仅 reviewDecision=APPROVED。"""
+    return [(int(p["number"]), p["mergeable"]) for p in prs
+            if p["reviewDecision"] == "APPROVED"]
+
+
+class _DispatchCfg:
+    def __init__(self, factory: Path, main_factory: Path, slug: str, dry: bool):
+        self.factory = factory
+        self.main_factory = main_factory
+        self.slug = slug
+        self.dry = dry
+        self.max_parallel = int(os.environ.get("MAX_PARALLEL") or 4)
+        self.merge_method = os.environ.get("FACTORY_MERGE_METHOD") or "merge"
+        # auto-merge 受 A5 门控：FACTORY_AUTO_MERGE=1 且 metrics/auto-merge-unlocked
+        # 存在（mutations kill-rate ≥80% 前不得开启——「未证明的门不是门」）
+        self.auto_merge = (os.environ.get("FACTORY_AUTO_MERGE") == "1"
+                           and (factory / "metrics" / "auto-merge-unlocked").is_file())
+        self.pool = ChainPool(factory, self.max_parallel)
+
+    def say(self, msg: str) -> None:
+        print(("  [dry-run] " if self.dry else "  ") + msg)
+
+
+def _gh(cfg: _DispatchCfg, *args: str) -> tuple[int, str]:
+    r = subprocess.run(["gh", *args, "--repo", cfg.slug],
+                       capture_output=True, text=True)
+    return r.returncode, r.stdout
+
+
+def _gh_json(cfg: _DispatchCfg, *args: str) -> list:
+    """gh JSON 查询；瞬断/输出异常 → 可诊断跳过该批（对齐 triage 批次
+    c22130df 的降级形态：失败可见，不静默也不炸轮）。"""
+    rc, out = _gh(cfg, *args)
+    if rc != 0:
+        # rc!=0 必须有痕（PR #53 审查⑤）：GitHub 故障/权限失败若无告警，
+        # 空队列会被当成「无事可做」，整轮静默空转还报成功。
+        print(f"  [warn] gh {args[0]} {args[1]} 失败（rc={rc}），跳过该批"
+              "——若是持续故障请检查 gh auth / GitHub 状态", file=sys.stderr)
+        return []
+    try:
+        return json.loads(out)
+    except json.JSONDecodeError:
+        print(f"  [warn] gh {args[0]} {args[1]} 输出异常（rc={rc}），跳过该批",
+              file=sys.stderr)
+        return []
+
+
+def _claim(cfg: _DispatchCfg, n: int) -> bool:
+    """消费 accepted → in-progress（幂等重试 ×2，add+remove 单请求——
+    GitHub 换标签非 CAS，见 README「S2 落地记录」1）。"""
+    if cfg.dry:
+        cfg.say(f"claim issue #{n}: accepted → in-progress")
+        return True
+    for _ in range(2):
+        rc, _out = _gh(cfg, "issue", "edit", str(n),
+                       "--remove-label", "factory:accepted",
+                       "--add-label", "factory:in-progress")
+        if rc == 0:
+            return True
+    print(f"  claim #{n} 失败（并发或权限），跳过", file=sys.stderr)
+    return False
+
+
+def _pr_link_issue(cfg: _DispatchCfg, pr_number: int) -> str:
+    """PR body → 关联 issue 号（Closes #N 解析权威在 state.py link）。"""
+    rc, body = _gh(cfg, "pr", "view", str(pr_number), "--json", "body")
+    if rc != 0:
+        return ""
+    r = subprocess.run([sys.executable, str(cfg.factory / "state.py"),
+                        "link", "/dev/stdin"],
+                       input=body, capture_output=True, text=True)
+    return r.stdout.strip()
+
+
+def _issue_in_progress(cfg: _DispatchCfg, n: int) -> bool:
+    """D4（2026-08-21 双派实证）：gh label 过滤是「含有」非「仅有」，
+    accepted+in-progress 双标签条目仍在队列，必须显式跳过在跑的。"""
+    rc, out = _gh(cfg, "issue", "view", str(n), "--json", "labels",
+                  "-q", ".labels[].name")
+    if rc != 0:
+        return False
+    return any(line.strip() == "factory:in-progress" for line in out.splitlines())
+
+
+def dispatch_round(cfg: _DispatchCfg) -> int:
+    """单轮：breaker 门 → sync → triage 批次 → PR 结果 → needs-fix 重派 →
+    accepted 队列 → 等链收尾 sync → rejected 对账 → M2 上游同步检查。
+    唯一非零返回 = 熔断/门故障透传码（watch 循环据此一并停摆）。"""
+    print(f"=== dispatch @ {datetime.datetime.now():%H:%M:%S} ===")
+    # R4 成本熔断：每轮派发前检查（DRY 干跑无副作用不检查）。透传 breaker.sh
+    # 退出码（3=熔断；1=floor 缺失/损坏 fail-closed）。锁路径对齐硬锁：
+    # git-common-dir 锚定主树，worktree 内启动也能读到主台账。
+    if not cfg.dry:
+        rc = subprocess.run(["bash", str(cfg.factory / "breaker.sh"),
+                             str(cfg.main_factory / "locks")]).returncode
+        if rc != 0:
+            return rc
+    cfg.say("sync: factory-state.sh sync --all")
+    if not cfg.dry:
+        subprocess.run(["bash", str(cfg.factory / "factory-state.sh"),
+                        "sync", "--all"])
+
+    print("-- triage 批次（零标签 issue 裁决；失败不阻断派发） --")
+    if cfg.dry:
+        cfg.say("triage-batch: 零 factory 标签 issue，≤MAX_TRIAGE 个")
+    else:
+        rc = subprocess.run(["bash", str(cfg.factory / "triage-batch.sh")]).returncode
+        print(f"-- triage 批次结束（exit={rc}） --")
+
+    print("-- PR 结果处理（优先） --")
+    # approved：sync 已打好标签；此处只做 A5 门内的 merge 动作
+    for num, mergeable in approved_prs(_gh_json(
+            cfg, "pr", "list", "--state", "open", "--label", "factory:approved",
+            "--json", "number,mergeable,reviewDecision", "--limit", "50")):
+        if cfg.auto_merge and mergeable == "MERGEABLE":
+                rc, _out = _gh(cfg, "pr", "merge", str(num),
+                               f"--{cfg.merge_method}", "--admin")
+                if rc == 0:
+                    print(f"  PR #{num} 已合并；issue 由 GitHub 自动关闭")
+        else:
+            print(f"  PR #{num} approved 但 A5 门未开（FACTORY_AUTO_MERGE + metrics/auto-merge-unlocked）→ 人工合并")
+
+    print("-- needs-fix 重派（计数契约：claim 时移除 needs-fix） --")
+    # 计数契约：重派必须 remove factory:needs-fix——label 事件只在添加时
+    # 触发，标签滞留则 state.py 轮次计数冻结（test_state.py 有边界测试）
+    for pr in _gh_json(cfg, "pr", "list", "--state", "open",
+                       "--label", "factory:needs-fix",
+                       "--json", "number", "--limit", "50"):
+        p = pr["number"]
+        n = _pr_link_issue(cfg, p)
+        if not n:
+            print(f"  PR #{p} 无关联 issue（body 缺 Closes #N），跳过", file=sys.stderr)
+            continue
+        if _issue_in_progress(cfg, int(n)):
+            print(f"  issue #{n} 已 in-progress，跳过")
+            continue
+        cfg.say(f"PR #{p} → issue #{n} 重派（remove needs-fix 保计数活性）")
+        if not cfg.dry:
+            _gh(cfg, "pr", "edit", str(p), "--remove-label", "factory:needs-fix")
+        if _claim(cfg, int(n)):
+            cfg.pool.spawn(int(n))
+
+    print(f"-- accepted 队列（priority 排序，并发 ≤{cfg.max_parallel}） --")
+    for n in sort_by_priority(_gh_json(
+            cfg, "issue", "list", "--state", "open", "--label", "factory:accepted",
+            "--json", "number,labels", "--limit", "100")):
+        if _issue_in_progress(cfg, n):
+            print(f"  issue #{n} 已 in-progress，跳过")
+            continue
+        if _claim(cfg, n):
+            cfg.say(f"issue #{n} → 链")
+            cfg.pool.spawn(n)
+
+    if not cfg.dry:
+        cfg.pool.wait_all()
+        print("本轮链全部结束，收尾 sync")
+        subprocess.run(["bash", str(cfg.factory / "factory-state.sh"),
+                        "sync", "--all"])
+
+    # ── rejected 存量对账（reject→人工闭环缺口，2026-08-23 审计）───────
+    # 只报告不动作（铁律 4）：有 reject 后人工评论的 → 提示复核关闭；
+    # 零评论的 → 静默滞留计数。关闭决策永远归人类。
+    for r in rejected_reconcile(_gh_json(
+            cfg, "issue", "list", "--state", "open", "--label", "factory:rejected",
+            "--json", "number,title,comments", "--limit", "100")):
+        c, t = r["human_comments_after_reject"], r["title"]
+        if c > 0:
+            print(f"  [rejected] #{r['number']} 裁决后有 {c} 条人工评论——已处置？复核关闭（{t}）")
+        else:
+            print(f"  [rejected] #{r['number']} 静默滞留（无后续人工评论，{t}）")
+
+    # ── M2 上游同步检查（设计 §11.2）：零 LLM、不占 R4 预算 ─────────────
+    # 不复用 fix-issue 链（guard PERIMETER 含 .factory/，链按设计拦工具链
+    # 自变更）；exit 0 = 同步已推进 → 当轮即止（自我指涉护栏：后续派发仍跑
+    # 内存旧脚本，下一轮生效）；1/2/3 不阻断本轮派发。
+    check = cfg.factory / "upstream-sync-check.sh"
+    if os.access(check, os.X_OK) and (cfg.factory / "upstream-lock.json").is_file():
+        if subprocess.run(["bash", str(check)]).returncode == 0:
+            print("上游同步已推进，本轮派发即止（下轮生效）")
+            return 0
+        print("（upstream-sync 未推进，继续本轮派发）")
+    return 0
+
+
+def dispatch_main(args: list[str]) -> int:
+    """dispatch.sh shim 的实现体。CLI/env 契约与 bash 版逐项等价：
+    --dry-run（DRY=1 同义，2026-08-21 事故教训：两者都认）/ --watch /
+    --interval N（INTERVAL 环境变量同义，默认 300s：链首 triage 批次 30s
+    级、全链分钟级，30min 轮询让新 issue 平均等 15min）。"""
+    watch = False
+    interval = float(os.environ.get("INTERVAL") or 300)
+    dry = os.environ.get("DRY", "0") == "1"
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--dry-run":
+            dry = True
+        elif a == "--watch":
+            watch = True
+        elif a == "--interval" and i + 1 < len(args):
+            interval = float(args[i + 1])
+            i += 1
+        i += 1
+
+    r = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        print("不在 git 仓库", file=sys.stderr)
+        return 2
+    repo = Path(r.stdout.strip())
+    factory = repo / ".factory"
+    slug = resolve_repo_slug(repo)
+    if not slug:
+        print("无法确定 GitHub 仓库 slug", file=sys.stderr)
+        return 2
+    if subprocess.run(["gh"], stdout=subprocess.DEVNULL,
+                      stderr=subprocess.DEVNULL).returncode != 0:
+        print("需要 gh CLI", file=sys.stderr)
+        return 2
+    # MAX_PARALLEL 配置错误 fail-fast（PR #53 审查②）：0/负/非整数值会让
+    # ChainPool 槽满等待永久为真——挂起而非报错。config-error = 退出码 2。
+    mp_raw = os.environ.get("MAX_PARALLEL") or "4"
+    try:
+        int(mp_raw)
+    except ValueError:
+        print(f"MAX_PARALLEL 非整数: {mp_raw!r}", file=sys.stderr)
+        return 2
+    if int(mp_raw) < 1:
+        print(f"MAX_PARALLEL 须为正整数（得到 {mp_raw!r}）", file=sys.stderr)
+        return 2
+    # 主树锚定：git-common-dir 在 worktree 中指向主 .git，据此回到主树
+    # .factory（39b6b8ec 硬锁语义）；非 git 环境退回 CWD 仓 .factory
+    g = subprocess.run(["git", "rev-parse", "--path-format=absolute",
+                        "--git-common-dir"], capture_output=True, text=True)
+    main_factory = factory
+    if g.returncode == 0 and g.stdout.strip():
+        main_factory = Path(g.stdout.strip().removesuffix("/.git")) / ".factory"
+
+    cfg = _DispatchCfg(factory, main_factory, slug, dry)
+    lock_dir = main_factory / "locks" / "dispatcher"
+    if not acquire_dispatch_lock(lock_dir, os.getpid()):
+        return 0  # cron 重叠是常态非错误（bash: acquire_lock || exit 0）
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        # EXIT trap 对应物：TERM/HUP → SystemExit 走 finally 放锁
+        signal.signal(sig, lambda s, _f: sys.exit(128 + int(s)))
+    try:
+        if watch:
+            while True:
+                rc = dispatch_round(cfg)
+                if rc != 0:
+                    return rc  # 熔断/门故障：watch 一并停摆（bash exit $? 语义）
+                time.sleep(interval)
+        rc = dispatch_round(cfg)
+        if not cfg.dry:
+            print("提示: --watch 常驻（或 cron */30 调用单轮）")
+        return rc
+    finally:
+        # 先收尸再放锁（PR #53 审查④）：孤儿链在锁释放后仍跑，会与新
+        # dispatcher 并发；TERM/HUP → SystemExit 走到此，正常路径此处
+        # 已被 wait_all 收空，shutdown 为空操作。
+        stuck = cfg.pool.shutdown()
+        if stuck:
+            print(f"  [warn] {len(stuck)} 条链未限期退出已 SIGKILL: {stuck}",
+                  file=sys.stderr)
+        release_dispatch_lock(lock_dir)
+
 
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
         print(__doc__, file=sys.stderr)
         return 2
     cmd = argv[1]
+    if cmd == "dispatch":
+        # dispatch [--dry-run] [--watch] [--interval N] —— S2 派发器
+        return dispatch_main(argv[2:])
     if cmd == "classify":
         print(classify_task(argv[2:]))
         return 0
