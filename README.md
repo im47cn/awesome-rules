@@ -108,6 +108,10 @@ Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分�
 本仓库已适配多种 AI 编程工具的插件格式，支持一行命令安装。详见 [插件安装指南](docs/ai-coding-tools-setup.md)。
 
 ## 贡献
+- 技能 description 触发词须带领域语境限定（如「画审查流程图/风险标注时序图」而非裸「画流程图/时序图」），避免无相关意图的请求误激活技能；新增或修改 description 后对照官方 Skill authoring best practices 自检触发面是否过宽（triggers too often → make it more specific）
+
+- **插件 manifest 约定**：`.claude-plugin/plugin.json` 不要显式声明 `"hooks": "./hooks/hooks.json"`——新版 Claude Code 自动加载标准路径的 hooks 文件，显式声明会触发 Duplicate hooks file 使整插件加载失败（且失败是静默的，可用 `claude plugin list` 或 `evo.py patrol` 检出）。
+- **SKILL.md 编写约定**：按 Anthropic 官方最佳实践，SKILL.md 只放触发后 AI 需要的操作指引（命令序列、判定语义、验收红线、易踩坑）；架构图、设计背景等给人看的内容放同目录 README；采用渐进式加载（description 常驻 → SKILL.md 触发载入 → 细节按需读引用文件），正文控制在 ~70 行。
 
 欢迎贡献规范文件、AI 技能和反例用例。详见 [贡献指南](CONTRIBUTING.md)。
 

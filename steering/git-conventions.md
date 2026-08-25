@@ -7,6 +7,7 @@ inclusion: always
 # Git 提交规范
 
 ## Commit 格式（强制）
+- 手工创建的合并提交（`git merge` / `git commit-tree`）同样适用本格式与主题行长度限制，示例：`chore: 合并 origin 链分支收敛异哈希重复提交`；不得沿用平台默认的 `Merge branch 'xxx' of ...` 主题行。
 
 ```
 <type>[(<scope>)][!]: <subject>
@@ -91,6 +92,12 @@ Refs #321
 
 ## 提交要求
 
+- 提交前核对暂存区文件清单只含本次任务改动：多会话/多链并行时，他人或他链遗留的陈旧暂存（含数日前已 staged 未提交的文件）容易被随车带入；发现即拆分提交，非本任务文件还原为暂存态。
+- 合并/rebase 冲突经工具自动解后，提交前必须核验冲突文件完整性：同一锚点两侧各自新增的测试类/函数应保两侧（union），工具静默删除一侧或整块删除冲突区是常见坏解（表现为文件尾部缺失、测试类丢失）。
+
+- 重写/清洗提交历史前必须验证两个不变量：被剔除段的净效果为零（`git diff 段首 段尾` 为空）、重写前后终态 tree 一致（`git diff 旧终态 新终态` 为空），两者皆空才允许重放
+- main 与工作分支（如 factory/base）并存时，推送前先比对两分支指向是否同步：修复提交落在旁支而未快进推送 main，会使远端 main 缺该修复，需二次补推
+
 ### 基础要求
 
 - 使用中文，主题行 ≤50 字符
@@ -119,11 +126,25 @@ Refs #321
 
 ## 同步纪律
 
+- rebase/reset/换基线前先确认工作树干净（commit 或 stash 未提交编辑）：`git reset --hard` 会静默丢弃未提交修改，事后只能靠重读重写恢复
+- 并发写入者防护：仓库存在后台脚本或其他会话共用主 worktree 时，checkout/merge 等操作可能落在被并发切走的分支上产生污染提交；长占用任务（处理 PR、解冲突）前先确认无并发进程在操作同一分支，必要时用独立 `git worktree add` 隔离执行
+
 - 任何「本地 vs 远端」状态判断（领先/落后/待推送/是否需要 rebase）前先 `git fetch`：共享 main 且 CI/定时任务高频自动提交的仓库里，陈旧的本地 refs 会导致误判（实证：本地 refs 未刷新时误报「领先 3 个提交待推送」，fetch 后实为落后 11 个）
 - 工作开始时先切到 `main` 并 `git pull --ff-only` 同步基线（同步对象是 `main` 而非当前 feature 分支——后者只拉自身 upstream，`main` 基线仍可能过时；无 upstream 的新分支上该命令直接失败，需同步工作分支时须显式指定其 upstream）：长期不 pull 会在下次同步时积累大体积 diff（自动提交的数据文件尤甚），且整个工作过程基于过时状态
 - 分叉分支（本地与远端各有新提交）上 `--ff-only` 必然失败并保持旧状态：改走显式 `git pull --rebase`（或 fetch 后 rebase）同步，不得因失败而跳过同步带着过时基线开工
 
 ## Pull Request
+- AI 创建 PR 后即停，合并决定权归人工：不得在创建后自行 `gh pr merge`——即使推送被分支保护拒绝转走 PR 流，也不延伸为自动合并（2026-08-24 PR #50/#51 教训：创建后 15 秒自行合并，人工审查窗口被绕过）
+- 触碰治理周界（guard PERIMETER，如 `.factory/`、`steering/`）的 PR 尤其不可自动合并：周界变更的人工审查是设计意图，不是流程仪式
+
+- PR 内容引用其他未合并 PR 的符号/文件时用 stacked PR（base 指向被依赖分支）：被依赖 PR 合并后 GitHub 自动 retarget 到 main；直接 base=main 会引用悬空、CI 必红
+- 禁止同内容直推 main：main 前进后 GitHub 会把指向该内容且已无差异的开放 PR 自动标记为 MERGED（指纹：mergedBy=null、无 review 记录），形成「未经批准合并」表象；分支保护须设置 required_approving_review_count ≥ 1。
+
+- 分支与远程出现内容等价但 hash 不同的提交（自动化链式重投/rebase 产物）时，先以 `git cherry` 判定等价，再以合并提交收敛并验证与目标树零差异（`git diff <目标> HEAD --stat` 为空），防止 hash 漂移累积。
+- 多远程/双 pushurl 场景验证推送结果，必须逐远程以显式 URL 执行 `git ls-remote` 比对 SHA：截断输出（如 `tail -5`）会吞掉其他 pushurl 的结果行造成误判成功；本地追踪 ref 可能被并行推送短暂污染，令祖先检查出现假阳性。
+
+- codeup（origin）服务端 pre-receive 禁止强推（`--force` / `--force-with-lease` 均被拒）。需收敛已分叉历史时改用合规路径：创建双端共同后代的合并提交使双远程均可 fast-forward，或删除远程分支后重建推送。
+- 已推送提交 message 不合规时，不得仅吸纳其内容而保留原提交；应以 `git commit-tree` 生成同树替换提交（树零差异、保留 Co-authored-by 署名、新 message 过 commitlint），必要时复造合并提交后再推送，并在推送前验证新旧树 `git diff` 为空。
 
 ### 格式要求
 
