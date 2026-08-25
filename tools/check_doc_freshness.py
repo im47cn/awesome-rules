@@ -2,8 +2,8 @@
 """check_doc_freshness — 实现↔文档一致性门禁（陈述 vs 事实）
 
 代码是事实，文档是陈述；两者的差（数字、清单、指向）此前只能靠人工
-审查发现。本门把审查实证逃逸过的四类漂移 + 两条已踩坑断言机械化，
-让工厂链 final_gate 自己拦漂移：
+审查发现。本门把审查实证逃逸过的漂移（计数/覆盖/枚举）+ 已踩坑断言
+机械化，让工厂链 final_gate 自己拦漂移：
 
   R1 工厂组件覆盖：.factory 顶层 *.sh/*.py 每个文件名须出现在
      .factory/README.md 文本中（子目录内文件豁免——tests/ locks/
@@ -25,6 +25,20 @@
         「复用来源」行须指向实际存在的 doc-gen 路径
      b. .factory/README 不得再出现「git checkout -b factory/issue」
         （实际是 worktree add -B）
+  R6 平台清单覆盖：.opencode/opencode.json 的 instructions ⊇
+     skills/*/SKILL.md 全集 ∪ steering 顶层 *.md 全集。opencode 是
+     枚举式注入清单，缺新技能/新规范即漂移；其余平台为 ./skills/
+     目录级声明，无枚举漂移面（文件不存在则整条跳过）
+  R7 枚举完整性（三处人工维护清单，文件缺失对应子项跳过）：
+     a. CONTRIBUTING.md 目录结构树（``` 围栏）中的 steering 文件 ⊇
+        steering/ 顶层 *.md
+     b. AGENTS.md / CLAUDE.md「通用设计规范」行枚举 ⊇ 各规范主题。
+        主题 = frontmatter title 去「规范/标准」尾缀；覆盖判定为
+        枚举 token（「——」后的、/，切分）与主题互为包含——容忍
+        「API 设计」对「Open API 设计」这类前后缀措辞差；行含
+        「等」明示枚举非穷尽，该行不查
+     c. hooks/load-steering.sh「审查类任务可使用」清单 ⊇ 全部
+        *-guard 技能
 
 豁免（误报控制，两条稳定通道）：
   --allow REGEX（可重复）：正则 search 命中证据行（[级别] 文件:行 →
@@ -42,6 +56,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -83,6 +98,25 @@ def _cn_to_int(s: str) -> int | None:
 
 def _lines(path: Path) -> list[str]:
     return path.read_text(encoding="utf-8").splitlines()
+
+
+def _fence_blocks(lines: list[str]) -> list[tuple[int, list[str]]]:
+    """提取 ``` 围栏区块 → [(起始行号, 区块行, ...)]（未闭合尾块算到文末）。
+
+    R3/R7a 共用：起始行号为围栏内第一行的行号。
+    """
+    segs: list[tuple[int, list[str]]] = []
+    inside, start = False, 0
+    for i, ln in enumerate(lines, 1):
+        if ln.strip().startswith("```"):
+            if inside:
+                segs.append((start, lines[start - 1:i - 1]))
+            else:
+                start = i + 1
+            inside = not inside
+    if inside:
+        segs.append((start, lines[start - 1:]))
+    return segs
 
 
 class Gate:
@@ -156,19 +190,7 @@ def rule_r3(root: Path, g: Gate) -> None:
     actual = {d.name for d in skills.iterdir()
               if d.is_dir() and (d / "SKILL.md").is_file()}
 
-    # 提取 ``` 围栏区块，找含 skills/ 树行的那个
-    lines = _lines(root / "README.md")
-    segs: list[tuple[int, list[str]]] = []
-    inside, start = False, 0
-    for i, ln in enumerate(lines, 1):
-        if ln.strip().startswith("```"):
-            if inside:
-                segs.append((start, lines[start - 1:i - 1]))
-            else:
-                start = i + 1
-            inside = not inside
-    if inside:
-        segs.append((start, lines[start - 1:]))
+    segs = _fence_blocks(_lines(root / "README.md"))
 
     tree_line: int | None = None
     tree_names: list[str] = []
@@ -280,6 +302,125 @@ def rule_r5(root: Path, g: Gate) -> None:
                    "R5 禁用表述「git checkout -b factory/issue」（实际为 worktree add -B）")
 
 
+def rule_r6(root: Path, g: Gate) -> None:
+    """R6 平台清单覆盖：opencode instructions ⊇ 技能 ∪ steering 顶层。"""
+    oc = root / ".opencode" / "opencode.json"
+    if not oc.is_file():
+        return  # 未装 opencode 适配即无枚举面（其余平台为目录级声明）
+    skills = root / "skills"
+    required = {f"skills/{d.name}/SKILL.md" for d in skills.iterdir()
+                if d.is_dir() and (d / "SKILL.md").is_file()}
+    required |= {f"steering/{p.name}" for p in (root / "steering").glob("*.md")}
+    text = oc.read_text(encoding="utf-8")
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        g.fail(".opencode/opencode.json:1", f"R6 opencode.json 解析失败（{e}）")
+        return
+    entries = data.get("instructions") if isinstance(data, dict) else None
+    if not isinstance(entries, list):
+        g.fail(".opencode/opencode.json:1", "R6 opencode.json 缺 instructions 数组")
+        return
+    key = re.search(r'(?m)^\s*"instructions"', text)
+    line = text[:key.start()].count("\n") + 1 if key else 1
+    for rel in sorted(required - {e for e in entries if isinstance(e, str)}):
+        g.fail(f".opencode/opencode.json:{line}",
+               f"R6 instructions 缺 {rel}（须 ⊇ skills/*/SKILL.md ∪ steering 顶层 *.md）")
+
+
+def _steering_topic(path: Path) -> str | None:
+    """steering 规范 frontmatter title → 主题词（去「规范/标准」尾缀）。
+
+    frontmatter 解析口径与 hooks/load-steering.sh 对齐（startswith('---')）。
+    无 title 返回 None（调用方跳过该文件）。
+    """
+    content = path.read_text(encoding="utf-8")
+    title = None
+    if content.startswith("---"):
+        end = content.find("\n---", 3)
+        if end != -1:
+            m = re.search(r"(?m)^title:\s*(.+)$", content[3:end])
+            if m:
+                title = m.group(1).strip()
+    return re.sub(r"(规范|标准)$", "", title) if title else None
+
+
+def rule_r7(root: Path, g: Gate) -> None:
+    """R7 枚举完整性：三处人工维护清单各自 ⊇ 实际集合。"""
+    steering = sorted((root / "steering").glob("*.md"))
+    top = [p.name for p in steering]
+
+    # a. CONTRIBUTING.md 目录结构树（``` 围栏）中的 steering 文件
+    contributing = root / "CONTRIBUTING.md"
+    if contributing.is_file():
+        tree: tuple[int, list[str]] | None = None
+        for seg_start, seg in _fence_blocks(_lines(contributing)):
+            for j, ln in enumerate(seg):
+                stem = re.sub(r"^[│├└─\s]+", "", ln.split("#")[0]).strip().rstrip("/")
+                if stem == "steering":
+                    tree = (seg_start + j, seg)
+                    break
+            if tree:
+                break
+        if tree is None:
+            if top:
+                g.fail("CONTRIBUTING.md:1",
+                       f"R7a 结构树未找到 steering 区块（{len(top)} 个顶层规范未被覆盖）")
+        else:
+            body = "\n".join(tree[1])
+            for name in top:
+                if name not in body:
+                    g.fail(f"CONTRIBUTING.md:{tree[0]}",
+                           f"R7a 目录树缺 steering 顶层文件 {name}")
+
+    # b. AGENTS.md / CLAUDE.md「通用设计规范」行枚举 ⊇ 各规范主题
+    for rel in ("AGENTS.md", "CLAUDE.md"):
+        p = root / rel
+        if not p.is_file():
+            continue
+        hit = False
+        for i, ln in enumerate(_lines(p), 1):
+            if "通用设计规范" not in ln:
+                continue
+            hit = True
+            if "等" in ln:
+                # 「等」明示枚举非穷尽，硬对齐必误报 → 该行不查
+                continue
+            # 覆盖口径：枚举 token（「——」后按 、/，切分）与主题互为包含，
+            # 容忍「API 设计」对「Open API 设计」的前后缀措辞差
+            tokens = [t.strip(" `*（）()。：:")
+                      for t in re.split("[、，]", re.split("——", ln)[-1])]
+            for sp in steering:
+                topic = _steering_topic(sp)
+                if not topic:
+                    continue
+                if not any(len(t) >= 2 and (t in topic or topic in t)
+                           for t in tokens):
+                    g.fail(f"{rel}:{i}",
+                           f"R7b 枚举未提及主题「{topic}」（对应 steering/{sp.name}）")
+        if not hit and steering:
+            g.fail(f"{rel}:1", "R7b 未找到「通用设计规范」行")
+
+    # c. hooks/load-steering.sh「审查类任务可使用」清单 ⊇ 全部 *-guard 技能
+    hook = root / "hooks" / "load-steering.sh"
+    if hook.is_file():
+        guards = sorted(d.name for d in (root / "skills").iterdir()
+                        if d.is_dir() and d.name.endswith("-guard")
+                        and (d / "SKILL.md").is_file())
+        hit = False
+        for i, ln in enumerate(_lines(hook), 1):
+            if "审查类任务可使用" not in ln:
+                continue
+            hit = True
+            listed = set(re.findall(r"/([A-Za-z0-9-]+-guard)\b", ln))
+            for name in guards:
+                if name not in listed:
+                    g.fail(f"hooks/load-steering.sh:{i}",
+                           f"R7c 审查技能清单缺 /{name}（须含全部 *-guard 技能）")
+        if not hit and guards:
+            g.fail("hooks/load-steering.sh:1", "R7c 未找到「审查类任务可使用」清单行")
+
+
 def _source_line(root: Path, where: str) -> str | None:
     """证据行 'path:line' → 源行文本（行级豁免标记判断用）。"""
     path_part, _, line_part = where.rpartition(":")
@@ -294,7 +435,7 @@ def _source_line(root: Path, where: str) -> str | None:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="实现↔文档一致性门禁（R1-R5）")
+    ap = argparse.ArgumentParser(description="实现↔文档一致性门禁（R1-R7）")
     ap.add_argument("root", nargs="?", default=".",
                     help="仓库根（默认当前目录）")
     ap.add_argument("--allow", action="append", default=[], metavar="REGEX",
@@ -323,6 +464,8 @@ def main() -> int:
     rule_r3(root, g)
     rule_r4(root, g)
     rule_r5(root, g)
+    rule_r6(root, g)
+    rule_r7(root, g)
 
     fails: list[str] = []
     infos: list[str] = []

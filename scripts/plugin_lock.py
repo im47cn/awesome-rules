@@ -41,6 +41,7 @@ LOCKED_DIRS = [".claude-plugin", ".codex-plugin", ".cursor-plugin",
                "hooks"]
 LOCKED_FILES = [  # 显式入口（目录扫描之外的兜底）
     "hooks/hooks.json",
+    ".pi/extensions/awesome-rules.ts",  # .pi 扩展入口（非 json，目录 glob 不覆盖）
 ]
 
 

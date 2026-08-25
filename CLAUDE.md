@@ -5,7 +5,7 @@
 
 规范分两组，体系独立，按当前任务所属体系选择对应规范，勿混用：
 
-- **通用设计规范**（设计阶段）：`steering/*.md` —— API 设计、数据库设计、测试、Git 提交
+- **通用设计规范**（设计阶段）：`steering/*.md` —— API 设计、数据库设计、测试、Git 提交、审查报告输出、跨仓契约兼容性
 - **GTSP 工程规范**（编码阶段，Java/Spring Cloud）：`steering/gtsp/*.md`，总入口 `steering/gtsp/README.md` —— 覆盖 `gtsp-*`/`fss-*` 微服务的项目结构、分层架构、命名、Feign、MyBatis、日志、异常、配置等
 
 > 完整规范索引由 SessionStart hook（`hooks/load-steering.sh`）动态扫描各文件 frontmatter 生成并注入上下文。新增规范只需带 frontmatter（`title` + `scenario`），无需手动维护本文件。

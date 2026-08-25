@@ -1,18 +1,23 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "instructions": [
-    "skills/ddl-guard/SKILL.md",
+    "skills/alibabacloud-devops/SKILL.md",
     "skills/api-guard/SKILL.md",
     "skills/arch-guard/SKILL.md",
-    "skills/impact-guard/SKILL.md",
+    "skills/code-review/SKILL.md",
+    "skills/contract-guard/SKILL.md",
+    "skills/ddl-guard/SKILL.md",
     "skills/doc-gen/SKILL.md",
-    "skills/work-report/SKILL.md",
-    "skills/alibabacloud-devops/SKILL.md",
+    "skills/impact-guard/SKILL.md",
     "skills/skill-evo/SKILL.md",
+    "skills/tokensave-mcp/SKILL.md",
+    "skills/work-report/SKILL.md",
+    "steering/cross-repo-contract-standards.md",
     "steering/database-design-specification.md",
-    "steering/openapi-standards.md",
-    "steering/testing-standards.md",
     "steering/git-conventions.md",
+    "steering/openapi-standards.md",
+    "steering/review-report-standards.md",
+    "steering/testing-standards.md",
     "steering/gtsp/README.md"
   ]
 }

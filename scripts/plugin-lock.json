@@ -3,7 +3,7 @@
   "files": {
     ".agents/plugins/marketplace.json": "a8c9d4ddf59735675a3aa3066ea57c115628d9bf",
     ".claude-plugin/marketplace.json": "feaf1660fec29031a75cea314e9ed34e410fccb7",
-    ".claude-plugin/plugin.json": "334e97936896b38bf39667380442c6b30ac65168",
+    ".claude-plugin/plugin.json": "11100ef467a21de622eb8f42cc19d9a37c2b227b",
     ".codex-plugin/plugin.json": "86bffcb06f015a0e4d00345a8279c02abc077c0f",
     ".cursor-plugin/marketplace.json": "d0de94b280e99b6c51d752c07c783a436cc97631",
     ".cursor-plugin/plugin.json": "ff65f36dd13efb70f4d7d5b71273ba8a279b069e",
@@ -11,7 +11,8 @@
     ".grok-plugin/plugin.json": "ff65f36dd13efb70f4d7d5b71273ba8a279b069e",
     ".kimi-plugin/marketplace.json": "449147eff3a8cc87b35973612660435dc9b2258d",
     ".kimi-plugin/plugin.json": "f8c2b5d6f9e8b3a8989551196796572bf8d7324d",
-    ".opencode/opencode.json": "d83f273f64c205a441a305f9496dbc45c14ff5e8",
+    ".opencode/opencode.json": "107de57c9ebbcfb87d97a59e552c611e77630af1",
+    ".pi/extensions/awesome-rules.ts": "910037bcb4ad57f0b53eb0dd45104c5dee768cc5",
     "hooks/hooks.json": "5d2b3580caff3286ee3a7464f1be70daa6ca5de0"
   }
 }

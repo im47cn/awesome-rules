@@ -87,7 +87,7 @@ parts.append("")
 parts.append("**使用规则**：")
 parts.append("- 遇到对应场景时，先 Read 相关规范文件，再开始工作")
 parts.append("- 遵守各项规范；标注【强制】的条款不可违反（不通过则不予合并），【推荐】尽可能遵守")
-parts.append("- 审查类任务可使用 /ddl-guard、/api-guard、/arch-guard、/contract-guard 自动检查")
+parts.append("- 审查类任务可使用 /ddl-guard、/api-guard、/arch-guard、/contract-guard、/impact-guard 自动检查")
 
 ctx = '\n'.join(parts)
 print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
