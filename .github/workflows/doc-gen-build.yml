@@ -16,6 +16,9 @@ on:
       - "skills/doc-gen/template/**"
       - "skills/doc-gen/scripts/**"
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
