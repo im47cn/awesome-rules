@@ -430,3 +430,58 @@ def test_apply_append_under_h3_anchor(tmp_path):
                                         lessons=[make_lesson(change=PR.Change(
                                             action="append_under", heading="### 基础要求",
                                             new_text="- 再一条"))]), repo)
+
+
+def test_normalize_headings_auto_prefix(tmp_path):
+    """无 # 前缀 heading → `## ` 前缀规范化回写 pending .md，apply 成功。
+
+    verdict 语义：.orig 快照（未规范化）vs 归档 .md（规范化）heading 不同
+    → derive_verdicts 落 edited。锚点真缺陷（无命中/多命中）fail-closed
+    保留，不被自动猜测掩盖。"""
+    repo = make_repo(tmp_path)
+    md = tmp_path / "p1.md"
+    p = make_proposal(tmp_path, pid="20260825-000001-cc-norm0001", lessons=[
+        make_lesson(change=PR.Change(action="append_under", heading="强制条款",
+                                     new_text="- 新条款 X"))])
+    md.write_text(PR._render_pending_body(p), encoding="utf-8")
+    (tmp_path / "p1.orig").write_text(PR._render_pending_body(p), encoding="utf-8")
+
+    log = PR.normalize_headings(p, repo, md)
+    assert any("规范化" in ln for ln in log)
+    assert p.lessons[0].change.heading == "## 强制条款"
+    # 回写落盘：重载后 heading 已规范化
+    re_p = PR.load_proposal(md)
+    assert re_p.lessons[0].change.heading == "## 强制条款"
+    PR.apply_proposal(p, repo)
+    text = (repo / "steering" / "demo-spec.md").read_text(encoding="utf-8")
+    assert text.index("## 强制条款") < text.index("- 新条款 X") < text.index("## 推荐")
+    # verdict 推导：heading 变化 → edited
+    verdicts = PR._derive_verdicts(re_p.lessons, PR.load_proposal(tmp_path / "p1.orig").lessons)
+    assert verdicts == ["edited"]
+
+
+def test_normalize_headings_no_guess_on_miss_or_ambiguity(tmp_path):
+    """负控制：规范化候选 0 命中 / 多命中 → 不改写，apply 原错误照报。"""
+    repo = make_repo(tmp_path)
+    md = tmp_path / "p2.md"
+    p = make_proposal(tmp_path, pid="20260825-000002-cc-norm0002", lessons=[
+        make_lesson(change=PR.Change(action="append_under", heading="不存在的节",
+                                     new_text="- x"))])
+    md.write_text(PR._render_pending_body(p), encoding="utf-8")
+    log = PR.normalize_headings(p, repo, md)
+    assert log == [] or all("规范化" not in ln for ln in log)
+    with pytest.raises(PR.ApplyError, match="找不到标题锚点"):
+        PR.apply_proposal(p, repo)
+
+    spec = repo / "steering" / "demo-spec.md"
+    spec.write_text(spec.read_text(encoding="utf-8") + "\n## 推荐\n\n- r2\n",
+                    encoding="utf-8")
+    p2 = make_proposal(tmp_path, pid="20260825-000003-cc-norm0003", lessons=[
+        make_lesson(change=PR.Change(action="append_under", heading="推荐",
+                                     new_text="- y"))])
+    log2 = PR.normalize_headings(p2, repo, tmp_path / "p3.md")
+    assert any("不唯一" in ln for ln in log2)
+    assert p2.lessons[0].change.heading == "推荐"   # 未被改写
+    # 多命中拒绝猜测 → apply 以原 heading 找不到锚点失败（fail-closed 保留）
+    with pytest.raises(PR.ApplyError, match="找不到标题锚点"):
+        PR.apply_proposal(p2, repo)

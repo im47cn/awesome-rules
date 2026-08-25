@@ -286,6 +286,8 @@ def cmd_apply(args) -> int:
     paths = C.base_paths(cfg)
     path = _find_pending(cfg, args.id)
     proposal = PR.load_proposal(path)
+    for line in PR.normalize_headings(proposal, C.repo_root(), path):
+        print("ℹ " + line)
     checks = PR.verify_evidence(proposal, _session_corpus(proposal))
     for i, status in checks:
         if status == "no_corpus":

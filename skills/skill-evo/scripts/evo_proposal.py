@@ -342,6 +342,71 @@ def _apply_change(content: str, ch: Change, target_file: str) -> str:
     raise ApplyError(f"{target_file}: 未知 action `{ch.action}`")
 
 
+def normalize_headings(p: Proposal, repo_root: Path, md_path: Optional[Path] = None) -> List[str]:
+    """apply 前自动规范化缺 `#` 前缀的 heading（改写 pending .md，非内存幻影）。
+
+    实测坑（2026-08-24 manual 提案 + 批量执行器 3 份提案）：手工/程序构造的
+    heading 常漏 `##` 前缀，apply 匹配契约是 `ln.strip() == heading.strip()`
+    且行首为 #——裸标题名永远失配，报「找不到标题锚点」。本函数把
+    `核心原则` 规范化为 `## 核心原则` 并回写 pending .md；verdict 推导
+    diff .orig 快照时 heading 变化自然落 edited，归档语义不丢。
+
+    fail-closed 保留：规范化后仍 0 命中或多于 1 命中 → 不改写，让
+    apply 的原错误路径报告（锚点真缺陷不该被自动猜测掩盖）。
+    """
+    log: List[str] = []
+    changed = False
+    for i, ls in enumerate(p.lessons, 1):
+        ch = ls.change
+        if not ch or ch.action != "append_under" or not ch.heading:
+            continue
+        if ch.heading.lstrip().startswith("#"):
+            continue
+        try:
+            target = validate_target(ls.target_file, repo_root)
+        except ApplyError:
+            continue  # 目标非法留给 apply 原路径报错
+        lines = target.read_text(encoding="utf-8").splitlines()
+        cand = "## " + ch.heading.strip()
+        hits = [ln for ln in lines if ln.strip() == cand and ln.lstrip().startswith("#")]
+        if len(hits) == 1:
+            log.append(f"lesson {i}: heading `{ch.heading}` 无 # 前缀，规范化为 `{cand}`（verdict=edited）")
+            ch.heading = cand
+            changed = True
+        elif len(hits) > 1:
+            log.append(f"lesson {i}: heading `{ch.heading}` 规范化后命中 {len(hits)} 处，不唯一——不自动改写")
+    if changed:
+        _rewrite_pending_md(p, md_path or _default_pending_md(p))
+    return log
+
+
+def _default_pending_md(p: Proposal) -> Path:
+    return Path.home() / ".config/ar/skill-evo/proposals/pending" / f"{p.id}.md"
+
+
+def _render_pending_body(p: Proposal) -> str:
+    import json as _json
+    fm = (f"---\nid: {p.id}\nstatus: {p.status}\nsource_agent: {p.source_agent}\n"
+          f"source_session: {p.source_session}\nsource_path: {p.source_path}\n"
+          f"created: {p.created}\nlessons: {len(p.lessons)}\n---\n")
+    rendered = "\n".join(_render_lesson(i, ls) for i, ls in enumerate(p.lessons, 1))
+    payload = {"lessons": [{
+        "type": ls.type, "evidence": ls.evidence, "target_file": ls.target_file,
+        "confidence": ls.confidence, "reason": ls.reason,
+        "lesson_id": ls.lesson_id, "supersedes": ls.supersedes,
+        "change": {"action": ls.change.action, "heading": ls.change.heading,
+                   "new_text": ls.change.new_text} if ls.change else None,
+    } for ls in p.lessons]}
+    machine = "```json\n" + _json.dumps(payload, ensure_ascii=False, indent=1) + "\n```"
+    return (f"{fm}\n# 进化提案 {p.id}\n\n> 来源：{p.source_agent} 会话 `{p.source_session}`"
+            f"（{p.source_path}）\n\n{rendered}\n\n## 机读数据（apply 依据，勿手改）\n\n{machine}\n")
+
+
+def _rewrite_pending_md(p: Proposal, md_path: Path) -> None:
+    """按当前内存态重写 pending .md（.orig 快照不动——verdict 推导依据）。"""
+    md_path.write_text(_render_pending_body(p), encoding="utf-8")
+
+
 def apply_proposal(p: Proposal, repo_root: Path, *, dry_run: bool = False,
                    force: bool = False, applied_dir: Optional[Path] = None,
                    extra_warnings: Optional[List[str]] = None) -> List[str]:
