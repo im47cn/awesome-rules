@@ -102,7 +102,6 @@ Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分�
 | [Factory Harness 设计](docs/design/factory-harness-design.md) | L4 自举工厂：第一性原理推导、方案 B（omp headless）、治理锁与 mutation 门（S0 已落地） |
 | [Gauntlet 门禁入口 SPEC](docs/design/spec-2026-08-21-gauntlet-entry.md) | 单一门禁入口 tools/gauntlet.sh：层编排 fail-closed + 检查器负控制 + 手动变异冒烟 |
 | [Gauntlet 门禁入口 EVIDENCE](docs/design/evidence-2026-08-21-gauntlet-entry.md) | 15 层全绿（927 tests / 4/4 变异击杀）证据报告，含三次门拦真问题与 errexit 缺陷修复记录 |
-| [Factory Harness 设计](docs/design/factory-harness-design.md) | L4 自举工厂：治理层（MISSION 宪法 + guard.py 周界锁）与 S1 节点链（omp headless + 薄 dispatcher）分层设计 |
 
 ## 安装
 

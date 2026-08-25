@@ -172,3 +172,44 @@ def test_session_lock_stale_steal(tmp_path):
     with S.session_lock(paths, "cc:s-dead", stale_seconds=100) as got:
         assert got                                  # 过期 → 窃取成功
     # 撞锁异常路径让位后释放不误删他人锁：直接持有者持有中释放让位者的锁不存在
+
+
+def test_save_state_concurrent_merge_no_loss(tmp_path, monkeypatch):
+    """PR #58 审查①判别：两进程各持不同会话锁，快照互不含对方条目——
+    后写者不得抹掉先写者的 processed（合并语义）。"""
+    import evo_session as S
+    sp = tmp_path / "state.json"
+    # 进程 A 快照：只知 sess-a
+    snap_a = {"processed": {"agent|sess-a": "digest-a"}}
+    S.save_state(sp, snap_a)
+    # 进程 B 持旧快照（读于 A 写之前）：只知 sess-b
+    snap_b = {"processed": {"agent|sess-b": "digest-b"}}
+    S.save_state(sp, snap_b)
+    merged = S.load_state(sp)
+    assert merged["processed"]["agent|sess-a"] == "digest-a"   # A 条目存活
+    assert merged["processed"]["agent|sess-b"] == "digest-b"
+
+
+def test_lock_steal_old_owner_does_not_delete_new(tmp_path, monkeypatch):
+    """PR #58 审查②判别：锁被窃后旧 owner 退出时不得误删新持有者的锁。"""
+    import evo_session as S
+    paths = {"locks": tmp_path}
+    # worker A 拿锁后"卡死"（不释放）
+    ctx_a = S.session_lock(paths, "agent|x")
+    held_a = ctx_a.__enter__()
+    assert held_a is True
+    # 伪造过期：mtime 回拨 2h
+    lock = tmp_path / ("agent|x".replace("/", "_") + ".lock")
+    import os as _os
+    old = S.time.time() - 7200
+    _os.utime(lock, (old, old))
+    # worker B 窃锁成功
+    ctx_b = S.session_lock(paths, "agent|x")
+    held_b = ctx_b.__enter__()
+    assert held_b is True
+    # worker A 结束：锁内容是 B 的 token，A 不得删除
+    ctx_a.__exit__(None, None, None)
+    assert lock.exists(), "旧 owner 误删了新持有者的锁"
+    # worker B 正常退出：锁被清
+    ctx_b.__exit__(None, None, None)
+    assert not lock.exists()

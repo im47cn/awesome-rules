@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# weekly-regression.sh — 自挖掘周回归（借鉴 dark-factory comprehensive-test 模式）。
+# daily-regression.sh — 自挖掘日回归（借鉴 dark-factory comprehensive-test 模式；
+# 2026-08-25 周频提至日频：停摆/断档类故障的发现延迟从 ≤7d 收到 ≤1d）。
 #
 # 三层顺序执行（全部跑完不短路——三层结果表完整是 triage 的输入）：
 #   1. badcase-strict : python3 scripts/badcase_runner.py --strict-exact
@@ -9,10 +10,13 @@
 #   3. doc-freshness  : python3 tools/check_doc_freshness.py
 #                       （陈述↔事实一致性 R1-R5；gauntlet 内已有同名子层，
 #                        独立成层是为了单层日志与失败归因）
+#   4. dispatch-liveness: python3 .factory/regression/dispatch_liveness.py
+#                       （调度器活性：停摆标记在=FAIL；streak 文件超 26h
+#                        未更新=LaunchAgent 断档 FAIL——两种死法都抓）
 #
-# 失败 → 开 issue：标题 [factory-regression] <date> 周回归失败：<首失败层>；
+# 失败 → 开 issue：标题 [factory-regression] <date> 日回归失败：<首失败层>；
 #   已有 open 的标题含 [factory-regression] 的 issue → 只 gh issue comment 追加（幂等）。
-# 全绿 → 追加一行 JSON 到 .factory/metrics/weekly-regression.jsonl。
+# 全绿 → 追加一行 JSON 到 .factory/metrics/daily-regression.jsonl。
 #
 # 标签策略（有意零标签）：triage-batch.sh 只拾取零 factory:* 标签的 open issue，
 # dispatch.sh 消费 factory:accepted——零标签让回归 issue 走设计的
@@ -24,8 +28,8 @@
 #    flake；latest 符号链接指向最近一次）。
 #
 # 用法:
-#   bash .factory/regression/weekly-regression.sh            # 真跑（失败开 issue / 全绿记 metrics）
-#   bash .factory/regression/weekly-regression.sh --dry-run  # 真跑三层，只预览将开的 issue，不写 gh、不记 metrics
+#   bash .factory/regression/daily-regression.sh            # 真跑（失败开 issue / 全绿记 metrics）
+#   bash .factory/regression/daily-regression.sh --dry-run  # 真跑三层，只预览将开的 issue，不写 gh、不记 metrics
 #
 # 退出码: 0=全绿（或锁被持静默退出） 1=有层失败（issue 已开/已评） 2=基础设施错误
 set -euo pipefail
@@ -58,7 +62,7 @@ REPO_SLUG="${GH_REPO:-$(
 
 # ── 单实例锁（mkdir 原子性 + PID 活性检测，形态对齐 dispatch.sh；
 #    防手动跑与 launchd 定时跑并发执行 gauntlet 互踩 .coverage 清理） ────
-LOCKDIR="$FACTORY/locks/weekly-regression"
+LOCKDIR="$FACTORY/locks/daily-regression"
 mkdir -p "${LOCKDIR%/*}" 2>/dev/null || true
 if ! mkdir "$LOCKDIR" 2>/dev/null; then
   _pid="$(cat "$LOCKDIR/pid" 2>/dev/null || true)"
@@ -67,7 +71,7 @@ if ! mkdir "$LOCKDIR" 2>/dev/null; then
     rm -rf "$LOCKDIR"
     mkdir "$LOCKDIR"
   else
-    echo "[$(ts)] 另一周回归实例运行中（pid=${_pid}），退出" >&2
+    echo "[$(ts)] 另一日回归实例运行中（pid=${_pid}），退出" >&2
     exit 0
   fi
 fi
@@ -104,6 +108,7 @@ run_layer() {  # <name> <cmd...>
 run_layer badcase-strict python3 scripts/badcase_runner.py --strict-exact
 run_layer gauntlet sh tools/gauntlet.sh
 run_layer doc-freshness python3 tools/check_doc_freshness.py
+run_layer dispatch-liveness python3 .factory/regression/dispatch_liveness.py
 
 FIRST_FAIL=""
 TABLE=""
@@ -119,20 +124,20 @@ done
 
 # ── 全绿：metrics 台账（dry-run 预演不记账） ───────────────────────────
 if [ -z "$FIRST_FAIL" ]; then
-  echo "── [$(ts)] 三层全绿"
+  echo "── [$(ts)] 四层全绿"
   if [ "$DRY_RUN" = 1 ]; then
     echo "── [$(ts)] dry-run：跳过 metrics 追加与 gh 写操作"
   else
-    printf '{"ts":"%s","result":"pass","layers":{"badcase-strict":"pass","gauntlet":"pass","doc-freshness":"pass"}}\n' \
-      "$(date +%Y-%m-%dT%H:%M:%S%z)" >> "$FACTORY/metrics/weekly-regression.jsonl"
+    printf '{"ts":"%s","result":"pass","layers":{"badcase-strict":"pass","gauntlet":"pass","doc-freshness":"pass","dispatch-liveness":"pass"}}\n' \
+      "$(date +%Y-%m-%dT%H:%M:%S%z)" >> "$FACTORY/metrics/daily-regression.jsonl"
   fi
   exit 0
 fi
 
 # ── 失败：汇总 issue（首失败层 + 该层日志尾部 30 行） ────────────────────
-TITLE="[factory-regression] ${DATE} 周回归失败：${FIRST_FAIL}"
+TITLE="[factory-regression] ${DATE} 日回归失败：${FIRST_FAIL}"
 {
-  echo "自动化周回归失败（首失败层：\`${FIRST_FAIL}\`）。"
+  echo "自动化日回归失败（首失败层：\`${FIRST_FAIL}\`）。"
   echo
   echo "- 日期：${DATE}"
   echo "- HEAD：$(git rev-parse --short HEAD)（运行于工作树，未自动提交）"
@@ -152,8 +157,8 @@ TITLE="[factory-regression] ${DATE} 周回归失败：${FIRST_FAIL}"
   echo "## 复跑"
   echo
   echo '```bash'
-  echo "cd $REPO && bash .factory/regression/weekly-regression.sh"
-  echo '# 或只预览不开 issue：bash .factory/regression/weekly-regression.sh --dry-run'
+  echo "cd $REPO && bash .factory/regression/daily-regression.sh"
+  echo '# 或只预览不开 issue：bash .factory/regression/daily-regression.sh --dry-run'
   echo '```'
 } > "$BODY"
 
