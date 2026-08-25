@@ -27,7 +27,7 @@
 | `upstream-sync-check.sh` | M2 上游同步检查（dispatch 轮末）：full 漂移→确定性 PR 流；local 漂移→needs-human issue；无凭据降级仅报告 |
 | `sync-from-upstream.sh` + `DISTRIBUTION.json` | M1 上游同步：三态分发清单（full/local/skip）+ 下游拉取（--check 门禁/--apply 追平+锚点） |
 | `decisions.md` | 工厂决策记录（ADR-001~006：租约仲裁/A3 记账/单写者降级/周回归/dispatch 下沉/触发器计数口径）；进程管理类缺陷须在此记账（ADR-002，合并前自愈不计数，ADR-006） |
-| `regression/` | 自挖掘日回归（ADR-004）：daily-regression.sh 串联 badcase/gauntlet/doc-freshness/dispatch-liveness 四层，失败自动开 `[factory-regression]` issue 走 triage；liveness 抓调度器停摆与 LaunchAgent 断档两种死法 |
+| `regression/` | 自挖掘日回归（ADR-004）：daily-regression.sh 串联 badcase/gauntlet/doc-freshness/dispatch-liveness 四层，失败自动开 `[factory-regression]` issue 走 triage；liveness 多仓活性：hub 注册表 repos.conf 全部仓库，停摆/断档两死法任一仓死即 FAIL |
 
 ## 前置条件
 - `omp` CLI（AI 节点引擎；每节点独立进程 = 物理级 fresh context）
