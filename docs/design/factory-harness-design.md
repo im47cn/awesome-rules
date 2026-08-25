@@ -1,6 +1,6 @@
 # Factory Harness 设计：awesome-rules 的 L4 自举工厂
 
-> 状态：S0 定稿 v0.1（2026-08-21）· 选型方案 B（omp headless + 自研薄 dispatcher）
+> 状态：S2（人工路径收口中；以 §8 判据为准）· 选型方案 B（omp headless + 自研薄 dispatcher）
 > 治理依据：[MISSION.md](../../MISSION.md)（工厂永不可改）
 > 参考：Dan Shapiro 五级框架、coleam00/dark-factory-experiment、coleam00/skills、coleam00/Archon
 
@@ -14,7 +14,8 @@ omp 以进程级 fresh context 执行，治理与质检复用仓库既有资产�
 scripts/run_tests.sh、plugin_lock 体系）。
 
 S0 已落地并验证：`MISSION.md`（宪法）、`.factory/guard.py`（周界锁）、
-`.factory/mutations/`（门灵敏度冒烟，**kill rate 4/4 = 100%，负例放行 1/1**）。
+`.factory/mutations/`（门灵敏度冒烟，kill rate 与负例放行口径以
+`.factory/mutations/EVIDENCE-2026-08-24.md` 证据文件为准）。
 
 ---
 
@@ -311,7 +312,7 @@ dispatch.sh [--dry-run] [--watch] [--interval SEC]:
   → needs-fix 重派（移除 needs-fix 保计数活性 → claim → fix-issue）
   → accepted 队列（priority 排序，MAX_PARALLEL 槽，bash3 兼容轮询）
   → wait + 收尾 sync
-固定优先级：PR 结果 > fix-issue（triage 内联于 fix-issue.sh，无独立批）
+固定优先级：PR 结果 > fix-issue（triage 已独立成批：cron-dispatch 每轮先跑 triage-batch.sh 再跑 dispatch）
 ```
 
 ### 四条工作流

@@ -455,6 +455,137 @@ if [ "$_rc10f" -eq 2 ]; then
 else
     bad "NC10f 期望 rc=2, 实际 rc=${_rc10f}"
 fi
+
+# ── NC11 doc-freshness R6/R7 负控制：枚举漂移必须被拦下 ────────────────
+# 在 NC10 最小仓上加 R6/R7 面：guard 技能（带 SKILL.md，R3 树须覆盖）、
+# steering 两规范（frontmatter title 供 R7b 主题）、opencode 清单、
+# CONTRIBUTING 树、AGENTS/CLAUDE 枚举行、load-steering 审查清单。
+nc11_setup() {
+    _d=$1
+    nc10_setup "$_d"
+    mkdir -p "$_d/skills/ddl-guard" "$_d/steering" "$_d/.opencode" "$_d/hooks"
+    printf -- '---\nname: ddl-guard\ndescription: t\n---\n' \
+        >"$_d/skills/ddl-guard/SKILL.md"
+    printf -- '---\ntitle: 测试规范\nscenario: t\n---\n' \
+        >"$_d/steering/testing-standards.md"
+    printf -- '---\ntitle: 审查报告输出规范\nscenario: t\n---\n' \
+        >"$_d/steering/report-standards.md"
+    {
+        echo '# T'
+        echo '```'
+        echo '├── skills/'
+        echo '│   ├── foo/'
+        echo '│   └── ddl-guard/'
+        echo '```'
+    } >"$_d/README.md"
+    cat >"$_d/.opencode/opencode.json" <<'EOF'
+{
+  "instructions": [
+    "skills/ddl-guard/SKILL.md",
+    "steering/testing-standards.md",
+    "steering/report-standards.md"
+  ]
+}
+EOF
+    {
+        echo '# C'
+        echo '```'
+        echo 'steering/'
+        echo '├── testing-standards.md'
+        echo '├── report-standards.md'
+        echo '└── gtsp/'
+        echo '```'
+    } >"$_d/CONTRIBUTING.md"
+    echo '- **通用设计规范**（设计阶段）：steering/*.md —— 测试、审查报告输出' \
+        >"$_d/AGENTS.md"
+    echo '- **通用设计规范**（设计阶段）：steering/*.md —— 测试、审查报告输出' \
+        >"$_d/CLAUDE.md"
+    echo 'parts.append("- 审查类任务可使用 /ddl-guard 自动检查")' \
+        >"$_d/hooks/load-steering.sh"
+}
+
+NC11="$TMP/nc11"; nc11_setup "$NC11"
+if "$PY" tools/check_doc_freshness.py "$NC11" >"$TMP/out11" 2>&1; then
+    ok "NC11 干净 fixture 全绿（R6/R7 无误报）"
+else
+    bad "NC11 干净 fixture 期望 rc=0: $(cat "$TMP/out11")"
+fi
+
+# R6 漏报：opencode instructions 缺 guard 技能条目
+NC11A="$TMP/nc11a"; nc11_setup "$NC11A"
+grep -v 'ddl-guard/SKILL.md' "$NC11A/.opencode/opencode.json" \
+    >"$NC11A/.opencode/opencode.json.tmp" && mv "$NC11A/.opencode/opencode.json.tmp" \
+    "$NC11A/.opencode/opencode.json"
+if "$PY" tools/check_doc_freshness.py "$NC11A" >"$TMP/out11a" 2>&1; then
+    _rc11a=0
+else
+    _rc11a=$?
+fi
+if [ "$_rc11a" -eq 1 ] && grep -q 'R6' "$TMP/out11a" \
+    && grep -q 'ddl-guard/SKILL.md' "$TMP/out11a"; then
+    ok "NC11a R6 opencode 清单漏报检出"
+else
+    bad "NC11a 期望 rc=1+R6+ddl-guard, 实际 rc=${_rc11a}: $(cat "$TMP/out11a")"
+fi
+
+# R6 修绿：补回缺失条目后同一夹具转绿（证明检出项可修复、非结构性拒判）
+cat >"$NC11A/.opencode/opencode.json" <<'EOF'
+{
+  "instructions": [
+    "skills/ddl-guard/SKILL.md",
+    "steering/testing-standards.md",
+    "steering/report-standards.md"
+  ]
+}
+EOF
+if "$PY" tools/check_doc_freshness.py "$NC11A" >"$TMP/out11a2" 2>&1; then
+    ok "NC11a2 R6 补条目后修绿"
+else
+    bad "NC11a2 修绿后期望 rc=0: $(cat "$TMP/out11a2")"
+fi
+
+# R7a 漏报：CONTRIBUTING 目录树缺 steering 顶层文件
+NC11B="$TMP/nc11b"; nc11_setup "$NC11B"
+grep -v 'report-standards.md' "$NC11B/CONTRIBUTING.md" \
+    >"$NC11B/CONTRIBUTING.md.tmp" && mv "$NC11B/CONTRIBUTING.md.tmp" \
+    "$NC11B/CONTRIBUTING.md"
+if "$PY" tools/check_doc_freshness.py "$NC11B" >"$TMP/out11b" 2>&1; then
+    _rc11b=0
+else
+    _rc11b=$?
+fi
+if [ "$_rc11b" -eq 1 ] && grep -q 'R7a' "$TMP/out11b" \
+    && grep -q 'report-standards.md' "$TMP/out11b"; then
+    ok "NC11b R7a 目录树漏报检出"
+else
+    bad "NC11b 期望 rc=1+R7a+report-standards.md, 实际 rc=${_rc11b}: $(cat "$TMP/out11b")"
+fi
+
+# R7c 漏报：审查清单行在但缺 /ddl-guard
+NC11C="$TMP/nc11c"; nc11_setup "$NC11C"
+echo 'parts.append("- 审查类任务可使用 自动检查")' \
+    >"$NC11C/hooks/load-steering.sh"
+if "$PY" tools/check_doc_freshness.py "$NC11C" >"$TMP/out11c" 2>&1; then
+    _rc11c=0
+else
+    _rc11c=$?
+fi
+if [ "$_rc11c" -eq 1 ] && grep -q 'R7c' "$TMP/out11c" \
+    && grep -q 'ddl-guard' "$TMP/out11c"; then
+    ok "NC11c R7c 审查清单漏报检出"
+else
+    bad "NC11c 期望 rc=1+R7c+ddl-guard, 实际 rc=${_rc11c}: $(cat "$TMP/out11c")"
+fi
+
+# 文件缺失跳过：无 .opencode/CONTRIBUTING/AGENTS/CLAUDE/hooks 面 → 整组
+# 跳过而非误报（NC10 最小仓本身即此形态，此处显式再证一次）
+NC11E="$TMP/nc11e"; nc10_setup "$NC11E"
+if "$PY" tools/check_doc_freshness.py "$NC11E" >"$TMP/out11e" 2>&1; then
+    ok "NC11e R6/R7 目标面缺失时跳过"
+else
+    bad "NC11e 缺面时期望 rc=0: $(cat "$TMP/out11e")"
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────
 if [ "$fails" -gt 0 ]; then
     echo "checker-self-test: $fails 项失败"

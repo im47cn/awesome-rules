@@ -6,7 +6,7 @@ inclusion: manual
 
 # 审查报告输出规范
 
-适用于本仓库所有审查类输出：`/ddl-guard`、`/api-guard`、`/arch-guard`、`/impact-guard`
+适用于本仓库所有审查类输出：`/ddl-guard`、`/api-guard`、`/arch-guard`、`/impact-guard`、`/contract-guard`
 的「补充人工判断」部分，以及 CR 评审意见、设计评审回复。
 
 > 机器可读部分（CI/脚本输出）由 [`docs/design/guard-receipt-spec.md`](../docs/design/guard-receipt-spec.md)

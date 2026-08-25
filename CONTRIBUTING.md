@@ -30,8 +30,9 @@ npm i -g lefthook && lefthook install   # 或 npm run setup:hooks
 ```
 
 - **commit-msg**：commitlint 校验提交信息格式（`steering/git-conventions.md`）
-- **pre-push**：全量测试 + badcase 回归 + 安装入口 blob 锁定校验，
-  任一失败即阻断推送（跳过：`git push --no-verify`）
+- **pre-push**：全量测试 + badcase 回归 + 安装入口 blob 锁定 + 文档链接
+  （md_link_check）+ 文档新鲜度（doc_freshness）校验，任一失败即阻断推送
+  （跳过：`git push --no-verify`）
 - 未装 lefthook 时 hook shim 打印警告并放行，不阻塞提交
 
 手动执行 pre-push 同一路径：
@@ -57,6 +58,11 @@ npm test                   # bash scripts/run_tests.sh
 
 ## 一、规范文件（steering/）
 
+> 治理层级：[MISSION.md](MISSION.md)（宪法）→ `steering/`（规范）→ 仓库既有约定。
+> `steering/` 属于 MISSION.md 定义的工厂周界（PERIMETER）——工厂自动维护链不可触碰，
+> 变更只能走人类 PR（分支保护 + CODEOWNERS 强制人审）。贡献者修改 `steering/` 时
+> 受此层级约束。
+
 `steering/` 是**团队标准的唯一真相源**，所有技能的检查规则均派生自这里。修改规范影响面大，需格外谨慎。
 
 ### 目录结构
@@ -69,6 +75,8 @@ steering/
 ├── openapi-standards.md                  # 通用：Open API 设计规范
 ├── database-design-specification.md  # 通用：数据库设计规范
 ├── git-conventions.md                # 通用：Git 提交规范
+├── review-report-standards.md        # 通用：审查报告输出规范
+├── cross-repo-contract-standards.md  # 通用：跨仓契约兼容性规范
 └── gtsp/                             # GTSP 工程规范（Java/Spring Cloud，按维度拆分，含 DDD 架构）
     ├── README.md                     #   总入口
     └── 01-project-structure.md … 09-cr-checklist.md   #   各维度
