@@ -32,16 +32,24 @@ JUDGE_PROMPT = """你是「经验提炼质量」评审。给定：候选 prompt 
 - rejected = 被剔除或整包驳回（不应产出；verdict_codes 给出原因）
 另有整包 reject_reason（若有）。
 
+参考还携带两类元数据：
+- heading：人工认可的落点锚点。## 与 ### 级均合法（目标清单同时提供两级），
+  语义匹配时应优先最具体的子节锚点；候选落点比参考更粗（堆在二级标题）计 precision 扣分，
+  落到语义不符的锚点按 off_target 处理。
+- evidence_check：来源会话核验状态。hit=逐字命中 / paraphrase=转述拼接（片段命中，
+  可接受）/ miss=可疑编造 / no_corpus=无法核验。候选复现 miss 级 evidence 内容时
+  precision 必须低分；paraphrase 与 hit 同为有效证据形态，不因非逐字扣分。
+
 negative_avoidance 按 verdict_codes 精确评估：候选复现被标注 dup_superset /
 content_overlap / low_value / off_target 等模式的内容则低分；trimmed 的教训
 （超量/冗余产出）也计入。
 
 按四维打分（0-10 整数），输出严格单个 JSON（无围栏无其他文字）：
 {
-  "precision": "产出的 lessons 中命中人工认可内容的比例（trimmed 部分按冗余扣）",
+  "precision": "产出的 lessons 中命中人工认可内容的比例（trimmed 部分按冗余扣；evidence 复现 miss 级内容计 0）",
   "recall": "人工认可的经验中被提炼出的比例",
   "negative_avoidance": "是否规避了被驳回/被裁剪的错误（按 verdict_codes 逐类核对）",
-  "format_compliance": "JSON schema、追加语义（append_under/append_end）、无新增【强制】标记",
+  "format_compliance": "JSON schema、追加语义（append_under/append_end，锚点 ##/### 逐字取自清单）、无新增【强制】标记",
   "feedback": "一句话最有价值的改进方向"
 }"""
 
@@ -85,6 +93,9 @@ def build_dataset(cfg: dict) -> Tuple[List[G.Case], List[G.Case]]:
             sess = S.parse_session(agent, src)
             if not sess.messages:
                 continue
+            # 与 evo.py _session_corpus 同构的语料：脱敏后逐字/转述核验（✓/⚠/✗/?）
+            corpus = "\n".join(P.sanitize(m.text) for m in sess.messages)
+            ev_checks = dict(PR.verify_evidence(p, corpus))
             cases.append(G.Case(
                 id=sess.key,
                 inputs={"transcript_view": P.build_transcript_view(sess, cfg),
@@ -92,9 +103,11 @@ def build_dataset(cfg: dict) -> Tuple[List[G.Case], List[G.Case]]:
                 reference={"status": status, "lessons": [
                     {"target_file": ls.target_file, "confidence": ls.confidence,
                      "change_new_text": ls.change.new_text if ls.change else "",
+                     "heading": ls.change.heading if ls.change else "",
                      "evidence": ls.evidence,
+                     "evidence_check": ev_checks.get(i, "no_corpus"),
                      "verdict": ls.verdict,
-                     "verdict_codes": ls.verdict_codes} for ls in p.lessons],
+                     "verdict_codes": ls.verdict_codes} for i, ls in enumerate(p.lessons, 1)],
                     "reject_reason": _reject_reason(f)}))
     # 按 session 分层切（同会话的提案不跨集）
     sessions = sorted({c.id for c in cases})
@@ -167,12 +180,16 @@ def make_reflect(call_claude_raw, cfg):
 
 
 def validate_candidate(baseline_len: int):
-    """变异候选约束：保留 JSON 契约关键词 + 长度上限。"""
+    """变异候选约束：保留 JSON 契约关键词 + 子节锚点契约 + 长度上限。"""
 
     def check(text: str) -> bool:
         for kw in ('"no_signal"', '"lessons"', "append_under", "append_end", "evidence"):
             if kw not in text:
                 return False
+        # 子节锚点契约是人工基线的一部分（2026-08-24 调整）：reflector 重写掉
+        ### 指引会使新提案全部堆回二级标题，属退化候选，直接拒绝
+        if "###" not in text:
+            return False
         return len(text) <= baseline_len * 1.5
 
     return check
