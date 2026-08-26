@@ -43,3 +43,6 @@ judge_weights = [0.35, 0.35, 0.2, 0.1]
 
 # 插件哑故障巡检：两次巡检最小间隔（小时），run 搭车执行
 patrol_interval_hours = 6
+
+# apply 幂等检查：语义重复检测阈值（0-1，越高越保守）
+idempotent_threshold = 0.8

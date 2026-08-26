@@ -8,6 +8,7 @@ round-trip 只依赖 JSON 块，正文渲染仅供人工审核阅读。
 """
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import re
@@ -36,6 +37,7 @@ class Lesson:
     confidence: str                # High | Medium | Low
     reason: str = ""
     change: Optional[Change] = None
+    knowledge_type: str = "pattern"   # pattern=稳定方法论 | instance=随环境实例变化
     lesson_id: str = ""            # L-XXXXXXXX，write/load 时自动派生
     supersedes: str = ""           # 被修正的旧 lesson_id（人工审核时填写）
     # 以下仅在归档态存在（review 产物，借鉴 harness-anything verdict 语义）
@@ -74,6 +76,10 @@ class Proposal:
                            "强制级别应由人工评审设定（apply 需 --force）")
             if ls.confidence == "Low":
                 out.append(f"lesson {i}: 置信度 Low，建议人工核实后再应用")
+            if ls.knowledge_type == "instance":
+                out.append(f"lesson {i}: instance 类知识（随环境实例变化，ID/路径/字段名/"
+                           "账号/时间戳/版本号）不入技能文档，正确位置是代码（运行时发现）"
+                           "或 ADR（决策记录）；技能只沉淀稳定方法论（pattern），--force 可越过")
         return out
 
 
@@ -105,6 +111,7 @@ def write_proposal(p: Proposal, pending_dir: Path) -> Path:
     payload = {"lessons": [{
         "type": ls.type, "evidence": ls.evidence, "target_file": ls.target_file,
         "confidence": ls.confidence, "reason": ls.reason,
+        "knowledge_type": ls.knowledge_type,
         "lesson_id": ls.lesson_id, "supersedes": ls.supersedes,
         "change": {"action": ls.change.action, "heading": ls.change.heading,
                    "new_text": ls.change.new_text} if ls.change else None,
@@ -150,6 +157,7 @@ def load_proposal(path: Path) -> Proposal:
                     target_file=str(ls.get("target_file", "")),
                     confidence=str(ls.get("confidence", "")),
                     reason=str(ls.get("reason", "")), change=ch,
+                    knowledge_type=str(ls.get("knowledge_type", "pattern")),  # 旧提案兼容默认
                     lesson_id=str(ls.get("lesson_id", "")),
                     supersedes=str(ls.get("supersedes", "")),
                     verdict=str(ls.get("verdict", "")),
@@ -231,6 +239,27 @@ def _norm_quote(text: str) -> str:
     字形差异不应导致真实引用被判 miss。
     """
     return "".join(text.split()).translate(_QUOTE_NORM)
+
+
+def check_idempotent(new_text: str, content: str, threshold: float) -> Optional[Tuple[int, float]]:
+    """语义幂等检查：new_text 与 content 既有段落（按空行分段）的相似度比对。
+
+    两侧各做 _norm_quote 归一后逐段 difflib.SequenceMatcher(autojunk=False)；
+    返回相似度 >= threshold 的最高比率段 (段序号 1-based, 比率)，无命中返回 None。
+    空白段跳过但占原序号（分段原序保持，消息可指回文件中的段落位置）。
+    """
+    norm_nt = _norm_quote(new_text)
+    if not norm_nt:
+        return None
+    best: Optional[Tuple[int, float]] = None
+    for idx, para in enumerate(re.split(r"\n\s*\n", content), 1):
+        norm_para = _norm_quote(para)
+        if not norm_para:
+            continue
+        ratio = difflib.SequenceMatcher(None, norm_nt, norm_para, autojunk=False).ratio()
+        if ratio >= threshold and (best is None or ratio > best[1]):
+            best = (idx, ratio)
+    return best
 
 
 PARAPHRASE_MIN_CHARS = 16
@@ -393,6 +422,7 @@ def _render_pending_body(p: Proposal) -> str:
     payload = {"lessons": [{
         "type": ls.type, "evidence": ls.evidence, "target_file": ls.target_file,
         "confidence": ls.confidence, "reason": ls.reason,
+        "knowledge_type": ls.knowledge_type,
         "lesson_id": ls.lesson_id, "supersedes": ls.supersedes,
         "change": {"action": ls.change.action, "heading": ls.change.heading,
                    "new_text": ls.change.new_text} if ls.change else None,
@@ -401,20 +431,43 @@ def _render_pending_body(p: Proposal) -> str:
     return (f"{fm}\n# 进化提案 {p.id}\n\n> 来源：{p.source_agent} 会话 `{p.source_session}`"
             f"（{p.source_path}）\n\n{rendered}\n\n## 机读数据（apply 依据，勿手改）\n\n{machine}\n")
 
-
 def _rewrite_pending_md(p: Proposal, md_path: Path) -> None:
     """按当前内存态重写 pending .md（.orig 快照不动——verdict 推导依据）。"""
     md_path.write_text(_render_pending_body(p), encoding="utf-8")
 
 
+def annotate_pending_block(md_path: Path, msg: str) -> None:
+    """apply 拦截原因写入 pending .md frontmatter（audit 痕迹）。
+
+    覆盖式：先删既有 apply_blocked: 行防重跑堆积，再在 fm 收尾 --- 前插入单行
+    （msg 内换行替换为空格，fm 单行值）；无 fm 时文件头补空 fm 再注入。
+    只写 .md，永不动 .orig 快照（verdict 推导依据）。
+    """
+    text = md_path.read_text(encoding="utf-8")
+    lines = [ln for ln in text.splitlines(keepends=True)
+             if not ln.startswith("apply_blocked:")]
+    one_line = "apply_blocked: " + msg.replace("\n", " ") + "\n"
+    if text.startswith("---"):
+        for i in range(1, len(lines)):
+            if lines[i].strip() == "---":
+                lines.insert(i, one_line)
+                break
+        else:                                    # fm 无收尾 ---（残缺）：头部直插
+            lines.insert(0, one_line)
+    else:
+        lines = ["---\n", "---\n", one_line] + lines
+    md_path.write_text("".join(lines), encoding="utf-8")
+
+
 def apply_proposal(p: Proposal, repo_root: Path, *, dry_run: bool = False,
                    force: bool = False, applied_dir: Optional[Path] = None,
-                   extra_warnings: Optional[List[str]] = None) -> List[str]:
+                   extra_warnings: Optional[List[str]] = None,
+                   idempotent_threshold: float = 0.8) -> List[str]:
     """两阶段应用：先在内存中对所有 lesson 校验并计算新内容，全部通过才落盘。
 
     返回各文件变更说明；dry_run 只输出不写。锚点失配/不唯一即整体失败，不盲写。
-    护栏警告（【强制】标记/Low 置信度/重复沉淀/evidence 未核验）需 --force 越过；
-    supersedes 引用无效为硬错（输入非法，force 不可越过）。
+    护栏警告（【强制】标记/Low 置信度/重复沉淀——归档命中/逐字/语义相似/evidence 未核验）
+    需 --force 越过；supersedes 引用无效为硬错（输入非法，force 不可越过）。
     """
     if not p.lessons:
         raise ApplyError("提案无 lesson")
@@ -440,6 +493,12 @@ def apply_proposal(p: Proposal, repo_root: Path, *, dry_run: bool = False,
         if ls.change.new_text.strip() in content:
             guard.append(f"lesson {i}: new_text 已逐字存在于 {ls.target_file}"
                          "（疑似重复追加，--force 可越过）")
+        dup = check_idempotent(ls.change.new_text, content, idempotent_threshold)
+        if dup:
+            seg_no, ratio = dup
+            guard.append(f"lesson {i}: 与 {ls.target_file} 既有段落 {seg_no} 语义重复"
+                         f"（相似度 {ratio:.2f} >= 阈值 {idempotent_threshold}；"
+                         "请人工 diff 后改写合并，--force 可越过）")
         new_contents[path.as_posix()] = _apply_change(content, ls.change, ls.target_file)
         where = (f"`{ls.change.heading}` 下" if ls.change.action == "append_under" else "末尾")
         report.append(f"lesson {i} → {ls.target_file}（{where}）追加 {len(ls.change.new_text)} chars")

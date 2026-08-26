@@ -54,8 +54,13 @@ python3 scripts/evo.py list
 - new_text 含**【强制】**标记 → 强制级别是人工评审决策，自动化只能提【推荐】级内容
 - 置信度 Low → 建议先人工核实
 - **evidence 未命中来源会话**（✗）→ 可疑编造，需人工核实
-- **重复沉淀**：lesson_id（按 target|type|new_text 内容哈希确定性派生）已存在于 applied
-  归档，或 new_text 已逐字存在于目标文件 → 疑似同一教训重复提案
+- **重复沉淀**（三分支）：lesson_id（按 target|type|new_text 内容哈希确定性派生）已存在于
+  applied 归档 / new_text 已逐字存在于目标文件 / **new_text 与既有段落语义相似
+  （difflib 相似度 >= `idempotent_threshold`，默认 0.8）→ 疑似同一教训换皮重提，
+  需人工 diff 后改写合并**
+- `knowledge_type=instance`（随环境实例变化的 ID/路径/字段名/账号/时间戳/版本号）
+  → 不入技能文档，正确位置是代码（运行时发现）或 ADR（决策记录）；技能只沉淀稳定
+  方法论（pattern）
 - **steering 既有【强制】条款不可被削弱**——v1 仅支持追加（append_under/append_end），
   改写删除类变更一律驳回并等待人工直接编辑规范文件
 

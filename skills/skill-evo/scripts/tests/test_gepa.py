@@ -113,7 +113,7 @@ def test_run_gepa_reflector_exception_skips_iteration():
 
 def test_validate_candidate():
     v = V.validate_candidate(100)
-    ok = ('x "no_signal" "lessons" append_under append_end evidence ##/### '
+    ok = ('x "no_signal" "lessons" append_under append_end evidence "knowledge_type" ##/### '
           + "y" * 50)
     assert v(ok)
     assert not v(ok.replace("append_under", ""))      # 契约关键词缺失

@@ -126,8 +126,8 @@ SYSTEM_PROMPT = """你是研发规范仓库 awesome-rules 的「经验提炼器�
     {
       "type": "correction | failure | success",
       "evidence": "会话原文片段（逐字引用，可追溯）",
-      "target_file": "目标资产清单中的相对路径",
       "confidence": "High | Medium | Low",
+      "knowledge_type": "pattern | instance",
       "reason": "为什么要改这个文件（一句话）",
       "change": {
         "action": "append_under | append_end",
@@ -144,6 +144,7 @@ SYSTEM_PROMPT = """你是研发规范仓库 awesome-rules 的「经验提炼器�
 - 目标标题下是表格时（如 README 的技能/规范/文档索引表），new_text 必须是完整表格行（以 | 开头，列数与该表一致）
 - 新技能/新规范/新设计文档已在磁盘但未登记 README 索引表的经验，优先以表格行追加到对应 README
 - 不新增【强制】标记（强制级别是人工评审决策）
+- 判别 knowledge_type：该知识会随环境实例变化吗（ID/路径/字段名/账号/时间戳/版本号）？会 → instance，默认不入技能文档——正确位置是代码（运行时发现）或 ADR（决策记录）；技能只沉淀稳定方法论（pattern）
 - 每条 evidence 必须能在会话记录中找到出处"""
 
 

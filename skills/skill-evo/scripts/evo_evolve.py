@@ -183,7 +183,7 @@ def validate_candidate(baseline_len: int):
     """变异候选约束：保留 JSON 契约关键词 + 子节锚点契约 + 长度上限。"""
 
     def check(text: str) -> bool:
-        for kw in ('"no_signal"', '"lessons"', "append_under", "append_end", "evidence"):
+        for kw in ('"no_signal"', '"lessons"', "append_under", "append_end", "evidence", '"knowledge_type"'):
             if kw not in text:
                 return False
         # 子节锚点契约是人工基线的一部分（2026-08-24 调整）：reflector 重写掉
