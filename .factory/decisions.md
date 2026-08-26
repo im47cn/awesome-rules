@@ -84,7 +84,7 @@
 - **勘误（上节「已知边界」）**：「projex 写 403（工作项 labels/评论/创建）」已过时——令牌权限 2026-08-26 放开后实测：工作项**评论读/写全通**、**标签写（description 模式）全通**。issue 侧状态机链路（triage 落标/回执评论）完整可用。
 - **issue create 破案**（此前误判 403/字段不可发现）：根因是 create API 无「计划开始时间」本体字段——它是模板层 SystemCustomField，必经 `customFieldValues {"fieldId":"value"}` **平面对象**（数组形态报 Invalid format）。fieldId 由字段配置接口发现（`GET projects/{spaceId}/workitemTypes/{wit}/fields`，实测 79/80=计划起止、101586=预计工时）；value 形态：date=ISO、float=小数字符串、list=**option id**（非文本）；assignedTo=24-hex 用户 id（配置 `forge.json codeup.assign_user_id`，成员端点不可达）。forge 现按字段配置自动构造默认值，create 全链路实测打通（gtsp-wop-gateway）。
 - **空体容错**：云效写操作可返回 200+空 body；`json.load` 裸崩改为按长度守卫返回 `{}`。
-- **权限矩阵实测**（新令牌）：工作项 update/create ✅、工作项评论写 ❌403（缺 scope——链可跑但 triage 拒绝回执降级为仅告警，标签裁决不受影响）、Codeup MR 全套 ✅。
+- ~~权限矩阵（首测）~~：首测口径（评论写 403）已被上行勘误推翻，勿引用；当前有效矩阵见 forge「Codeup 工作项 OpenAPI 实测知识」（skills/alibabacloud-devops/SKILL.md）——权限随令牌 scope 动态，**以复验为准**。
 
 ## ADR-008 · 2026-08-26 · 托管平台抽象层 hosting.py（取代 ADR-007：核心与 GitHub/Codeup 解耦）
 
@@ -110,13 +110,18 @@
   故 Codeup 上**全链状态机不可运行**，可用面 = MR 读写/评论（comment_type
   +resolved 必填，skills 实测坑位已锁定进适配器）/合并/类标 Link + issue
   create（工具/人工开工作项，不进链状态机）。
-- **验证边界（诚实声明）**：GitHub 侧行为保持由 193 项测试（含 hosting 契约
-  22 项：gh 命令构造/原子换标/归一化/CLI 缺口）+ 沙箱端到端冒烟
-  （sync --plan/--apply、fix-issue --dry-run 全链 gh 调用序列核对）覆盖；
-  Codeup 侧 MR 端点按官方文档推导、mock 锁定请求形状，**未经 live 验证**
-  （本仓无云效凭据环境）；issue create 的字段形态结论来自 PR #62 在
-  gtsp-wop-gateway 的真实创建实测（forge 形态），hosting 迁移以
-  test_hosting.py mock 对齐该形态——首个真实接入时以两者为对齐基线。
+- **验证边界（live 基线已锁定，2026-08-26 更新）**：GitHub 侧行为保持由
+  测试（含 hosting 契约：gh 命令构造/原子换标/归一化/CLI 缺口）+ 沙箱
+  端到端冒烟覆盖；**Codeup 侧 MR 面已在 gtsp-wop-gateway live 验证**
+  （auth/list/view/comment/类标 Link 全通）。live 修正了五处文档推导偏差：
+  ① MR 集合是**组织级端点**（无 /repositories 段 + projectIds query，
+  仓库级集合 404），分页参数 perPage（非 pageSize）；② 组织级端点返回
+  **裸 JSON 数组**（success 包裹仅 dict 响应有）；③ MR 详情**无 labels
+  字段**，类标须专用端点读回；④ LinkMergeRequestLabel body 键是
+  **labelIdList**（labelIds/labels/labelId 均拒）；⑤ label create body
+  形态未破案（多形态探针均拒）——类标创建走云效界面人工路径，
+  ensure 的 400 兜底语义保留。issue create 字段形态来自 PR #62 真实
+  创建实测，hosting 迁移已对齐。
 - **后果**：MISSION 铁律 4「纯 bash + gh」措辞需人类修宪为「纯 bash/Python +
   托管适配层（零 LLM 不变）」；组件数 18→19（ADR-002 触发器 3 余量充足）；
   核心脚本自此禁直调 gh（doc-freshness R1 已盯 README 登记，新增写点必须走

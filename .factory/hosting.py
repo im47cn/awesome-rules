@@ -411,7 +411,9 @@ class CodeupAdapter:
             # 不让裸 JSONDecodeError 逃出适配器边界（PR #64 Sourcery）
             raise HostingError(
                 f"codeup {method} {path} 响应格式错误（{self._endpoint}）: {e}")
-        if payload.get("success") is False:
+        # 【live 2026-08-26】组织级端点（MR 集合等）直接返回 JSON 数组——
+        # success/errorCode 包裹仅 dict 形态才有；列表响应原样透传
+        if isinstance(payload, dict) and payload.get("success") is False:
             raise HostingError(
                 f"codeup {method} {path} 失败: "
                 f"{payload.get('errorCode')}: {payload.get('errorMessage')}")
@@ -447,9 +449,13 @@ class CodeupAdapter:
     # -- ops --
     def auth_ok(self):
         try:
-            # 探测 = 鉴权 + 连通（复用 MR 集合端点，避免引入未经验证的路径）
-            self._req("GET", f"{self._base()}/changeRequests",
-                      query={"page": 1, "pageSize": 1})
+            # 探测 = 鉴权 + 连通。【live 2026-08-26】MR 集合是组织级端点
+            # （无 /repositories 段，projectIds query 过滤；仓库级集合 404），
+            # 分页参数 perPage（pageSize 仅单体/labels 端点有效）
+            _, org = self._cfg()
+            self._req(
+                "GET", f"/oapi/v1/codeup/organizations/{org}/changeRequests",
+                query={"page": 1, "perPage": 1, "projectIds": self.repo_ref()})
             return True
         except HostingError as e:
             print(f"[hosting] codeup 鉴权探测失败: {e}", file=sys.stderr)
@@ -529,7 +535,11 @@ class CodeupAdapter:
             print(f"[hosting] [warn] 字段配置拉取失败,create 可能因模板"
                   f"必填被拒: {e}", file=sys.stderr)
         if label:
-            payload["labels"] = [label]
+            # 云效 Task 类型常无 labels 字段（ADR-007 实测：PUT 报
+            # "workitem does not contains field"）；等价载体 =
+            # description 尾部 HTML 注释块（富文本完整保留，读取时剥离）
+            payload["description"] = (
+                (body or "") + f"\n\n<!-- factory:labels:v1: {label} -->")
         r = self._req("POST",
                       f"/oapi/v1/projex/organizations/{org}/workitems", payload)
         d = r.get("result") if isinstance(r, dict) else r
@@ -537,22 +547,39 @@ class CodeupAdapter:
         return {"number": d.get("serialNumber") or d.get("id"),
                 "url": d.get("detailUrl", "")}
 
+    def _pr_labels(self, p):
+        # 【live 2026-08-26】MR 详情响应无 labels 字段——类标须专用端点读回
+        try:
+            payload = self._req("GET", f"{self._base()}/changeRequests/{p}/labels")
+            items = payload if isinstance(payload, list) else (payload.get("result") or [])
+            return [l.get("name") for l in items if l.get("name")]
+        except HostingError:
+            return []  # 类标读失败不阻断详情（labels 置空，消费方按无类标处理）
+
     def pr_view(self, p, repo=None):
-        # 【文档推导】GetMergeRequest（org 级，对齐评论端点实测形态）
+        # 【live 2026-08-26】单体端点是仓库级（仓库级集合 404、单体正常）
         d = self._req("GET", f"{self._base()}/changeRequests/{p}")
-        return self._pr(d.get("result", d))
+        out = self._pr(d.get("result", d))
+        out["labels"] = self._pr_labels(p)
+        return out
 
     def pr_list(self, state="open", label=None, limit=100, repo=None):
-        # 【文档推导】集合 GET + 分页；label 过滤客户端做（labelIds 服务端
-        # 过滤需类标 ID，留待 live 验证后启用）
+        # 【live 2026-08-26 gtsp-wop-gateway】集合是组织级端点（无
+        # /repositories 段；仓库级集合 404——ADR-007 forge 期同发现），
+        # GET + URL query 过滤 projectIds（POST/body 形态被拒），分页
+        # perPage；state 服务端过滤 opened。label 过滤客户端做（labelIds
+        # 服务端过滤需类标 ID，留待需要时启用）
+        _, org = self._cfg()
         out, page = [], 1
         while len(out) < limit:
-            payload = self._req("GET", f"{self._base()}/changeRequests",
-                                query={"page": page, "pageSize": 100,
-                                       "state": "opened" if state == "open" else "all"})
-            batch = payload.get("result") or []
+            payload = self._req(
+                "GET", f"/oapi/v1/codeup/organizations/{org}/changeRequests",
+                query={"page": page, "perPage": 100,
+                       "projectIds": self.repo_ref(),
+                       "state": "opened" if state == "open" else "all"})
+            batch = payload if isinstance(payload, list) else (payload.get("result") or [])
             out += [self._pr(d) for d in batch]
-            if len(batch) < 100:  # 页短于 pageSize = 末页（空页/短页都停）
+            if len(batch) < 100:  # 页短于 perPage = 末页（空页/短页都停）
                 break
             page += 1
         if state != "all":
@@ -565,18 +592,19 @@ class CodeupAdapter:
         if remove:
             _unsupported("pr set-labels --remove",
                          "Codeup 类标仅有 Link 端点、无 Unlink")
-        for name in add:
-            lid = self._label_id(name)
-            # 【文档推导】LinkMergeRequestLabel
+        ids = [self._label_id(name) for name in add]
+        # 【live 2026-08-26】LinkMergeRequestLabel body 键是 labelIdList
+        # （labelIds/labels/labelId 均被拒："Invalid param value [null]"）
+        if ids:
             self._req("POST", f"{self._base()}/changeRequests/{p}/labels",
-                      body={"labelIds": [lid]})
+                      body={"labelIdList": ids})
         return True
 
     def _label_id(self, name):
         # 【文档推导】ListProjectLabels → name→id
         payload = self._req("GET", f"{self._base()}/labels",
                             query={"page": 1, "pageSize": 100})
-        for l in (payload.get("result") or []):
+        for l in (payload if isinstance(payload, list) else (payload.get("result") or [])):
             if l.get("name") == name:
                 return l.get("id")
         raise HostingError(f"类标 {name} 不存在（先 label ensure）", code=2)
