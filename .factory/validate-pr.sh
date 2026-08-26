@@ -19,17 +19,21 @@ fi
 
 REPO="$(git rev-parse --show-toplevel)"
 DIR="${REPO}/.factory/artifacts/pr-${PR}"
+# ADR-007 平台适配层：github 后端 exec gh（零行为变化）；codeup 按 forge.json
+FORGE="${REPO}/.factory/forge"
 node_timeout() { python3 "${REPO}/.factory/factory_lib.py" timeout "$1"; }  # 分级预算：评审15m/holdout 5m
 
 # --- 0. PR 元数据与 diff 面 ---
 if [ "${DRY}" = 0 ]; then
-  command -v gh >/dev/null || { echo "需要 gh CLI" >&2; exit 2; }
+  if [ "$("${FORGE}" probe 2>/dev/null || true)" != codeup ]; then
+    command -v gh >/dev/null || { echo "需要 gh CLI" >&2; exit 2; }
+  fi
   mkdir -p "${DIR}"
-  gh pr view "${PR}" --json number,title,body,headRefName,baseRefName \
+  "${FORGE}" pr view "${PR}" --json number,title,body,headRefName,baseRefName \
     > "${DIR}/pr.json" 2>/dev/null || { echo "PR #${PR} 不存在" >&2; exit 2; }
   BASE="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["baseRefName"])' "${DIR}/pr.json")"
   HEAD_REF="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["headRefName"])' "${DIR}/pr.json")"
-  CHANGED=(); while IFS= read -r f; do CHANGED+=("${f}"); done < <(gh pr diff "${PR}" --name-only)
+  CHANGED=(); while IFS= read -r f; do CHANGED+=("${f}"); done < <("${FORGE}" pr diff "${PR}" --name-only)
 else
   BASE="main"; HEAD_REF="<pr-head>"; CHANGED=("<changed-files>")
 fi
@@ -44,7 +48,7 @@ PYM
 }
 
 fail() {  # fail <label> <msg> —— 打标签、留言、退出
-  [ "${DRY}" = 0 ] && gh pr edit "${PR}" --add-label factory:validation-failed >/dev/null 2>&1 || true
+  [ "${DRY}" = 0 ] && "${FORGE}" pr edit "${PR}" --add-label factory:validation-failed >/dev/null 2>&1 || true
   echo "✗ $2" >&2; exit "${3:-1}"
 }
 
@@ -83,7 +87,7 @@ echo "==> AI 评审（守卫: ${SKILLS_ARG:-none}；通用 review 常驻）"
 if [ "${DRY}" = 1 ]; then
   echo "    [dry-run] omp -p <prompts/pr-review.md + PR diff 内联> --no-session --max-time $(node_timeout pr-review)"
 else
-  gh pr diff "${PR}" > "${DIR}/pr.diff"
+  "${FORGE}" pr diff "${PR}" > "${DIR}/pr.diff"
   DIFF="$(cat "${DIR}/pr.diff")"
   TITLE="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["title"])' "${DIR}/pr.json")"
   prompt="$(cat "${REPO}/.factory/prompts/pr-review.md")
@@ -137,9 +141,9 @@ fi
 
 # --- 5. 通过：状态流转 + 总结评论 ---
 if [ "${DRY}" = 0 ]; then
-  gh pr edit "${PR}" --remove-label factory:needs-review >/dev/null 2>&1 || true
-  gh pr edit "${PR}" --add-label factory:validated >/dev/null 2>&1 || true
-  gh pr comment "${PR}" --body "工厂 validate-pr 全门通过（guard + tests + AI 评审 + holdout）。产物: ${DIR}。可合并。" >/dev/null
+  "${FORGE}" pr edit "${PR}" --remove-label factory:needs-review >/dev/null 2>&1 || true
+  "${FORGE}" pr edit "${PR}" --add-label factory:validated >/dev/null 2>&1 || true
+  "${FORGE}" pr comment "${PR}" --body "工厂 validate-pr 全门通过（guard + tests + AI 评审 + holdout）。产物: ${DIR}。可合并。" >/dev/null
   echo "✓ PR #${PR} validated（factory:validated）。人类合并。"
 else
   echo "[dry-run] label: needs-review → validated + 总结评论"

@@ -22,6 +22,11 @@ if [ -z "${ISSUE}" ]; then
 fi
 
 REPO="$(git rev-parse --show-toplevel)"
+# ADR-007 平台适配层：codeup 后端时 slug 为占位（forge 忽略 --repo）
+FORGE="${REPO}/.factory/forge"
+if [ "$("${FORGE}" probe 2>/dev/null || true)" = codeup ]; then
+  REPO_SLUG="${GH_REPO:-codeup:$(basename "${REPO}")}"
+else
 REPO_SLUG="${GH_REPO:-$(
   # 双 remote 布局：origin pushurl 可能多条（codeup 镜像 + github），
   # 逐条扫含 github.com 者（github remote 名优先）；443 端口形态兼容
@@ -31,9 +36,11 @@ REPO_SLUG="${GH_REPO:-$(
   # etf-radar#70 审查）；sed -n 1p 取首行且消费全部输入，无早退
   } | grep 'github\.com' | sed -n '1p' | sed -E 's#^.*github\.com(:[0-9]+)?[/:]##; s#\.git$##'
 )}"
+fi
 DIR="${REPO}/.factory/artifacts/issue-${ISSUE}"
 BRANCH="factory/issue-${ISSUE}"
 WT="${REPO}/.factory/worktrees/issue-${ISSUE}"   # 链独立 worktree（多驱动隔离）
+BASE_BRANCH="${FACTORY_BASE_BRANCH:-main}"   # ADR-007：下游基线旋钮（master/develop）
 # 链副作用共享库：issue 评论唯一出口 + 拒绝单一动作（契约见库头注释）
 source "${REPO}/.factory/factory-lib.sh"
 node_timeout() { python3 "${REPO}/.factory/factory_lib.py" timeout "$1"; }  # 分级预算：裁决器5m/工作节点15m/implement 30m
@@ -57,7 +64,7 @@ ensure_labels() {
   local entry name color desc
   for entry in "${FACTORY_LABELS[@]}"; do
     read -r name color desc <<<"${entry}"
-    gh label create "${name}" --color "${color}" --description "${desc}" --force >/dev/null 2>&1 || true
+    "${FORGE}" label create "${name}" --color "${color}" --description "${desc}" --force >/dev/null 2>&1 || true
   done
 }
 
@@ -69,7 +76,7 @@ issue_label() { # issue_label <add|remove> <name> —— 失败仅告警；租�
     echo "  [warn] 租约 ${LEASE_KEY:-?} 已失效（epoch=${LEASE_EPOCH:-?}），${1} ${2} 跳过（围栏）" >&2
     return 0
   fi
-  if gh issue edit "${ISSUE}" --"${1}-label" "${2}" >/dev/null 2>&1; then
+  if "${FORGE}" issue edit "${ISSUE}" --"${1}-label" "${2}" >/dev/null 2>&1; then
     echo "  [label] ${1} ${2}"
   else
     echo "  [warn] 标签操作失败：${1} ${2}（可观测性降级，链继续）" >&2
@@ -254,9 +261,12 @@ ${out}
 
 # --- 预备：拉取 issue 原文（唯一一次读不可信文本的地方，落盘供节点读） ---
 if [ "${DRY}" = 0 ]; then
-  command -v gh >/dev/null || { echo "需要 gh CLI" >&2; exit 2; }
+  # ADR-007：github 后端仍需 gh；codeup 后端由 forge 自持凭据
+  if [ "$("${FORGE}" probe 2>/dev/null || true)" != codeup ]; then
+    command -v gh >/dev/null || { echo "需要 gh CLI" >&2; exit 2; }
+  fi
   mkdir -p "${DIR}"
-  gh issue view "${ISSUE}" --json number,title,body,comments > "${DIR}/issue.json" 2>/dev/null \
+  "${FORGE}" issue view "${ISSUE}" --json number,title,body,comments > "${DIR}/issue.json" 2>/dev/null \
     || { echo "issue #${ISSUE} 不存在或不可读" >&2; exit 2; }
   # fail-closed：rc=0 但输出为空/非 JSON 的 gh（网络截断、代理 stub 等）不可信——
   # 空数据流入 triage 会产出"空 issue 拒绝"+毒回执（2026-08-23 实证；彼时
@@ -304,7 +314,7 @@ if [ "${DRY}" = 0 ]; then
       # NUL 分隔读入数组（bash 3.2 无 mapfile）：文件名含空白/通配符不拆分
       # （etf-radar#70 审查）；classify 失败降级 no-diff，trap 不因分类器死
       while IFS= read -r -d '' f; do files+=("$f"); done \
-        < <(git -C "${REPO}" diff --name-only -z main..."${BRANCH}" 2>/dev/null || true)
+        < <(git -C "${REPO}" diff --name-only -z ${BASE_BRANCH}..."${BRANCH}" 2>/dev/null || true)
       [ "${#files[@]}" -eq 0 ] && while IFS= read -r -d '' f; do files+=("$f"); done \
         < <(git -C "${REPO}" diff --name-only -z HEAD~1 2>/dev/null || true)
       if [ "${#files[@]}" -gt 0 ]; then
@@ -335,7 +345,7 @@ if [ "${DRY}" = 0 ]; then
   #   或作为人工债务可见。lease_cleanup 收心跳+放租约，放清理链末尾。
   # D1: 本 trap 覆盖早期放锁 trap，故自带锁释放；派发链 MANUAL_LOCK=0 不动锁
   # shellcheck disable=SC2154  # rc 于本 trap 行内由 rc=$? 赋值，shellcheck 不解析 trap 字符串
-  trap 'rc=$?; set +e; write_ledger "${rc}"; if [ "${rc}" -ne 0 ] && [ "$(git -C "${REPO}" rev-list --count main.."${BRANCH}" 2>/dev/null || echo 0)" -gt 0 ]; then git -C "${REPO}" push --force --no-verify origin "${BRANCH}" >/dev/null 2>&1 && echo "  [salvage] 失败链产出已推送 origin/${BRANCH}" || echo "  [warn] 失败链产出推送失败，产出仅在本地分支 ${BRANCH}" >&2; fi; git -C "${REPO}" worktree remove --force "${WT}" >/dev/null 2>&1 || true; [ "${rc}" -ne 0 ] && { issue_label remove factory:triaging; issue_label remove factory:accepted; issue_label remove factory:in-progress; }; lease_cleanup; [ "${MANUAL_LOCK}" = 1 ] && rm -rf "${LOCKDIR:-}" 2>/dev/null' EXIT
+  trap 'rc=$?; set +e; write_ledger "${rc}"; if [ "${rc}" -ne 0 ] && [ "$(git -C "${REPO}" rev-list --count ${BASE_BRANCH}.."${BRANCH}" 2>/dev/null || echo 0)" -gt 0 ]; then git -C "${REPO}" push --force --no-verify origin "${BRANCH}" >/dev/null 2>&1 && echo "  [salvage] 失败链产出已推送 origin/${BRANCH}" || echo "  [warn] 失败链产出推送失败，产出仅在本地分支 ${BRANCH}" >&2; fi; git -C "${REPO}" worktree remove --force "${WT}" >/dev/null 2>&1 || true; [ "${rc}" -ne 0 ] && { issue_label remove factory:triaging; issue_label remove factory:accepted; issue_label remove factory:in-progress; }; lease_cleanup; [ "${MANUAL_LOCK}" = 1 ] && rm -rf "${LOCKDIR:-}" 2>/dev/null' EXIT
 else
   echo "[dry-run] gh issue view #${ISSUE} → ${DIR}/issue.json"
   echo "[dry-run] label: +factory:triaging（裁决后 → accepted|rejected）"
@@ -374,7 +384,7 @@ if [ "${DRY}" = 0 ]; then
   # 分支若被其他 worktree 持有则 add 失败(宁死勿抢, 防误伤人工现场)
   git -C "${REPO}" worktree remove --force "${WT}" >/dev/null 2>&1 || true
   git -C "${REPO}" worktree prune
-  git -C "${REPO}" worktree add -B "${BRANCH}" "${WT}" main >/dev/null
+  git -C "${REPO}" worktree add -B "${BRANCH}" "${WT}" "${BASE_BRANCH}" >/dev/null
 fi
 run_node prime
 run_node plan
@@ -409,7 +419,7 @@ done
 
 # --- 6. 确定性门：周界 + 测试（tests-output.txt 由脚本生成，不依赖节点自觉） ---
 if [ "${DRY}" = 0 ]; then
-  CHANGED="$(git -C "${WT}" diff --name-only main..."${BRANCH}" 2>/dev/null \
+  CHANGED="$(git -C "${WT}" diff --name-only ${BASE_BRANCH}..."${BRANCH}" 2>/dev/null \
     || git -C "${WT}" diff --name-only HEAD~1)"
   python3 "${REPO}/.factory/guard.py" --files ${CHANGED}
   if ! (cd "${WT}" && scripts/run_tests.sh --no-lock) > "${DIR}/tests-output.txt" 2>&1; then
@@ -456,7 +466,7 @@ if [ "${DRY}" = 0 ]; then
   git -C "${WT}" push -u origin "${BRANCH}" --no-verify
   # --repo/--head 显式指定：origin 的 fetch URL 是 codeup，gh 无法从
   # remote 解析 GitHub 仓库（dispatch5 实测 "could not resolve remote origin"）
-  gh pr create --repo "$REPO_SLUG" --head "$BRANCH" --fill \
+  "${FORGE}" pr create --repo "$REPO_SLUG" --head "$BRANCH" --fill \
     --label "factory:needs-review" \
     --body-file <(echo "Closes #${ISSUE}"; echo; echo "工厂链产物见 ${DIR}"; echo; echo "链: triage → prime → plan → implement ↔ review（ralph ≤${RALPH_MAX} 轮）→ guard → holdout")
   # PR 落地后 issue 侧转移：accepted → in-review（PR 状态接管 issue，§7）。

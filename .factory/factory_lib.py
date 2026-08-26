@@ -306,7 +306,7 @@ class ChainPool:
                 self.done.append((n, p.returncode))
         self._active = [(n, p) for n, p in self._active if p.poll() is None]
 
-    def spawn(self, issue: int) -> None:
+    def spawn(self, issue: "int | str") -> None:
         """占并发槽运行链。FACTORY_DISPATCHED=1：链知道锁已由父持有，
         S1 手动互斥锁免获取（防自锁）。日志尾追 artifacts/issue-N/dispatch.log，
         父目录先建——bash `>>` 对缺目录静默死链是既证缺陷形态。"""
@@ -445,6 +445,14 @@ def resolve_repo_slug(repo: Path) -> str:
     优先，origin push 兜底；443 端口形态兼容——双仓镜像布局实证）。"""
     if os.environ.get("GH_REPO"):
         return os.environ["GH_REPO"]
+    # ADR-007：codeup 后端时 slug 是占位（forge 忽略 --repo；配置在
+    # forge.json）。探测 fail-closed：探测失败按 github 处理（forge.json
+    # 缺失 = 上游形态）
+    probe = subprocess.run(
+        [sys.executable, str(repo / "forge"), "probe"],
+        capture_output=True, text=True)
+    if probe.stdout.strip() == "codeup":
+        return f"codeup:{repo.name}"
     urls: list[str] = []
     for remote in ("github", "origin"):
         r = subprocess.run(
@@ -458,12 +466,13 @@ _PRIORITY_RANK = {"priority:critical": 0, "priority:high": 1,
                   "priority:medium": 2, "priority:low": 3}
 
 
-def sort_by_priority(issues: list[dict]) -> list[int]:
+def sort_by_priority(issues: list[dict]) -> list:
     """accepted issue 号按 priority:* 排序（critical>high>medium>low；
-    无 priority 垫底，同 rank 按号升序）。"""
+    无 priority 垫底，同 rank 按号升序）。编号统一字符串（ADR-007：
+    GitHub 数字 / Codeup 序号 KFPT-16 同构）。"""
     rows = sorted(
         (min((_PRIORITY_RANK.get(l["name"], 9) for l in i["labels"]), default=9),
-         i["number"])
+         str(i["number"]))
         for i in issues)
     return [n for _, n in rows]
 
@@ -493,7 +502,9 @@ class _DispatchCfg:
 
 
 def _gh(cfg: _DispatchCfg, *args: str) -> tuple[int, str]:
-    r = subprocess.run(["gh", *args, "--repo", cfg.slug],
+    # ADR-007 平台适配层：统一走 forge（github 后端 exec gh，零行为变化；
+    # codeup 后端按 forge.json 配置寻址，--repo 为占位被忽略）
+    r = subprocess.run([str(cfg.factory / "forge"), *args, "--repo", cfg.slug],
                        capture_output=True, text=True)
     return r.returncode, r.stdout
 
@@ -516,7 +527,7 @@ def _gh_json(cfg: _DispatchCfg, *args: str) -> list:
         return []
 
 
-def _claim(cfg: _DispatchCfg, n: int) -> bool:
+def _claim(cfg: _DispatchCfg, n: "int | str") -> bool:
     """消费 accepted → in-progress（幂等重试 ×2，add+remove 单请求——
     GitHub 换标签非 CAS，见 README「S2 落地记录」1）。"""
     if cfg.dry:
@@ -532,7 +543,7 @@ def _claim(cfg: _DispatchCfg, n: int) -> bool:
     return False
 
 
-def _pr_link_issue(cfg: _DispatchCfg, pr_number: int) -> str:
+def _pr_link_issue(cfg: _DispatchCfg, pr_number: "int | str") -> str:
     """PR body → 关联 issue 号（Closes #N 解析权威在 state.py link）。"""
     rc, body = _gh(cfg, "pr", "view", str(pr_number), "--json", "body")
     if rc != 0:
@@ -543,7 +554,7 @@ def _pr_link_issue(cfg: _DispatchCfg, pr_number: int) -> str:
     return r.stdout.strip()
 
 
-def _issue_in_progress(cfg: _DispatchCfg, n: int) -> bool:
+def _issue_in_progress(cfg: _DispatchCfg, n: "int | str") -> bool:
     """D4（2026-08-21 双派实证）：gh label 过滤是「含有」非「仅有」，
     accepted+in-progress 双标签条目仍在队列，必须显式跳过在跑的。"""
     rc, out = _gh(cfg, "issue", "view", str(n), "--json", "labels",
@@ -602,14 +613,14 @@ def dispatch_round(cfg: _DispatchCfg) -> int:
         if not n:
             print(f"  PR #{p} 无关联 issue（body 缺 Closes #N），跳过", file=sys.stderr)
             continue
-        if _issue_in_progress(cfg, int(n)):
+        if _issue_in_progress(cfg, n):
             print(f"  issue #{n} 已 in-progress，跳过")
             continue
         cfg.say(f"PR #{p} → issue #{n} 重派（remove needs-fix 保计数活性）")
         if not cfg.dry:
             _gh(cfg, "pr", "edit", str(p), "--remove-label", "factory:needs-fix")
-        if _claim(cfg, int(n)):
-            cfg.pool.spawn(int(n))
+        if _claim(cfg, n):
+            cfg.pool.spawn(str(n))
 
     print(f"-- accepted 队列（priority 排序，并发 ≤{cfg.max_parallel}） --")
     for n in sort_by_priority(_gh_json(

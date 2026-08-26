@@ -84,9 +84,16 @@ def self_check() -> None:
 
 
 def normalize(path: str) -> str:
-    """规范化 diff 路径：去 ./ 前缀、反斜杠转正斜杠、丢弃删除标记。"""
-    p = path.strip().lstrip("./")
-    return p.replace("\\", "/")
+    """规范化 diff 路径：去 ./ 前缀、反斜杠转正斜杠。
+
+    只剥字面 "./" 两字符前缀——lstrip("./") 会连剥所有前导点/斜杠，
+    把 .factory/forge 变成 factory/forge，点前缀周界（.factory/、
+    .github/、.gitignore）整体失效（2026-08-25 ADR-007 移植实测；
+    上游 mutations 锚点无点文件故未暴露）。"""
+    p = path.strip().replace("\\", "/")
+    if p.startswith("./"):
+        p = p[2:]
+    return p
 
 
 def violates(path: str) -> str | None:

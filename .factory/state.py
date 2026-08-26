@@ -64,9 +64,10 @@ def _needs_fix_rounds(events):
 
 
 def _linked_issue(pr):
-    """链约定：PR body 含 'Closes #N'。"""
-    m = re.search(r"[Cc]loses #(\d+)", (pr or {}).get("body") or "")
-    return int(m.group(1)) if m else None
+    """链约定：PR body 含 'Closes #N'。N 为 GitHub 数字或 Codeup 序号
+    （KFPT-16，ADR-007）——统一按字符串处理。"""
+    m = re.search(r"[Cc]loses #([\w][\w-]*)", (pr or {}).get("body") or "")
+    return m.group(1) if m else None
 
 
 def plan_phase(issue, pr, events, current_pr_labels=None):

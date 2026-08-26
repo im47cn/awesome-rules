@@ -25,6 +25,7 @@ REPO="__REPO__"
 WT="__WT__"
 BRANCH="factory/issue-99"
 ISSUE="99"
+BASE_BRANCH=main
 MANUAL_LOCK=1
 LOCKDIR="__LOCKDIR__"
 CALLS="__CALLS__"
