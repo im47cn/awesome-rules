@@ -1,5 +1,5 @@
 {
-  "description": ".factory 工具链分发清单。awesome-rules 是唯一上游真相源；下游仓库（etf-radar 等）用 sync-from-upstream.sh 按本清单拉取，替代手工拷贝（README 移植四步的持续维护部分）。分类语义——full: 零本地化，blob 可直接覆盖（漂移=门禁失败）；local: 含仓特定区（同步只报告不覆盖，漂移经 feedback-upstream 反哺管线收敛）；skip: 仓特定或运行时产物，永不跨仓。M4 后（guard.py/factory_lib.py 周界与判据措辞数据化到 factory-local.json）local 面仅剩下游视角命名与测试布局。",
+  "description": ".factory 工具链分发清单。awesome-rules 是唯一上游真相源；下游仓库（etf-radar 等）用 sync-from-upstream.sh 按本清单拉取，替代手工拷贝（README 移植四步的持续维护部分）。分类语义——full: 零本地化，blob 可直接覆盖（漂移=门禁失败）；local: 含仓特定区（同步只报告不覆盖，漂移经 feedback-upstream 反哺管线收敛）；skip: 仓特定或运行时产物，永不跨仓。M4 后（guard.py/factory_lib.py 周界与判据措辞数据化到 factory-local.json）local 面仅剩下游视角命名与测试布局。 清单修正（2026-08-26）：sync-from-upstream.sh 由 skip 移 full——它零本地化（锚点优先级修复无法经 sync 自身到达下游，gtsp-wop-gateway 迁移实测鸡生蛋）。",
   "full": [
     "cron-dispatch.sh",
     "dispatch.sh",
@@ -15,7 +15,8 @@
     "guard.py",
     "factory_lib.py",
     "upstream-sync-check.sh",
-    "hosting.py"
+    "hosting.py",
+    "sync-from-upstream.sh"
   ],
   "local": {
     "feedback-upstream.sh": "UPSTREAM_REPO/BRANCH 前缀/PR 文案从下游视角命名，每仓指向自己的上游；上游这份是模板真相源",
@@ -33,8 +34,7 @@
     "worktrees/",
     "feedback-log.jsonl",
     "upstream-lock.json",
-    "DISTRIBUTION.json",
-    "sync-from-upstream.sh"
+    "DISTRIBUTION.json"
   ],
   "anchor_policy": "下游 .factory/upstream-lock.json 记录上次同步的上游 commit（M2 起含 upstream 路径字段）；--check 对比该锚点与上游 HEAD 的 full 文件 blob，漂移即提醒（追平或反哺二选一），对齐 scripts/plugin-lock.json 的 blob 锁定模式"
 }
