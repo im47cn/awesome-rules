@@ -58,9 +58,11 @@ def test_validate_candidate_protects_subsection_contract():
     """进化候选重写掉 ### 子节锚点指引 → 拒绝（防退化回二级标题堆叠）。"""
     check = V.validate_candidate(baseline_len=2000)
     good = ('"no_signal"' in '') or 'x "no_signal" "lessons" append_under append_end '
-    base = 'k: "no_signal" "lessons" append_under append_end evidence'
+    base = 'k: "no_signal" "lessons" append_under append_end evidence "knowledge_type"'
     assert check(base + " heading: ##/### 逐字选取") is True
     assert check(base + " heading: ## 级标题") is False        # 丢子节契约 → 拒绝
+    assert check('k: "no_signal" "lessons" append_under append_end "knowledge_type" '
+                 "evidence heading: ## 级标题") is False       # 丢 knowledge_type 契约 → 拒绝（顺序无关）
 
 
 def test_build_dataset_reference_carries_heading_and_evidence(tmp_path, monkeypatch):

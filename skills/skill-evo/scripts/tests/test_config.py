@@ -1,5 +1,5 @@
 """evo_config 单测：默认值 / 极简 toml 解析 / scope 判定。"""
-import os
+import re
 from pathlib import Path
 
 import evo_config as C
@@ -57,3 +57,23 @@ def test_base_paths(tmp_path):
     paths = C.base_paths(cfg)
     assert paths["pending"] == tmp_path / "ar" / "proposals" / "pending"
     assert paths["state"].name == "state.json"
+
+
+def test_idempotent_threshold_default_and_override(tmp_path):
+    """idempotent_threshold：默认 0.8（float），toml 可覆盖。"""
+    assert C.DEFAULTS["idempotent_threshold"] == 0.8
+    assert C.load_config(str(tmp_path / "absent.toml"))["idempotent_threshold"] == 0.8
+    f = tmp_path / "config.toml"
+    f.write_text("idempotent_threshold = 0.9\n", encoding="utf-8")
+    assert C.load_config(str(f))["idempotent_threshold"] == 0.9
+
+
+def test_config_example_keys_match_defaults():
+    """config.example.toml ↔ DEFAULTS 键集合一致（任一端漂移即红）。"""
+    example = Path(C.__file__).resolve().parents[1] / "config.example.toml"
+    keys = set()
+    for ln in example.read_text(encoding="utf-8").splitlines():
+        m = re.match(r"^([A-Za-z_]\w*)\s*=", ln.split("#", 1)[0])
+        if m:
+            keys.add(m.group(1))
+    assert keys == set(C.DEFAULTS)

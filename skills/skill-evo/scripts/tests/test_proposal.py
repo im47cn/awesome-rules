@@ -217,6 +217,106 @@ def test_apply_verbatim_dup_warns(tmp_path):
         PR.apply_proposal(make_proposal(tmp_path), repo)
 
 
+def test_check_idempotent_boundaries():
+    """边界钉死：>= 含等、> 实际比率即失、无关内容 None、长中文段落不抖动。"""
+    clause = "禁止使用 select 星号，查询必须显式列出全部字段名，避免列序漂移"
+    content = f"# 标题\n\n引言段落。\n\n- {clause}\n\n## 其他\n\n- 其他条款\n"
+    variant = clause.replace("全部", "所有")
+    hit = PR.check_idempotent(variant, content, 0.8)
+    assert hit == (3, hit[1]) and hit[1] > 0.85        # 命中第三段（1-based 原序）
+    r = hit[1]
+    assert PR.check_idempotent(variant, content, r)[1] == r      # 阈值=实际比率 → 命中（>= 含等）
+    assert PR.check_idempotent(variant, content, r + 0.01) is None
+    assert PR.check_idempotent("推荐使用参数化查询并绑定变量", content, 0.8) is None
+    # autojunk 回归：200+ 字中文段落换皮变体——autojunk=True 时比率坍缩（实测 0.07）
+    long_para = ("令牌探测顺序应从环境变量开始逐级回退到本地配置文件，"
+                 "并记录每次探测的结果与时间戳供后续审计复核使用。") * 4
+    long_variant = long_para.replace("逐级回退", "依次回退").replace("后续审计", "事后审计")
+    assert PR.check_idempotent(long_variant, f"# 标题\n\n{long_para}\n", 0.8)[1] > 0.9
+
+
+def test_apply_semantic_dup_requires_force(tmp_path):
+    """new_text 与既有段落语义相似（换皮重提）→ 护栏拦截，--force 越过。"""
+    repo = make_repo(tmp_path)
+    spec = repo / "steering" / "demo-spec.md"
+    para = "禁止使用 select 星号，查询必须显式列出全部字段名，避免列序漂移"
+    spec.write_text(spec.read_text(encoding="utf-8") + f"\n- {para}\n", encoding="utf-8")
+    variant = para.replace("全部", "所有")
+    p = make_proposal(tmp_path, lessons=[make_lesson(change=PR.Change(
+        action="append_end", new_text=f"- {variant}"))])
+    with pytest.raises(PR.ApplyError, match="语义重复") as ei:
+        PR.apply_proposal(p, repo)
+    assert "0.9" in str(ei.value)                      # 相似度数值进拦截消息
+    PR.apply_proposal(p, repo, force=True)             # force 后通过
+    assert variant in spec.read_text(encoding="utf-8")
+
+
+def test_apply_distinct_text_passes(tmp_path):
+    """全新条款与既有段落无相似 → 无任何 guard 直接应用（防过度拦截负例）。"""
+    repo = make_repo(tmp_path)
+    p = make_proposal(tmp_path, lessons=[make_lesson(change=PR.Change(
+        action="append_end", new_text="- 推荐使用参数化查询并绑定变量避免拼接"))])
+    assert len(PR.apply_proposal(p, repo)) == 1
+    assert "参数化查询" in (repo / "steering" / "demo-spec.md").read_text(encoding="utf-8")
+
+
+_ALI_TOKEN_PARA = ("- 令牌探测顺序：优先检查环境变量 `YUNXIAO_ACCESS_TOKEN`（用户可能在其他终端窗口 export，"
+                   "非交互 shell 中不可见），再查 `~/.yunxiao_token`、`~/.aliyun/` 等本地配置；"
+                   "历史会话的「无令牌」结论不可复用，每次操作前须重新确认。")
+"""实证样本（issue #63）：alibabacloud-devops SKILL.md L13 令牌探测段落，冻结为常量防内容演化脆断。"""
+
+
+def test_apply_real_regress_alibabacloud_dup(tmp_path):
+    """实证回归（issue #63）：同段落 ~90% 换皮变体重提 → 被幂等检查拦截。"""
+    repo = make_repo(tmp_path)
+    ali = repo / "skills" / "alibabacloud-devops" / "SKILL.md"
+    ali.parent.mkdir(parents=True)
+    ali.write_text(f"# Alibaba DevOps\n\n## 前置：访问令牌\n\n{_ALI_TOKEN_PARA}\n",
+                   encoding="utf-8")
+    variant = _ALI_TOKEN_PARA.replace("优先检查", "首先检查").replace("重新确认", "再次确认")
+    p = make_proposal(tmp_path, lessons=[make_lesson(
+        target_file="skills/alibabacloud-devops/SKILL.md",
+        change=PR.Change(action="append_end", new_text=variant))])
+    with pytest.raises(PR.ApplyError, match="语义重复"):
+        PR.apply_proposal(p, repo)
+
+
+def test_knowledge_type_roundtrip(tmp_path):
+    """knowledge_type：write→load 保真；旧式 JSON 无该键 → 默认 pattern。"""
+    p = make_proposal(tmp_path, lessons=[make_lesson(knowledge_type="instance")])
+    loaded = PR.load_proposal(PR.write_proposal(p, tmp_path / "pending"))
+    assert loaded.lessons[0].knowledge_type == "instance"
+    legacy = tmp_path / "legacy.md"
+    legacy.write_text(
+        "# 旧式提案\n\n```json\n" + json.dumps({"lessons": [{
+            "type": "success", "evidence": "e", "target_file": "steering/demo-spec.md",
+            "confidence": "High", "reason": "r",
+            "change": {"action": "append_end", "new_text": "- 旧式条款"}}]},
+            ensure_ascii=False) + "\n```\n", encoding="utf-8")
+    assert PR.load_proposal(legacy).lessons[0].knowledge_type == "pattern"
+
+
+def test_lesson_id_excludes_knowledge_type():
+    """不变量：knowledge_type 不进哈希——归档索引/supersedes 链/GEPA 标注依赖 ID 稳定。"""
+    a = make_lesson(knowledge_type="pattern")
+    b = make_lesson(knowledge_type="instance")
+    assert PR.derive_lesson_id(a) == PR.derive_lesson_id(b)
+
+
+def test_apply_instance_guarded(tmp_path):
+    """instance 类知识 → 护栏拦截（消息指向代码/ADR），--force 越过。"""
+    repo = make_repo(tmp_path)
+    p = make_proposal(tmp_path, lessons=[make_lesson(
+        knowledge_type="instance",
+        change=PR.Change(action="append_end", new_text="- 云效 fieldId 101586 是选项型字段"))])
+    with pytest.raises(PR.ApplyError, match="instance") as ei:
+        PR.apply_proposal(p, repo)
+    msg = str(ei.value)
+    assert "代码" in msg and "ADR" in msg
+    PR.apply_proposal(p, repo, force=True)             # force 后通过
+    assert "101586" in (repo / "steering" / "demo-spec.md").read_text(encoding="utf-8")
+
+
 def test_supersedes_validation(tmp_path):
     repo = make_repo(tmp_path)
     applied, archived = _archive(tmp_path, make_proposal(tmp_path))

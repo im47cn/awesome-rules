@@ -81,5 +81,6 @@ def test_build_summary_prompt_contains_sections(tmp_path):
     repo = _mk_repo(tmp_path)
     sess = make_session([Msg(role="user", text="用户要求 X")])
     prompt = P.build_summary_prompt(sess, cfg, repo)
-    for sec in ("# 会话信息", "# 目标资产清单", "# 会话记录", '"no_signal"', "append_under"):
+    for sec in ("# 会话信息", "# 目标资产清单", "# 会话记录", '"no_signal"', "append_under",
+                '"knowledge_type"', "instance", "ADR"):
         assert sec in prompt
