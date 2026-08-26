@@ -437,16 +437,65 @@ def gh_issue(cx, pos, flags, fields):
             body = open(flags["--body-file"][0]).read()
         elif "--body" in flags:
             body = flags["--body"][0]
-        # 云效 issue create 实测不可达（2026-08-26 探针矩阵，13 形态全拒）：
-        # 该 space 模板将「计划开始时间」设为必填，但字段标识符无法经公开
-        # API 发现（字段配置端点 404；gmtStart/startDate/startTime/
-        # planStartDate/中文键/customFieldValues 三格式全不识别；官方
-        # CreateWorkitem 示例不含此字段）；assignedTo 需 24-hex 完整用户
-        # id 且成员查询端点不可达。诚实边界：fail-fast 交人工在云效界面
-        # 创建（dispatch-liveness 在 codeup 仓走本地日志降级，已记录）。
-        die("codeup 后端暂不支持 issue create（该 space 模板必填字段无公开"
-            "标识符）——请在云效界面创建工作项，或调整模板去掉『计划开始"
-            "时间』必填后重试", EXIT_USAGE)
+        # 云效 create 完整解法（2026-08-26 破案，官方 swagger + 实测）：
+        # 1. create API 本体必填仅 assignedTo/spaceId/subject/workitemTypeId
+        #    （CreateWorkitemRequest）；「计划开始时间」等是模板层
+        #    SystemCustomField，须经 customFieldValues {"fieldId":"value"}
+        #    平面对象传（数组形态报 Invalid format）。
+        # 2. fieldId 从字段配置接口发现：
+        #    GET projects/{spaceId}/workitemTypes/{wit}/fields → required
+        #    字段的 id（实测 79/80=计划起止、101586=预计工时、priority）。
+        # 3. value 形态：date=ISO 日期；float=小数字符串（"0.5"，"1h" 拒）；
+        #    list=option **id**（非文本——"低"拒、"c18e89…" 过）。
+        # 4. assignedTo=24-hex 用户 id（工作项详情 assignedTo.id 形态；
+        #    成员查询端点不可达，取 forge.json codeup.assign_user_id）。
+        def _default_cfvs(cx):
+            """拉字段配置，为全部 required 的 SystemCustomField 构造默认值。"""
+            import datetime as _dt
+            today = _dt.date.today().isoformat()
+            due = (_dt.date.today() + _dt.timedelta(days=7)).isoformat()
+            fields = cx.call(
+                f"/oapi/v1/projex/organizations/{cx.org}/projects/{cx.space}"
+                f"/workitemTypes/{cx.wit}/fields")
+            out = {}
+            for f in (fields if isinstance(fields, list) else fields.get("result", [])):
+                if f.get("required") not in (True, "true", 1):
+                    continue
+                if f.get("type") == "NativeField":
+                    continue  # subject/assignedTo 走本体字段
+                fid, name, fmt = str(f["id"]), f["name"], f.get("format", "")
+                if "开始" in name:
+                    out[fid] = today
+                elif "完" in name or "结束" in name:
+                    out[fid] = due
+                elif fmt == "float":
+                    out[fid] = "0.5"
+                elif fmt == "date":
+                    out[fid] = today
+                elif f.get("options"):
+                    out[fid] = str(f["options"][-1]["id"])  # 末项=最低档
+            return out
+
+        assignee = cx.cfg.get("assign_user_id") or die(
+            "codeup issue create 需要 forge.json codeup.assign_user_id"
+            "（指派人必填；从工作项详情 assignedTo.id 取 24-hex 值）",
+            EXIT_USAGE)
+        payload = {"spaceId": cx.space, "subject": title,
+                   "workitemTypeId": cx.wit, "description": body,
+                   "assignedTo": assignee}
+        try:
+            payload["customFieldValues"] = _default_cfvs(cx)
+        except SystemExit:
+            raise
+        except Exception as e:
+            print(f"forge: [warn] 字段配置拉取失败，create 可能因模板必填"
+                  f"被拒: {e}", file=sys.stderr)
+        if "--label" in flags:
+            payload["labels"] = flags["--label"]
+        r = cx.call(cx.p_workitems(), "POST", payload)
+        print(json.dumps({"number": r.get("serialNumber") or r.get("id"),
+                          "url": r.get("detailUrl", "")}, ensure_ascii=False))
+        return EXIT_OK
     die(f"issue 子命令不支持: {sub}", EXIT_USAGE)
 
 

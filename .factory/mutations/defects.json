@@ -121,10 +121,19 @@
     },
     {
       "id": "G-05",
-      "description": "normalize 点前缀退化：lstrip(\"./\") 连剥前导点/斜杠，.factory/ 周界整体失效（ADR-007 移植实测；上游锚点无点文件故未暴露，2026-08-25 回溯补负例）",
+      "description": "normalize 点前缀退化实证（ADR-007 移植实测形态）：lstrip(\"./\") 连剥前导点/斜杠，.factory/guard.py 被剥成 factory/guard.py，周界失明放行——本条 expect_block=false 钉死该缺陷形态（失明门必放行）；若 guard 意外拦截（rc≠0）说明 normalize/前缀匹配被改宽，须人审。修复的正向 kill 证据由 G-06 承载",
       "target": ".factory/guard.py",
       "find": "    p = path.strip().replace(\"\\\\\", \"/\")\n    if p.startswith(\"./\"):\n        p = p[2:]",
       "replace": "    p = path.strip().lstrip(\"./\").replace(\"\\\\\", \"/\")",
+      "gate": "guard",
+      "expect_block": false
+    },
+    {
+      "id": "G-06",
+      "description": "点文件周界正向证据：.gitignore 属 PERIMETER（MISSION 周界清单末项），任何触碰必拦——修复 normalize 后前缀匹配对点前缀路径有效",
+      "target": ".gitignore",
+      "find": ".factory/locks/",
+      "replace": "#.factory/locks/",
       "gate": "guard",
       "expect_block": true
     }
