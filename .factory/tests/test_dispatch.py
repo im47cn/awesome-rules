@@ -16,16 +16,17 @@ import pytest
 from pathlib import Path
 
 import factory_lib
+import hosting as hosting_mod
 from factory_lib import (
     ChainPool,
     _DispatchCfg,
     acquire_dispatch_lock,
     approved_prs,
     dispatch_main,
-    extract_slug,
     release_dispatch_lock,
     sort_by_priority,
 )
+extract_slug = hosting_mod.extract_slug  # ADR-008：slug 解析已迁 hosting.py
 
 # 测试链：输出带纪元时间戳——并发峰值必须按真实时序测，按 issue 分组拼接
 # 日志会抹平交错（首版测试自身的缺陷，非被测代码缺陷）
@@ -171,29 +172,29 @@ class TestDispatchLock:
 class TestDispatchParsers:
     def test_sort_by_priority_full_ladder(self):
         issues = [
-            {"number": 7, "labels": [{"name": "factory:accepted"}]},
-            {"number": 2, "labels": [{"name": "priority:low"}]},
-            {"number": 5, "labels": [{"name": "priority:critical"}]},
-            {"number": 3, "labels": [{"name": "priority:medium"}, {"name": "x"}]},
-            {"number": 4, "labels": [{"name": "priority:high"}]},
+            {"number": 7, "labels": ["factory:accepted"]},
+            {"number": 2, "labels": ["priority:low"]},
+            {"number": 5, "labels": ["priority:critical"]},
+            {"number": 3, "labels": ["priority:medium", "x"]},
+            {"number": 4, "labels": ["priority:high"]},
         ]
-        assert sort_by_priority(issues) == ["5", "4", "3", "2", "7"]  # ADR-007 字符串编号
+        assert sort_by_priority(issues) == [5, 4, 3, 2, 7]
 
     def test_sort_by_priority_tie_by_number_and_empty_labels(self):
         issues = [
-            {"number": 9, "labels": [{"name": "priority:high"}]},
+            {"number": 9, "labels": ["priority:high"]},
             {"number": 8, "labels": []},
-            {"number": 6, "labels": [{"name": "priority:high"}]},
+            {"number": 6, "labels": ["priority:high"]},
         ]
-        assert sort_by_priority(issues) == ["6", "9", "8"]
+        assert sort_by_priority(issues) == [6, 9, 8]
 
     def test_approved_prs_filters_review_decision(self):
         prs = [
-            {"number": 1, "mergeable": "MERGEABLE", "reviewDecision": "APPROVED"},
-            {"number": 2, "mergeable": "MERGEABLE", "reviewDecision": "CHANGES_REQUESTED"},
-            {"number": 3, "mergeable": "CONFLICTING", "reviewDecision": "APPROVED"},
+            {"number": 1, "mergeable": True, "review": "approved"},
+            {"number": 2, "mergeable": True, "review": "changes_requested"},
+            {"number": 3, "mergeable": False, "review": "approved"},
         ]
-        assert approved_prs(prs) == [(1, "MERGEABLE"), (3, "CONFLICTING")]
+        assert approved_prs(prs) == [(1, True), (3, False)]
 
     def test_extract_slug_shapes(self):
         assert extract_slug(["git@github.com:owner/repo.git"]) == "owner/repo"
@@ -269,19 +270,18 @@ class TestChainPoolShutdown:
         assert ChainPool(tmp_path, 1).shutdown() == []
 
 
-class TestGhJson:
-    """_gh_json 失败可见（PR #53 审查⑤）：rc!=0 / 坏 JSON 都必须有 stderr
-    告警 + 空列表降级——静默空轮 = 整轮空转还报成功。"""
+class TestHostingJson:
+    """_hosting_json 失败可见（PR #53 审查⑤ 同源）：HostingError 必须有
+    stderr 告警 + 空列表降级——静默空轮 = 整轮空转还报成功。"""
 
-    def test_nonzero_rc_warns_and_skips(self, tmp_path, monkeypatch, capsys):
-        monkeypatch.setattr(factory_lib, "_gh", lambda cfg, *a: (1, ""))
-        cfg = _DispatchCfg(tmp_path, tmp_path, "o/r", True)
-        assert factory_lib._gh_json(cfg, "pr", "list") == []
+    def test_hosting_error_warns_and_skips(self, tmp_path, monkeypatch, capsys):
+        def boom():
+            raise hosting_mod.HostingError("pr list 失败: HTTP 502")
+        cfg = _DispatchCfg(tmp_path, tmp_path, None, True)
+        assert factory_lib._hosting_json(cfg, "pr list", boom) == []
         err = capsys.readouterr().err
-        assert "rc=1" in err and "跳过该批" in err
+        assert "pr list" in err and "跳过该批" in err
 
-    def test_bad_json_warns_and_skips(self, tmp_path, monkeypatch, capsys):
-        monkeypatch.setattr(factory_lib, "_gh", lambda cfg, *a: (0, "not-json"))
-        cfg = _DispatchCfg(tmp_path, tmp_path, "o/r", True)
-        assert factory_lib._gh_json(cfg, "pr", "list") == []
-        assert "输出异常" in capsys.readouterr().err
+    def test_ok_passthrough(self, tmp_path):
+        cfg = _DispatchCfg(tmp_path, tmp_path, None, True)
+        assert factory_lib._hosting_json(cfg, "x", lambda: [1, 2]) == [1, 2]

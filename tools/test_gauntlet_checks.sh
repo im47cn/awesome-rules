@@ -586,6 +586,48 @@ else
     bad "NC11e 缺面时期望 rc=0: $(cat "$TMP/out11e")"
 fi
 
+
+# ── NC12 hosting-exit 负控制：出口收口两规则都会拦，行文不误报 ──────────
+# 夹具 = 临时 git 仓（tracked 面原则）；bad 形态含命令位 gh 直调 + 收口外
+# ${HOST} issue 写，ok 形态含注释行文 / issue 创建 / PR 侧写（均合法）。
+NC12="$TMP/nc12"; mkdir -p "$NC12/.factory"
+git init -q "$NC12"
+cat >"$NC12/.factory/evil.sh" <<'EOF'
+#!/usr/bin/env bash
+gh issue edit 9 --add-label factory:accepted
+gh pr list --state open
+out="$(gh api repos/o/r/issues/9/events)"
+${HOST} issue comment 9 --body-file f
+${HOST} issue set-labels 9 --add factory:triaging
+EOF
+git -C "$NC12" add .factory/evil.sh
+if "$PY" tools/check_hosting_exit.py "$NC12" >"$TMP/out12" 2>&1; then
+    _rc12=0
+else
+    _rc12=$?
+fi
+if [ "$_rc12" -eq 1 ] && grep -q 'R1' "$TMP/out12" && grep -q 'R2' "$TMP/out12"; then
+    ok "NC12 hosting-exit 拦 R1（gh 直调）+R2（issue 写绕收口）"
+else
+    bad "NC12 期望 rc=1+R1+R2, 实际 rc=${_rc12}, 输出: $(cat "$TMP/out12")"
+fi
+
+NC12B="$TMP/nc12b"; mkdir -p "$NC12B/.factory"
+git init -q "$NC12B"
+cat >"$NC12B/.factory/good.sh" <<'EOF'
+#!/usr/bin/env bash
+# gh label 过滤是「含有」非「仅有」（行文，不在命令位）
+echo "报错文案: hosting issue comment 失败（行文，非调用形态）"
+${HOST} issue create --title t --body-file f
+${HOST} pr comment 7 --body ok
+${HOST} pr set-labels 7 --add factory:validated
+EOF
+git -C "$NC12B" add .factory/good.sh
+if "$PY" tools/check_hosting_exit.py "$NC12B" >"$TMP/out12b" 2>&1; then
+    ok "NC12b 行文/创建/PR 侧写不误报（收口边界 = issue 评论与标签写）"
+else
+    bad "NC12b 期望 rc=0, 实际输出: $(cat "$TMP/out12b")"
+fi
 # ── 汇总 ───────────────────────────────────────────────────────────────
 if [ "$fails" -gt 0 ]; then
     echo "checker-self-test: $fails 项失败"

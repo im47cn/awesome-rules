@@ -253,9 +253,12 @@ PR_BODY="$FB_DIR/pr-body.md"
   echo
   echo "适配说明: 见 ARTIFACT；上游门禁 run_tests.sh --no-lock 绿。"
 } > "$PR_BODY"
-PR_URL="$(gh pr create --repo "$UPSTREAM_REPO" --head "$BRANCH" \
+PR_URL="$(FACTORY_HOSTING=github python3 "${REPO}/.factory/hosting.py" pr create \
+  --repo "$UPSTREAM_REPO" --head "$BRANCH" \
   --title "factory: 反哺 etf-radar 工厂改进（${N_TOTAL} commits）" \
-  --body-file "$PR_BODY")" || die "gh pr create 失败（分支已推送: ${PUSH_URL} ${BRANCH}）"
+  --body-file "$PR_BODY" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url") or "")')" \
+  || die "hosting pr create 失败（分支已推送: ${PUSH_URL} ${BRANCH}）"
 say "✓ 上游 PR: $PR_URL"
 # PR 落定后立即删本地裸分支（远端 PR 分支不受影响）：上游 bare 仓本地分支
 # 不随 PR 合并自动消失，feedback-upstream 又只 push 不清理——攒下的死引用

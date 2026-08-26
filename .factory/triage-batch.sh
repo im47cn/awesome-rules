@@ -15,25 +15,10 @@ set -euo pipefail
 
 REPO="$(git rev-parse --show-toplevel)"
 FACTORY="$REPO/.factory"
-# ADR-007 平台适配：codeup 后端时 slug 为占位（forge 忽略 --repo）
-FORGE="${FACTORY}/forge"
-if [ "$("${FORGE}" probe 2>/dev/null || true)" = codeup ]; then
-  REPO_SLUG="${GH_REPO:-codeup:$(basename "${REPO}")}"
-else
-REPO_SLUG="${GH_REPO:-$(
-  # 对齐 dispatch.sh：github remote 名优先，origin push 兜底；443 端口形态兼容
-  { git -C "$REPO" remote get-url --all --push github 2>/dev/null
-    git -C "$REPO" remote get-url --all --push origin 2>/dev/null
-  # grep 去 -m1（消费全量防 SIGPIPE，issue #30）；sed 1!d 语义同旧形态
-  } | grep 'github\.com' | sed -E '1!d; s#^.*github\.com(:[0-9]+)?[/:]##; s#\.git$##'
-)}"
-fi
-[ -n "$REPO_SLUG" ] || { echo "无法确定 GitHub 仓库 slug" >&2; exit 2; }
+HOST="python3 ${FACTORY}/hosting.py"
 MAX_TRIAGE="${MAX_TRIAGE:-5}"
-if [ "$("${FORGE}" probe 2>/dev/null || true)" != codeup ]; then
-  command -v gh >/dev/null || { echo "需要 gh CLI" >&2; exit 2; }
-fi
-# 链副作用共享库（契约：REPO/REPO_SLUG 已定义；ISSUE 为循环变量）
+${HOST} auth ok >/dev/null 2>&1 || { echo "Hosting platform unavailable (hosting auth)" >&2; exit 2; }
+# 链副作用共享库（契约：REPO/ISSUE 已定义；ADR-008 起 REPO_SLUG 不再需要）
 source "${FACTORY}/factory-lib.sh"
 # --- R4 成本熔断：批次是 LLM 成本入口之一（手动直跑路径此前无门，
 # 2026-08-24 收口）。透传 breaker 码：3=熔断 / 1=门故障 fail-closed，
@@ -42,12 +27,11 @@ if [ "${DRY:-0}" = 0 ]; then
   bash "${FACTORY}/breaker.sh" "${FACTORY}/locks"
 fi
 
-# 零 factory 标签的 open issue（json 一次取齐, python 过滤排序）。
-# gh 瞬断（2026-08-23 22:27 实证：connection reset → 空输出）时给出可读
-# 降级信息退出 rc=1，而非 json.load 裸 traceback——批次失败由上游容忍
-# （cron 下一 tick 重试），但错误形态必须可诊断。
-QUEUE="$("${FORGE}" issue list --repo "$REPO_SLUG" --state open --limit 100 \
-  --json number,labels,title,body,comments \
+# 零 factory 标签的 open issue（中立 JSON 一次取齐, python 过滤排序）。
+# 平台瞬断（2026-08-23 实证形态）时给出可读降级信息退出 rc=1，而非
+# json.load 裸 traceback——批次失败由上游容忍（cron 下一 tick 重试），
+# 但错误形态必须可诊断。
+QUEUE="$(${HOST} issue list --state open --limit 100 --comments 2>/dev/null \
   | python3 -c '
 import json, sys
 try:
@@ -55,19 +39,19 @@ try:
 except ValueError:
     issues = None
 if not isinstance(issues, list):
-    sys.stderr.write("triage 批次: gh issue list 输出非 JSON（gh 失败/网络瞬断），本轮跳过\n")
+    sys.stderr.write("triage 批次: hosting issue list 输出非 JSON（平台失败/网络瞬断），本轮跳过\n")
     sys.exit(1)
 for i in issues:
-    if not any(l["name"].startswith("factory:") for l in i["labels"]):
-        print(i["number"])')"
+    if not any(l.startswith("factory:") for l in i["labels"]):
+        print(i["number"])' )" || exit 1
 
 COUNT=0
 for ISSUE in $QUEUE; do
   COUNT=$((COUNT+1)); [ "$COUNT" -gt "$MAX_TRIAGE" ] && { echo "达每轮上限 $MAX_TRIAGE, 余量下轮"; break; }
   DIR="${FACTORY}/artifacts/issue-${ISSUE}"
   mkdir -p "$DIR"
-  if ! "${FORGE}" issue view "${ISSUE}" --repo "$REPO_SLUG" --json number,title,body,comments > "${DIR}/issue.json"; then
-    echo "    issue #${ISSUE} 取回失败（gh 失败/网络瞬断），跳过" >&2; continue
+  if ! ${HOST} issue view "${ISSUE}" > "${DIR}/issue.json"; then
+    echo "    issue #${ISSUE} 取回失败（平台失败/网络瞬断），跳过" >&2; continue
   fi
 
   mission="$(cat "${REPO}/MISSION.md")"
@@ -77,7 +61,7 @@ for ISSUE in $QUEUE; do
 import json, sys
 d = json.load(open(sys.argv[1]))
 cs = d.get("comments") or []
-out = "\n\n".join("[作者: %s]\n%s" % (c["author"]["login"], c["body"]) for c in cs[-3:])
+out = "\n\n".join("[作者: %s]\n%s" % (c.get("author") or "?", c["body"]) for c in cs[-3:])
 print(out if out else "（无评论）")
 PYC
 )"
@@ -105,7 +89,7 @@ ${cmts}
   fi
   VERDICT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["verdict"])' "${DIR}/triage.json")"
   if [ "$VERDICT" = accept ]; then
-    "${FORGE}" issue edit "${ISSUE}" --repo "$REPO_SLUG" --add-label factory:accepted >/dev/null
+    issue_label_swap "" "factory:accepted"   # 收口出口（ADR-008 层级契约）：与 reject 同一标签转移通道
     echo "    → accept（已入派发队列）"
   else
     # 落标 + 判据回执一次收口；落标失败仅告警不中断批次（下一 issue 继续）
