@@ -302,8 +302,8 @@ prompts 零宿主专名（gauntlet `factory-portability` 门机械化盯防）�
 **local**（ADR-009 后**已归零**——历史 local 面 guard.py/factory_lib.py/
 feedback-upstream.sh/tests/ 均数据化升 full，漂移的正道是
 `feedback-upstream.sh` 反哺后追平，不是静默分叉）；
-**skip**（仓特定/运行时产物：MISSION/factory-local.json/mutations/prompts
-模板锚等）。上游可为 bare 仓（经 git 对象库读）。
+**skip**（仓特定/运行时产物：MISSION/factory-local.json/mutations 等）。
+上游可为 bare 仓（经 git 对象库读）。
 
 漂移闭环：下游热修 → feedback-upstream 反哺 PR → 上游合并 → 下游
 `--apply` 追平 → `--check` 归零。双向都有机器检查，分叉不再靠人工记忆。

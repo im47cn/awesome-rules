@@ -72,6 +72,8 @@ def emit(kind, entry):
         r = subprocess.run(["git", "-C", up, "ls-tree", "-r", "--name-only",
                             sha, ".factory/" + entry],
                            capture_output=True, text=True)
+        if not r.stdout.strip():
+            sys.stderr.write("  [%s] %s: 目录在上游不存在（上游整目录已删？清单待退役甄别）\n" % (kind, entry))
         for line in r.stdout.splitlines():
             print("%s\t%s" % (kind, line[len(".factory/"):]))
     else:

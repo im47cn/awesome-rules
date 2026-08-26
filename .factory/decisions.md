@@ -211,3 +211,20 @@ reviewer 审出 3 BLOCKER + 4 MAJOR + 4 MINOR，处置：
   （纯函数层刻意不 import factory_lib；KeyError→非零=fail-closed 语义已达，
   记录不改）；feedback-upstream 在上游仓运行时的语义错位（f6835d15 下游
   SHA 不在上游对象库，main 预存，工具设计为下游运行）。
+
+### ADR-009 附记二 · 2026-08-27 · R2 复审收口
+
+复审判定 8✓/2部分,新发现 N1-N9,处置：
+- **N1(MAJOR)** upstream-lock.json 夹具运行时锚点(bad object)误入库 → 移除
+  (skip 面运行时产物,上游自身无上游)。
+- **N4** state.py 污染恢复丢执行位 → chmod +x(否则经 sync 的 chmod 语义
+  传播到全部下游)。
+- **N3** 编号体系:M9 只改 prompt 流程文字造成与回执消费链(receipt 正则
+  ^判据([abc])/guidance 键 a/b/c/夹具)割裂 → 回退字母并显式声明映射
+  (a/b/c ↔ MISSION 1/2/3,输出契约=字母)。教训:跨文件契约改动必须
+  全链同步,单点"对齐"制造新割裂。
+- **N2** README 三态描述与 DISTRIBUTION 同步(prompts 入 full 枚举)。
+- **N5/N6/N8** 陈旧注释、目录消失零告警、run.py 引号拒绝补齐。
+- **N7** ~user 形态误展开:fail-closed 兜底,配置约定 ~/ 形态,记录不改。
+- **N9** evidence-stamp.json 被跟踪 → mutation 重证后须提交 stamp,既有
+  设计(证据可审计),非缺陷。

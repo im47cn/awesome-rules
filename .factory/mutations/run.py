@@ -53,7 +53,10 @@ def _final_gate_words() -> list[str]:
     cfg_path = REPO_ROOT / ".factory" / "factory-local.json"
     try:
         cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
-        words = shlex.split(str(cfg["final_gate_cmd"]).strip())
+        raw = str(cfg["final_gate_cmd"]).strip()
+        if "'" in raw or '"' in raw:
+            raise ValueError("final_gate_cmd 禁含引号（与 bash 侧 read -ra 拆词一致性，R2-N8）")
+        words = shlex.split(raw)
         if not words:
             raise ValueError("final_gate_cmd 为空")
     except Exception as exc:
@@ -178,7 +181,7 @@ def run_gate(gate: str, target: str) -> int | None:
         timeout = GUARD_TIMEOUT
     else:
         # ADR-009：tests 门命令自 factory-local.json final_gate_cmd 拆词
-        #（FINAL_GATE 首词已解析为仓库根绝对路径；fail-closed 加载于模块常量段）。
+        #（词保持配置原样，cwd=REPO_ROOT 解析；fail-closed 加载于模块常量段）。
         cmd = ["bash", *FINAL_GATE]
         timeout = TESTS_TIMEOUT
     start = time.monotonic()
