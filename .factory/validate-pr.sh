@@ -58,7 +58,10 @@ fi
 
 # --- 2. 测试门 + 证据段（与 fix-issue 同构；产物落 PR 目录） ---
 if [ "${DRY}" = 0 ]; then
-  if ! (cd "${REPO}" && scripts/run_tests.sh --no-lock) > "${DIR}/tests-output.txt" 2>&1; then
+  # ADR-009 门命令数据化（与 fix-issue 同构）：fail-closed 加载失败即终止。
+  GATE_CMD="$(python3 "${REPO}/.factory/factory_lib.py" final-gate)"
+  read -r -a GATE_ARGS <<< "${GATE_CMD}"
+  if ! (cd "${REPO}" && "${GATE_ARGS[@]}") > "${DIR}/tests-output.txt" 2>&1; then
     fail tests "测试门失败（详见 ${DIR}/tests-output.txt）" 1
   fi
   for suite in $(python3 "${REPO}/.factory/factory_lib.py" suites "${CHANGED[@]}"); do
@@ -70,23 +73,27 @@ if [ "${DRY}" = 0 ]; then
 else
   echo "[dry-run] run_tests.sh → ${DIR}/tests-output.txt + 证据段"
 fi
-
-# --- 3. AI 评审（按触及面选配；PR 级独立进程，不共享 fix-issue 会话） ---
-SKILLS_ARG=""
 if [ "${DRY}" = 0 ]; then
-  # 命中即评审：skills/<name> 被触 → 对应守卫技能自审；任意 PR 加通用 review
-  for skill in api-guard ddl-guard arch-guard impact-guard contract-guard; do
+  # 命中即评审：守卫技能目录（ADR-009：选配面 = factory-local.json
+  # pr_review_skills，宿主技能清单不再硬编码于 full 面脚本）被触 →
+  # 对应守卫技能自审；任意 PR 加通用 review
+  SKILL_LIST="$(python3 "${REPO}/.factory/factory_lib.py" local-list pr_review_skills)"
+  for skill in ${SKILL_LIST}; do
     printf '%s\n' "${CHANGED[@]}" | grep -q "^skills/${skill}/" && SKILLS_ARG="${SKILLS_ARG}${skill} "
   done
 fi
 echo "==> AI 评审（守卫: ${SKILLS_ARG:-none}；通用 review 常驻）"
 if [ "${DRY}" = 1 ]; then
-  echo "    [dry-run] omp -p <prompts/pr-review.md + PR diff 内联> --no-session --max-time $(node_timeout pr-review)"
+  echo "    [dry-run] omp_node <prompts/pr-review.md + PR diff 内联> --no-session --max-time $(node_timeout pr-review)"
 else
+  # ADR-009 prompt 参数化：仓库参数注入（守卫技能面/final_gate），
+  # fail-closed 同 run_node。
   ${HOST} pr diff "${PR}" > "${DIR}/pr.diff"
   DIFF="$(cat "${DIR}/pr.diff")"
   TITLE="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["title"])' "${DIR}/pr.json")"
   prompt="$(cat "${REPO}/.factory/prompts/pr-review.md")
+
+$(python3 "${REPO}/.factory/factory_lib.py" repo-vars)
 
 ——PR #${PR}: ${TITLE}
 ——守卫技能: ${SKILLS_ARG:-无}
@@ -95,8 +102,7 @@ else
 ${DIFF}
 ——diff 结束——"
   t0=$(date +%s)
-  if ! (cd "${REPO}" && omp -p "${prompt}" --no-session --max-time "$(node_timeout pr-review)" < /dev/null) \
-      > "${DIR}/review.log" 2>&1; then
+  if ! omp_node "${REPO}" "${DIR}/review.log" "$(node_timeout pr-review)" -- "${prompt}"; then
     _node_metric pr-review "${t0}" "fail" >> "${DIR}/node-metrics.jsonl"
     fail review "AI 评审节点失败（详见 ${DIR}/review.log）" 1
   fi
@@ -110,7 +116,7 @@ fi
 # --- 4. holdout（物理隔离终审：PR 标题 + tests-output，正文不进） ---
 echo "==> holdout（物理隔离终审）"
 if [ "${DRY}" = 1 ]; then
-  echo "    [dry-run] omp -p <prompts/holdout.md + title/tests-output> --no-tools --max-time $(node_timeout holdout)"
+  echo "    [dry-run] omp_node <prompts/holdout.md + title/tests-output> --no-tools --max-time $(node_timeout holdout)"
 else
   TITLE="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["title"])' "${DIR}/pr.json")"
   OUT="$(cat "${DIR}/tests-output.txt")"
@@ -123,8 +129,7 @@ else
 ${OUT}
 ——tests-output.txt 结束——"
   t0=$(date +%s)
-  if ! (cd "${REPO}" && omp -p "${prompt}" --no-tools --no-session --max-time "$(node_timeout holdout)" < /dev/null) \
-      > "${DIR}/holdout.log" 2>&1; then
+  if ! omp_node "${REPO}" "${DIR}/holdout.log" "$(node_timeout holdout)" --no-tools -- "${prompt}"; then
     _node_metric holdout "${t0}" "fail" >> "${DIR}/node-metrics.jsonl"
     fail holdout "holdout 节点失败（详见 ${DIR}/holdout.log）" 1
   fi

@@ -18,6 +18,24 @@
 #    副作用（gauntlet lint-factory-hosting-exit 门机械化盯防）。
 source "${REPO}/.factory/factory-lease.sh"
 
+omp_node() { # omp_node <cwd> <log> <timeout> [omp-opts...] -- <prompt...>
+  # omp CLI 唯一执行点（ADR-009 引擎收口，设计 §4 runNode 的 bash 形态）：
+  # 链/批次/PR 门/反哺全部节点经此 spawn——换引擎（SDK 直连等）只改本函数。
+  # 契约：--no-session 恒加（物理级 fresh context，A1）；--max-time 必填；
+  # opts 透传（--no-tools / --config …）；prompt 为 "--" 之后的剩余参数整体。
+  # 返回 omp 进程退出码（调用方自持 metric/失败语义）。
+  local _cwd="$1" _log="$2" _tmo="$3"
+  shift 3
+  local -a _opts=()
+  while [ "${1:-}" != "--" ]; do
+    [ "$#" -gt 0 ] || { echo "[error] omp_node: 缺 -- 分隔符" >&2; return 2; }
+    _opts+=("$1"); shift
+  done
+  shift
+  (cd "${_cwd}" && omp -p "$*" --no-session ${_opts[@]+"${_opts[@]}"} \
+      --max-time "${_tmo}" < /dev/null) > "${_log}" 2>&1
+}
+
 
 issue_label_swap() { # issue_label_swap <"删,删"|空> <"加,加"> —— 单请求原子转移
   # 逐个 add/remove 会把状态机跳变拆成可失败的顺序依赖（半途断裂=双标签或裸奔）；

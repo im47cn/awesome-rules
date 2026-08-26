@@ -628,6 +628,64 @@ if "$PY" tools/check_hosting_exit.py "$NC12B" >"$TMP/out12b" 2>&1; then
 else
     bad "NC12b 期望 rc=0, 实际输出: $(cat "$TMP/out12b")"
 fi
+
+# ── NC13 factory-portability 负控制：P1/P2/P3 都会拦，中性形态不误报 ──
+# 夹具 = 临时 git 仓（含最小 DISTRIBUTION.json + prompts）；bad 形态三规则
+# 各一处（宿主专名 / omp 旁路 / 平铺 path hack），ok 形态全中性。
+NC13="$TMP/nc13"; mkdir -p "$NC13/.factory/prompts" "$NC13/.factory/db"
+git init -q "$NC13"
+cat >"$NC13/.factory/DISTRIBUTION.json" <<'EOF'
+{"full": ["chain.sh", "lib.py", "db/schema.sql"], "local": {}, "skip": []}
+EOF
+cat >"$NC13/.factory/chain.sh" <<'EOF'
+# 借鉴源仓#42 审查（中性考证：不命中）
+awesome-rules && steering/ x
+EOF
+cat >"$NC13/.factory/lib.py" <<'EOF'
+import json
+sys.path.insert(0, ".")
+EOF
+echo "db schema" >"$NC13/.factory/db/schema.sql"
+printf '使用阅读范围参数\n' >"$NC13/.factory/prompts/p.md"
+git -C "$NC13" add .factory
+if "$PY" tools/check_factory_portability.py "$NC13" >"$TMP/out13" 2>&1; then
+    bad "NC13 期望 rc=1（P1+P3 命中），实际放行"
+else
+    if grep -q 'P1 宿主专名' "$TMP/out13" && grep -q 'P3 path hack' "$TMP/out13"; then
+        ok "NC13 P1（宿主专名）+P3（平铺 hack）被拦"
+    else
+        bad "NC13 输出缺 P1/P3 报告: $(cat "$TMP/out13")"
+    fi
+fi
+# P2 引擎旁路：chain.sh 直调 omp
+cat >>"$NC13/.factory/chain.sh" <<'EOF'
+omp -p "x" --no-session
+EOF
+git -C "$NC13" add .factory
+if "$PY" tools/check_factory_portability.py "$NC13" >"$TMP/out13b" 2>&1; then
+    bad "NC13b 期望 rc=1（P2 命中），实际放行"
+else
+    grep -q 'P2 引擎旁路' "$TMP/out13b" \
+        || bad "NC13b 输出缺 P2: $(cat "$TMP/out13b")"
+fi
+NC13C="$TMP/nc13c"; mkdir -p "$NC13C/.factory/prompts" "$NC13C/.factory/db"
+echo "db schema" >"$NC13C/.factory/db/schema.sql"
+cp "$NC13/.factory/DISTRIBUTION.json" "$NC13C/.factory/"
+cat >"$NC13C/.factory/chain.sh" <<'EOF'
+source lib.sh
+omp_node . log 5m -- "prompt"
+EOF
+cat >"$NC13C/.factory/lib.py" <<'EOF'
+import json
+print(json.dumps({"ok": 1}))
+EOF
+printf '仓库参数注入\n' >"$NC13C/.factory/prompts/p.md"
+git -C "$NC13C" add .factory
+if "$PY" tools/check_factory_portability.py "$NC13C" >"$TMP/out13c" 2>&1; then
+    ok "NC13c 中性形态零误报（源仓#NN 考证 / omp_node / 无 hack）"
+else
+    bad "NC13c 期望 rc=0, 实际: $(cat "$TMP/out13c")"
+fi
 # ── 汇总 ───────────────────────────────────────────────────────────────
 if [ "$fails" -gt 0 ]; then
     echo "checker-self-test: $fails 项失败"

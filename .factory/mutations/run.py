@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import signal
 import subprocess
 import sys
@@ -39,9 +40,32 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 GUARD = REPO_ROOT / ".factory" / "guard.py"
-TESTS = REPO_ROOT / "scripts" / "run_tests.sh"
 
-# 门超时预算（run_tests.sh 自身无超时参数，此处兜底）。tests 门实测基线
+
+def _final_gate_words() -> list[str]:
+    """tests 门命令（ADR-009 数据化）：factory-local.json final_gate_cmd 拆词。
+
+    首词解析为仓库根相对绝对路径（配置是仓相对形态，如
+    "scripts/run_tests.sh --no-lock"）；fail-closed：配置缺失/缺键/空 →
+    RuntimeError（run.py 启动即炸，不产生无效证据）。
+    """
+    cfg_path = REPO_ROOT / ".factory" / "factory-local.json"
+    try:
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        words = shlex.split(str(cfg["final_gate_cmd"]).strip())
+        if not words:
+            raise ValueError("final_gate_cmd 为空")
+    except Exception as exc:
+        raise RuntimeError(f"factory-local.json final_gate_cmd 不可用（fail-closed）: {exc}") from exc
+    head = Path(words[0])
+    if not head.is_absolute():
+        head = REPO_ROOT / head
+    return [str(head), *words[1:]]
+
+
+FINAL_GATE = _final_gate_words()
+
+# 门超时预算（tests 门自身无超时参数，此处兜底）。tests 门实测基线
 # ~10s；600s ≈ 60 倍余量，超时即无效运行（judge 判 FAIL，不计击杀/放行）。
 GUARD_TIMEOUT = 300
 TESTS_TIMEOUT = 600
@@ -155,7 +179,9 @@ def run_gate(gate: str, target: str) -> int | None:
         cmd = [sys.executable, str(GUARD), "--files", target]
         timeout = GUARD_TIMEOUT
     else:
-        cmd = ["bash", str(TESTS), "--no-lock"]
+        # ADR-009：tests 门命令自 factory-local.json final_gate_cmd 拆词
+        #（FINAL_GATE 首词已解析为仓库根绝对路径；fail-closed 加载于模块常量段）。
+        cmd = ["bash", *FINAL_GATE]
         timeout = TESTS_TIMEOUT
     start = time.monotonic()
     # 安全审计落档（PR #33 Sourcery/opengrep dangerous-subprocess-use-audit）：

@@ -138,3 +138,47 @@
   托管适配层（零 LLM 不变）」；组件数 18→19（ADR-002 触发器 3 余量充足）；
   核心脚本自此禁直调 gh（doc-freshness R1 已盯 README 登记，新增写点必须走
   hosting 出口，租约围栏/factory-lib 收口不变量原样保留）。
+
+## ADR-009 · 2026-08-27 · 拆分前置：本地化全量数据化 + 引擎单点 + portability 门
+
+**背景**：工厂拆独立仓库的评估结论（S2 会话）——现在不拆（实例 2 < 3 阈值，
+设计 §2.2 重估条件），但先消灭全部结构性耦合，使拆分当天只剩 git mv + 锚点锁。
+审计发现四类残留：门命令三处硬编码（fix-issue/validate-pr/mutations）、
+prompts 七文件含宿主专名、DISTRIBUTION 缺件（omp-isolated.yml、db/schema.sql
+不在任何面）、local 面三项未清零（feedback-upstream/tests/test_state）、
+omp CLI 七处直调无单点。
+
+**决策**：
+1. **门命令数据化**：`factory-local.json` 增 `final_gate_cmd`；
+   `factory_lib.py final-gate` 子命令（fail-closed）为唯一取值口，
+   fix-issue/validate-pr `read -ra` 拆词执行，mutations `FINAL_GATE` 拆词
+   （首词解析为仓库根绝对路径）。
+2. **prompts 参数化**：增 `repo_identity/reading_scopes/review_basis/
+   pr_review_skills`；`repo-vars` 子命令渲染「仓库参数」段，由 run_node /
+   pr-review / feedback-adapt 拼装时注入；triage/holdout 物理隔离不注入。
+   prompts 正文零宿主专名（triage 判据 a 改为指向内联 MISSION 原文，
+   真相源唯一化是顺带修正）。
+3. **上游指针数据化**：`upstream_repo/upstream_path/feedback_branch_prefix`；
+   feedback-upstream.sh 默认值改读配置（env 显式覆盖保留，镜像拓扑逃生口），
+   PR 文案/分支前缀用 `SELF_ID`/`FB_PREFIX`，升 full。
+4. **引擎单点**：`factory-lib.sh omp_node()`（omp CLI 唯一执行点，设计 §4
+   runNode 的 bash 形态）；七处直调全部收口，dry-run 文案同步。
+5. **分发补缺与归零**：full += omp-isolated.yml、db/schema.sql、
+   feedback-upstream.sh、tests/（用例随源走；tests 内仓名是夹具样例数据，
+   合法）；local = {}。test_state.py 随源入 tests/（去自带 path hack）。
+6. **防回归门**：gauntlet 新层 `factory-portability`（checker
+   tools/check_factory_portability.py，负控制 NC13）三规则——P1 full 面+
+   prompts 零宿主专名（awesome-rules/im47cn/gtsp-/fss-/etf-radar/steering//
+   scripts/run_tests；刻意不含 skills/——双布局识别是通用机制词）；P2
+   `omp -p` 仅 factory-lib.sh；P3 full 面 .py 禁 sys.path.insert（tests/
+   豁免：conftest 注入与跨目录被测 import 属测试布局语义）。
+   `factory-local-validity` 层扩 final-gate/repo-vars 渲染断言。
+7. **历史考证中性化**：注释中 etf-radar#NN → 源仓#NN（编号保留可溯）、
+   hosting 实测项目名泛化；feedback.py record 上游 repo 改读配置。
+
+**验收**：local 面归零；`factory-portability` P1/P2/P3 干净；omp 单点；
+factory-local.json 变更后 mutations 重证全绿（指纹绑定强制）。
+
+**边界**：tests/ 内夹具专名（slug 解析、作者名）不属 P1 管辖；M2 同步流
+设计未动；拆分本身（独立仓 + 版本 tag + guard.self_check 跨仓核对）留待
+第 3 个消费者出现，按设计 §2.2 纪律执行。

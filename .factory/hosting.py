@@ -641,7 +641,7 @@ class CodeupAdapter:
         return out
 
     def issue_create(self, title, body, label=None, repo=None):
-        # forge 实装迁移（PR #62 实测破案,gtsp-wop-gateway 真实创建验证）：
+        # forge 实装迁移（PR #62 实测破案,真实 Codeup 项目创建验证）：
         # create 本体必填仅 4 项;「计划开始时间」等模板必填是
         # SystemCustomField,须以 customFieldValues {"fieldId":"value"}
         # 平面对象传（数组形态 Invalid format;value 形态见 _default_cfvs）。
@@ -680,7 +680,7 @@ class CodeupAdapter:
         d = d or {}
         wid = d.get("id")
         # 【live 2026-08-26】create 响应只含 24-hex id，无 serialNumber
-        # （gtsp-wop-gateway KFPT-21 实测）；人类可读编号（KFPT-N）须回查
+        # （实测项目 KFPT-21）；人类可读编号（KFPT-N）须回查
         # 详情。回查失败降级 id（view/编辑两种键都认，但人在界面引用
         # 序号——宁可多一次 GET）
         number = d.get("serialNumber") or wid
@@ -715,7 +715,7 @@ class CodeupAdapter:
         return out
 
     def pr_list(self, state="open", label=None, limit=100, repo=None):
-        # 【live 2026-08-26 gtsp-wop-gateway】集合是组织级端点（无
+        # 【live 2026-08-26 实测项目】集合是组织级端点（无
         # /repositories 段；仓库级集合 404——ADR-007 forge 期同发现），
         # GET + URL query 过滤 projectIds（POST/body 形态被拒），分页
         # perPage；state 服务端过滤 opened。label 过滤客户端做（labelIds
@@ -786,7 +786,7 @@ class CodeupAdapter:
         return True
 
     def pr_close(self, p, repo=None):
-        # 【live 2026-08-26】唯一生效形态 = POST /close 空 body（gtsp-wop-gateway
+        # 【live 2026-08-26】唯一生效形态 = POST /close 空 body（实测项目
         # MR#7 实测：POST {} → 200 且状态转 CLOSED）。陷阱：PUT 详情端点带
         # {"state":"closed"} 返回 {"result":true} 但状态不变——假阳性，勿用。
         self._req("POST", f"{self._base()}/changeRequests/{p}/close", body={})
@@ -818,7 +818,7 @@ class CodeupAdapter:
         return True
 
     def pr_close(self, p, repo=None):
-        # 【live 2026-08-26】唯一生效形态 = POST /close 空 body（gtsp-wop-gateway
+        # 【live 2026-08-26】唯一生效形态 = POST /close 空 body（实测项目
         # MR#7 实测：POST {} → 200 且状态转 CLOSED）。陷阱：PUT 详情端点带
         # {"state":"closed"} 返回 {"result":true} 但状态不变——假阳性，勿用。
         self._req("POST", f"{self._base()}/changeRequests/{p}/close", body={})

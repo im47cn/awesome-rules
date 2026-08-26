@@ -20,11 +20,11 @@
 | `factory-state.sh` | 标签同步器（托管平台事实 → state.py 推导 → 幂等收敛） |
 | `hosting.py` + `tests/test_hosting.py` | 托管平台抽象层（ADR-008）：中立 schema（issue/pr/label history）+ GitHub（gh）/Codeup（云效 oapi）双适配器；核心脚本零 gh 直调，平台缺口 fail-closed（Codeup 可用面 = MR 读写/评论/合并/类标 Link + issue create，PR #62 实测破案） |
 | `validate-pr.sh` | S3 PR 门禁链（guard → tests → AI 评审 → holdout，人类合并前独立验证） |
-| `state.py` + `test_state.py` + `tests/` | 状态机权威（TRANSITIONS 唯一 spec）与全套测试 |
-| `feedback.py` + `feedback-upstream.sh` | etf-radar 工厂改进反哺上游仓（决策零 LLM，AI 仅适配内容） |
+| `state.py` + `tests/`（含 test_state.py） | 状态机权威（TRANSITIONS 唯一 spec）与全套测试 |
+| `feedback.py` + `feedback-upstream.sh` | 本仓工厂改进反哺上游（决策零 LLM，AI 仅适配内容；上游指针 = factory-local.json，ADR-009） |
 | `breaker.sh` | R4 成本熔断门（fix-issue/dispatch/cron-dispatch/triage-batch 四入口共用接线点，透传 factory_lib breaker 码） |
-| `factory-lib.sh` + `factory_lib.py` | 链副作用共享库（issue 评论唯一出口/拒绝单一动作/租约围栏钩位）+ python 工具箱（timeout 分级预算/breaker/回执解析 + dispatch 进程编排：并发槽/收割/硬锁，ADR-005） |
-| `factory-local.json` | 工厂本地化配置（M4）：PERIMETER 与 REJECT_GUIDANCE 的数据载体——guard/factory_lib 零本地化的前提；改后须重跑 mutations 重证 |
+| `factory-lib.sh` + `factory_lib.py` | 链副作用共享库（issue 评论唯一出口/拒绝单一动作/租约围栏钩位）+ python 工具箱（timeout 分级预算/breaker/回执解析 + dispatch 进程编排：并发槽/收割/硬锁，ADR-005）。`omp_node()` 是 omp CLI 唯一执行点（ADR-009 引擎收口）——换引擎只改此函数 |
+| `factory-local.json` | 工厂本地化配置（M4 + ADR-009）：perimeter/reject_guidance（guard 判据）+ repo_identity/reading_scopes/review_basis/final_gate_cmd/pr_review_skills（prompt 仓库参数与门命令）+ upstream_repo/upstream_path/feedback_branch_prefix（反哺上游指针）——链脚本与 prompts 零本地化的全部数据载体；改后须重跑 mutations 重证 |
 | `upstream-sync-check.sh` | M2 上游同步检查（dispatch 轮末）：full 漂移→确定性 PR 流；local 漂移→needs-human issue；无凭据降级仅报告 |
 | `sync-from-upstream.sh` + `DISTRIBUTION.json` | M1 上游同步：三态分发清单（full/local/skip）+ 下游拉取（--check 门禁/--apply 追平+锚点） |
 | `decisions.md` | 工厂决策记录（ADR-001~008：租约仲裁/A3 记账/单写者降级/周回归/dispatch 下沉/触发器计数口径/forge 平台适配/托管平台抽象层）；进程管理类缺陷须在此记账（ADR-002，合并前自愈不计数，ADR-006） |
@@ -113,7 +113,7 @@ bash .factory/dispatch.sh --watch          # 常驻，默认 300s（或 cron 单
 sh .factory/cron-dispatch.sh               # hub(LaunchAgent 600s) 的 kick 入口：锁 + triage + dispatch 单轮
 bash .factory/factory-state.sh sync --all  # 标签收敛（幂等，可随时/cron 跑）
 bash .factory/factory-state.sh sync 2 --plan   # 单 issue 计划模式（只打印）
-python3 -m pytest .factory/test_state.py -o addopts= -q   # 状态机测试
+python3 -m pytest .factory/tests/test_state.py -o addopts= -q   # 状态机测试
 bash .factory/regression/weekly-regression.sh --dry-run  # 周回归预演（真跑三层，不开 issue）
 # 定时：LaunchAgent com.im47cn.factory.weekly（周日 03:00，加载由人类决定）；详见 regression/README.md
 ```
@@ -256,19 +256,23 @@ mutations 时序约束：**全绿证明必须在工作树干净时做**（相对
 stamp 指纹绑定会宣告旧证据过期（M4，设计 §11.3）。
 ```
 
-## 移植到其他仓库（适配清单）
+## 移植到其他仓库（ADR-009 后：一份配置 + 两条命令）
 
-本工厂默认绑定 awesome-rules。移植（如 etf-radar）需改五处：
+本地化已全部数据化到 `factory-local.json`（M4 + ADR-009），链脚本与
+prompts 零宿主专名（gauntlet `factory-portability` 门机械化盯防）。
+移植（如 etf-radar）只需：
 
-1. **拷贝** `.factory/`（排除 `artifacts/`）到目标仓库根。
-2. **重写 `MISSION.md`**：使命、triage 判据 a 的范围表述、周界清单
-   （目标仓库的治理/发布面路径）。
-3. **重写 `guard.py` 的 PERIMETER 列表**为目标仓库路径，
-   然后重跑 `mutations/run.py` 重新证明 kill rate——改过周界未重证的门不算门。
-4. **替换测试门命令**：`plan.md` 的 `final_gate` 示例与
-   `implement.md` 纪律 4 中的 `scripts/run_tests.sh --no-lock`
-   → 目标仓库真实测试命令（如 `uv run pytest` / `npm test`）。
-5. **平台适配（GitHub 仓可跳过）**：目标仓若托管在云效 Codeup，设
+1. **拷贝** `DISTRIBUTION.json` 的 full 面 + `prompts/` + `tests/` 到目标
+   仓库 `.factory/`（排除 artifacts/locks/worktrees 等运行时产物）。
+2. **写目标仓的 `factory-local.json`**：perimeter（目标仓治理/发布面路径）、
+   reject_guidance（锚定目标仓 MISSION 判据措辞）、repo_identity /
+   reading_scopes / review_basis / final_gate_cmd（目标仓真实测试命令，如
+   `uv run pytest`）/ pr_review_skills / upstream_repo / upstream_path /
+   feedback_branch_prefix。
+3. **写目标仓的 `MISSION.md`**（使命与 triage 判据），然后**重跑
+   `mutations/run.py`** 重新证明 kill rate——改过周界未重证的门不算门
+   （evidence-stamp 指纹绑定会强制）。
+4. **平台适配（GitHub 仓可跳过）**：目标仓若托管在云效 Codeup，设
    `FACTORY_HOSTING=codeup` + `YUNXIAO_ACCESS_TOKEN` + `CODEUP_ORG_ID` +
    `CODEUP_REPO_ID`（或 `CODEUP_REPO_PATH`），见 ADR-008——注意 Codeup
    缺工作项读写面/类标 Unlink/标签事件史，全链状态机跑不起来（可用面 =
@@ -276,9 +280,9 @@ stamp 指纹绑定会宣告旧证据过期（M4，设计 §11.3）。
    `CODEUP_SPACE_ID`/`WORKITEM_TYPE_ID`/`ASSIGN_USER_ID`，PR #62 实测破案）；
    GitHub 仓零配置（hosting 默认走 gh，行为不变）。
 
-次级审计（提示词里的仓库引用）：
-`triage.md` 首行的仓库身份与判据表述、`prime.md` 的阅读范围
-（README/skills/steering/scripts）、`review.md` 的审查依据（steering/）。
+历史：ADR-009 前的「改五处 + 次级审计 prompts 仓库引用」已由数据化
+消灭——triage/prime/review 的仓库身份、阅读范围、审查依据、final_gate
+示例现在全部经 `factory_lib.py repo-vars` 运行时注入。
 
 ## 上游同步（移植后的增量维护）
 
@@ -293,10 +297,13 @@ stamp 指纹绑定会宣告旧证据过期（M4，设计 §11.3）。
 .factory/sync-from-upstream.sh <upstream-path> --apply
 ```
 
-三态语义：**full**（零本地化，blob 直接覆盖，漂移=门禁失败）；
-**local**（含仓特定区——guard.py PERIMETER、factory_lib.py 判据措辞等，
-永不覆盖，漂移的正道是 `feedback-upstream.sh` 反哺后追平，不是静默分叉）；
-**skip**（仓特定/运行时产物）。上游可为 bare 仓（经 git 对象库读）。
+三态语义：**full**（零本地化，blob 直接覆盖，漂移=门禁失败；ADR-009 后
+含全部链脚本、feedback-upstream、omp-isolated.yml、db/schema.sql 与 tests/）；
+**local**（ADR-009 后**已归零**——历史 local 面 guard.py/factory_lib.py/
+feedback-upstream.sh/tests/ 均数据化升 full，漂移的正道是
+`feedback-upstream.sh` 反哺后追平，不是静默分叉）；
+**skip**（仓特定/运行时产物：MISSION/factory-local.json/mutations/prompts
+模板锚等）。上游可为 bare 仓（经 git 对象库读）。
 
 漂移闭环：下游热修 → feedback-upstream 反哺 PR → 上游合并 → 下游
 `--apply` 追平 → `--check` 归零。双向都有机器检查，分叉不再靠人工记忆。
@@ -312,8 +319,9 @@ L4 无关）：
   设计拦工具链自变更）；local 漂移落 needs-human issue；apply 后
   当轮即止（自我指涉护栏）。
 - **M3** 上游 merge 发 repository_dispatch，下游分钟级触发 M2。
-- **M4** 本地化外置 `factory-local.json`（perimeter/判据措辞/布局
-  全成数据），guard.py 等从 local → full，local 面归零；PERIMETER
+- **M4 ✅ + ADR-009** 本地化外置 `factory-local.json`（perimeter/判据
+  措辞/门命令/仓库参数/上游指针全成数据），guard.py/factory_lib.py/
+  feedback-upstream.sh/tests/ 从 local → full，**local 面归零**；PERIMETER
   blob 指纹绑定 EVIDENCE——改配置未重证 kill rate 即非绿。
 
 ### 下游采纳 M2/M4 checklist（顺序不可倒）

@@ -126,7 +126,7 @@ def test_timeout_kills_process_group(tmp_path, monkeypatch):
     下 == 自身 pid）、派生 sleep 孙进程后挂起；断言超时后整组无存活。"""
     import time as _time
     pgid_file, gate = _slow_gate(tmp_path)
-    monkeypatch.setattr(mut, "TESTS", gate)
+    monkeypatch.setattr(mut, "FINAL_GATE", [str(gate)])
     monkeypatch.setattr(mut, "TESTS_TIMEOUT", 1)
     t0 = _time.monotonic()
     assert mut.run_gate("tests", "whatever") is None
@@ -149,7 +149,7 @@ def test_timeout_sigkill_eperm_tolerated(tmp_path, monkeypatch):
             raise PermissionError(errno.EPERM, "zombie-only pgroup")
 
     monkeypatch.setattr(os, "killpg", killpg_then_eperm)
-    monkeypatch.setattr(mut, "TESTS", gate)
+    monkeypatch.setattr(mut, "FINAL_GATE", [str(gate)])
     monkeypatch.setattr(mut, "TESTS_TIMEOUT", 1)
     assert mut.run_gate("tests", "whatever") is None
     _assert_group_dead(int(pgid_file.read_text().strip()))

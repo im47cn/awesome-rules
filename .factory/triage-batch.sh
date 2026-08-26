@@ -80,8 +80,7 @@ ${cmts}
 ——评论结束——"
 
   echo "==> triage #${ISSUE}: ${title}"
-  if ! (cd "$REPO" && omp -p "$prompt" --no-tools --no-session --max-time 5m < /dev/null) \
-      > "${DIR}/triage.log" 2>&1; then
+  if ! omp_node "$REPO" "${DIR}/triage.log" 5m --no-tools -- "$prompt"; then
     echo "    triage 节点失败（详见 ${DIR}/triage.log）, 跳过" >&2; continue
   fi
   if ! python3 "${FACTORY}/factory_lib.py" parse "${DIR}/triage.log" "${DIR}/triage.json" accept,reject; then

@@ -15,7 +15,7 @@
 2. 需要 touches 周界路径（MISSION.md 的 PERIMETER 清单）的任务：**跳过并在
    日志中标记 blocked**，绝不尝试修改、绕过或说服自己"这次不算"
 3. 复用既有模式；不新增第三方依赖；不重构与本 issue 无关的代码
-4. 全部任务后运行 `final_gate`（scripts/run_tests.sh --no-lock），
+4. 全部任务后运行 `final_gate`（命令见任务参数「仓库参数」段），
    将完整输出另存到 `$ISSUE_DIR/tests-output.txt`（holdout 节点的输入）。
    随后对**触及的测试套件**以 `-v` 冗长模式重跑一次并附于该文件末尾：
    holdout 只见此文件且不允许推测，静默点号输出无法建立测试与诉求的
