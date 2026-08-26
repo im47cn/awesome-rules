@@ -103,13 +103,18 @@
   customFieldValues 平面对象 {"fieldId":"value"} 传，fieldId 从字段配置
   端点发现，value 形态 date=ISO/float=小数字符串/list=option id；
   assignedTo=24-hex 用户 id）——hosting.CodeupAdapter 已实装迁移（env：
-  CODEUP_SPACE_ID/WORKITEM_TYPE_ID/ASSIGN_USER_ID），工作项读/写面
-  （view/list/set-labels/comment）仍未实装；(b) MR 类标仅
+  CODEUP_SPACE_ID/WORKITEM_TYPE_ID/ASSIGN_USER_ID）；工作项读/写面五方法
+  （view/list/set-labels/comment/get-labels）已实装（#67，2026-08-26 live
+  验收：KFPT-18 标签 add→读回→remove→读回空、描述零残留；双键寻址
+  serialNumber/id；标签载体 CODEUP_ISSUE_LABELS=native|description——
+  Task 类型常无 labels 字段，description 尾部注释块为等价载体；评论端点
+  仅认 24-hex id；search category 必填）；(b) MR 类标仅
   LinkMergeRequestLabel、无 Unlink——needs-fix→approved 全部换标转移
   不可表达；(c) 无标签事件时间线——轮次计数（MAX_FIX_ROUNDS）不可派生。
-  故 Codeup 上**全链状态机不可运行**，可用面 = MR 读写/评论（comment_type
-  +resolved 必填，skills 实测坑位已锁定进适配器）/合并/类标 Link + issue
-  create（工具/人工开工作项，不进链状态机）。
+  故 Codeup 上链状态机的 issue 面（a）已解锁；剩余缺口集中在 MR 面
+  (b)(c)（#66 评论标记模型承载）；可用面 = MR 读写/评论（comment_type
+  +resolved 必填，skills 实测坑位已锁定进适配器）/合并/类标 Link + 工作项
+  全套（create/view/list/labels/comment）。
 - **验证边界（live 基线已锁定，2026-08-26 更新）**：GitHub 侧行为保持由
   测试（含 hosting 契约：gh 命令构造/原子换标/归一化/CLI 缺口）+ 沙箱
   端到端冒烟覆盖；**Codeup 侧 MR 面已在 gtsp-wop-gateway live 验证**

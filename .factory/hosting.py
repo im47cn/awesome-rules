@@ -467,21 +467,149 @@ class CodeupAdapter:
             print(f"[hosting] codeup 鉴权探测失败: {e}", file=sys.stderr)
             return False
 
+    # -- 工作项面（issue 等价物，#67 live 已验形态；forge 参考实现迁移）--
+
+    _WI_LABELS_MARK = re.compile(r"<!--\s*factory:labels:v1:\s*(.*?)\s*-->")
+
+    @classmethod
+    def _wi_labels_of(cls, wi):
+        """标签读取按载体分派：native=labels 字段；description=尾部注释块
+        （云效 Task 类型常无 labels 字段——PUT 报 does not contains field,
+        ADR-007 实测;富文本完整保留 HTML 注释）。载体由 env
+        CODEUP_ISSUE_LABELS 选择（native|description,默认 native）。"""
+        if os.environ.get("CODEUP_ISSUE_LABELS", "native") == "description":
+            m = cls._WI_LABELS_MARK.search(wi.get("description") or "")
+            return m.group(1).split() if m and m.group(1) else []
+        return [l for l in (wi.get("labels") or []) if isinstance(l, str)]
+
+    @classmethod
+    def _wi_state_of(cls, wi):
+        # logicalStatus: NORMAL=活跃;FINISHED/其余=closed（保守:不误清标签）
+        return "open" if (wi.get("logicalStatus") or "NORMAL") == "NORMAL" else "closed"
+
+    @staticmethod
+    def _wi_text(raw):
+        """description 双形态（{"htmlValue":...} JSON 串 / 裸 HTML）→ 纯文本。"""
+        s = raw or ""
+        if s.lstrip().startswith("{"):
+            try:
+                s = json.loads(s).get("htmlValue") or ""
+            except ValueError:
+                pass
+        # HTML 注释段原样保留：dedupe marker（<!-- m1 -->）与 labels 块
+        # （<!-- factory:labels:v1: ... -->）靠注释承载——剥标签会把注释
+        # 一起剥掉，marker 永不命中（#67 实现期实证）。labels 块的剥离
+        # 由 _wi_normalize 的专用 sub 负责。
+        parts = re.split(r"(<!--.*?-->)", s, flags=re.S)
+        s = "".join(seg if seg.startswith("<!--")
+                    else re.sub(r"<[^>]+>", " ", seg) for seg in parts)
+        return re.sub(r"[ \t]+", " ", s).strip()
+
+    def _wi_normalize(self, wi, comments=True):
+        body = self._wi_text(wi.get("description"))
+        # 标记块从正文剥离（native 载体下块不存在,sub 为无害 no-op）
+        body = self._WI_LABELS_MARK.sub("", body).strip()
+        _, org = self._cfg()
+        cs = []
+        if comments:
+            raw = self._req(
+                "GET",
+                f"/oapi/v1/projex/organizations/{org}/workitems/{wi['id']}/comments")
+            cs = [{"author": (c.get("author") or {}).get("name") or "",
+                   "body": self._wi_text(c.get("content"))}
+                  for c in (raw if isinstance(raw, list) else raw.get("result") or [])]
+        return {"number": wi.get("serialNumber") or wi.get("id"),
+                "state": self._wi_state_of(wi),
+                "title": wi.get("subject") or "",
+                "body": body,
+                "labels": self._wi_labels_of(wi),
+                "comments": cs}
+
+    def _wi_get(self, n):
+        """双键寻址：serialNumber（KFPT-16）或 24-hex id 均 200（live）。"""
+        _, org = self._cfg()
+        r = self._req(
+            "GET",
+            f"/oapi/v1/projex/organizations/{org}/workitems/{n}")
+        # live 形态：详情返回裸工作项 dict（无 result 包裹）;search 才包 result
+        if isinstance(r, dict):
+            return r.get("result") or r
+        return r or {}
+
     def issue_view(self, n, repo=None):
-        _unsupported("issue view", "Codeup 无仓库 issue，对应物 Projex 工作项需映射决策")
+        return self._wi_normalize(self._wi_get(n))
 
     def issue_labels(self, n, repo=None):
-        _unsupported("issue get-labels", "同 issue view")
+        return self._wi_labels_of(self._wi_get(n))
 
     def issue_list(self, state="open", label=None, limit=100,
                    comments=False, repo=None):
-        _unsupported("issue list", "同 issue view")
+        # 【live】workitems:search：category 必填（workitemTypeId 过滤被拒
+        # "工作项类型不能为空"）;分页 perPage/page;摘要有 description——
+        # description 载体标签零 N+1。state 过滤客户端做（search 无
+        # logicalStatus 参数）;label 过滤"含有"语义对齐 GitHub
+        space = os.environ.get("CODEUP_SPACE_ID")
+        category = os.environ.get("CODEUP_WORKITEM_CATEGORY", "Task")
+        if not space:
+            raise HostingError(
+                "codeup issue list 需要 CODEUP_SPACE_ID（项目 id）", code=2)
+        _, org = self._cfg()
+        out, page = [], 1
+        while len(out) < limit:
+            payload = self._req(
+                "POST", f"/oapi/v1/projex/organizations/{org}/workitems:search",
+                body={"category": category, "spaceId": space,
+                      "perPage": 100, "page": page,
+                      "orderBy": "gmtCreate", "sort": "desc"})
+            batch = payload.get("result") if isinstance(payload, dict) else payload
+            if not batch:
+                break
+            out += [self._wi_normalize(wi, comments=comments) for wi in batch]
+            if len(batch) < 100:
+                break
+            page += 1
+        if state != "all":
+            out = [i for i in out if i["state"] == state]
+        if label:
+            out = [i for i in out if label in i["labels"]]
+        return out[:limit]
 
     def issue_set_labels(self, n, add=(), remove=(), repo=None):
-        _unsupported("issue set-labels", "同 issue view")
+        wi = self._wi_get(n)
+        labels = list(self._wi_labels_of(wi))
+        for x in add:
+            if x not in labels:
+                labels.append(x)
+        labels = [l for l in labels if l not in set(remove)]
+        _, org = self._cfg()
+        path = f"/oapi/v1/projex/organizations/{org}/workitems/{wi['id']}"
+        if os.environ.get("CODEUP_ISSUE_LABELS", "native") == "description":
+            # 读-改-写描述块：原文剥离旧块,尾部追加新块（空标签=移除块）
+            raw = wi.get("description") or ""
+            base = self._WI_LABELS_MARK.sub("", raw).rstrip()
+            desc = base + ("\n\n<!-- factory:labels:v1: "
+                           + " ".join(sorted(labels)) + " -->" if labels else "")
+            self._req("PUT", path, body={
+                "description": desc,
+                "formatType": wi.get("formatType") or "MARKDOWN"})
+        else:
+            self._req("PUT", path, body={"labels": sorted(set(labels))})
+        return True
 
     def issue_comment(self, n, body, marker=None, repo=None):
-        _unsupported("issue comment", "同 issue view")
+        if marker:
+            have = self.issue_view(n, repo)["comments"]
+            if any(f"<!-- {marker} -->" in c["body"] for c in have):
+                print(f"[dedupe] 评论标记 {marker} 已存在，跳过", file=sys.stderr)
+                return True
+            body = f"{body}\n<!-- {marker} -->\n"
+        wi = self._wi_get(n)  # 评论端点仅认 24-hex id（serialNumber 404）
+        _, org = self._cfg()
+        self._req(
+            "POST",
+            f"/oapi/v1/projex/organizations/{org}/workitems/{wi['id']}/comments",
+            body={"content": body, "contentType": "markdown"})
+        return True
 
     def _default_cfvs(self, space, wit):
         """拉字段配置,为全部 required 的 SystemCustomField 构造默认值

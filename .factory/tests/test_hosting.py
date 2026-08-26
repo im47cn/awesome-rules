@@ -233,10 +233,8 @@ class TestCodeupGaps:
         ad._req = lambda *a, **k: {"success": True, "result": []}
         return ad
 
+    # issue 面已实装（#67）;此处收敛 MR 面真缺口（#66 范围）
     @pytest.mark.parametrize("fn", [
-        lambda ad: ad.issue_view(1),
-        lambda ad: ad.issue_list(),
-        lambda ad: ad.issue_set_labels(1, add=["x"]),
         lambda ad: ad.label_history(2),
         lambda ad: ad.pr_set_labels(2, remove=["x"]),
         lambda ad: ad.pr_diff(2),
@@ -246,6 +244,116 @@ class TestCodeupGaps:
             fn(self._ad(monkeypatch))
         assert e.value.code == 2
         assert "ADR-008" in str(e.value)
+
+
+
+class TestCodeupWorkItemFace:
+    """#67 工作项面五方法（live 已验形态;forge 参考实现迁移）。"""
+
+    WI_DESC = json.dumps({"htmlValue":
+                           "<p>正文</p>\n<!-- factory:labels:v1: factory:accepted -->"},
+                          ensure_ascii=False)
+    WI = {"result": {"id": "wid1", "serialNumber": "KFPT-18",
+                     "subject": "标题", "logicalStatus": "NORMAL",
+                     "description": WI_DESC,
+                     "labels": None},
+          "_comments": [{"author": {"name": "纪柏涛"}, "content": "<p>早</p>"}]}
+
+    def _ad(self, monkeypatch, routes=None, env=None):
+        for k, v in {**{"YUNXIAO_ACCESS_TOKEN": "t", "CODEUP_ORG_ID": "org",
+                        "CODEUP_REPO_ID": "42", "CODEUP_SPACE_ID": "sp1"}, **(env or {})}.items():
+            monkeypatch.setenv(k, v)
+        ad = hosting.CodeupAdapter()
+        ad.seen = []
+        base = routes or {}
+        def fake_req(method, path, body=None, query=None, _retry_rdc=True):
+            ad.seen.append((method, path, body, query))
+            for (m, suf), payload in base.items():
+                if m == method and path.endswith(suf):
+                    return payload
+            if path.endswith("/comments"):
+                return self.WI["_comments"]
+                if m == method and path.endswith(suf):
+                    return payload
+            if path.endswith("/workitems/KFPT-18") or path.endswith("/workitems/wid1"):
+                return self.WI["result"]
+            if path.endswith("/workitems:search"):
+                return {"result": [self.WI["result"], {"id": "wid2", "serialNumber": "KFPT-19",
+                              "subject": "旧", "logicalStatus": "FINISHED", "description": ""}]}
+            raise hosting.HostingError(f"mock 未路由: {method} {path}")
+        ad._req = fake_req
+        return ad
+
+    def test_issue_view_normalizes_and_strips_marker(self, monkeypatch):
+        monkeypatch.setenv("CODEUP_ISSUE_LABELS", "description")
+        ad = self._ad(monkeypatch)
+        n = ad.issue_view("KFPT-18")
+        assert n["number"] == "KFPT-18" and n["state"] == "open"
+        assert n["title"] == "标题"
+        assert n["body"] == "正文"           # HTML 剥离 + 标记块剥离
+        assert "factory:labels" not in n["body"]
+        assert n["labels"] == ["factory:accepted"]  # description 载体解析
+        assert n["comments"] == [{"author": "纪柏涛", "body": "早"}]
+
+    def test_issue_view_native_labels(self, monkeypatch):
+        wi = {**self.WI["result"], "labels": ["factory:rejected"], "description": ""}
+        ad = self._ad(monkeypatch, routes={("GET", "/workitems/KFPT-16"): wi})
+        assert ad.issue_labels("KFPT-16") == ["factory:rejected"]
+
+    def test_issue_list_paginates_filters_state_and_label(self, monkeypatch):
+        monkeypatch.setenv("CODEUP_ISSUE_LABELS", "description")
+        ad = self._ad(monkeypatch)
+        out = ad.issue_list(state="open", label="factory:accepted", limit=10)
+        assert [i["number"] for i in out] == ["KFPT-18"]  # FINISHED 滤出+label 过滤
+        m, p, body, _q = ad.seen[0]
+        assert (m, p.endswith("/workitems:search")) == ("POST", True)
+        assert body["category"] == "Task" and body["spaceId"] == "sp1"  # category 必填（live）
+
+    def test_issue_list_requires_space_env(self, monkeypatch):
+        monkeypatch.delenv("CODEUP_SPACE_ID", raising=False)
+        ad = hosting.CodeupAdapter()
+        ad._req = lambda *a, **k: {}
+        with pytest.raises(hosting.HostingError) as e:
+            ad.issue_list()
+        assert e.value.code == 2
+
+    def test_issue_set_labels_native_put(self, monkeypatch):
+        wi = {**self.WI["result"], "labels": ["keep"]}
+        ad = self._ad(monkeypatch, routes={("GET", "/workitems/KFPT-18"): wi})
+        ad.issue_set_labels("KFPT-18", add=["factory:triaging"], remove=["keep"])
+        put = [s for s in ad.seen if s[0] == "PUT"][-1]
+        assert put[2] == {"labels": ["factory:triaging"]}  # 排序去重
+
+    def test_issue_set_labels_description_rw(self, monkeypatch):
+        monkeypatch.setenv("CODEUP_ISSUE_LABELS", "description")
+        ad = self._ad(monkeypatch)
+        ad.issue_set_labels("KFPT-18", add=["factory:in-progress"])
+        put = [s for s in ad.seen if s[0] == "PUT"][-1]
+        assert put[2]["formatType"] == "MARKDOWN"
+        # 读-改-写保留原始载体格式（JSON 串不解包）:原 accepted 保留+新增
+        # 原文字面 \n（json 转义）保留;块前是真换行（实现拼接语义）
+        assert put[2]["description"] == (
+            '{"htmlValue": "<p>正文</p>\\n"}'
+            '\n\n<!-- factory:labels:v1: factory:accepted factory:in-progress -->')
+        # 移除唯一标签 = 块消失,原文保留
+        ad2 = self._ad(monkeypatch)
+        ad2.issue_set_labels("KFPT-18", remove=["factory:accepted"])
+        put2 = [s for s in ad2.seen if s[0] == "PUT"][-1]
+        assert put2[2]["description"] == '{"htmlValue": "<p>正文</p>\\n"}'
+
+    def test_issue_comment_uses_id_and_marker_dedupe(self, monkeypatch, capsys):
+        monkeypatch.setenv("CODEUP_ISSUE_LABELS", "description")
+        ad = self._ad(monkeypatch, routes={
+            ("GET", "/workitems/wid1/comments"): [
+                {"author": {"name": "x"}, "content": "<p>旧<!-- m1 --></p>"}]})
+        assert ad.issue_comment("KFPT-18", "回执", marker="m1") is True  # dedupe 命中
+        assert "dedupe" in capsys.readouterr().err
+        posts = [s for s in ad.seen if s[0] == "POST"]
+        assert not posts
+        ad.issue_comment("KFPT-18", "新评论")
+        posts = [s for s in ad.seen if s[0] == "POST"]
+        assert posts[-1][1].endswith("/workitems/wid1/comments")  # serialNumber→id
+        assert posts[-1][2]["contentType"] == "markdown"
 
 
 class TestCodeupIssueCreate:
@@ -384,6 +492,8 @@ class TestCodeupEndpointFallback:
 
 class TestCli:
     def test_codeup_issue_view_cli_fails_closed(self, tmp_path):
+        """#67 后 issue view 已实装：CLI 边界=无凭据/网络失败 fail-closed
+        非零（假 token → 401 → HostingError），不再是无条件 unsupported。"""
         r = subprocess.run(
             [sys.executable, str(Path(hosting.__file__).resolve()),
              "issue", "view", "1"],
@@ -391,8 +501,8 @@ class TestCli:
             env={"FACTORY_HOSTING": "codeup", "PATH": "/usr/bin:/bin",
                  "YUNXIAO_ACCESS_TOKEN": "t", "CODEUP_ORG_ID": "o",
                  "CODEUP_REPO_ID": "1"})
-        assert r.returncode == 2
-        assert "ADR-008" in r.stderr
+        assert r.returncode != 0          # 401 fail-closed（无真凭据环境）
+        assert "hosting" in r.stderr or "codeup" in r.stderr
 
     def test_platform_select_unknown(self):
         with pytest.raises(hosting.HostingError) as e:
