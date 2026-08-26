@@ -122,6 +122,13 @@
   形态未破案（多形态探针均拒）——类标创建走云效界面人工路径，
   ensure 的 400 兜底语义保留。issue create 字段形态来自 PR #62 真实
   创建实测，hosting 迁移已对齐。
+- **MR close 与 issue create 编号（live 2026-08-26 第二批，gtsp-wop-gateway MR#7/KFPT-21 实测）**：
+  ① close 唯一生效形态 = `POST /changeRequests/{n}/close` 空 body；**PUT 详情端点带
+  `{"state":"closed"}` 返回 `{"result":true}` 但状态不变（假阳性）**——多形态探针中仅
+  POST /close 改变状态。hosting 两侧补 `pr_close`（GitHub=gh pr close 直通）。
+  ② issue create 响应只含 24-hex id，无 serialNumber——人类可读编号（KFPT-N）须回查
+  详情；回查失败降级 id + stderr 告警。mock 契约同步对齐（create_resp 仅 id、
+  detail_resp 承载 serialNumber）。
 - **后果**：MISSION 铁律 4「纯 bash + gh」措辞需人类修宪为「纯 bash/Python +
   托管适配层（零 LLM 不变）」；组件数 18→19（ADR-002 触发器 3 余量充足）；
   核心脚本自此禁直调 gh（doc-freshness R1 已盯 README 登记，新增写点必须走

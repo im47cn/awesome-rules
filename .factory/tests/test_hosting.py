@@ -176,6 +176,28 @@ class TestCodeupShapes:
         assert p.endswith("/changeRequests/6/merge")
         assert body["mergeType"] == "squash"
 
+    def test_pr_close_post_empty_body(self, monkeypatch):
+        """live 契约：唯一生效形态 = POST /close 空 body；PUT 详情带
+        state=closed 是假阳性（result:true 但状态不变）——MR#7 实测。"""
+        ad = self._ad({("POST", "/close"): {"result": True}}, monkeypatch)
+        ad.pr_close(7)
+        m, p, body, _q = ad.seen[0]
+        assert (m, p) == ("POST", ad._base() + "/changeRequests/7/close")
+        assert body == {}  # 空 body；PUT /changeRequests/7 假阳性形态禁用
+
+    def test_pr_close_github_uses_gh(self, monkeypatch):
+        """GitHub 侧 pr_close → gh pr close（_gh 内部按 slug 追加 --repo，
+        这里只断言子命令形状）。"""
+        calls = []
+
+        def fake(_self, args, repo_override=None, stdin=None):
+            calls.append(args)
+            return type("R", (), {"returncode": 0, "stderr": "",
+                                  "stdout": ""})()
+        monkeypatch.setattr(hosting.GitHubAdapter, "_gh", fake)
+        assert hosting.GitHubAdapter().pr_close(9) is True
+        assert calls[0] == ["pr", "close", "9"]
+
     def test_pr_list_filters_state_and_label(self, monkeypatch):
         page = {"result": [
             {"localId": 1, "newVersionState": "UNDER_REVIEW",
@@ -243,7 +265,8 @@ class TestCodeupIssueCreate:
         {"id": 7, "name": "可选字段", "required": False},
     ]}
 
-    def _ad(self, monkeypatch, fields=None, create_resp=None, fail_fields=False):
+    def _ad(self, monkeypatch, fields=None, create_resp=None,
+            detail_resp=None, fail_fields=False, fail_detail=False):
         for k, v in {**{"YUNXIAO_ACCESS_TOKEN": "t", "CODEUP_ORG_ID": "org",
                         "CODEUP_REPO_ID": "42"}, **self.ENV}.items():
             monkeypatch.setenv(k, v)
@@ -256,7 +279,13 @@ class TestCodeupIssueCreate:
                 if fail_fields:
                     raise hosting.HostingError("codeup GET fields HTTP 404: x")
                 return fields if fields is not None else self.FIELDS
-            return create_resp or {"result": {"serialNumber": "KFPT-42",
+            # 【live 2026-08-26】create 响应只含 24-hex id（无 serialNumber/
+            # detailUrl）——KFPT-21 实测；详情回查才有可读编号
+            if method == "POST" and path.endswith("/workitems"):
+                return create_resp or {"result": {"id": "wid123"}}
+            if fail_detail:
+                raise hosting.HostingError("codeup GET detail HTTP 500: x")
+            return detail_resp or {"result": {"serialNumber": "KFPT-42",
                                               "detailUrl": "https://x/KFPT-42"}}
 
         ad._req = fake_req
@@ -275,7 +304,8 @@ class TestCodeupIssueCreate:
     def test_create_payload_shape(self, monkeypatch):
         ad, calls = self._ad(monkeypatch)
         out = ad.issue_create("标题", "正文", label="factory:triaging")
-        m, path, body = calls[-1]
+        posts = [c for c in calls if c[0] == "POST" and c[1].endswith("/workitems")]
+        m, path, body = posts[-1]  # 回查 GET 在 POST 后,calls[-1] 已非 POST
         assert (m, path) == ("POST", "/oapi/v1/projex/organizations/org/workitems")
         assert body["spaceId"] == "sp1" and body["workitemTypeId"] == "wt9"
         assert body["subject"] == "标题"
@@ -299,8 +329,34 @@ class TestCodeupIssueCreate:
         ad, calls = self._ad(monkeypatch, fail_fields=True)
         out = ad.issue_create("t", "b")
         assert "warn" in capsys.readouterr().err  # 降级可见不静默
-        assert "customFieldValues" not in calls[-1][2]  # POST 仍发出
+        posts = [c for c in calls if c[0] == "POST" and c[1].endswith("/workitems")]
+        assert posts and "customFieldValues" not in posts[-1][2]  # POST 仍发出
         assert out["number"] == "KFPT-42"
+
+    def test_create_returns_serial_via_detail_lookup(self, monkeypatch):
+        """live 契约：create 响应仅 24-hex id；serialNumber 由详情回查取得。"""
+        ad, calls = self._ad(monkeypatch)
+        out = ad.issue_create("t", "b")
+        gets = [(m, p) for m, p, _b in calls if m == "GET"]
+        assert any(p.endswith("/workitems/wid123") for _m, p in gets), \
+            "必须回查详情端点"
+        assert out == {"number": "KFPT-42", "url": "https://x/KFPT-42"}
+
+    def test_detail_lookup_failure_degrades_to_id(self, monkeypatch, capsys):
+        """回查失败降级返回 id + stderr 告警（可读性损失可见，不阻断）。"""
+        ad, _calls = self._ad(monkeypatch, fail_detail=True)
+        out = ad.issue_create("t", "b")
+        assert out["number"] == "wid123"
+        assert "serialNumber" in capsys.readouterr().err
+
+    def test_create_resp_with_serial_still_wins(self, monkeypatch):
+        """若平台未来在 create 响应补 serialNumber：有 id 仍回查（详情
+        是 detailUrl 权威源）；无 id 才直取响应字段。"""
+        ad, _calls = self._ad(
+            monkeypatch, create_resp={"result": {"serialNumber": "KFPT-9"}})
+        out = ad.issue_create("t", "b")
+        # create 无 id → 不回查，直接响应字段
+        assert out["number"] == "KFPT-9"
 
 
 class TestCodeupEndpointFallback:

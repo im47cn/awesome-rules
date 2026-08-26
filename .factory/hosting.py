@@ -308,6 +308,12 @@ class GitHubAdapter:
             raise HostingError(f"pr #{p} merge 失败: {r.stderr.strip()[:200]}")
         return True
 
+    def pr_close(self, p, repo=None):
+        r = self._gh(["pr", "close", str(p)], repo)
+        if r.returncode != 0:
+            raise HostingError(f"pr #{p} close 失败: {r.stderr.strip()[:200]}")
+        return True
+
     def label_ensure(self, name, color, desc):
         r = self._gh(["label", "create", name, "--color", color,
                       "--description", desc, "--force"])
@@ -544,8 +550,25 @@ class CodeupAdapter:
                       f"/oapi/v1/projex/organizations/{org}/workitems", payload)
         d = r.get("result") if isinstance(r, dict) else r
         d = d or {}
-        return {"number": d.get("serialNumber") or d.get("id"),
-                "url": d.get("detailUrl", "")}
+        wid = d.get("id")
+        # 【live 2026-08-26】create 响应只含 24-hex id，无 serialNumber
+        # （gtsp-wop-gateway KFPT-21 实测）；人类可读编号（KFPT-N）须回查
+        # 详情。回查失败降级 id（view/编辑两种键都认，但人在界面引用
+        # 序号——宁可多一次 GET）
+        number = d.get("serialNumber") or wid
+        url = d.get("detailUrl", "")
+        if wid:
+            try:
+                det = self._req(
+                    "GET",
+                    f"/oapi/v1/projex/organizations/{org}/workitems/{wid}")
+                det = det.get("result") if isinstance(det, dict) else det
+                number = (det or {}).get("serialNumber") or wid
+                url = (det or {}).get("detailUrl") or url
+            except HostingError as e:
+                print(f"[hosting] [warn] serialNumber 回查失败,返回 id: {e}",
+                      file=sys.stderr)
+        return {"number": number, "url": url}
 
     def _pr_labels(self, p):
         # 【live 2026-08-26】MR 详情响应无 labels 字段——类标须专用端点读回
@@ -634,6 +657,13 @@ class CodeupAdapter:
                         "resolved": True})
         return True
 
+    def pr_close(self, p, repo=None):
+        # 【live 2026-08-26】唯一生效形态 = POST /close 空 body（gtsp-wop-gateway
+        # MR#7 实测：POST {} → 200 且状态转 CLOSED）。陷阱：PUT 详情端点带
+        # {"state":"closed"} 返回 {"result":true} 但状态不变——假阳性，勿用。
+        self._req("POST", f"{self._base()}/changeRequests/{p}/close", body={})
+        return True
+
     def pr_diff(self, p, name_only=False, repo=None):
         if name_only:
             # 【文档推导】GetMergeRequestChangeTree → 变更文件路径
@@ -657,6 +687,13 @@ class CodeupAdapter:
         self._req("POST", f"{self._base()}/changeRequests/{p}/merge",
                   body={"mergeType": _CU_MERGE_METHOD.get(method, "no-fast-forward"),
                         "removeSourceBranch": False})
+        return True
+
+    def pr_close(self, p, repo=None):
+        # 【live 2026-08-26】唯一生效形态 = POST /close 空 body（gtsp-wop-gateway
+        # MR#7 实测：POST {} → 200 且状态转 CLOSED）。陷阱：PUT 详情端点带
+        # {"state":"closed"} 返回 {"result":true} 但状态不变——假阳性，勿用。
+        self._req("POST", f"{self._base()}/changeRequests/{p}/close", body={})
         return True
 
     def label_ensure(self, name, color, desc):
