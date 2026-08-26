@@ -539,6 +539,10 @@ class TestCli:
 
         monkeypatch.setenv("CODEUP_ORG_ID", "org")
         monkeypatch.setenv("CODEUP_REPO_ID", "42")
+        # 凭据值非被测语义（被测 = 200+畸形体 fail-closed）：_req 首行
+        # _cfg() 读 token，无凭据环境（CI/净克隆）缺此 mock 必红——
+        # 2026-08-27 实证其污染 mutations B-106 负例（rc=1 假击杀）。
+        monkeypatch.setenv("YUNXIAO_ACCESS_TOKEN", "test-token")
         ad = hosting.CodeupAdapter.__new__(hosting.CodeupAdapter)
         ad._endpoint = "openapi-rdc.aliyuncs.com"
         monkeypatch.setattr(
