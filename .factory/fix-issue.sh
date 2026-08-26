@@ -22,26 +22,11 @@ if [ -z "${ISSUE}" ]; then
 fi
 
 REPO="$(git rev-parse --show-toplevel)"
-# ADR-007 平台适配层：codeup 后端时 slug 为占位（forge 忽略 --repo）
-FORGE="${REPO}/.factory/forge"
-if [ "$("${FORGE}" probe 2>/dev/null || true)" = codeup ]; then
-  REPO_SLUG="${GH_REPO:-codeup:$(basename "${REPO}")}"
-else
-REPO_SLUG="${GH_REPO:-$(
-  # 双 remote 布局：origin pushurl 可能多条（codeup 镜像 + github），
-  # 逐条扫含 github.com 者（github remote 名优先）；443 端口形态兼容
-  { git -C "$(dirname "$0")/.." remote get-url --all --push github 2>/dev/null
-    git -C "$(dirname "$0")/.." remote get-url --all --push origin 2>/dev/null
-  # grep 不用 -m1：早退关读端会让 git 组 SIGPIPE（pipefail 下 141，
-  # etf-radar#70 审查）；sed -n 1p 取首行且消费全部输入，无早退
-  } | grep 'github\.com' | sed -n '1p' | sed -E 's#^.*github\.com(:[0-9]+)?[/:]##; s#\.git$##'
-)}"
-fi
+HOST="python3 ${REPO}/.factory/hosting.py"   # 托管平台抽象（ADR-008）：slug/凭据解析在其内
 DIR="${REPO}/.factory/artifacts/issue-${ISSUE}"
 BRANCH="factory/issue-${ISSUE}"
 WT="${REPO}/.factory/worktrees/issue-${ISSUE}"   # 链独立 worktree（多驱动隔离）
-BASE_BRANCH="${FACTORY_BASE_BRANCH:-$(python3 "${REPO}/.factory/factory_lib.py" forge-base 2>/dev/null || true)}"
-BASE_BRANCH="${BASE_BRANCH:-main}"   # 三级回退：env → forge.json base_branch → main（PR #61 Sourcery：forge.json 单独配置时基线双源不一致）
+BASE_BRANCH="${FACTORY_BASE_BRANCH:-main}"   # 两级回退：env → main（PR #61 Sourcery 意图；hosting 形态平台配置走 env，forge.json 中间级随 forge 退役）
 # 链副作用共享库：issue 评论唯一出口 + 拒绝单一动作（契约见库头注释）
 source "${REPO}/.factory/factory-lib.sh"
 node_timeout() { python3 "${REPO}/.factory/factory_lib.py" timeout "$1"; }  # 分级预算：裁决器5m/工作节点15m/implement 30m
@@ -65,7 +50,7 @@ ensure_labels() {
   local entry name color desc
   for entry in "${FACTORY_LABELS[@]}"; do
     read -r name color desc <<<"${entry}"
-    "${FORGE}" label create "${name}" --color "${color}" --description "${desc}" --force >/dev/null 2>&1 || true
+    ${HOST} label ensure "${name}" "${color}" "${desc}" >/dev/null 2>&1 || true
   done
 }
 
@@ -77,7 +62,7 @@ issue_label() { # issue_label <add|remove> <name> —— 失败仅告警；租�
     echo "  [warn] 租约 ${LEASE_KEY:-?} 已失效（epoch=${LEASE_EPOCH:-?}），${1} ${2} 跳过（围栏）" >&2
     return 0
   fi
-  if "${FORGE}" issue edit "${ISSUE}" --"${1}-label" "${2}" >/dev/null 2>&1; then
+  if ${HOST} issue set-labels "${ISSUE}" "--${1}" "${2}" >/dev/null 2>&1; then
     echo "  [label] ${1} ${2}"
   else
     echo "  [warn] 标签操作失败：${1} ${2}（可观测性降级，链继续）" >&2
@@ -262,12 +247,9 @@ ${out}
 
 # --- 预备：拉取 issue 原文（唯一一次读不可信文本的地方，落盘供节点读） ---
 if [ "${DRY}" = 0 ]; then
-  # ADR-007：github 后端仍需 gh；codeup 后端由 forge 自持凭据
-  if [ "$("${FORGE}" probe 2>/dev/null || true)" != codeup ]; then
-    command -v gh >/dev/null || { echo "需要 gh CLI" >&2; exit 2; }
-  fi
+  ${HOST} auth ok >/dev/null 2>&1 || { echo "托管平台不可用（hosting auth）" >&2; exit 2; }
   mkdir -p "${DIR}"
-  "${FORGE}" issue view "${ISSUE}" --json number,title,body,comments > "${DIR}/issue.json" 2>/dev/null \
+  ${HOST} issue view "${ISSUE}" > "${DIR}/issue.json" 2>/dev/null \
     || { echo "issue #${ISSUE} 不存在或不可读" >&2; exit 2; }
   # fail-closed：rc=0 但输出为空/非 JSON 的 gh（网络截断、代理 stub 等）不可信——
   # 空数据流入 triage 会产出"空 issue 拒绝"+毒回执（2026-08-23 实证；彼时
@@ -335,8 +317,8 @@ if [ "${DRY}" = 0 ]; then
   #   （etf-radar#57 实证：write_ledger 内 git 竞态 141 → 标签/worktree/
   #   台账三重残留 → 队列死锁）
   # - 失败且分支有新提交 → push 抢救产出（#14：否则随 worktree 强删 +
-  #   下轮 -B 重置回 main 孤儿化，implement 成果湮灭）。--force：下轮
-  #   从 main 重跑后非 FF，远端镜像语义 = 最新一轮产出；推送失败仅告警
+  #   下轮 -B 重置回基线孤儿化，implement 成果湮灭）。--force：下轮
+  #   从基线重跑后非 FF，远端镜像语义 = 最新一轮产出；推送失败仅告警
   #   不阻断后续清理（网络故障不应二次放大为状态残留）
   # - 非零退出移除流转标签回零标签态（可重试）；无论成败都记账；
   #   worktree 无论成败一并回收
@@ -348,7 +330,7 @@ if [ "${DRY}" = 0 ]; then
   # shellcheck disable=SC2154  # rc 于本 trap 行内由 rc=$? 赋值，shellcheck 不解析 trap 字符串
   trap 'rc=$?; set +e; write_ledger "${rc}"; if [ "${rc}" -ne 0 ] && [ "$(git -C "${REPO}" rev-list --count ${BASE_BRANCH}.."${BRANCH}" 2>/dev/null || echo 0)" -gt 0 ]; then git -C "${REPO}" push --force --no-verify origin "${BRANCH}" >/dev/null 2>&1 && echo "  [salvage] 失败链产出已推送 origin/${BRANCH}" || echo "  [warn] 失败链产出推送失败，产出仅在本地分支 ${BRANCH}" >&2; fi; git -C "${REPO}" worktree remove --force "${WT}" >/dev/null 2>&1 || true; [ "${rc}" -ne 0 ] && { issue_label remove factory:triaging; issue_label remove factory:accepted; issue_label remove factory:in-progress; }; lease_cleanup; [ "${MANUAL_LOCK}" = 1 ] && rm -rf "${LOCKDIR:-}" 2>/dev/null' EXIT
 else
-  echo "[dry-run] gh issue view #${ISSUE} → ${DIR}/issue.json"
+  echo "[dry-run] hosting issue view #${ISSUE} → ${DIR}/issue.json"
   echo "[dry-run] label: +factory:triaging（裁决后 → accepted|rejected）"
 fi
 
@@ -465,9 +447,10 @@ if [ "${DRY}" = 0 ]; then
   # 链内等价门（run_tests.sh/guard/holdout）已在本链跑过，此处跳过的是
   # 与链重复的人工推送门，非绕过验证
   git -C "${WT}" push -u origin "${BRANCH}" --no-verify
-  # --repo/--head 显式指定：origin 的 fetch URL 是 codeup，gh 无法从
-  # remote 解析 GitHub 仓库（dispatch5 实测 "could not resolve remote origin"）
-  "${FORGE}" pr create --repo "$REPO_SLUG" --head "$BRANCH" --fill \
+  # 标题取 HEAD 提交主题（原 gh --fill 的平台特例，中立化：链自控输入）
+  PR_TITLE="$(git -C "${WT}" log --pretty=%s -1)"
+  ${HOST} pr create \
+    --head "$BRANCH" --title "$PR_TITLE" \
     --label "factory:needs-review" \
     --body-file <(echo "Closes #${ISSUE}"; echo; echo "工厂链产物见 ${DIR}"; echo; echo "链: triage → prime → plan → implement ↔ review（ralph ≤${RALPH_MAX} 轮）→ guard → holdout")
   # PR 落地后 issue 侧转移：accepted → in-review（PR 状态接管 issue，§7）。
@@ -476,6 +459,6 @@ if [ "${DRY}" = 0 ]; then
   issue_label_swap "factory:accepted,factory:in-progress" "factory:in-review" || exit 1
   echo "PR 已建（factory:needs-review）。issue #${ISSUE} → factory:in-review。人类合并。"
 else
-  echo "[dry-run] push + gh pr create --label factory:needs-review；issue: accepted → in-review"
+  echo "[dry-run] push + hosting pr create --label factory:needs-review；issue: accepted → in-review"
 fi
 

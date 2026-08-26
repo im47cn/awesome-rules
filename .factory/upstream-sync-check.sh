@@ -34,9 +34,8 @@ DRY=0
 
 REPO="$(git rev-parse --show-toplevel)"
 FACTORY="$REPO/.factory"
+HOST="python3 ${FACTORY}/hosting.py"
 LOCK="$FACTORY/upstream-lock.json"
-# ADR-007 平台适配层：本脚本副作用作用于本仓（下游）
-FORGE="${FACTORY}/forge"
 
 # 上游路径：锁文件 upstream 字段（M2 约定）> 环境变量 > 退出 2
 UP="$(python3 -c '
@@ -47,8 +46,8 @@ UP="${FACTORY_UPSTREAM:-${UP:-}}"
 [ -n "$UP" ] || { echo "upstream-sync: upstream-lock.json 缺 upstream 字段且未设 FACTORY_UPSTREAM" >&2; exit 2; }
 
 # 凭据探测：无凭据环境降级（设计约束：降级不产生远端副作用）
-if ! "${FORGE}" auth status >/dev/null 2>&1; then
-  echo "upstream-sync: 无 gh 凭据（降级模式）——本地漂移报告：" >&2
+if ! ${HOST} auth ok >/dev/null 2>&1; then
+  echo "upstream-sync: 无托管平台凭据（降级模式）——本地漂移报告：" >&2
   bash "$FACTORY/sync-from-upstream.sh" "$UP" --check 2>&1 | sed 's/^/  /' >&2 || true
   echo "upstream-sync: 人工追平: $FACTORY/sync-from-upstream.sh $UP --apply" >&2
   exit 3
@@ -66,7 +65,7 @@ echo "$CHECK_OUT"
 if echo "$CHECK_OUT" | grep -q '\[local\].*差'; then
   LOCAL_SUMMARY="$(echo "$CHECK_OUT" | grep '\[local\].*差' | head -20)"
   if [ "$DRY" = 0 ]; then
-    "${FORGE}" issue create --title "factory 上游 local 面漂移（人工合并）" \
+    ${HOST} issue create --title "factory 上游 local 面漂移（人工合并）" \
       --label factory:needs-human --body "上游 \`${UP}\` 与本仓 local 面文件存在分叉——local 含仓特定区，不可自动合并（设计 §11.2 分诊）。
 
 正道：对上游修通用缺陷 → feedback-upstream.sh 反哺 PR → 上游合并 → 本仓 --apply 追平。
@@ -102,13 +101,13 @@ print(json.loads(open(sys.argv[1]).read())["anchor"][:9])' "$LOCK")"
   fi
   git commit -qm "chore(factory): 上游同步追平 ${ANCHOR}（M2 确定性 PR 流）"
   git push -q --no-verify origin "HEAD:refs/heads/${BR}"
-  PR_URL="$("${FORGE}" pr create --head "$BR" --title "factory: 上游同步追平（${ANCHOR}）" \
+  PR_URL="$(${HOST} pr create --head "$BR" --title "factory: 上游同步追平（${ANCHOR}）" \
     --label factory:needs-review \
     --body "M2 确定性 PR 流（设计 §11.2）：full 面漂移自动追平，机器执行、人工合并。
 
 - 锚点: \`${ANCHOR}\`
 - gauntlet 全量门禁已过（fail-closed：红门不 push）
-- 同锚点重跑幂等（push 同分支，PR 自动更新）")" \
+- 同锚点重跑幂等（push 同分支，PR 自动更新）" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url") or "")')" \
     || PR_URL="(PR 已存在或创建失败——分支 ${BR} 已推送，可手工开 PR)"
   echo "upstream-sync: 同步 PR ${PR_URL}（人工合并）"
   exit 0

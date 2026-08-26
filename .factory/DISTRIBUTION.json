@@ -15,13 +15,12 @@
     "guard.py",
     "factory_lib.py",
     "upstream-sync-check.sh",
-    "forge"
+    "hosting.py"
   ],
   "local": {
     "feedback-upstream.sh": "UPSTREAM_REPO/BRANCH 前缀/PR 文案从下游视角命名，每仓指向自己的上游；上游这份是模板真相源",
     "tests/": "测试布局已分叉（本仓 tests/ 子目录 + conftest 注入，下游平铺 + sys.path hack）；用例宜随源文件走，人工对齐（目录项不做 blob 级处理）",
-    "test_state.py": "state.py 的测试，语义通用但断言措辞可能含仓特定锚",
-    "test_forge.py": "forge 的测试，语义通用（形状映射/marker 模型）；与 test_state.py 同类，断言无仓锚，可随 forge 走 full——先按 local 保守"
+    "test_state.py": "state.py 的测试，语义通用但断言措辞可能含仓特定锚"
   },
   "skip": [
     "README.md",
@@ -35,8 +34,7 @@
     "feedback-log.jsonl",
     "upstream-lock.json",
     "DISTRIBUTION.json",
-    "sync-from-upstream.sh",
-    "forge.json"
+    "sync-from-upstream.sh"
   ],
   "anchor_policy": "下游 .factory/upstream-lock.json 记录上次同步的上游 commit（M2 起含 upstream 路径字段）；--check 对比该锚点与上游 HEAD 的 full 文件 blob，漂移即提醒（追平或反哺二选一），对齐 scripts/plugin-lock.json 的 blob 锁定模式"
 }

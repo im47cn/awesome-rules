@@ -17,7 +17,8 @@
 | `db/schema.sql` | 仲裁层 schema（Supabase/任何 Postgres，服务端原子，幂等迁移） |
 | `dispatch.sh` | S2 派发器入口 shim（编排下沉 `factory_lib.py dispatch` 子命令，ADR-005；CLI/env 契约不变，零 LLM） |
 | `cron-dispatch.sh` | hub kick 入口（LaunchAgent 600s → 锁 + dispatch 单轮） |
-| `factory-state.sh` | 标签同步器（GitHub 事实 → state.py 推导 → 幂等收敛） |
+| `factory-state.sh` | 标签同步器（托管平台事实 → state.py 推导 → 幂等收敛） |
+| `hosting.py` + `tests/test_hosting.py` | 托管平台抽象层（ADR-008）：中立 schema（issue/pr/label history）+ GitHub（gh）/Codeup（云效 oapi）双适配器；核心脚本零 gh 直调，平台缺口 fail-closed |
 | `validate-pr.sh` | S3 PR 门禁链（guard → tests → AI 评审 → holdout，人类合并前独立验证） |
 | `state.py` + `test_state.py` + `tests/` | 状态机权威（TRANSITIONS 唯一 spec）与全套测试 |
 | `feedback.py` + `feedback-upstream.sh` | etf-radar 工厂改进反哺上游仓（决策零 LLM，AI 仅适配内容） |
@@ -26,14 +27,16 @@
 | `factory-local.json` | 工厂本地化配置（M4）：PERIMETER 与 REJECT_GUIDANCE 的数据载体——guard/factory_lib 零本地化的前提；改后须重跑 mutations 重证 |
 | `upstream-sync-check.sh` | M2 上游同步检查（dispatch 轮末）：full 漂移→确定性 PR 流；local 漂移→needs-human issue；无凭据降级仅报告 |
 | `sync-from-upstream.sh` + `DISTRIBUTION.json` | M1 上游同步：三态分发清单（full/local/skip）+ 下游拉取（--check 门禁/--apply 追平+锚点） |
-| `decisions.md` | 工厂决策记录（ADR-001~007：租约仲裁/A3 记账/单写者降级/周回归/dispatch 下沉/触发器计数口径/forge 平台适配）；进程管理类缺陷须在此记账（ADR-002，合并前自愈不计数，ADR-006） |
-| `regression/` | 自挖掘日回归（ADR-004）：daily-regression.sh 串联 badcase/gauntlet/doc-freshness/dispatch-liveness 四层，失败自动开 `[factory-regression]` issue 走 triage；liveness 多仓活性：hub 注册表 repos.conf 全部仓库，停摆/断档两死法任一仓死即 FAIL |
-| `forge` + `forge.json` | 平台适配层（ADR-007）：gh 兼容 argv shim——forge.json 缺失 exec gh（上游零行为变化）；`backend=codeup` 走云效 REST（工作项=issue、MR 评论标记=PR 侧标签/事件）；forge.json 每仓一份（skip 分发） |
-| `test_forge.py` | forge 适配层测试（github 透传语义 / codeup 映射纯函数）；与 `tests/test_guard_dotfiles.py` 同属测试面，R1 按目录豁免但顶层登记保完整性 |
+| `decisions.md` | 工厂决策记录（ADR-001~008：租约仲裁/A3 记账/单写者降级/周回归/dispatch 下沉/触发器计数口径/forge 平台适配/托管平台抽象层）；进程管理类缺陷须在此记账（ADR-002，合并前自愈不计数，ADR-006） |
 
 ## 前置条件
 - `omp` CLI（AI 节点引擎；每节点独立进程 = 物理级 fresh context）
-- `gh` 已认证（github 后端；codeup 后端改为 `YUNXIAO_ACCESS_TOKEN` + forge.json）
+- `python3`（guard / mutations / hosting / JSON 解析）
+- 托管平台凭据（ADR-008，二选一）：GitHub = `gh` 已认证（默认）；
+  Codeup = `YUNXIAO_ACCESS_TOKEN` + `CODEUP_ORG_ID` + `CODEUP_REPO_ID|PATH`
+  （注意：Codeup 缺仓库 issue/类标 Unlink/标签事件史，全链状态机跑不起来——
+  见 ADR-008 平台缺口，仅 MR 读写/评论/合并可用）
+- `SUPABASE_DB` 仲裁层 PG 连接串（Supabase pooler 或自建 Postgres；未设 = 单写者模式本地锁降级，见「租约仲裁」）
 
 ## 快速开始
 
@@ -130,6 +133,12 @@ bash .factory/regression/weekly-regression.sh --dry-run  # 周回归预演（真
   （→ factory:rejected）与判据回执评论一次收口，链/批次两入口共用。
   历史教训：两入口曾各自只做一半——链路发回执不落标、批次落标不发回执
   （#59 二次拒绝静默），动作散落必然被漏做一半。
+- **hosting 仅传输层**（ADR-008）：`hosting.py` 是 issue 评论/标签副作用
+  出口（`issue_comment()`/`issue_label_swap()`）的下层传输，链/批次/回归
+  脚本不得绕过 factory-lib 直调 hosting 写 issue 副作用——`gauntlet`
+  `lint-factory-hosting-exit` 门机械化盯防（负控制 NC12）。issue/pr 创建
+  与 PR 侧写不在收口范围（S3/M2 无 issue 租约上下文，PR 标签漂移由
+  sync 兜底收敛）。
 - **锁例外**：`triaging`（链写）/`in-progress`（dispatch 写）是运行中
   声明，sync 永不触碰；终态（rejected/closed）清理除外（漂移自愈）。
 - **转移表即 spec**：`state.py TRANSITIONS` 是唯一权威；
@@ -258,11 +267,11 @@ stamp 指纹绑定会宣告旧证据过期（M4，设计 §11.3）。
 4. **替换测试门命令**：`plan.md` 的 `final_gate` 示例与
    `implement.md` 纪律 4 中的 `scripts/run_tests.sh --no-lock`
    → 目标仓库真实测试命令（如 `uv run pytest` / `npm test`）。
-5. **平台适配（GitHub 仓可跳过）**：目标仓若托管在云效 Codeup，创建
-   `.factory/forge.json`（`backend=codeup` + org/repo/space/workitemType/
-   base_branch，见 ADR-007）并设 `YUNXIAO_ACCESS_TOKEN`（需工作项写权限；
-   labels 字段缺失时用 `issue_labels=description` 模式）；GitHub 仓不建
-   forge.json——forge 透传 gh，零行为变化。护栏：`forge probe` 应答后端身份。
+5. **平台适配（GitHub 仓可跳过）**：目标仓若托管在云效 Codeup，设
+   `FACTORY_HOSTING=codeup` + `YUNXIAO_ACCESS_TOKEN` + `CODEUP_ORG_ID` +
+   `CODEUP_REPO_ID`（或 `CODEUP_REPO_PATH`），见 ADR-008——注意 Codeup
+   缺仓库 issue/类标 Unlink/标签事件史，全链状态机跑不起来（仅 MR
+   读写/评论/合并可用）；GitHub 仓零配置（hosting 默认走 gh，行为不变）。
 
 次级审计（提示词里的仓库引用）：
 `triage.md` 首行的仓库身份与判据表述、`prime.md` 的阅读范围

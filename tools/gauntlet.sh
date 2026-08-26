@@ -122,6 +122,9 @@ else
     # 扫描面 = tracked *.py（67c2965b 原则）
     run_layer lint-killpg-strict "$PY" tools/check_killpg_strict.py \
         .factory tools scripts hooks skills arch-hawkeye .github
+    # 托管平台出口收口门（ADR-007 层级契约）：零 gh 直调 + issue 副作用
+    # 经 factory-lib 收口（hosting.py 仅传输层）。负控制 NC12。
+    run_layer lint-factory-hosting-exit "$PY" tools/check_hosting_exit.py .
     # 工厂本地化配置有效性门（M4 本地化外置，设计 §11.3）：
     # factory-local.json = guard.py PERIMETER 与 REJECT_GUIDANCE 的数据载体。
     # JSON 可解析 + 必需键 + guard 实际加载自检（含 MISSION 一致性）。

@@ -32,6 +32,8 @@ import sys
 import time
 from pathlib import Path
 
+import hosting  # 托管平台抽象层（ADR-008）：中立 schema，gh/云效差异在其内
+
 
 class CircuitOpen(RuntimeError):
     """熔断打开：超日上限或连续失败上限。"""
@@ -306,7 +308,7 @@ class ChainPool:
                 self.done.append((n, p.returncode))
         self._active = [(n, p) for n, p in self._active if p.poll() is None]
 
-    def spawn(self, issue: "int | str") -> None:
+    def spawn(self, issue: int) -> None:
         """占并发槽运行链。FACTORY_DISPATCHED=1：链知道锁已由父持有，
         S1 手动互斥锁免获取（防自锁）。日志尾追 artifacts/issue-N/dispatch.log，
         父目录先建——bash `>>` 对缺目录静默死链是既证缺陷形态。"""
@@ -415,79 +417,34 @@ def release_dispatch_lock(lock_dir: Path) -> None:
     shutil.rmtree(lock_dir, ignore_errors=True)
 
 
-_SLUG_RE = re.compile(
-    r"^(?:[A-Za-z0-9_.-]+@)?(?:github\.com|ssh\.github\.com)(?::\d+)?[/:]"
-    r"(?P<slug>[^/]+/[^/]+?)(?:\.git)?/?$")
-_SLUG_VALID = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
-
-
-def extract_slug(urls: list[str]) -> str:
-    """remote URL 清单 → GitHub slug（owner/repo）。首条 github.com 者胜出
-    （github remote 名优先由调用方注入顺序保证）；grep -m1 的 SIGPIPE
-    早退缺陷（a4d81930，issue #30）在清单消费下不可表达。
-
-    只认 github.com / ssh.github.com 为 URL 权威主机（后者是 GitHub 官方
-    443 端口 SSH 端点；前缀至多 userinfo@、scheme 已剥离）：凭子串位置剪裁
-    会把 evil.com/github.com/o/r 之类伪装主机剪成可用 slug（CodeQL：
-    incomplete URL substring sanitization）；主机锚定后仍以 [/:] 定界，
-    ssh.github.com.evil.com 形态同样被拒。产出再过 owner/repo 字符白名单，
-    双闸。GH_REPO 显式指定不经此函数（显式覆盖即信任）。"""
-    for u in urls:
-        t = re.sub(r"^(?:ssh|git|https?)://", "", u.strip())
-        m = _SLUG_RE.match(t)
-        if m and _SLUG_VALID.fullmatch(m.group("slug")):
-            return m.group("slug")
-    return ""
-
-
-def resolve_repo_slug(repo: Path) -> str:
-    """GH_REPO 显式指定优先；否则双 remote 布局逐条扫（github remote 名
-    优先，origin push 兜底；443 端口形态兼容——双仓镜像布局实证）。"""
-    if os.environ.get("GH_REPO"):
-        return os.environ["GH_REPO"]
-    # ADR-007：codeup 后端时 slug 是占位（forge 忽略 --repo；配置在
-    # forge.json）。探测 fail-closed：探测失败按 github 处理（forge.json
-    # 缺失 = 上游形态）
-    probe = subprocess.run(
-        [sys.executable, str(repo / ".factory" / "forge"), "probe"],
-        capture_output=True, text=True)
-    if probe.stdout.strip() == "codeup":
-        return f"codeup:{repo.name}"
-    urls: list[str] = []
-    for remote in ("github", "origin"):
-        r = subprocess.run(
-            ["git", "-C", str(repo), "remote", "get-url", "--all", "--push", remote],
-            capture_output=True, text=True)
-        urls += [ln for ln in r.stdout.splitlines() if ln.strip()]
-    return extract_slug(urls)
+# （slug 解析已迁 hosting.py——平台选择逻辑归抽象层，ADR-008）
 
 
 _PRIORITY_RANK = {"priority:critical": 0, "priority:high": 1,
                   "priority:medium": 2, "priority:low": 3}
 
 
-def sort_by_priority(issues: list[dict]) -> list:
+def sort_by_priority(issues: list[dict]) -> list[int]:
     """accepted issue 号按 priority:* 排序（critical>high>medium>low；
-    无 priority 垫底，同 rank 按号升序）。编号统一字符串（ADR-007：
-    GitHub 数字 / Codeup 序号 KFPT-16 同构）。"""
+    无 priority 垫底，同 rank 按号升序）。labels 为中立 [str]。"""
     rows = sorted(
-        (min((_PRIORITY_RANK.get(l["name"], 9) for l in i["labels"]), default=9),
-         str(i["number"]))
+        (min((_PRIORITY_RANK.get(l, 9) for l in i["labels"]), default=9),
+         i["number"])
         for i in issues)
     return [n for _, n in rows]
 
 
-def approved_prs(prs: list[dict]) -> list[tuple[int, str]]:
-    """open+factory:approved PR → (number, mergeable)，仅 reviewDecision=APPROVED。"""
-    return [(int(p["number"]), p["mergeable"]) for p in prs
-            if p["reviewDecision"] == "APPROVED"]
+def approved_prs(prs: list[dict]) -> list[tuple[int, bool]]:
+    """open+factory:approved PR → (number, mergeable)，中立 review 字段。"""
+    return [(int(p["number"]), bool(p["mergeable"])) for p in prs
+            if p["review"] == "approved"]
 
 
 class _DispatchCfg:
-    def __init__(self, factory: Path, main_factory: Path, slug: str, dry: bool):
+    def __init__(self, factory: Path, main_factory: Path, adapter, dry: bool):
         self.factory = factory
         self.main_factory = main_factory
-        self.slug = slug
+        self.adapter = adapter  # hosting 适配器实例（ADR-008）
         self.dry = dry
         self.max_parallel = int(os.environ.get("MAX_PARALLEL") or 4)
         self.merge_method = os.environ.get("FACTORY_MERGE_METHOD") or "merge"
@@ -501,67 +458,56 @@ class _DispatchCfg:
         print(("  [dry-run] " if self.dry else "  ") + msg)
 
 
-def _gh(cfg: _DispatchCfg, *args: str) -> tuple[int, str]:
-    # ADR-007 平台适配层：统一走 forge（github 后端 exec gh，零行为变化；
-    # codeup 后端按 forge.json 配置寻址，--repo 为占位被忽略）
-    r = subprocess.run([str(cfg.factory / "forge"), *args, "--repo", cfg.slug],
-                       capture_output=True, text=True)
-    return r.returncode, r.stdout
-
-
-def _gh_json(cfg: _DispatchCfg, *args: str) -> list:
-    """gh JSON 查询；瞬断/输出异常 → 可诊断跳过该批（对齐 triage 批次
+def _hosting_json(cfg: _DispatchCfg, what: str, fn):
+    """hosting 查询；瞬断/输出异常 → 可诊断跳过该批（对齐 triage 批次
     c22130df 的降级形态：失败可见，不静默也不炸轮）。"""
-    rc, out = _gh(cfg, *args)
-    if rc != 0:
-        # rc!=0 必须有痕（PR #53 审查⑤）：GitHub 故障/权限失败若无告警，
-        # 空队列会被当成「无事可做」，整轮静默空转还报成功。
-        print(f"  [warn] gh {args[0]} {args[1]} 失败（rc={rc}），跳过该批"
-              "——若是持续故障请检查 gh auth / GitHub 状态", file=sys.stderr)
-        return []
     try:
-        return json.loads(out)
-    except json.JSONDecodeError:
-        print(f"  [warn] gh {args[0]} {args[1]} 输出异常（rc={rc}），跳过该批",
-              file=sys.stderr)
+        return fn()
+    except hosting.HostingError as e:
+        # 失败必须有痕（PR #53 审查⑤）：平台故障/权限失败若无告警，
+        # 空队列会被当成「无事可做」，整轮静默空转还报成功。
+        print(f"  [warn] hosting {what} 失败（{e}），跳过该批"
+              "——若是持续故障请检查平台凭据/网络", file=sys.stderr)
         return []
 
 
-def _claim(cfg: _DispatchCfg, n: "int | str") -> bool:
+def _claim(cfg: _DispatchCfg, n: int) -> bool:
     """消费 accepted → in-progress（幂等重试 ×2，add+remove 单请求——
-    GitHub 换标签非 CAS，见 README「S2 落地记录」1）。"""
+    GitHub 换标签非 CAS，见 README「S2 落地记录」1；ADR-008 起走 hosting）。"""
     if cfg.dry:
         cfg.say(f"claim issue #{n}: accepted → in-progress")
         return True
     for _ in range(2):
-        rc, _out = _gh(cfg, "issue", "edit", str(n),
-                       "--remove-label", "factory:accepted",
-                       "--add-label", "factory:in-progress")
-        if rc == 0:
+        try:
+            cfg.adapter.issue_set_labels(
+                n, add=["factory:in-progress"], remove=["factory:accepted"])
             return True
+        except hosting.HostingError:
+            continue
     print(f"  claim #{n} 失败（并发或权限），跳过", file=sys.stderr)
     return False
 
 
-def _pr_link_issue(cfg: _DispatchCfg, pr_number: "int | str") -> str:
+def _pr_link_issue(cfg: _DispatchCfg, pr_number: int) -> str:
     """PR body → 关联 issue 号（Closes #N 解析权威在 state.py link）。"""
-    rc, body = _gh(cfg, "pr", "view", str(pr_number), "--json", "body")
-    if rc != 0:
+    try:
+        body = cfg.adapter.pr_view(pr_number)["body"]
+    except hosting.HostingError:
         return ""
     r = subprocess.run([sys.executable, str(cfg.factory / "state.py"),
                         "link", "/dev/stdin"],
-                       input=body, capture_output=True, text=True)
+                       input=json.dumps({"body": body}), capture_output=True,
+                       text=True)
     return r.stdout.strip()
 
 
-def _issue_in_progress(cfg: _DispatchCfg, n: "int | str") -> bool:
-    """D4（2026-08-21 双派实证）：gh label 过滤是「含有」非「仅有」，
+def _issue_in_progress(cfg: _DispatchCfg, n: int) -> bool:
+    """D4（2026-08-21 双派实证）：平台 label 过滤是「含有」非「仅有」，
     accepted+in-progress 双标签条目仍在队列，必须显式跳过在跑的。"""
-    rc, out = _gh(cfg, "issue", "view", str(n), "--json", "labels",
-                  "-q", ".labels[].name")
-    if rc != 0:
+    try:
+        return "factory:in-progress" in cfg.adapter.issue_labels(n)
+    except hosting.HostingError:
         return False
-    return any(line.strip() == "factory:in-progress" for line in out.splitlines())
 
 
 def dispatch_round(cfg: _DispatchCfg) -> int:
@@ -591,41 +537,49 @@ def dispatch_round(cfg: _DispatchCfg) -> int:
 
     print("-- PR 结果处理（优先） --")
     # approved：sync 已打好标签；此处只做 A5 门内的 merge 动作
-    for num, mergeable in approved_prs(_gh_json(
-            cfg, "pr", "list", "--state", "open", "--label", "factory:approved",
-            "--json", "number,mergeable,reviewDecision", "--limit", "50")):
-        if cfg.auto_merge and mergeable == "MERGEABLE":
-                rc, _out = _gh(cfg, "pr", "merge", str(num),
-                               f"--{cfg.merge_method}", "--admin")
-                if rc == 0:
-                    print(f"  PR #{num} 已合并；issue 由 GitHub 自动关闭")
+    for num, mergeable in approved_prs(_hosting_json(
+            cfg, "pr list(approved)",
+            lambda: cfg.adapter.pr_list(state="open", label="factory:approved",
+                                        limit=50))):
+        if cfg.auto_merge and mergeable is True:
+            try:
+                cfg.adapter.pr_merge(num, method=cfg.merge_method)
+                print(f"  PR #{num} 已合并；issue 由平台自动关闭")
+            except hosting.HostingError as e:
+                print(f"  [warn] PR #{num} merge 失败: {e}", file=sys.stderr)
         else:
             print(f"  PR #{num} approved 但 A5 门未开（FACTORY_AUTO_MERGE + metrics/auto-merge-unlocked）→ 人工合并")
 
     print("-- needs-fix 重派（计数契约：claim 时移除 needs-fix） --")
     # 计数契约：重派必须 remove factory:needs-fix——label 事件只在添加时
     # 触发，标签滞留则 state.py 轮次计数冻结（test_state.py 有边界测试）
-    for pr in _gh_json(cfg, "pr", "list", "--state", "open",
-                       "--label", "factory:needs-fix",
-                       "--json", "number", "--limit", "50"):
+    for pr in _hosting_json(cfg, "pr list(needs-fix)",
+                            lambda: cfg.adapter.pr_list(
+                                state="open", label="factory:needs-fix",
+                                limit=50)):
         p = pr["number"]
         n = _pr_link_issue(cfg, p)
         if not n:
             print(f"  PR #{p} 无关联 issue（body 缺 Closes #N），跳过", file=sys.stderr)
             continue
-        if _issue_in_progress(cfg, n):
+        if _issue_in_progress(cfg, int(n)):
             print(f"  issue #{n} 已 in-progress，跳过")
             continue
         cfg.say(f"PR #{p} → issue #{n} 重派（remove needs-fix 保计数活性）")
         if not cfg.dry:
-            _gh(cfg, "pr", "edit", str(p), "--remove-label", "factory:needs-fix")
-        if _claim(cfg, n):
-            cfg.pool.spawn(str(n))
+            try:
+                cfg.adapter.pr_set_labels(p, remove=["factory:needs-fix"])
+            except hosting.HostingError as e:
+                print(f"  [warn] PR #{p} 移除 needs-fix 失败: {e}", file=sys.stderr)
+                continue
+        if _claim(cfg, int(n)):
+            cfg.pool.spawn(int(n))
 
     print(f"-- accepted 队列（priority 排序，并发 ≤{cfg.max_parallel}） --")
-    for n in sort_by_priority(_gh_json(
-            cfg, "issue", "list", "--state", "open", "--label", "factory:accepted",
-            "--json", "number,labels", "--limit", "100")):
+    for n in sort_by_priority(_hosting_json(
+            cfg, "issue list(accepted)",
+            lambda: cfg.adapter.issue_list(state="open", label="factory:accepted",
+                                           limit=100))):
         if _issue_in_progress(cfg, n):
             print(f"  issue #{n} 已 in-progress，跳过")
             continue
@@ -642,9 +596,10 @@ def dispatch_round(cfg: _DispatchCfg) -> int:
     # ── rejected 存量对账（reject→人工闭环缺口，2026-08-23 审计）───────
     # 只报告不动作（铁律 4）：有 reject 后人工评论的 → 提示复核关闭；
     # 零评论的 → 静默滞留计数。关闭决策永远归人类。
-    for r in rejected_reconcile(_gh_json(
-            cfg, "issue", "list", "--state", "open", "--label", "factory:rejected",
-            "--json", "number,title,comments", "--limit", "100")):
+    for r in rejected_reconcile(_hosting_json(
+            cfg, "issue list(rejected)",
+            lambda: cfg.adapter.issue_list(state="open", label="factory:rejected",
+                                           limit=100, comments=True))):
         c, t = r["human_comments_after_reject"], r["title"]
         if c > 0:
             print(f"  [rejected] #{r['number']} 裁决后有 {c} 条人工评论——已处置？复核关闭（{t}）")
@@ -704,13 +659,16 @@ def dispatch_main(args: list[str]) -> int:
         return 2
     repo = Path(r.stdout.strip())
     factory = repo / ".factory"
-    slug = resolve_repo_slug(repo)
-    if not slug:
+    try:
+        adapter = hosting.current_adapter(repo)
+    except hosting.HostingError as e:
+        print(f"托管平台配置错误: {e}", file=sys.stderr)
+        return 2
+    if adapter.name == "github" and not adapter.slug():
         print("无法确定 GitHub 仓库 slug", file=sys.stderr)
         return 2
-    if subprocess.run(["gh"], stdout=subprocess.DEVNULL,
-                      stderr=subprocess.DEVNULL).returncode != 0:
-        print("需要 gh CLI", file=sys.stderr)
+    if not adapter.auth_ok():
+        print("托管平台不可用（hosting auth：gh 凭据或云效令牌）", file=sys.stderr)
         return 2
     # 主树锚定：git-common-dir 在 worktree 中指向主 .git，据此回到主树
     # .factory（39b6b8ec 硬锁语义）；非 git 环境退回 CWD 仓 .factory
@@ -720,7 +678,7 @@ def dispatch_main(args: list[str]) -> int:
     if g.returncode == 0 and g.stdout.strip():
         main_factory = Path(g.stdout.strip().removesuffix("/.git")) / ".factory"
 
-    cfg = _DispatchCfg(factory, main_factory, slug, dry)
+    cfg = _DispatchCfg(factory, main_factory, adapter, dry)
     lock_dir = main_factory / "locks" / "dispatcher"
     if not acquire_dispatch_lock(lock_dir, os.getpid()):
         return 0  # cron 重叠是常态非错误（bash: acquire_lock || exit 0）
@@ -759,17 +717,6 @@ def main(argv: list[str]) -> int:
         return dispatch_main(argv[2:])
     if cmd == "classify":
         print(classify_task(argv[2:]))
-        return 0
-    if cmd == "forge-base":
-        # forge-base —— forge.json codeup.base_branch（无配置/损坏输出空；
-        # 调用方回退 main。PR #61 Sourcery：基线双源收口）
-        p = Path(".factory/forge.json")
-        if p.exists():
-            try:
-                print(json.loads(p.read_text(encoding="utf-8"))
-                      .get("codeup", {}).get("base_branch", ""))
-            except (ValueError, OSError):
-                pass
         return 0
     if cmd == "timeout":
         print(node_timeout(argv[2]))

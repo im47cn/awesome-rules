@@ -65,7 +65,7 @@
 - **理由**：触发器 2 的语义是「外壳形态在主干持续产生进程缺陷」；审查轮自愈恰恰是评审机制在工作，属反证据。计入会造成「审查越有效 → 越快触发重写评估」的激励倒挂。
 - **后果**：ADR-002 证据清单自此区分两类行：默认计数；标注「不计触发器（ADR-006）」的不计。机器消费（skill-evo）以标注为准。
 
-## ADR-007 · 2026-08-25 · forge 平台适配层（GitHub 单平台 → gh 兼容多平台）
+## ADR-007 · 2026-08-25 · forge 平台适配层（GitHub 单平台 → gh 兼容多平台）【已被 ADR-008 取代】
 
 - **背景**：`.factory` 调用面（issue/pr/label/api/auth ≈9 读 + 9 写）结构性绑定 `gh` CLI 与 GitHub JSON 形状（state.py 消费这些形状）；Codeup（云效）托管的下游仓（gtsp-wop-gateway 等）无 gh 可用，移植被平台锁死。
 - **决策**：引入 `.factory/forge`（gh 兼容 argv shim，stdlib Python）：`forge.json` 缺失 → github 后端 `exec gh`（上游零行为变化、零配置）；`backend=codeup` → 云效 REST（`openapi-rdc.aliyuncs.com`，`x-yunxiao-token`），输出同形状 JSON。调用面改动仅二进制名 `gh`→`"${FORGE}"`（feedback-upstream.sh 例外：它指向上游 GitHub，保持 gh）。issue 编号统一字符串（GitHub 数字 / Codeup 工作项序号 KFPT-16 同构；state.py `_linked_issue` 正则放宽 `#([\w][\w-]*)`）。
@@ -85,3 +85,30 @@
 - **issue create 破案**（此前误判 403/字段不可发现）：根因是 create API 无「计划开始时间」本体字段——它是模板层 SystemCustomField，必经 `customFieldValues {"fieldId":"value"}` **平面对象**（数组形态报 Invalid format）。fieldId 由字段配置接口发现（`GET projects/{spaceId}/workitemTypes/{wit}/fields`，实测 79/80=计划起止、101586=预计工时）；value 形态：date=ISO、float=小数字符串、list=**option id**（非文本）；assignedTo=24-hex 用户 id（配置 `forge.json codeup.assign_user_id`，成员端点不可达）。forge 现按字段配置自动构造默认值，create 全链路实测打通（gtsp-wop-gateway）。
 - **空体容错**：云效写操作可返回 200+空 body；`json.load` 裸崩改为按长度守卫返回 `{}`。
 - **权限矩阵实测**（新令牌）：工作项 update/create ✅、工作项评论写 ❌403（缺 scope——链可跑但 triage 拒绝回执降级为仅告警，标签裁决不受影响）、Codeup MR 全套 ✅。
+
+## ADR-008 · 2026-08-26 · 托管平台抽象层 hosting.py（取代 ADR-007：核心与 GitHub/Codeup 解耦）
+
+- **背景**：链/调度/同步/验证/回归九个脚本 + factory_lib.py 直调 `gh`，GitHub
+  schema（reviewDecision/labels[].name/events API）渗入核心逻辑；Codeup 仅作
+  git 推送镜像（factory-state/fix-issue 的 REPO_SLUG 双 remote 扫描即为此补丁）。
+- **决策**：引入 `.factory/hosting.py` 唯一平台出口——中立 schema
+  （issue/pr/label_history：state=open|closed|merged、review=三态、labels=[str]）
+  + 双适配器（GitHub=gh CLI 行为保持；Codeup=云效 oapi/v1 org 级端点，
+  `x-yunxiao-token`，端点 TLS 失联自动切 openapi-rdc 一次）。state.py 输入
+  契约切中立 schema（转移表/语义零变更，9 测试原样通过）；slug 解析自
+  factory_lib 迁入 hosting；GH_REPO→FACTORY_HOSTING（默认 github）。
+- **Codeup 平台缺口（文档+API 面实证，fail-closed exit 2 绝不静默降级）**：
+  (a) 无仓库 issue——对应物 Projex 工作项需组织级映射决策（project/type/字段）；
+  (b) MR 类标仅 LinkMergeRequestLabel、无 Unlink——needs-fix→approved 全部
+  换标转移不可表达；(c) 无标签事件时间线——轮次计数（MAX_FIX_ROUNDS）不可
+  派生。故 Codeup 上**全链状态机不可运行**，可用面 = MR 读写/评论（comment_type
+  +resolved 必填，skills 实测坑位已锁定进适配器）/合并/类标 Link。
+- **验证边界（诚实声明）**：GitHub 侧行为保持由 193 项测试（含 hosting 契约
+  22 项：gh 命令构造/原子换标/归一化/CLI 缺口）+ 沙箱端到端冒烟
+  （sync --plan/--apply、fix-issue --dry-run 全链 gh 调用序列核对）覆盖；
+  Codeup 侧按官方文档端点推导、mock 锁定请求形状，**未经 live 验证**（本仓
+  无云效凭据环境）——首个真实接入时以 test_hosting.py 为对齐基线。
+- **后果**：MISSION 铁律 4「纯 bash + gh」措辞需人类修宪为「纯 bash/Python +
+  托管适配层（零 LLM 不变）」；组件数 18→19（ADR-002 触发器 3 余量充足）；
+  核心脚本自此禁直调 gh（doc-freshness R1 已盯 README 登记，新增写点必须走
+  hosting 出口，租约围栏/factory-lib 收口不变量原样保留）。

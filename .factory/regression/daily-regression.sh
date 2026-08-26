@@ -15,7 +15,8 @@
 #                        未更新=LaunchAgent 断档 FAIL——两种死法都抓）
 #
 # 失败 → 开 issue：标题 [factory-regression] <date> 日回归失败：<首失败层>；
-#   已有 open 的标题含 [factory-regression] 的 issue → 只 gh issue comment 追加（幂等）。
+#   已有 open 的标题含 [factory-regression] 的 issue → 只评论追加（幂等，
+#   经 factory-lib issue_comment 收口出口，ADR-008 层级契约）。
 # 全绿 → 追加一行 JSON 到 .factory/metrics/daily-regression.jsonl。
 #
 # 标签策略（有意零标签）：triage-batch.sh 只拾取零 factory:* 标签的 open issue，
@@ -52,13 +53,9 @@ cd "$REPO"
 FACTORY="$REPO/.factory"
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
-# GitHub slug（对齐 dispatch.sh：github remote 名优先、origin push 兜底、
-# 443 端口形态兼容；仅失败路径写 gh 时需要，dry-run 不依赖）
-REPO_SLUG="${GH_REPO:-$(
-  { git remote get-url --all --push github 2>/dev/null
-    git remote get-url --all --push origin 2>/dev/null
-  } | grep 'github\.com' | sed -E '1!d; s#^.*github\.com(:[0-9]+)?[/:]##; s#\.git$##' || true
-)}"
+# 托管平台（ADR-008）：slug/凭据解析收敛 hosting.py；仅失败路径写平台时
+# 需要，dry-run 不依赖
+HOST="python3 ${FACTORY}/hosting.py"
 
 # ── 单实例锁（mkdir 原子性 + PID 活性检测，形态对齐 dispatch.sh；
 #    防手动跑与 launchd 定时跑并发执行 gauntlet 互踩 .coverage 清理） ────
@@ -170,19 +167,28 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 1
 fi
 
-[ -n "$REPO_SLUG" ] || { echo "无法确定 GitHub 仓库 slug（GH_REPO 可显式指定）" >&2; exit 2; }
+[ "$(${HOST} auth ok >/dev/null 2>&1; echo $?)" = 0 ] || { echo "托管平台不可用（hosting auth）" >&2; exit 2; }
 
 # 幂等：已有 open 的 [factory-regression] issue → 评论追加，不重复开
-EXISTING="$(gh issue list --repo "$REPO_SLUG" --state open --limit 200 \
-  --json number,title \
-  --jq '[.[] | select(.title | contains("[factory-regression]"))][0].number // empty')"
+EXISTING="$(${HOST} issue list --state open --limit 200 \
+  | python3 -c '
+import json, sys
+for i in json.load(sys.stdin):
+    if "[factory-regression]" in (i.get("title") or ""):
+        print(i["number"]); break')"
 if [ -n "$EXISTING" ]; then
   echo "── [$(ts)] 已有 open 回归 issue #${EXISTING}，评论追加本次结果"
-  gh issue comment "$EXISTING" --repo "$REPO_SLUG" --body-file "$BODY" >/dev/null \
-    || { echo "gh issue comment 失败（网络/权限）" >&2; exit 2; }
+  # 收口出口（ADR-008 层级契约）：sanitize（防日志回显 [factory:rejected] 标记
+  # 钉死 issue）+ 租约围栏（无租约上下文时直通）都在 factory-lib 出口统一管
+  ISSUE="$EXISTING" REPO="$REPO" bash -c '
+    source "${0}/factory-lib.sh"
+    issue_comment "$1"
+  ' "$FACTORY" "$BODY" \
+    || { echo "issue_comment（factory-lib 收口出口）失败（网络/权限）" >&2; exit 2; }
 else
-  URL="$(gh issue create --repo "$REPO_SLUG" --title "$TITLE" --body-file "$BODY")" \
-    || { echo "gh issue create 失败（网络/权限）" >&2; exit 2; }
+  URL="$(${HOST} issue create --title "$TITLE" --body-file "$BODY" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url") or "")')" \
+    || { echo "hosting issue create 失败（网络/权限）" >&2; exit 2; }
   echo "── [$(ts)] 已开回归 issue：${URL}"
 fi
 exit 1

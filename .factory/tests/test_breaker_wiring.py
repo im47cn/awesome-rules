@@ -56,9 +56,6 @@ def _sandbox(tmp_path: Path, floor: str | None, ledger: str | None) -> Path:
     factory = repo / ".factory"
     shutil.copytree(FACTORY, factory,
                     ignore=shutil.ignore_patterns("artifacts", "worktrees", "__pycache__", "locks"))
-    # ADR-007：沙箱模拟 github 后端（gh 桩）——摘除仓库的 forge.json，
-    # 防 codeup 后端劫持（无令牌 forge 直接 die，label 全失败）
-    (factory / "forge.json").unlink(missing_ok=True)
     locks = factory / "locks"
     locks.mkdir()
     if floor is not None:
@@ -169,9 +166,9 @@ class TestDispatchWiring:
         repo, r = self._dispatch(tmp_path, json.dumps(TRIP_FLOOR), _e(0) + "\n")
         assert r.returncode == 3
         assert TRIP_MSG in r.stderr
-        # 死在门口：无 gh 数据面调用（仅启动时的 CLI 存在性探测）、无下游脚本
+        # 死在门口：无 gh 数据面调用（仅启动时的 hosting auth 探测）、无下游脚本
         gh_calls = [ln.rstrip() for ln in _stub_lines(tmp_path) if ln.startswith("gh ")]
-        assert gh_calls == ["gh"]  # dispatch.sh:58 的 `gh >/dev/null 2>&1` 探测
+        assert gh_calls == ["gh auth status"]  # dispatch_main 的 hosting auth 探测（ADR-008）
         assert _sentinel_hit(tmp_path) == []
         assert not (repo / ".factory/artifacts").exists()
 
@@ -216,9 +213,9 @@ class TestFixIssueWiring:
         r = _run(["bash", ".factory/fix-issue.sh", "99"], repo, tmp_path, with_stubs=True)
         assert r.returncode == 5
         labels = [ln for ln in _stub_lines(tmp_path) if " issue edit " in ln]
-        assert labels[0].endswith("--add-label factory:needs-human")
+        assert "--add-label factory:needs-human" in labels[0]
         for name in ("factory:in-progress", "factory:triaging", "factory:accepted"):
-            assert any(ln.endswith(f"--remove-label {name}") for ln in labels), name
+            assert any(f"--remove-label {name}" in ln for ln in labels), name
         assert not any("remove-label factory:needs-human" in ln
                        for ln in _stub_lines(tmp_path))
         assert not (repo / ".factory/locks/dispatcher").exists()  # 连锁都没占
@@ -233,7 +230,7 @@ class TestFixIssueWiring:
         """透传证明：门口放行后走到既有下一站（沙箱无 gh → exit 2）。"""
         repo, r = self._fix(tmp_path, json.dumps(FLOOR), "")
         assert r.returncode == 2
-        assert "需要 gh CLI" in r.stderr
+        assert "托管平台不可用" in r.stderr
         assert "熔断" not in r.stderr
         assert not (repo / ".factory/locks/dispatcher").exists()  # trap 已放锁
 
