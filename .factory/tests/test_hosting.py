@@ -141,9 +141,11 @@ class TestCodeupShapes:
         ad = self._ad({("GET", "/changeRequests/3"): {
             "result": {"localId": 3, "newVersionState": "UNDER_REVIEW",
                        "reviewers": [{"reviewOpinionStatus": "NOT_PASS"}],
-                       "labels": [{"name": "factory:needs-fix"}],
                        "sourceBranch": "s", "targetBranch": "t",
-                       "title": "T", "description": "D"}}}, monkeypatch)
+                       "title": "T", "description": "D"}},
+            # 【live 2026-08-26】MR 详情无 labels 字段，类标专用端点读回
+            ("GET", "/changeRequests/3/labels"): [
+                {"name": "factory:needs-fix"}]}, monkeypatch)
         n = ad.pr_view(3)
         assert n["review"] == "changes_requested"
         assert n["state"] == "open"
@@ -195,7 +197,7 @@ class TestCodeupShapes:
             ("POST", "/changeRequests/7/labels"): {"success": True}}, monkeypatch)
         ad.pr_set_labels(7, add=["factory:needs-review"])
         link = [s for s in ad.seen if s[0] == "POST" and "labels" in s[1]][0]
-        assert link[2] == {"labelIds": ["lbl-9"]}
+        assert link[2] == {"labelIdList": ["lbl-9"]}  # live 破案键名（labelIds 拒）
 
 
 class TestCodeupGaps:
@@ -276,9 +278,13 @@ class TestCodeupIssueCreate:
         m, path, body = calls[-1]
         assert (m, path) == ("POST", "/oapi/v1/projex/organizations/org/workitems")
         assert body["spaceId"] == "sp1" and body["workitemTypeId"] == "wt9"
-        assert body["subject"] == "标题" and body["description"] == "正文"
+        assert body["subject"] == "标题"
         assert body["assignedTo"] == "0123456789abcdef01234567"
-        assert body["labels"] == ["factory:triaging"]
+        # label 载体 = description 尾部 HTML 注释块（云效 Task 常无 labels
+        # 字段，ADR-007 实测；PR #64 审查 F1 修复）
+        assert body["description"].startswith("正文")
+        assert "<!-- factory:labels:v1: factory:triaging -->" in body["description"]
+        assert "labels" not in body  # 不再直写 labels 字段（真实平台 400）
         cfvs = body["customFieldValues"]
         # 平面对象 {"fieldId": "value"}（数组形态 = Invalid format 实测）
         assert isinstance(cfvs, dict)

@@ -110,13 +110,18 @@
   故 Codeup 上**全链状态机不可运行**，可用面 = MR 读写/评论（comment_type
   +resolved 必填，skills 实测坑位已锁定进适配器）/合并/类标 Link + issue
   create（工具/人工开工作项，不进链状态机）。
-- **验证边界（诚实声明）**：GitHub 侧行为保持由 193 项测试（含 hosting 契约
-  22 项：gh 命令构造/原子换标/归一化/CLI 缺口）+ 沙箱端到端冒烟
-  （sync --plan/--apply、fix-issue --dry-run 全链 gh 调用序列核对）覆盖；
-  Codeup 侧 MR 端点按官方文档推导、mock 锁定请求形状，**未经 live 验证**
-  （本仓无云效凭据环境）；issue create 的字段形态结论来自 PR #62 在
-  gtsp-wop-gateway 的真实创建实测（forge 形态），hosting 迁移以
-  test_hosting.py mock 对齐该形态——首个真实接入时以两者为对齐基线。
+- **验证边界（live 基线已锁定，2026-08-26 更新）**：GitHub 侧行为保持由
+  测试（含 hosting 契约：gh 命令构造/原子换标/归一化/CLI 缺口）+ 沙箱
+  端到端冒烟覆盖；**Codeup 侧 MR 面已在 gtsp-wop-gateway live 验证**
+  （auth/list/view/comment/类标 Link 全通）。live 修正了五处文档推导偏差：
+  ① MR 集合是**组织级端点**（无 /repositories 段 + projectIds query，
+  仓库级集合 404），分页参数 perPage（非 pageSize）；② 组织级端点返回
+  **裸 JSON 数组**（success 包裹仅 dict 响应有）；③ MR 详情**无 labels
+  字段**，类标须专用端点读回；④ LinkMergeRequestLabel body 键是
+  **labelIdList**（labelIds/labels/labelId 均拒）；⑤ label create body
+  形态未破案（多形态探针均拒）——类标创建走云效界面人工路径，
+  ensure 的 400 兜底语义保留。issue create 字段形态来自 PR #62 真实
+  创建实测，hosting 迁移已对齐。
 - **后果**：MISSION 铁律 4「纯 bash + gh」措辞需人类修宪为「纯 bash/Python +
   托管适配层（零 LLM 不变）」；组件数 18→19（ADR-002 触发器 3 余量充足）；
   核心脚本自此禁直调 gh（doc-freshness R1 已盯 README 登记，新增写点必须走
