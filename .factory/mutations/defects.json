@@ -118,6 +118,15 @@
       "replace": "    \"\"\"路径全小写 kebab-case，禁止 camelCase、下划线（负例：仅措辞变更）。\"\"\"",
       "gate": "tests",
       "expect_block": false
+    },
+    {
+      "id": "G-05",
+      "description": "normalize 点前缀退化：lstrip(\"./\") 连剥前导点/斜杠，.factory/ 周界整体失效（ADR-007 移植实测；上游锚点无点文件故未暴露，2026-08-25 回溯补负例）",
+      "target": ".factory/guard.py",
+      "find": "    p = path.strip().replace(\"\\\\\", \"/\")\n    if p.startswith(\"./\"):\n        p = p[2:]",
+      "replace": "    p = path.strip().lstrip(\"./\").replace(\"\\\\\", \"/\")",
+      "gate": "guard",
+      "expect_block": true
     }
   ]
 }
