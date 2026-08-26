@@ -40,7 +40,8 @@ fi
 DIR="${REPO}/.factory/artifacts/issue-${ISSUE}"
 BRANCH="factory/issue-${ISSUE}"
 WT="${REPO}/.factory/worktrees/issue-${ISSUE}"   # 链独立 worktree（多驱动隔离）
-BASE_BRANCH="${FACTORY_BASE_BRANCH:-main}"   # ADR-007：下游基线旋钮（master/develop）
+BASE_BRANCH="${FACTORY_BASE_BRANCH:-$(python3 "${REPO}/.factory/factory_lib.py" forge-base 2>/dev/null || true)}"
+BASE_BRANCH="${BASE_BRANCH:-main}"   # 三级回退：env → forge.json base_branch → main（PR #61 Sourcery：forge.json 单独配置时基线双源不一致）
 # 链副作用共享库：issue 评论唯一出口 + 拒绝单一动作（契约见库头注释）
 source "${REPO}/.factory/factory-lib.sh"
 node_timeout() { python3 "${REPO}/.factory/factory_lib.py" timeout "$1"; }  # 分级预算：裁决器5m/工作节点15m/implement 30m

@@ -19,6 +19,32 @@ from factory_lib import (
     reject_receipt,
 )
 
+from pathlib import Path as _P
+from unittest import mock as _mock
+
+
+def test_resolve_repo_slug_probe_path():
+    """PR #61 Sourcery：探测必须是 repo/.factory/forge（repo/forge 恒失败，
+    纯 codeup 仓 slug 解析为空 → dispatch 初始化退出）。"""
+    from factory_lib import resolve_repo_slug
+    with _mock.patch("subprocess.run") as run:
+        run.return_value = _mock.Mock(stdout="codeup\n", returncode=0)
+        assert resolve_repo_slug(_P("/tmp/fake-repo")) == "codeup:fake-repo"
+        argv = run.call_args_list[0].args[0]
+        assert argv[1].endswith("/.factory/forge"), argv
+
+
+def test_forge_base_fallback(monkeypatch, tmp_path):
+    """forge-base：forge.json 有则输出 base_branch，无/损坏输出空（调用方回退 main）。"""
+    import json as _json
+    import factory_lib as FL
+    monkeypatch.chdir(tmp_path)
+    assert FL.main(["x", "forge-base"]) == 0  # 无 forge.json → 空
+    (tmp_path / ".factory").mkdir()
+    (tmp_path / ".factory/forge.json").write_text(
+        _json.dumps({"codeup": {"base_branch": "develop"}}), encoding="utf-8")
+    assert FL.main(["x", "forge-base"]) == 0
+
 # ---- S2 issue #2 holdout 的真实输出形态（fence 包裹 + 前导文字）----
 REAL_HOLDOUT = """Working...
 ```json

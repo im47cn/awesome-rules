@@ -109,6 +109,7 @@ def run_github(argv):
 
 class Codeup:
     def __init__(self, cfg):
+        self.cfg = cfg
         self.org = str(cfg["org_id"])
         self.repo = str(cfg["repo_id"])
         self.space = str(cfg["space_id"])
@@ -436,21 +437,18 @@ def gh_issue(cx, pos, flags, fields):
             body = open(flags["--body-file"][0]).read()
         elif "--body" in flags:
             body = flags["--body"][0]
-        payload = {"spaceId": cx.space, "subject": title,
-                   "workitemTypeId": cx.wit, "description": body,
-                   "assignedTo": _self_user_id(cx)}
-        if "--label" in flags:
-            payload["labels"] = flags["--label"]
-        r = cx.call(cx.p_workitems(), "POST", payload)
-        print(json.dumps({"number": r.get("serialNumber") or r.get("id"),
-                          "url": r.get("detailUrl", "")}, ensure_ascii=False))
-        return EXIT_OK
+        # 云效 issue create 实测不可达（2026-08-26 探针矩阵，13 形态全拒）：
+        # 该 space 模板将「计划开始时间」设为必填，但字段标识符无法经公开
+        # API 发现（字段配置端点 404；gmtStart/startDate/startTime/
+        # planStartDate/中文键/customFieldValues 三格式全不识别；官方
+        # CreateWorkitem 示例不含此字段）；assignedTo 需 24-hex 完整用户
+        # id 且成员查询端点不可达。诚实边界：fail-fast 交人工在云效界面
+        # 创建（dispatch-liveness 在 codeup 仓走本地日志降级，已记录）。
+        die("codeup 后端暂不支持 issue create（该 space 模板必填字段无公开"
+            "标识符）——请在云效界面创建工作项，或调整模板去掉『计划开始"
+            "时间』必填后重试", EXIT_USAGE)
     die(f"issue 子命令不支持: {sub}", EXIT_USAGE)
 
-
-def _self_user_id(cx):
-    r = cx.call("/oapi/v1/oapi/organization/user/current")
-    return r.get("userId") or r.get("id") or ""
 
 
 def gh_pr(cx, pos, flags, fields):
@@ -599,9 +597,6 @@ def gh_api(cx, pos, flags):
             # resolved 不删事件：轮次计数与 GitHub label-add 事件对齐（单调）
             events.append({"event": "labeled", "label": {"name": name}})
     print(json.dumps(events, ensure_ascii=False))
-def _self_user_id(cx):
-    r = cx.call("/oapi/v1/platform/user")
-    return r.get("userId") or r.get("id") or ""
 
 
 def gh_auth():

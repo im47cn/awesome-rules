@@ -449,7 +449,7 @@ def resolve_repo_slug(repo: Path) -> str:
     # forge.json）。探测 fail-closed：探测失败按 github 处理（forge.json
     # 缺失 = 上游形态）
     probe = subprocess.run(
-        [sys.executable, str(repo / "forge"), "probe"],
+        [sys.executable, str(repo / ".factory" / "forge"), "probe"],
         capture_output=True, text=True)
     if probe.stdout.strip() == "codeup":
         return f"codeup:{repo.name}"
@@ -759,6 +759,17 @@ def main(argv: list[str]) -> int:
         return dispatch_main(argv[2:])
     if cmd == "classify":
         print(classify_task(argv[2:]))
+        return 0
+    if cmd == "forge-base":
+        # forge-base —— forge.json codeup.base_branch（无配置/损坏输出空；
+        # 调用方回退 main。PR #61 Sourcery：基线双源收口）
+        p = Path(".factory/forge.json")
+        if p.exists():
+            try:
+                print(json.loads(p.read_text(encoding="utf-8"))
+                      .get("codeup", {}).get("base_branch", ""))
+            except (ValueError, OSError):
+                pass
         return 0
     if cmd == "timeout":
         print(node_timeout(argv[2]))
