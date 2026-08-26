@@ -41,12 +41,16 @@ LOCKFILE="$FACTORY/upstream-lock.json"
 git -C "$UP" rev-parse --git-dir >/dev/null 2>&1 \
   || { echo "上游仓不可用: $UP" >&2; exit 2; }
 
-# 锚点解析：--anchor > 上次 lock > 上游 main
-ANCHOR="$(python3 -c '
+# 锚点解析：--anchor > 上次 lock > main（优先级左→右；gtsp-wop-gateway
+# sync 实测：lock 读取无条件覆盖会把 --anchor main 吞掉——只在未显式
+# 指定时才读 lock，--anchor 成为唯一强制追新出口）
+if [ -z "${ANCHOR:-}" ]; then
+  ANCHOR="$(python3 -c '
 import json, pathlib, sys
 p = pathlib.Path(sys.argv[1])
 try: print(json.loads(p.read_text())["anchor"])
 except Exception: pass' "$LOCKFILE" 2>/dev/null || true)"
+fi
 [ -n "$ANCHOR" ] && git -C "$UP" rev-parse --verify -q "$ANCHOR^{commit}" >/dev/null \
   || ANCHOR="main"
 git -C "$UP" rev-parse --verify -q "$ANCHOR^{commit}" >/dev/null \
