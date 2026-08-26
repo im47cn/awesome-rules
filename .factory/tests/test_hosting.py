@@ -340,3 +340,50 @@ class TestCli:
             finally:
                 hosting.FACTORY_HOSTING = "github"
         assert e.value.code == 2
+
+    def test_platform_select_unknown_cli_exit2(self, monkeypatch):
+        """PR #64 Sourcery：ad=current_adapter() 移入 try 后，未知
+        FACTORY_HOSTING 经 CLI 主入口必须 rc=2（fail-closed），
+        不再是裸 traceback + Python 通用 rc=1。"""
+        import subprocess, sys
+        monkeypatch.setenv("FACTORY_HOSTING", "gitlab")
+        r = subprocess.run(
+            [sys.executable, str(hosting.__file__ or ".factory/hosting.py"), "auth"],
+            capture_output=True, text=True, timeout=15)
+        assert r.returncode == 2, (r.returncode, r.stderr[-200:])
+
+    def test_req_malformed_json_fail_closed(self, monkeypatch):
+        """PR #64 Sourcery：200 + 畸形体必须转 HostingError（exit 2 域），
+        裸 JSONDecodeError 不逃出适配器边界。"""
+        import io
+
+        class _BadResp:
+            def read(self):
+                return b"{not-json"
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+
+        monkeypatch.setenv("CODEUP_ORG_ID", "org")
+        monkeypatch.setenv("CODEUP_REPO_ID", "42")
+        ad = hosting.CodeupAdapter.__new__(hosting.CodeupAdapter)
+        ad._endpoint = "openapi-rdc.aliyuncs.com"
+        monkeypatch.setattr(
+            hosting.urllib.request, "urlopen",
+            lambda req, timeout: _BadResp())
+        with pytest.raises(hosting.HostingError) as e:
+            ad._req("GET", "/x")
+        assert "响应格式错误" in str(e.value)
+
+    def test_issue_comments_author_neutral_string(self):
+        """PR #64 Sourcery：中立 schema author 是字符串；分流提示词
+        格式化不得 c["author"]["login"]（TypeError）。fix-issue.sh
+        内联 python 的等价形态回归（与 triage-batch.sh 同款）。"""
+        cs = [{"author": "someone", "body": "hi"},
+              {"body": "no-author-entry"}]
+        out = "\n\n".join(
+            "[作者: %s]\n%s" % (c.get("author") or "?", c["body"])
+            for c in cs[-3:])
+        assert "[作者: someone]" in out
+        assert "[作者: ?]" in out  # 缺 author 不炸

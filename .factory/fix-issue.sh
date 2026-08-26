@@ -186,7 +186,7 @@ run_triage() {  # 物理隔离裁决器：--no-tools --no-session，输入全部
 import json, sys
 d = json.load(open(sys.argv[1]))
 cs = d.get("comments") or []
-out = "\n\n".join("[作者: %s]\n%s" % (c["author"]["login"], c["body"]) for c in cs[-3:])
+out = "\n\n".join("[作者: %s]\n%s" % (c.get("author") or "?", c["body"]) for c in cs[-3:])
 print(out if out else "（无评论）")
 PYC
 )"

@@ -406,6 +406,11 @@ class CodeupAdapter:
             detail = e.read().decode()[:300]
             raise HostingError(
                 f"codeup {method} {path} HTTP {e.code}: {detail}")
+        except json.JSONDecodeError as e:
+            # 200 + 空/畸形体（代理、网关截断）：fail-closed 成 HostingError，
+            # 不让裸 JSONDecodeError 逃出适配器边界（PR #64 Sourcery）
+            raise HostingError(
+                f"codeup {method} {path} 响应格式错误（{self._endpoint}）: {e}")
         if payload.get("success") is False:
             raise HostingError(
                 f"codeup {method} {path} 失败: "
@@ -726,9 +731,9 @@ def main(argv):
                     choices=["merge", "squash", "rebase"])
 
     args = p.parse_args(argv)
-    ad = current_adapter()
-
     try:
+        ad = current_adapter()
+
         if args.cmd == "auth":
             sys.exit(0 if ad.auth_ok() else 1)
 
