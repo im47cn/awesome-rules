@@ -30,9 +30,14 @@ Codeup 能力边界（ADR-008 证据，勿删）：
   ——本仓 skills/alibabacloud-devops 生产沉淀。
 - 【文档推导】其余 MR 端点按 oapi/v1 org 级模式推导，未经 live 验证
   （本仓无云效凭据环境），请求形状由 tests/test_hosting.py mock 锁定。
-- 【平台缺口】(a) 无仓库 issue（对应物 Projex 工作项需组织级映射决策）；
-  (b) MR 类标无 Unlink 端点 → set-labels --remove 不可表达；
-  (c) 无标签事件时间线 → label history 不可表达。三者均 fail-closed exit 2。
+- 【实测破案 PR #62】issue create 可用:create 本体必填仅 assignedTo/
+  spaceId/subject/workitemTypeId;模板层 SystemCustomField 经
+  customFieldValues 平面对象 {"fieldId":"value"} 传,fieldId 从字段配置
+  端点发现,assignedTo=24-hex 用户 id(env CODEUP_ASSIGN_USER_ID)。
+  工作项读/写面（view/list/set-labels/comment）仍未实装——链状态机
+  依赖 PR 侧标签/事件史,缺口 (b)(c) 未解。
+- 【平台缺口】(b) MR 类标无 Unlink 端点 → set-labels --remove 不可表达；
+  (c) 无标签事件时间线 → label history 不可表达。fail-closed exit 2。
 
 CLI（bash 侧调用面；py 侧 import current_adapter）：
   hosting.py auth ok
@@ -54,6 +59,7 @@ CLI（bash 侧调用面；py 侧 import current_adapter）：
   hosting.py pr merge <p> --method merge|squash|rebase
 """
 import argparse
+import datetime
 import json
 import os
 import re
@@ -460,8 +466,71 @@ class CodeupAdapter:
     def issue_comment(self, n, body, marker=None, repo=None):
         _unsupported("issue comment", "同 issue view")
 
+    def _default_cfvs(self, space, wit):
+        """拉字段配置,为全部 required 的 SystemCustomField 构造默认值
+        （forge 实装迁移,PR #62 破案:开始=今日/完成=+7d/float="0.5"/
+        date=今日/list=末档 option id——「末项=最低档」为实测约定）。"""
+        today = datetime.date.today().isoformat()
+        due = (datetime.date.today() + datetime.timedelta(days=7)).isoformat()
+        _, org = self._cfg()
+        fields = self._req(
+            "GET", f"/oapi/v1/projex/organizations/{org}/projects/{space}"
+                  f"/workitemTypes/{wit}/fields")
+        out = {}
+        for f in (fields if isinstance(fields, list) else fields.get("result", [])):
+            if f.get("required") not in (True, "true", 1):
+                continue
+            if f.get("type") == "NativeField":
+                continue  # subject/assignedTo 走 create 本体字段
+            fid, name, fmt = str(f["id"]), f["name"], f.get("format", "")
+            if "开始" in name:
+                out[fid] = today
+            elif "完" in name or "结束" in name:
+                out[fid] = due
+            elif fmt == "float":
+                out[fid] = "0.5"
+            elif fmt == "date":
+                out[fid] = today
+            elif f.get("options"):
+                out[fid] = str(f["options"][-1]["id"])
+        return out
+
     def issue_create(self, title, body, label=None, repo=None):
-        _unsupported("issue create", "同 issue view")
+        # forge 实装迁移（PR #62 实测破案,gtsp-wop-gateway 真实创建验证）：
+        # create 本体必填仅 4 项;「计划开始时间」等模板必填是
+        # SystemCustomField,须以 customFieldValues {"fieldId":"value"}
+        # 平面对象传（数组形态 Invalid format;value 形态见 _default_cfvs）。
+        space = os.environ.get("CODEUP_SPACE_ID")
+        wit = os.environ.get("CODEUP_WORKITEM_TYPE_ID")
+        assignee = os.environ.get("CODEUP_ASSIGN_USER_ID")
+        missing = [k for k, v in (("CODEUP_SPACE_ID", space),
+                                  ("CODEUP_WORKITEM_TYPE_ID", wit),
+                                  ("CODEUP_ASSIGN_USER_ID", assignee)) if not v]
+        if missing:
+            raise HostingError(
+                "codeup issue create 需要 " + "/".join(missing)
+                + "（space=项目 id、wit=工作项类型 id、assign=指派人 24-hex"
+                  " 用户 id——工作项详情 assignedTo.id 形态;成员查询端点"
+                  "不可达,值从云效界面取）", code=2)
+        _, org = self._cfg()
+        payload = {"spaceId": space, "subject": title,
+                   "workitemTypeId": wit, "description": body or "",
+                   "assignedTo": assignee}
+        try:
+            payload["customFieldValues"] = self._default_cfvs(space, wit)
+        except HostingError as e:
+            # 字段配置拉取失败降级告警不阻断（forge 同款行为）：create 由
+            # 平台按模板必填裁决,平台错比静默跳过更可诊断
+            print(f"[hosting] [warn] 字段配置拉取失败,create 可能因模板"
+                  f"必填被拒: {e}", file=sys.stderr)
+        if label:
+            payload["labels"] = [label]
+        r = self._req("POST",
+                      f"/oapi/v1/projex/organizations/{org}/workitems", payload)
+        d = r.get("result") if isinstance(r, dict) else r
+        d = d or {}
+        return {"number": d.get("serialNumber") or d.get("id"),
+                "url": d.get("detailUrl", "")}
 
     def pr_view(self, p, repo=None):
         # 【文档推导】GetMergeRequest（org 级，对齐评论端点实测形态）

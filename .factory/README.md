@@ -18,7 +18,7 @@
 | `dispatch.sh` | S2 派发器入口 shim（编排下沉 `factory_lib.py dispatch` 子命令，ADR-005；CLI/env 契约不变，零 LLM） |
 | `cron-dispatch.sh` | hub kick 入口（LaunchAgent 600s → 锁 + dispatch 单轮） |
 | `factory-state.sh` | 标签同步器（托管平台事实 → state.py 推导 → 幂等收敛） |
-| `hosting.py` + `tests/test_hosting.py` | 托管平台抽象层（ADR-008）：中立 schema（issue/pr/label history）+ GitHub（gh）/Codeup（云效 oapi）双适配器；核心脚本零 gh 直调，平台缺口 fail-closed |
+| `hosting.py` + `tests/test_hosting.py` | 托管平台抽象层（ADR-008）：中立 schema（issue/pr/label history）+ GitHub（gh）/Codeup（云效 oapi）双适配器；核心脚本零 gh 直调，平台缺口 fail-closed（Codeup 可用面 = MR 读写/评论/合并/类标 Link + issue create，PR #62 实测破案） |
 | `validate-pr.sh` | S3 PR 门禁链（guard → tests → AI 评审 → holdout，人类合并前独立验证） |
 | `state.py` + `test_state.py` + `tests/` | 状态机权威（TRANSITIONS 唯一 spec）与全套测试 |
 | `feedback.py` + `feedback-upstream.sh` | etf-radar 工厂改进反哺上游仓（决策零 LLM，AI 仅适配内容） |
@@ -34,8 +34,9 @@
 - `python3`（guard / mutations / hosting / JSON 解析）
 - 托管平台凭据（ADR-008，二选一）：GitHub = `gh` 已认证（默认）；
   Codeup = `YUNXIAO_ACCESS_TOKEN` + `CODEUP_ORG_ID` + `CODEUP_REPO_ID|PATH`
-  （注意：Codeup 缺仓库 issue/类标 Unlink/标签事件史，全链状态机跑不起来——
-  见 ADR-008 平台缺口，仅 MR 读写/评论/合并可用）
+  （注意：Codeup 缺工作项读写面/类标 Unlink/标签事件史，全链状态机跑
+  不起来——见 ADR-008 平台缺口，可用面 = MR 读写/评论/合并/类标 Link +
+  issue create（需 `CODEUP_SPACE_ID`/`WORKITEM_TYPE_ID`/`ASSIGN_USER_ID`））
 - `SUPABASE_DB` 仲裁层 PG 连接串（Supabase pooler 或自建 Postgres；未设 = 单写者模式本地锁降级，见「租约仲裁」）
 
 ## 快速开始
@@ -270,8 +271,10 @@ stamp 指纹绑定会宣告旧证据过期（M4，设计 §11.3）。
 5. **平台适配（GitHub 仓可跳过）**：目标仓若托管在云效 Codeup，设
    `FACTORY_HOSTING=codeup` + `YUNXIAO_ACCESS_TOKEN` + `CODEUP_ORG_ID` +
    `CODEUP_REPO_ID`（或 `CODEUP_REPO_PATH`），见 ADR-008——注意 Codeup
-   缺仓库 issue/类标 Unlink/标签事件史，全链状态机跑不起来（仅 MR
-   读写/评论/合并可用）；GitHub 仓零配置（hosting 默认走 gh，行为不变）。
+   缺工作项读写面/类标 Unlink/标签事件史，全链状态机跑不起来（可用面 =
+   MR 读写/评论/合并/类标 Link + issue create，后者需
+   `CODEUP_SPACE_ID`/`WORKITEM_TYPE_ID`/`ASSIGN_USER_ID`，PR #62 实测破案）；
+   GitHub 仓零配置（hosting 默认走 gh，行为不变）。
 
 次级审计（提示词里的仓库引用）：
 `triage.md` 首行的仓库身份与判据表述、`prime.md` 的阅读范围

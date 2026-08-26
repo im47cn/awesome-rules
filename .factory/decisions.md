@@ -98,16 +98,25 @@
   契约切中立 schema（转移表/语义零变更，9 测试原样通过）；slug 解析自
   factory_lib 迁入 hosting；GH_REPO→FACTORY_HOSTING（默认 github）。
 - **Codeup 平台缺口（文档+API 面实证，fail-closed exit 2 绝不静默降级）**：
-  (a) 无仓库 issue——对应物 Projex 工作项需组织级映射决策（project/type/字段）；
-  (b) MR 类标仅 LinkMergeRequestLabel、无 Unlink——needs-fix→approved 全部
-  换标转移不可表达；(c) 无标签事件时间线——轮次计数（MAX_FIX_ROUNDS）不可
-  派生。故 Codeup 上**全链状态机不可运行**，可用面 = MR 读写/评论（comment_type
-  +resolved 必填，skills 实测坑位已锁定进适配器）/合并/类标 Link。
+  (a) issue create 已破案（PR #62 实测：create 本体必填仅 assignedTo/
+  spaceId/subject/workitemTypeId；模板必填 SystemCustomField 经
+  customFieldValues 平面对象 {"fieldId":"value"} 传，fieldId 从字段配置
+  端点发现，value 形态 date=ISO/float=小数字符串/list=option id；
+  assignedTo=24-hex 用户 id）——hosting.CodeupAdapter 已实装迁移（env：
+  CODEUP_SPACE_ID/WORKITEM_TYPE_ID/ASSIGN_USER_ID），工作项读/写面
+  （view/list/set-labels/comment）仍未实装；(b) MR 类标仅
+  LinkMergeRequestLabel、无 Unlink——needs-fix→approved 全部换标转移
+  不可表达；(c) 无标签事件时间线——轮次计数（MAX_FIX_ROUNDS）不可派生。
+  故 Codeup 上**全链状态机不可运行**，可用面 = MR 读写/评论（comment_type
+  +resolved 必填，skills 实测坑位已锁定进适配器）/合并/类标 Link + issue
+  create（工具/人工开工作项，不进链状态机）。
 - **验证边界（诚实声明）**：GitHub 侧行为保持由 193 项测试（含 hosting 契约
   22 项：gh 命令构造/原子换标/归一化/CLI 缺口）+ 沙箱端到端冒烟
   （sync --plan/--apply、fix-issue --dry-run 全链 gh 调用序列核对）覆盖；
-  Codeup 侧按官方文档端点推导、mock 锁定请求形状，**未经 live 验证**（本仓
-  无云效凭据环境）——首个真实接入时以 test_hosting.py 为对齐基线。
+  Codeup 侧 MR 端点按官方文档推导、mock 锁定请求形状，**未经 live 验证**
+  （本仓无云效凭据环境）；issue create 的字段形态结论来自 PR #62 在
+  gtsp-wop-gateway 的真实创建实测（forge 形态），hosting 迁移以
+  test_hosting.py mock 对齐该形态——首个真实接入时以两者为对齐基线。
 - **后果**：MISSION 铁律 4「纯 bash + gh」措辞需人类修宪为「纯 bash/Python +
   托管适配层（零 LLM 不变）」；组件数 18→19（ADR-002 触发器 3 余量充足）；
   核心脚本自此禁直调 gh（doc-freshness R1 已盯 README 登记，新增写点必须走

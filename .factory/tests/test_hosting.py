@@ -213,7 +213,6 @@ class TestCodeupGaps:
         lambda ad: ad.issue_view(1),
         lambda ad: ad.issue_list(),
         lambda ad: ad.issue_set_labels(1, add=["x"]),
-        lambda ad: ad.issue_create("t", "b"),
         lambda ad: ad.label_history(2),
         lambda ad: ad.pr_set_labels(2, remove=["x"]),
         lambda ad: ad.pr_diff(2),
@@ -223,6 +222,79 @@ class TestCodeupGaps:
             fn(self._ad(monkeypatch))
         assert e.value.code == 2
         assert "ADR-008" in str(e.value)
+
+
+class TestCodeupIssueCreate:
+    """issue create 实装契约（forge 实装迁移,PR #62 实测破案）:
+    本体 4 必填 + customFieldValues 平面对象 + 缺 env fail-closed。"""
+
+    ENV = {"CODEUP_SPACE_ID": "sp1", "CODEUP_WORKITEM_TYPE_ID": "wt9",
+           "CODEUP_ASSIGN_USER_ID": "0123456789abcdef01234567"}
+
+    FIELDS = {"result": [
+        {"id": 1, "name": "标题", "required": True, "type": "NativeField"},
+        {"id": 79, "name": "计划开始时间", "required": True, "format": "date"},
+        {"id": 80, "name": "计划结束时间", "required": True, "format": "date"},
+        {"id": 101586, "name": "预计工时", "required": True, "format": "float"},
+        {"id": 6, "name": "优先级", "required": True,
+         "options": [{"id": 11}, {"id": 22}]},
+        {"id": 7, "name": "可选字段", "required": False},
+    ]}
+
+    def _ad(self, monkeypatch, fields=None, create_resp=None, fail_fields=False):
+        for k, v in {**{"YUNXIAO_ACCESS_TOKEN": "t", "CODEUP_ORG_ID": "org",
+                        "CODEUP_REPO_ID": "42"}, **self.ENV}.items():
+            monkeypatch.setenv(k, v)
+        ad = hosting.CodeupAdapter()
+        calls = []
+
+        def fake_req(method, path, body=None, query=None, _retry_rdc=True):
+            calls.append((method, path, body))
+            if "workitemTypes" in path:  # 字段配置发现端点
+                if fail_fields:
+                    raise hosting.HostingError("codeup GET fields HTTP 404: x")
+                return fields if fields is not None else self.FIELDS
+            return create_resp or {"result": {"serialNumber": "KFPT-42",
+                                              "detailUrl": "https://x/KFPT-42"}}
+
+        ad._req = fake_req
+        return ad, calls
+
+    def test_missing_env_fail_closed(self, monkeypatch):
+        monkeypatch.setenv("YUNXIAO_ACCESS_TOKEN", "t")
+        monkeypatch.setenv("CODEUP_ORG_ID", "org")
+        monkeypatch.delenv("CODEUP_SPACE_ID", raising=False)
+        ad = hosting.CodeupAdapter()
+        with pytest.raises(hosting.HostingError) as e:
+            ad.issue_create("t", "b")
+        assert e.value.code == 2
+        assert "CODEUP_SPACE_ID" in str(e.value)
+
+    def test_create_payload_shape(self, monkeypatch):
+        ad, calls = self._ad(monkeypatch)
+        out = ad.issue_create("标题", "正文", label="factory:triaging")
+        m, path, body = calls[-1]
+        assert (m, path) == ("POST", "/oapi/v1/projex/organizations/org/workitems")
+        assert body["spaceId"] == "sp1" and body["workitemTypeId"] == "wt9"
+        assert body["subject"] == "标题" and body["description"] == "正文"
+        assert body["assignedTo"] == "0123456789abcdef01234567"
+        assert body["labels"] == ["factory:triaging"]
+        cfvs = body["customFieldValues"]
+        # 平面对象 {"fieldId": "value"}（数组形态 = Invalid format 实测）
+        assert isinstance(cfvs, dict)
+        assert cfvs["79"].endswith("-") or len(cfvs["79"]) == 10  # date ISO
+        assert cfvs["101586"] == "0.5"  # float=小数字符串
+        assert cfvs["6"] == "22"  # list=末档 option id（str）
+        assert 1 not in cfvs and "1" not in cfvs  # NativeField 走本体
+        assert 7 not in cfvs and "7" not in cfvs  # 非 required 不带
+        assert out == {"number": "KFPT-42", "url": "https://x/KFPT-42"}
+
+    def test_fields_fetch_failure_degrades_with_warning(self, monkeypatch, capsys):
+        ad, calls = self._ad(monkeypatch, fail_fields=True)
+        out = ad.issue_create("t", "b")
+        assert "warn" in capsys.readouterr().err  # 降级可见不静默
+        assert "customFieldValues" not in calls[-1][2]  # POST 仍发出
+        assert out["number"] == "KFPT-42"
 
 
 class TestCodeupEndpointFallback:
