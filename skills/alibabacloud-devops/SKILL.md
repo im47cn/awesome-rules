@@ -62,57 +62,44 @@ mcporter list yunxiao --schema && mcporter call yunxiao.<tool> key=value   # 秒
 #           → create_change_request_comment organizationId=<org> repositoryId=<repo> localId=123 content="LGTM"
 # 流水线：  list_pipelines → create_pipeline_run pipelineId=123456 branch=main
 #           → get_latest_pipeline_run pipelineId=123456
-# 工作项：  search_projects keyword=<kw> → create_work_item workitemTypeId=<type-id> subject="..."
+# 工作项：  search_projects → list_work_item_types → get_work_item_type_field_config
+#           → create_work_item（模板必填字段经 customFieldValues 平面对象传）
 ```
 
-## Codeup 工作项（projex）OpenAPI 实测知识
+## 工作项操作：MCP 工具优先（官方最佳实践对齐）
 
-REST 直连层知识（2026-08-26 破案沉淀，`.factory/forge` 全量实测；mcporter 工具
-走同一后端，字段语义通用）。**排错第一信源：MCP server 仓的 swagger schema，
-其次官方文档；黑盒探针路径形态成本极高**（实测 13 种形态全拒后才定位到正解）。
+官方 server 已把工作项的发现/创建/评论全部工具化，**能用工具就不要直连 REST**
+（工具自带字段抽象与错误翻译，直连只在该工具确实缺失时作为兜底）：
 
-### 创建工作项（CreateWorkitem）五层要点
-
-`POST /oapi/v1/projex/organizations/{orgId}/workitems`：
-
-1. **API 本体必填仅 4 项**：`assignedTo` / `spaceId` / `subject` / `workitemTypeId`
-   （swagger `CreateWorkitemRequest`）。帮助文档示例里看到的其它字段全可选。
-2. **模板层必填字段走 `customFieldValues` 平面对象** `{"fieldId":"value"}`——
-   数组形态报 `Invalid format`；不传模板必填字段报中文错误（如「字段【计划
-   开始时间】不能为空」）。**不要用 gmtStart/startDate/startTime 等键名探针**：
-   create API 没有时间本体字段。
-3. **fieldId 从字段配置接口发现**：`GET /oapi/v1/projex/organizations/{org}/projects/{spaceId}/workitemTypes/{wit}/fields`（注意是 `projects/{spaceId}` 形态；`spaces/...`、直接 `workitemTypes/{id}/fields` 均 404）。返回项含 `id`（fieldId）、`name`、`type`（`NativeField`/`SystemCustomField`/`CustomField`）、`format`、`required`、`options`。
-4. **value 形态**：`date`=ISO 日期串；`float`=小数字符串（`"0.5"` 过、`"1h"` 拒）；
-   `list`=**option 的 id**（非文本——传「低」拒、传 option id `c18e89…` 过，
-   options 数组里每项有 `value`/`displayValue`/`id`）；`NativeField` 不进
-   customFieldValues（走本体字段）。
-5. **assignedTo 是 24-hex 完整用户 id**（工作项详情 `assignedTo.id` 形态；
-   截断 id 报 `Invalid.UserAccountId`）。成员查询端点不可达（多个候选 404/HTML），
-   自动解析当前用户无门——从任一现有工作项详情取 `assignedTo.id` 或 `creator.id`。
-
-### 其它工作项接口形态
-
-- 详情：`GET .../workitems/{24-hex-id}`——按 `serialNumber`（如 `KFPT-16`）取需先
-  `POST .../workitems:search`（`category` 必填如 `Task`；`workitemTypeId` 过滤被拒）。
-- 评论写：`POST .../workitems/{id}/comments` + `{"content","contentType":"markdown"}`。
-- 评论读：`GET .../workitems/{id}/comments`（需令牌含对应 scope，403 时报
-  `Current token has no permission to api`）。
-- 删除：`DELETE .../workitems/{id}`（200 空体）。
-- labels：Task 类型常无 labels 字段（PUT 报 `workitem does not contains field`，
-   非权限）——等价载体是 description 尾部 HTML 注释块（富文本完整保留注释）。
-- 写操作可返回 200+空 body，按长度守卫解析为 `{}`，勿裸 `json.load`。
-
-### 权限矩阵实测（个人令牌，2026-08-26）
-
-| 面 | 结果 | 备注 |
+| 意图 | 工具（以 `mcporter list` 实时为准） | 说明 |
 | --- | --- | --- |
-| 工作项读/搜索 | ✅ | 详情/列表/字段配置 |
-| 工作项写（update/labels） | ✅ | description 模式标签全通 |
-| 工作项创建/删除 | ✅ | 需上述五层正确姿势 |
-| 工作项评论读/写 | ✅ | 令牌需项目管理评论 scope（此前 403，放开后全通） |
-| Codeup MR 全套 | ✅ | 列表/详情/评论/diff/merge |
+| 找项目空间 | `search_projects` / `get_project` | spaceId = 项目 id |
+| 工作项类型 | `list_work_item_types`（项目空间）/ `get_work_item_type` | 拿 workitemTypeId |
+| **字段配置** | `get_work_item_type_field_config` | **模板必填字段（如「计划开始时间」）在这里发现**——fieldId、format（date/float/list）、options（含每项 id）、required 一并返回；create 前必查 |
+| 创建 | `create_work_item` | 模板必填字段经 customFieldValues 平面对象传：`{"<fieldId>": "<value>"}`；list 类字段传 option **id**（非文本），float 传小数字符串，date 传 ISO 日期 |
+| 读/搜 | `get_work_item` / `search_workitems` | |
+| 评论 | `list_work_item_comments` / `create_work_item_comment` | |
+| 工时 | `list_effort_records` / `create_effort_record` 等 | |
 
-令牌权限变更后**必须复验**——403 结论有时效性（本技能两次实测口径相反即为证）。
+### 直连 REST 的两个正当场景（兜底，非默认）
+
+1. **工具面缺失**：如 MC 评论 resolve（`PUT comments/{id}`）、MR `comments/list`
+   批量拉取——工具未覆盖时直连，端点/字段形态见「注意」节。
+2. **脚本化集成**（`.factory/forge` 形态）：需要稳定 argv 界面时。完整实测
+   知识（字段配置端点形态、value 形态矩阵、assignedTo 24-hex、空体容错）沉淀在
+   [.factory/decisions.md ADR-007](../../.factory/decisions.md)，不在此复制——
+   实例态数据（fieldId 等）随 space 模板变化，正确位置是代码运行时发现，不是文档。
+
+### 排错信源优先级（黑盒探针成本实证）
+
+1. **MCP server 仓 `docs/*.swagger.json`**（[GitHub](https://github.com/aliyun/alibabacloud-devops-mcp-server)）——字段必填性/类型/枚举一查便知，比帮助文档表格结构化
+2. 官方文档 https://help.aliyun.com/zh/yunxiao/
+3. 黑盒探针（最后手段——曾实测 13 种键名形态全拒后才发现正解是「先查字段配置拿 fieldId」）
+
+### 令牌权限时效性
+
+403 结论**不可缓存**：个人令牌 scope 变更后同一接口口径可完全反转（工作项评论
+曾 403 后全通）。变更后必须复验；诊断时先想「scope 变了吗」再看代码。
 
 ## 注意
 
