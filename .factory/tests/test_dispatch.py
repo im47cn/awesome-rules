@@ -177,7 +177,7 @@ class TestDispatchParsers:
             {"number": 3, "labels": [{"name": "priority:medium"}, {"name": "x"}]},
             {"number": 4, "labels": [{"name": "priority:high"}]},
         ]
-        assert sort_by_priority(issues) == [5, 4, 3, 2, 7]
+        assert sort_by_priority(issues) == ["5", "4", "3", "2", "7"]  # ADR-007 字符串编号
 
     def test_sort_by_priority_tie_by_number_and_empty_labels(self):
         issues = [
@@ -185,7 +185,7 @@ class TestDispatchParsers:
             {"number": 8, "labels": []},
             {"number": 6, "labels": [{"name": "priority:high"}]},
         ]
-        assert sort_by_priority(issues) == [6, 9, 8]
+        assert sort_by_priority(issues) == ["6", "9", "8"]
 
     def test_approved_prs_filters_review_decision(self):
         prs = [

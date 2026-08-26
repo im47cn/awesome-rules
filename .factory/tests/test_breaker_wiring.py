@@ -56,6 +56,9 @@ def _sandbox(tmp_path: Path, floor: str | None, ledger: str | None) -> Path:
     factory = repo / ".factory"
     shutil.copytree(FACTORY, factory,
                     ignore=shutil.ignore_patterns("artifacts", "worktrees", "__pycache__", "locks"))
+    # ADR-007：沙箱模拟 github 后端（gh 桩）——摘除仓库的 forge.json，
+    # 防 codeup 后端劫持（无令牌 forge 直接 die，label 全失败）
+    (factory / "forge.json").unlink(missing_ok=True)
     locks = factory / "locks"
     locks.mkdir()
     if floor is not None:

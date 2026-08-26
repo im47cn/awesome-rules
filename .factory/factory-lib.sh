@@ -14,6 +14,9 @@
 #    幂等键兜底。LEASE_KEY 未设（无租约上下文）不拦。
 source "${REPO}/.factory/factory-lease.sh"
 
+# ADR-007 平台适配层：调用方（fix-issue/triage-batch）已定义 FORGE；兜底
+FORGE="${FORGE:-${REPO}/.factory/forge}"
+
 
 issue_label_swap() { # issue_label_swap <"删,删"|空> <"加,加"> —— 单请求原子转移
   # 逐个 add/remove 会把状态机跳变拆成可失败的顺序依赖（半途断裂=双标签或裸奔）；
@@ -26,7 +29,7 @@ issue_label_swap() { # issue_label_swap <"删,删"|空> <"加,加"> —— 单�
     return 1
   }
   if [ -n "${1:-}" ]; then
-    if gh issue edit "${ISSUE}" --repo "${REPO_SLUG}" \
+    if "${FORGE}" issue edit "${ISSUE}" --repo "${REPO_SLUG}" \
         --remove-label "${1}" --add-label "${2}" >/dev/null 2>&1; then
       echo "  [label] -${1} +${2}"
     else
@@ -34,7 +37,7 @@ issue_label_swap() { # issue_label_swap <"删,删"|空> <"加,加"> —— 单�
       return 1
     fi
   else
-    if gh issue edit "${ISSUE}" --repo "${REPO_SLUG}" \
+    if "${FORGE}" issue edit "${ISSUE}" --repo "${REPO_SLUG}" \
         --add-label "${2}" >/dev/null 2>&1; then
       echo "  [label] +${2}"
     else
@@ -62,7 +65,7 @@ issue_comment() { # issue_comment <body-file> [dedupe-marker] —— 链写 issu
     return 1
   }
   if [ -n "${2:-}" ]; then
-    if gh issue view "${ISSUE}" --repo "${REPO_SLUG}" --json comments 2>/dev/null \
+    if "${FORGE}" issue view "${ISSUE}" --repo "${REPO_SLUG}" --json comments 2>/dev/null \
         | python3 -c 'import json, sys
 m = "<!-- " + sys.argv[1] + " -->"
 comments = json.load(sys.stdin).get("comments") or []
@@ -72,7 +75,7 @@ sys.exit(0 if any(m in (c.get("body") or "") for c in comments) else 1)' "$2"; t
     fi
     printf '\n<!-- %s -->\n' "$2" >> "${1}"
   fi
-  gh issue comment "${ISSUE}" --repo "${REPO_SLUG}" --body-file "${1}"
+  "${FORGE}" issue comment "${ISSUE}" --repo "${REPO_SLUG}" --body-file "${1}"
 }
 
 issue_reject() { # issue_reject <remove-csv|空> <triage.json> —— 拒绝的单一动作

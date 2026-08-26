@@ -26,14 +26,14 @@
 | `factory-local.json` | 工厂本地化配置（M4）：PERIMETER 与 REJECT_GUIDANCE 的数据载体——guard/factory_lib 零本地化的前提；改后须重跑 mutations 重证 |
 | `upstream-sync-check.sh` | M2 上游同步检查（dispatch 轮末）：full 漂移→确定性 PR 流；local 漂移→needs-human issue；无凭据降级仅报告 |
 | `sync-from-upstream.sh` + `DISTRIBUTION.json` | M1 上游同步：三态分发清单（full/local/skip）+ 下游拉取（--check 门禁/--apply 追平+锚点） |
-| `decisions.md` | 工厂决策记录（ADR-001~006：租约仲裁/A3 记账/单写者降级/周回归/dispatch 下沉/触发器计数口径）；进程管理类缺陷须在此记账（ADR-002，合并前自愈不计数，ADR-006） |
+| `decisions.md` | 工厂决策记录（ADR-001~007：租约仲裁/A3 记账/单写者降级/周回归/dispatch 下沉/触发器计数口径/forge 平台适配）；进程管理类缺陷须在此记账（ADR-002，合并前自愈不计数，ADR-006） |
 | `regression/` | 自挖掘日回归（ADR-004）：daily-regression.sh 串联 badcase/gauntlet/doc-freshness/dispatch-liveness 四层，失败自动开 `[factory-regression]` issue 走 triage；liveness 多仓活性：hub 注册表 repos.conf 全部仓库，停摆/断档两死法任一仓死即 FAIL |
+| `forge` + `forge.json` | 平台适配层（ADR-007）：gh 兼容 argv shim——forge.json 缺失 exec gh（上游零行为变化）；`backend=codeup` 走云效 REST（工作项=issue、MR 评论标记=PR 侧标签/事件）；forge.json 每仓一份（skip 分发） |
+| `test_forge.py` | forge 适配层测试（github 透传语义 / codeup 映射纯函数）；与 `tests/test_guard_dotfiles.py` 同属测试面，R1 按目录豁免但顶层登记保完整性 |
 
 ## 前置条件
 - `omp` CLI（AI 节点引擎；每节点独立进程 = 物理级 fresh context）
-- `gh` 已认证（取 issue、建 PR）
-- `python3`（guard / mutations / JSON 解析）
-- `SUPABASE_DB` 仲裁层 PG 连接串（Supabase pooler 或自建 Postgres；未设 = 单写者模式本地锁降级，见「租约仲裁」）
+- `gh` 已认证（github 后端；codeup 后端改为 `YUNXIAO_ACCESS_TOKEN` + forge.json）
 
 ## 快速开始
 
@@ -248,7 +248,7 @@ stamp 指纹绑定会宣告旧证据过期（M4，设计 §11.3）。
 
 ## 移植到其他仓库（适配清单）
 
-本工厂默认绑定 awesome-rules。移植（如 etf-radar）需改四处：
+本工厂默认绑定 awesome-rules。移植（如 etf-radar）需改五处：
 
 1. **拷贝** `.factory/`（排除 `artifacts/`）到目标仓库根。
 2. **重写 `MISSION.md`**：使命、triage 判据 a 的范围表述、周界清单
@@ -258,6 +258,11 @@ stamp 指纹绑定会宣告旧证据过期（M4，设计 §11.3）。
 4. **替换测试门命令**：`plan.md` 的 `final_gate` 示例与
    `implement.md` 纪律 4 中的 `scripts/run_tests.sh --no-lock`
    → 目标仓库真实测试命令（如 `uv run pytest` / `npm test`）。
+5. **平台适配（GitHub 仓可跳过）**：目标仓若托管在云效 Codeup，创建
+   `.factory/forge.json`（`backend=codeup` + org/repo/space/workitemType/
+   base_branch，见 ADR-007）并设 `YUNXIAO_ACCESS_TOKEN`（需工作项写权限；
+   labels 字段缺失时用 `issue_labels=description` 模式）；GitHub 仓不建
+   forge.json——forge 透传 gh，零行为变化。护栏：`forge probe` 应答后端身份。
 
 次级审计（提示词里的仓库引用）：
 `triage.md` 首行的仓库身份与判据表述、`prime.md` 的阅读范围

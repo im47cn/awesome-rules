@@ -26,7 +26,9 @@ class TestGuardLoadsPerimeterFromConfig:
     def test_perimeter_loaded_and_nonempty(self):
         assert len(guard.PERIMETER) > 10
         assert ".factory/" in guard.PERIMETER
-        assert "steering/" in guard.PERIMETER
+        # 通用不变量：质检线自锁（治理文件属仓特定，不作硬断言——ADR-007
+        # 下游移植的周界清单各不相同）
+        assert any(p.endswith("/") for p in guard.PERIMETER)
 
     def test_perimeter_consistent_with_config_file(self):
         cfg = json.loads(

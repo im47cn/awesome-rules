@@ -14,6 +14,11 @@
 set -u
 REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "不在 git 仓库" >&2; exit 2; }
 FACTORY="$REPO/.factory"
+# ADR-007 平台适配：codeup 后端时 slug 为占位（forge 忽略 --repo）
+FORGE="${FACTORY}/forge"
+if [ "$("${FORGE}" probe 2>/dev/null || true)" = codeup ]; then
+  REPO_SLUG="${GH_REPO:-codeup:$(basename "${REPO}")}"
+else
 REPO_SLUG="${GH_REPO:-$(
   # 双 remote 布局：origin pushurl 可能多条（codeup 镜像 + github），
   # 逐条扫含 github.com 者（github remote 名优先）；443 端口形态兼容
@@ -22,6 +27,7 @@ REPO_SLUG="${GH_REPO:-$(
   # grep 去 -m1（消费全量防 SIGPIPE，issue #30）；sed 1!d 语义同旧形态
   } | grep 'github\.com' | sed -E '1!d; s#^.*github\.com(:[0-9]+)?[/:]##; s#\.git$##'
 )}"
+fi
 [ -n "$REPO_SLUG" ] || { echo "无法确定 GitHub 仓库 slug（GH_REPO 或 github remote）" >&2; exit 2; }
 
 TARGET=""; PLAN=0
@@ -37,7 +43,7 @@ done
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
 find_pr_for_issue() {  # <issue-number> → PR number（空=无）
-  gh pr list --repo "$REPO_SLUG" --state open --limit 100 \
+  "${FORGE}" pr list --repo "$REPO_SLUG" --state open --limit 100 \
     --json number,body,reviewDecision,labels,state \
     | python3 -c '
 import json, re, sys
@@ -50,14 +56,14 @@ for pr in json.load(sys.stdin):
 
 sync_one() {  # <issue-number>
   local N="$1" P="" plan=""
-  gh issue view "$N" --repo "$REPO_SLUG" \
+  "${FORGE}" issue view "$N" --repo "$REPO_SLUG" \
     --json number,state,labels,comments > "$TMP/issue.json" 2>/dev/null \
     || { echo "  issue #$N 不可读，跳过" >&2; return 0; }
   P="$(find_pr_for_issue "$N")"
   if [ -n "$P" ]; then
-    gh pr view "$P" --repo "$REPO_SLUG" \
+    "${FORGE}" pr view "$P" --repo "$REPO_SLUG" \
       --json number,state,reviewDecision,labels > "$TMP/pr.json"
-    gh api "repos/${REPO_SLUG}/issues/${P}/events" --paginate > "$TMP/events.json"
+    "${FORGE}" api "repos/${REPO_SLUG}/issues/${P}/events" --paginate > "$TMP/events.json"
     plan="$(python3 "$FACTORY/state.py" plan \
       --issue "$TMP/issue.json" --pr "$TMP/pr.json" --events "$TMP/events.json")"
   else
@@ -79,11 +85,11 @@ for o in json.load(sys.stdin)["ops"]:
     print("%s\t%s\t%s" % (o["target"], o["op"], o["label"]))' \
     | while IFS=$'\t' read -r tgt op label; do
         if [ "$tgt" = issue ]; then
-          gh issue edit "$N" --repo "$REPO_SLUG" "--${op}-label" "$label" >/dev/null \
+          "${FORGE}" issue edit "$N" --repo "$REPO_SLUG" "--${op}-label" "$label" >/dev/null \
             && echo "  [label] issue $op $label" \
             || echo "  [label] issue $op $label 失败（仅告警）" >&2
         else
-          gh pr edit "$P" --repo "$REPO_SLUG" "--${op}-label" "$label" >/dev/null \
+          "${FORGE}" pr edit "$P" --repo "$REPO_SLUG" "--${op}-label" "$label" >/dev/null \
             && echo "  [label] pr $op $label" \
             || echo "  [label] pr $op $label 失败（仅告警）" >&2
         fi
@@ -91,7 +97,7 @@ for o in json.load(sys.stdin)["ops"]:
 }
 
 if [ "$TARGET" = "--all" ]; then
-  { gh issue list --repo "$REPO_SLUG" --state all --limit 200 --json number,labels \
+  { "${FORGE}" issue list --repo "$REPO_SLUG" --state all --limit 200 --json number,labels \
       | python3 -c '
 import json, sys
 for i in json.load(sys.stdin):
@@ -99,7 +105,7 @@ for i in json.load(sys.stdin):
         print(i["number"])'
     # 零标签 issue 也会被 open PR 关联（链中途死亡 → trap 清标签但 PR 已建），
     # 并入 PR 的 closingIssues 引用，--all 才能收敛完整
-    gh pr list --repo "$REPO_SLUG" --state open --limit 100 \
+    "${FORGE}" pr list --repo "$REPO_SLUG" --state open --limit 100 \
       --json closingIssuesReferences --jq '.[].closingIssuesReferences[].number'; } \
     | sort -un | while read -r N; do sync_one "$N"; done
 else

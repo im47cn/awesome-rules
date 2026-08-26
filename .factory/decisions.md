@@ -64,3 +64,19 @@
 - **决策**：触发器只计**曾进入 main 的缺陷**（主干上发生过、靠事后修复收口）。合并前审查轮自愈照常记账——证据完整性不折损——但证据行标注「不计触发器」，不参与触发器 2 计数。
 - **理由**：触发器 2 的语义是「外壳形态在主干持续产生进程缺陷」；审查轮自愈恰恰是评审机制在工作，属反证据。计入会造成「审查越有效 → 越快触发重写评估」的激励倒挂。
 - **后果**：ADR-002 证据清单自此区分两类行：默认计数；标注「不计触发器（ADR-006）」的不计。机器消费（skill-evo）以标注为准。
+
+## ADR-007 · 2026-08-25 · forge 平台适配层（GitHub 单平台 → gh 兼容多平台）
+
+- **背景**：`.factory` 调用面（issue/pr/label/api/auth ≈9 读 + 9 写）结构性绑定 `gh` CLI 与 GitHub JSON 形状（state.py 消费这些形状）；Codeup（云效）托管的下游仓（gtsp-wop-gateway 等）无 gh 可用，移植被平台锁死。
+- **决策**：引入 `.factory/forge`（gh 兼容 argv shim，stdlib Python）：`forge.json` 缺失 → github 后端 `exec gh`（上游零行为变化、零配置）；`backend=codeup` → 云效 REST（`openapi-rdc.aliyuncs.com`，`x-yunxiao-token`），输出同形状 JSON。调用面改动仅二进制名 `gh`→`"${FORGE}"`（feedback-upstream.sh 例外：它指向上游 GitHub，保持 gh）。issue 编号统一字符串（GitHub 数字 / Codeup 工作项序号 KFPT-16 同构；state.py `_linked_issue` 正则放宽 `#([\w][\w-]*)`）。
+- **Codeup 事实模型**（无 labels/timeline 的等价物）：issue=projex 工作项（labels 直写）；PR 侧标签/事件=MR 全局评论标记——`--add-label` 发 `[factory:label:add] X` 评论、`--remove-label` 置 resolved（内容保留→轮次计数单调，对齐 GitHub label-add 事件语义）；`reviewDecision`：`TO_BE_MERGED`→APPROVED，人工标记评论 `[factory:changes-requested]`→CHANGES_REQUESTED；`pr diff` 用本地 git（远端分支已推）。未知子命令/标志 fail-closed exit 2。
+- **后果**：新增 forge（full 分发）+ forge.json（skip，每仓一份：org/repo/space/workitemType/base_branch）；`test_forge.py` 单测（零网络）+ `tests/` 162 绿；`.factory` 脚本 diff 仅 FORGE 定义块与二进制名替换。已知边界：当前云效令牌 projex 写 403（工作项 labels/评论/创建）——issue 侧状态机落地需令牌补项目管理写权限；Codeup MR 评论写已实测可用。
+- **引用**：`.factory/forge`；`.factory/test_forge.py`；README「平台适配层（forge）」。
+
+
+### ADR-007 补记 · 2026-08-25 · issue 侧标签描述载体与网络韧性
+
+- **标签载体双模**（`forge.json codeup.issue_labels`）：云效 Task 类型字段配置可无 labels 字段（PUT 400 "workitem does not contains field"，非权限）。`native` 直写字段；`description` 走描述尾部 HTML 注释块 `<!-- factory:labels:v1: ... -->`——实测云效富文本完整保留注释、单字段 PUT 不触碰其余字段。读取时标记剥离不进 body，标签从原文解析。gtsp-wop-gateway 现用 description 模式（字段配置后可切回）。
+- **握手级重试**：公司网关对快速连续 TLS 握手偶发 RST（SSLEOFError，2026-08-25 实测）。握手失败=请求未发出，全方法重试皆安全（非幂等 POST 不重复执行）；forge.call 内建 3 次退避。
+- **空体容错**：云效写操作可返回 200+空 body；`json.load` 裸崩改为按长度守卫返回 `{}`。
+- **权限矩阵实测**（新令牌）：工作项 update/create ✅、工作项评论写 ❌403（缺 scope——链可跑但 triage 拒绝回执降级为仅告警，标签裁决不受影响）、Codeup MR 全套 ✅。

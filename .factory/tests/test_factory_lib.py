@@ -19,6 +19,32 @@ from factory_lib import (
     reject_receipt,
 )
 
+from pathlib import Path as _P
+from unittest import mock as _mock
+
+
+def test_resolve_repo_slug_probe_path():
+    """PR #61 Sourcery：探测必须是 repo/.factory/forge（repo/forge 恒失败，
+    纯 codeup 仓 slug 解析为空 → dispatch 初始化退出）。"""
+    from factory_lib import resolve_repo_slug
+    with _mock.patch("subprocess.run") as run:
+        run.return_value = _mock.Mock(stdout="codeup\n", returncode=0)
+        assert resolve_repo_slug(_P("/tmp/fake-repo")) == "codeup:fake-repo"
+        argv = run.call_args_list[0].args[0]
+        assert argv[1].endswith("/.factory/forge"), argv
+
+
+def test_forge_base_fallback(monkeypatch, tmp_path):
+    """forge-base：forge.json 有则输出 base_branch，无/损坏输出空（调用方回退 main）。"""
+    import json as _json
+    import factory_lib as FL
+    monkeypatch.chdir(tmp_path)
+    assert FL.main(["x", "forge-base"]) == 0  # 无 forge.json → 空
+    (tmp_path / ".factory").mkdir()
+    (tmp_path / ".factory/forge.json").write_text(
+        _json.dumps({"codeup": {"base_branch": "develop"}}), encoding="utf-8")
+    assert FL.main(["x", "forge-base"]) == 0
+
 # ---- S2 issue #2 holdout 的真实输出形态（fence 包裹 + 前导文字）----
 REAL_HOLDOUT = """Working...
 ```json
@@ -249,7 +275,8 @@ class TestRejectReceipt:
         md = reject_receipt(REAL_REJECT)
         assert "判据a（使命一致）" in md
         assert "判据b（可判定）" in md
-        assert "转人工 PR" in md  # #24：判据 b 指引含 doc-only 载体/人工 PR 出路
+        assert "人工" in md  # #24：判据 b 指引含 doc-only 载体/人工出路
+        # （PR/MR 措辞是 factory-local.json 本地化面——不作硬断言，ADR-007）
 
     def test_receipt_pass_criteria_get_no_guidance(self):
         """全通过措辞（通过/勉强通过）不触发指引——防噪音。"""
