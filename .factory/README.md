@@ -342,11 +342,11 @@ dispatch 在 fail-closed 上空转。
 - S1 手动跑 `fix-issue.sh`；S2 用 `dispatch.sh`（本仓库现已内置）。
   标签状态机唯一权威在 `state.py TRANSITIONS`（转移表全覆盖有测试，
   meta-test 强制每条边有场景 fixture）。
-- S1→L3 出口判据「行为破坏类缺陷集扩充后 kill rate ≥80%」已证（2026-08-24）：
-  篡改类 6/6 + 行为破坏类 5/5，kill rate 11/11 = 100%，负例放行 2/2；
-  证据口径与逐条击杀明细见 `.factory/mutations/EVIDENCE-2026-08-24.md`。
+- S1→L3 出口判据「行为破坏类缺陷集扩充后 kill rate ≥80%」已证（2026-08-26 重证）：
+  篡改类 7/7 + 行为破坏类 5/5，kill rate 12/12 = 100%，负例放行 3/3；
+  证据口径与逐条击杀明细见 `.factory/mutations/EVIDENCE-2026-08-26.md`。
   A5 仍为必要非充分条件——`metrics/auto-merge-unlocked` 的开启/重签是治理
-  动作，由人类决定（其记录的 6/6 口径早于本扩充，开启与否人类复核）。
+  动作，由人类决定（2026-08-26 已重签至 12/12 口径）。
 - holdout 输入白名单是提示词纪律级约束，S2+ 换 SDK
   `restrictToolNames` 物理化（设计文档 §7）。
 - `--fill` 生成的 PR 标题质量依赖 implement 的 commit 信息。

@@ -78,5 +78,10 @@
 
 - **标签载体双模**（`forge.json codeup.issue_labels`）：云效 Task 类型字段配置可无 labels 字段（PUT 400 "workitem does not contains field"，非权限）。`native` 直写字段；`description` 走描述尾部 HTML 注释块 `<!-- factory:labels:v1: ... -->`——实测云效富文本完整保留注释、单字段 PUT 不触碰其余字段。读取时标记剥离不进 body，标签从原文解析。gtsp-wop-gateway 现用 description 模式（字段配置后可切回）。
 - **握手级重试**：公司网关对快速连续 TLS 握手偶发 RST（SSLEOFError，2026-08-25 实测）。握手失败=请求未发出，全方法重试皆安全（非幂等 POST 不重复执行）；forge.call 内建 3 次退避。
+
+### ADR-007 勘误与补记 · 2026-08-26 · 评论权限放开 + issue create 破案
+
+- **勘误（上节「已知边界」）**：「projex 写 403（工作项 labels/评论/创建）」已过时——令牌权限 2026-08-26 放开后实测：工作项**评论读/写全通**、**标签写（description 模式）全通**。issue 侧状态机链路（triage 落标/回执评论）完整可用。
+- **issue create 破案**（此前误判 403/字段不可发现）：根因是 create API 无「计划开始时间」本体字段——它是模板层 SystemCustomField，必经 `customFieldValues {"fieldId":"value"}` **平面对象**（数组形态报 Invalid format）。fieldId 由字段配置接口发现（`GET projects/{spaceId}/workitemTypes/{wit}/fields`，实测 79/80=计划起止、101586=预计工时）；value 形态：date=ISO、float=小数字符串、list=**option id**（非文本）；assignedTo=24-hex 用户 id（配置 `forge.json codeup.assign_user_id`，成员端点不可达）。forge 现按字段配置自动构造默认值，create 全链路实测打通（gtsp-wop-gateway）。
 - **空体容错**：云效写操作可返回 200+空 body；`json.load` 裸崩改为按长度守卫返回 `{}`。
 - **权限矩阵实测**（新令牌）：工作项 update/create ✅、工作项评论写 ❌403（缺 scope——链可跑但 triage 拒绝回执降级为仅告警，标签裁决不受影响）、Codeup MR 全套 ✅。
