@@ -9,7 +9,7 @@
 # 每节点 = 独立 omp 进程（物理级 fresh context，A1）。
 # holdout 与实现链无共享上下文：--no-tools 无工具形态，白名单输入（issue
 # 标题 + tests-output.txt）由本脚本内联进 prompt，issue 正文不进验证器。
-# 门: implement 后 guard.py（周界）+ run_tests.sh（测试）；holdout FAIL 即停。
+# 门: implement 后 guard.py（周界）+ 测试门（final_gate_cmd）；holdout FAIL 即停。
 # 预算: 每节点 omp --max-time（默认 30m，可 env 覆盖）。
 # 残留通道（诚实声明）: 会话 hooks/memory 注入仍在；S2 以 SDK inMemory 收口。
 set -euo pipefail
@@ -424,7 +424,7 @@ if [ "${DRY}" = 0 ]; then
     (cd "${WT}/${suite}" && python3 -m pytest -o addopts="" -v) >> "${DIR}/tests-output.txt" 2>&1 || true
   done
 else
-  echo "[dry-run] guard.py --files <changed> + run_tests.sh → ${DIR}/tests-output.txt（脚本生成）"
+  echo "[dry-run] guard.py --files <changed> + 测试门(final_gate_cmd) → ${DIR}/tests-output.txt（脚本生成）"
 fi
 
 # --- 7. holdout（独立验证；输入白名单见 prompt） ---
@@ -451,7 +451,7 @@ fi
 # --- 8. 开 PR（S1 到此为止：merge 由人类决定，铁律 5） ---
 if [ "${DRY}" = 0 ]; then
   # --no-verify：新分支首推无 @{push}，lefthook {push_files} 模板必然 exit 128；
-  # 链内等价门（run_tests.sh/guard/holdout）已在本链跑过，此处跳过的是
+  # 链内等价门（测试门/guard/holdout）已在本链跑过，此处跳过的是
   # 与链重复的人工推送门，非绕过验证
   git -C "${WT}" push -u origin "${BRANCH}" --no-verify
   # 标题取 HEAD 提交主题（原 gh --fill 的平台特例，中立化：链自控输入）

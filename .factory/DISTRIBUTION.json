@@ -19,7 +19,8 @@
     "feedback-upstream.sh",
     "omp-isolated.yml",
     "db/schema.sql",
-    "tests/"
+    "tests/",
+    "prompts/"
   ],
   "local": {},
   "skip": [
@@ -27,7 +28,6 @@
     "MISSION.md",
     "factory-local.json",
     "mutations/",
-    "prompts/",
     "artifacts/",
     "locks/",
     "worktrees/",

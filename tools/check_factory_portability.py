@@ -24,11 +24,12 @@ import re
 import sys
 from pathlib import Path
 
-# P1 禁词：宿主仓名 / 组织名 / 宿主仓特定路径。
+# P1 禁词：宿主仓名 / 组织名 / 宿主仓特定路径。run_tests 用裸词（review
+# R2-M6）："scripts/run_tests" 会漏 bare run_tests.sh 文案/注释残留。
 # 刻意不含 "skills/"：monorepo|skills 双布局识别是通用机制词（factory_lib
 # evidence_suites），非宿主绑定。误报的修复属于模式，不属于豁免清单。
 P1_PATTERN = re.compile(
-    r"awesome-rules|im47cn|gtsp-|fss-|etf-radar|steering/|scripts/run_tests")
+    r"awesome-rules|im47cn|gtsp-|fss-|etf-radar|steering/|run_tests")
 
 ENGINE_MARK = "omp -p"
 ENGINE_ALLOWED = "factory-lib.sh"

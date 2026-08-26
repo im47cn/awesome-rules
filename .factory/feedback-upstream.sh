@@ -15,10 +15,14 @@ set -euo pipefail
 
 REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "不在仓库内" >&2; exit 2; }
 FACTORY="$REPO/.factory"
+# ADR-009 引擎收口：omp_node 定义在 factory-lib.sh（本脚本只消费 omp_node；
+# issue_* 出口函数不用——ISSUE 未定义无碍，函数体不在此触发）
+source "${FACTORY}/factory-lib.sh"
 # ADR-009 上游指针数据化：默认值自 factory-local.json（env 显式覆盖优先，
 # 保留镜像拓扑逃生口）；fail-closed——配置缺失即终止。
 UPSTREAM_PATH="${UPSTREAM_PATH:-$(python3 "$FACTORY/factory_lib.py" local-str upstream_path)}" \
   || { echo "factory-local.json upstream_path 不可用（fail-closed）" >&2; exit 2; }
+UPSTREAM_PATH="${UPSTREAM_PATH/#\~/\$HOME}"   # 配置 ~/ 形态的消费端展开（git -C 不做 tilde 展开，review R2-B2）
 UPSTREAM_REPO="${UPSTREAM_REPO:-$(python3 "$FACTORY/factory_lib.py" local-str upstream_repo)}" \
   || { echo "factory-local.json upstream_repo 不可用（fail-closed）" >&2; exit 2; }
 FB_PREFIX="${FB_PREFIX:-$(python3 "$FACTORY/factory_lib.py" local-str feedback_branch_prefix)}" \
@@ -230,7 +234,7 @@ fi
 }
 
 # --- 7. 上游门禁：红 → 不开 PR，只收报告 ---
-# gauntlet（不是 run_tests.sh）: 2026-08-22 事故——适配节点产出 BRANCH 未定义
+# gauntlet（不是纯 pytest 门）: 2026-08-22 事故——适配节点产出 BRANCH 未定义
 # （SC2154）的 fix-issue.sh 逃过纯 pytest 门禁; gauntlet 的 .factory shell 三层
 # （syntax/lint -S warning/inline-python）正是为该逃逸所补。pytest 层两者等价。
 say "==> 上游门禁: tools/gauntlet.sh"
@@ -259,7 +263,7 @@ PR_BODY="$FB_DIR/pr-body.md"
   done
   echo '```'
   echo
-  echo "适配说明: 见 ARTIFACT；上游门禁 run_tests.sh --no-lock 绿。"
+  echo "适配说明: 见 ARTIFACT；上游门禁 gauntlet 全层绿。"
 } > "$PR_BODY"
 PR_URL="$(FACTORY_HOSTING=github python3 "${REPO}/.factory/hosting.py" pr create \
   --repo "$UPSTREAM_REPO" --head "$BRANCH" \

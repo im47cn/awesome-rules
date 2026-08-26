@@ -71,8 +71,11 @@ if [ "${DRY}" = 0 ]; then
     (cd "${REPO}/${suite}" && python3 -m pytest -o addopts="" -v) >> "${DIR}/tests-output.txt" 2>&1 || true
   done
 else
-  echo "[dry-run] run_tests.sh → ${DIR}/tests-output.txt + 证据段"
+  echo "[dry-run] 测试门（final_gate_cmd） → ${DIR}/tests-output.txt + 证据段"
 fi
+
+# --- 3. AI 评审（按触及面选配；PR 级独立进程，不共享 fix-issue 会话） ---
+SKILLS_ARG=""
 if [ "${DRY}" = 0 ]; then
   # 命中即评审：守卫技能目录（ADR-009：选配面 = factory-local.json
   # pr_review_skills，宿主技能清单不再硬编码于 full 面脚本）被触 →

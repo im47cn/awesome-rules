@@ -182,3 +182,32 @@ factory-local.json 变更后 mutations 重证全绿（指纹绑定强制）。
 **边界**：tests/ 内夹具专名（slug 解析、作者名）不属 P1 管辖；M2 同步流
 设计未动；拆分本身（独立仓 + 版本 tag + guard.self_check 跨仓核对）留待
 第 3 个消费者出现，按设计 §2.2 纪律执行。
+
+### ADR-009 附记 · 2026-08-27 · R2 审查回流（ralph 轮 1）
+
+reviewer 审出 3 BLOCKER + 4 MAJOR + 4 MINOR，处置：
+- **B1** feedback-upstream.sh 补 `source factory-lib.sh`（omp_node 此前未定义，
+  反哺真跑必炸 rc=127 被 `|| NODE_RC=$?` 吞）——已修并单元验证（omp 真进程）。
+- **B2** upstream_path `~/` 字面 tilde 不展开（git -C 回归）——消费端
+  `${VAR/#\~/$HOME}` 前缀展开，配置保持 `~/` 人类形态。已验证。
+- **B3** validate-pr `SKILLS_ARG=""` 初始化被误删（set -u 下首触守卫技能即
+  unbound 崩溃）——恢复。已验证。
+- **M4** mutations FINAL_GATE 首词不再绝对化（PATH 型命令 `uv run pytest`
+  变 `<repo>/uv` rc=127）——词保持原样，cwd=REPO_ROOT 解析。
+- **M5** sync-from-upstream 目录项（tests/）静默跳过 = 漂移盲区——清单生成
+  时 `ls-tree -r` 递归展开为文件项。fixture 端到端：同版 0/漂移 1/apply
+  覆盖/追平 0。
+- **M6** P1 禁词放宽 bare `run_tests`（抓出 feedback-upstream PR 文案真残留，
+  与实际门禁 gauntlet 不符一并修正）；fix-issue/validate-pr 注释与 dry-run
+  文案同步中性化。
+- **M7** prompts/ 由 skip 升 **full**——中性化后即引擎无关资产，上游 prompt
+  修复必须可达下游；README 三态描述同步。
+- **M8** final_gate_cmd 禁含引号（read -ra 与 shlex 两拆词器一致性），
+  fail-closed。
+- **M9** triage.md 判据编号 a/b/c → 1/2/3（对齐 MISSION 数字编号）。
+- **M10** repo_vars_text 的 pr_review_skills：键存在即严格校验（与 local-list
+  同规），键缺失 = 无守卫面仓合法省略；删除死 try/except。
+- **遗留（M11 及 MINOR）**：feedback.py record 独立读 factory-local.json
+  （纯函数层刻意不 import factory_lib；KeyError→非零=fail-closed 语义已达，
+  记录不改）；feedback-upstream 在上游仓运行时的语义错位（f6835d15 下游
+  SHA 不在上游对象库，main 预存，工具设计为下游运行）。

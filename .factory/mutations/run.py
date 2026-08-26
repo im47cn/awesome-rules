@@ -45,9 +45,10 @@ GUARD = REPO_ROOT / ".factory" / "guard.py"
 def _final_gate_words() -> list[str]:
     """tests 门命令（ADR-009 数据化）：factory-local.json final_gate_cmd 拆词。
 
-    首词解析为仓库根相对绝对路径（配置是仓相对形态，如
-    "scripts/run_tests.sh --no-lock"）；fail-closed：配置缺失/缺键/空 →
-    RuntimeError（run.py 启动即炸，不产生无效证据）。
+    词保持配置原样（不绝对化首词）：run_gate 以 cwd=REPO_ROOT 执行，
+    仓相对路径与 PATH 型命令（如 "uv run pytest"）都正常解析——
+    review R2-M4：绝对化拼接会让 PATH 型命令变 "<repo>/uv" rc=127。
+    fail-closed：配置缺失/缺键/空 → RuntimeError（启动即炸，不产生无效证据）。
     """
     cfg_path = REPO_ROOT / ".factory" / "factory-local.json"
     try:
@@ -57,10 +58,7 @@ def _final_gate_words() -> list[str]:
             raise ValueError("final_gate_cmd 为空")
     except Exception as exc:
         raise RuntimeError(f"factory-local.json final_gate_cmd 不可用（fail-closed）: {exc}") from exc
-    head = Path(words[0])
-    if not head.is_absolute():
-        head = REPO_ROOT / head
-    return [str(head), *words[1:]]
+    return list(words)
 
 
 FINAL_GATE = _final_gate_words()

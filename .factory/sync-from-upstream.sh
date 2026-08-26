@@ -65,8 +65,19 @@ if out.returncode != 0:
     sys.stderr.write("警告: 上游无 DISTRIBUTION.json（版本旧），全部按 local 报告\n")
     sys.exit(0)
 d = json.loads(out.stdout)
-for f in d.get("full", []): print("full\t%s" % f)
-for f in d.get("local", {}): print("local\t%s" % f)
+def emit(kind, entry):
+    if entry.endswith("/"):
+        # 目录项（如 tests/）递归展开为文件项——full 语义对目录内每个
+        # 文件成立（review R2-M5：跳过目录项 = tests/ 漂移永不告警）
+        r = subprocess.run(["git", "-C", up, "ls-tree", "-r", "--name-only",
+                            sha, ".factory/" + entry],
+                           capture_output=True, text=True)
+        for line in r.stdout.splitlines():
+            print("%s\t%s" % (kind, line[len(".factory/"):]))
+    else:
+        print("%s\t%s" % (kind, entry))
+for f in d.get("full", []): emit("full", f)
+for f in d.get("local", {}): emit("local", f)
 PY
 
 # 上游 mode+blob（git show 丢 mode，覆盖后须恢复执行位）

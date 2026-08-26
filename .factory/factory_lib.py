@@ -210,9 +210,14 @@ def final_gate_cmd() -> str:
     """确定性测试门命令（整条 shell 词序列，取值见 factory-local.json）。
 
     ADR-009 门命令数据化：fix-issue / validate-pr / mutations 共用此配置，
-    消灭三处硬编码漂移面。shlex 拆词由调用方执行（bash 侧 read -ra）。
+    消灭三处硬编码漂移面。拆词由调用方执行——bash 侧 read -ra（不认引号）
+    与 mutations 侧 shlex.split（认引号）语义分叉，故配置值**禁含引号**
+    （review R2-M8）；含引号即 fail-closed，两门 argv 永远一致。
     """
-    return _local_str("final_gate_cmd")
+    v = _local_str("final_gate_cmd")
+    if "'" in v or '"' in v:
+        raise RuntimeError("final_gate_cmd 禁含引号（read -ra 与 shlex 拆词一致性）")
+    return v
 
 
 def repo_vars_text() -> str:
@@ -229,12 +234,11 @@ def repo_vars_text() -> str:
         f"- 审查依据目录: {_local_str('review_basis')}",
         f"- final_gate 命令: {final_gate_cmd()}",
     ]
-    try:
-        skills = _LOCAL_CFG.get("pr_review_skills")
-        if isinstance(skills, list) and skills:
-            lines.append(f"- 守卫技能（PR 评审选配面）: {'、'.join(str(s) for s in skills)}")
-    except Exception:
-        pass  # 选配键：缺失仅降级该行，不是 fail-closed 面
+    if "pr_review_skills" in _LOCAL_CFG:
+        # 键存在即严格校验（与 local-list 同规）：值损坏 fail-closed；
+        # 键缺失 = 本仓无守卫技能面（如纯后端仓），合法省略该行。
+        skills = _local_str_list("pr_review_skills")
+        lines.append(f"- 守卫技能（PR 评审选配面）: {'、'.join(skills)}")
     return "\n".join(lines)
 
 
