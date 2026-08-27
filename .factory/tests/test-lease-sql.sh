@@ -126,6 +126,7 @@ fi
 
 LEASE_SH="${REPO}/.factory/factory-lease.sh"
 tp="$(mktemp -d)"; git -C "$tp" init -q; mkdir -p "$tp/.factory/var"
+printf "x'); drop table factory_leases;--" > "$tp/.factory/var/machine-id"
 rc=$(REPO="$tp" SUPABASE_DB=unused bash -c "source '${LEASE_SH}'; lease_machine_id >/dev/null 2>&1; echo \$?" 2>/dev/null)
 ck "machine-id 篡改拒"      "1"    "$rc"
 printf '%s' "$(python3 -c 'import uuid; print(uuid.uuid4().hex)')" > "$tp/.factory/var/machine-id"
