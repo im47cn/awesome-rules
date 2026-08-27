@@ -160,12 +160,8 @@ $(python3 "${REPO}/.factory/factory_lib.py" repo-vars)
   printf '    耗时 %ss\n' "$(( t1 - t0 ))"
 }
 
-_node_metric() {  # _node_metric <node> <t0> <status> → jsonl 行（节点级计时数据源）
-  python3 - "$1" "$2" "$3" "$(date +%s)" <<'PYM'
-import json, sys
-node, t0, status, now = sys.argv[1:5]
-print(json.dumps({"node": node, "secs": int(now) - int(t0), "status": status}, ensure_ascii=False))
-PYM
+_node_metric() {  # <node> <t0> <status> → jsonl 行（逻辑在 factory_lib metric；ADR-005 下沉）
+  python3 "${REPO}/.factory/factory_lib.py" metric "$1" "$2" "$3"
 }
 
 json_field() {  # json_field <file> <python-expr-on-d>

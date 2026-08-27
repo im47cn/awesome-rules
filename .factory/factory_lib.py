@@ -118,11 +118,22 @@ NODE_TIMEOUTS = {
 }
 
 
+def node_metric_line(node: str, t0: int, now: int, status: str) -> str:
+    """节点级计时 jsonl 行（report 子命令的数据源）。
+
+    ADR-005 缺陷驱动下沉（2026-08-27）：fix-issue.sh / validate-pr.sh 各自
+    内嵌的逐字节等价 heredoc 收口至此（shell 侧仅留调用 wrapper，与
+    node_timeout 同款）；渲染契约与消费端（report）同模块，drift 即测试红。
+    """
+    return json.dumps(
+        {"node": node, "secs": int(now) - int(t0), "status": status},
+        ensure_ascii=False)
+
+
 def node_timeout(name: str, env: dict | None = None) -> str:
     env = env if env is not None else {}
     per_node = env.get(f"FACTORY_TIMEOUT_{name.upper().replace('-', '_')}")
     return per_node or env.get("FACTORY_TIMEOUT") or NODE_TIMEOUTS.get(name, "15m")
-
 
 def classify_task(files: list[str]) -> str:
     """变更文件 → 任务类型（成本归因用；doc/code 分开统计预算分布）。
@@ -858,6 +869,10 @@ def main(argv: list[str]) -> int:
     if cmd == "local-str":
         # local-str <key> —— 单字符串键输出（feedback-upstream 上游指针等；ADR-009）
         print(_local_str(argv[2]))
+        return 0
+    if cmd == "metric":
+        # metric <node> <t0> <status> —— 节点计时 jsonl 行（shell wrapper 消费）
+        print(node_metric_line(argv[2], int(argv[3]), int(time.time()), argv[4]))
         return 0
     if cmd == "local-list":
         # local-list <key> —— 字符串数组键逐行输出（shell for 消费；ADR-009）

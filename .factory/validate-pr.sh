@@ -35,12 +35,8 @@ else
 fi
 echo "=== validate-pr #${PR}（${#CHANGED[@]} 文件: ${BASE}...${HEAD_REF}）==="
 
-_node_metric() {  # <node> <t0> <status> → jsonl 行（节点级计时）
-  python3 - "$1" "$2" "$3" "$(date +%s)" <<'PYM'
-import json, sys
-node, t0, status, now = sys.argv[1:5]
-print(json.dumps({"node": node, "secs": int(now) - int(t0), "status": status}, ensure_ascii=False))
-PYM
+_node_metric() {  # <node> <t0> <status> → jsonl 行（逻辑在 factory_lib metric；ADR-005 下沉）
+  python3 "${REPO}/.factory/factory_lib.py" metric "$1" "$2" "$3"
 }
 
 fail() {  # fail <label> <msg> —— 打标签、留言、退出
