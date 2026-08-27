@@ -5,7 +5,8 @@
   "scripts": {
     "test": "bash scripts/run_tests.sh",
     "setup:hooks": "lefthook install",
-    "release": "npx --no-install commit-and-tag-version",
+    "release": "python3 scripts/release_guard.py",
+    "release:raw": "npx --no-install commit-and-tag-version",
     "release:dry": "npx --no-install commit-and-tag-version --dry-run"
   },
   "devDependencies": {
