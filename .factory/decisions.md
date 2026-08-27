@@ -304,3 +304,15 @@ CountMax=4），dry-run 带 hook 实测 141→0。
 **验证**：check_git_sealing 真仓 R1/R2/R3 干净（6 套件全登记）；NC14
 三态（R1+R3 拦 / R2 拦 / 中性零误报）；hermetic 5 案例注入实跑全绿；
 drift-lock 5 例；带 hook push dry-run exit=0。
+
+### ADR-010 附记 · 2026-08-27 · 反斜杠分叉收口
+
+审查发现漂移锁遗留真实分歧点：反斜杠。`read -r -a` 字面（`a\ b` →
+2 词 `a\` + `b`）vs `shlex.split` POSIX 转义（→ 1 词 `a b`）——词数
+即不同，且旧校验（仅禁引号）双侧都放行，「过校验 ⇒ 两侧拆词一致」
+不变量有洞。处置：两侧校验同禁反斜杠（fail-closed，与禁引号并列：
+final_gate_cmd 与 _final_gate_words 互为镜像），TestFinalGateDriftLock
+参数化三形态（`a\ b` 转义词 / `x\y` 词内 / `tail\` 尾随）钉死双侧同拒。
+分叉点至此闭集：引号 + 反斜杠之外，两拆词器都只按空白切词、其余字符
+全字面（shlex.split 的 comments 默认 False，`#` 亦字面）——纯空白分隔
+下逐词相等，不变量闭环。

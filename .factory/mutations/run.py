@@ -63,7 +63,9 @@ def _final_gate_words(cfg_path: Path | None = None) -> list[str]:
             raise ValueError("final_gate_cmd 须为非空字符串")
         raw = raw_val.strip()
         if "'" in raw or '"' in raw:
-            raise ValueError("final_gate_cmd 禁含引号（与 bash 侧 read -ra 拆词一致性，R2-N8）")
+            raise ValueError("final_gate_cmd 禁含引号（与 bash 侧 read -r -a 拆词一致性，R2-N8）")
+        if "\\" in raw:
+            raise ValueError("final_gate_cmd 禁含反斜杠（shlex 转义与 read -r 字面语义分叉，ADR-010）")
         words = shlex.split(raw)
         if not words:
             raise ValueError("final_gate_cmd 为空")

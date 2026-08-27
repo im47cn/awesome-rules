@@ -233,12 +233,13 @@ def test_run_gate_executes_final_gate_without_bash_prefix(monkeypatch):
 class TestFinalGateDriftLock:
     """final_gate_cmd 双实现漂移锁（ADR-010）。
 
-    shell 侧（fix-issue/validate-pr：factory_lib.final-gate 输出 + read -ra
-    拆词）与 python 侧（mutations：_final_gate_words + shlex.split）是两套
-    实现、两个拆词器——PR #71 Sourcery S1 的 bash 前缀漂移即双实现产物。
-    保留 python 实现的决策下，一致性必须机械化：同一配置，两侧 argv
-    逐词相等。read -ra 无 shell 解释、按空白拆词，与禁引号约束下的
-    shlex.split 等价（引号被 final_gate_cmd 双侧拒绝）。
+    shell 侧（fix-issue/validate-pr：factory_lib.final-gate 输出 +
+    read -r -a 拆词）与 python 侧（mutations：_final_gate_words +
+    shlex.split）是两套实现、两个拆词器——PR #71 Sourcery S1 的 bash
+    前缀漂移即双实现产物。保留 python 实现的决策下，一致性必须机械化。
+    拆词器分叉点闭集：引号（shlex 剥除 / read 字面）与反斜杠（shlex
+    转义 / read -r 字面）——双侧校验同禁后，纯空白分隔下两拆词器逐词
+    相等；活配置单一事实源断言锁住「两侧永远消费同一字符串」。
     """
 
     @pytest.mark.parametrize("cmd", [
@@ -276,5 +277,24 @@ class TestFinalGateDriftLock:
             factory_lib._LOCAL_CFG = {"final_gate_cmd": 'sh -c "x"'}
             with pytest.raises(RuntimeError):
                 factory_lib.final_gate_cmd()    # shell 供词侧同拒
+        finally:
+            factory_lib._LOCAL_CFG = orig
+
+    @pytest.mark.parametrize("bad", ["a\\ b", "x\\y", "tail\\"])
+    def test_rejects_backslash_divergence(self, tmp_path, bad):
+        """反斜杠分叉锁（ADR-010）：shlex 把反斜杠当转义（`a\\ b` → 1 词
+        `a b`）、read -r -a 当字面（→ 2 词 `a\\` / `b`）——词数即不同，
+        且旧校验（仅禁引号）双侧都放行。双侧同拒后「过校验 ⇒ 两侧拆词
+        逐词一致」不变量才闭环。"""
+        cfg = tmp_path / "factory-local.json"
+        cfg.write_text(json.dumps({"final_gate_cmd": bad}), encoding="utf-8")
+        with pytest.raises(RuntimeError):
+            mut._final_gate_words(cfg)
+        import factory_lib
+        orig = factory_lib._LOCAL_CFG
+        try:
+            factory_lib._LOCAL_CFG = {"final_gate_cmd": bad}
+            with pytest.raises(RuntimeError):
+                factory_lib.final_gate_cmd()
         finally:
             factory_lib._LOCAL_CFG = orig

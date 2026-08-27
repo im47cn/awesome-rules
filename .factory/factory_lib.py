@@ -221,13 +221,18 @@ def final_gate_cmd() -> str:
     """确定性测试门命令（整条 shell 词序列，取值见 factory-local.json）。
 
     ADR-009 门命令数据化：fix-issue / validate-pr / mutations 共用此配置，
-    消灭三处硬编码漂移面。拆词由调用方执行——bash 侧 read -ra（不认引号）
-    与 mutations 侧 shlex.split（认引号）语义分叉，故配置值**禁含引号**
-    （review R2-M8）；含引号即 fail-closed，两门 argv 永远一致。
+    消灭三处硬编码漂移面。拆词由调用方执行——bash 侧 read -r -a 与
+    mutations 侧 shlex.split 的语义分叉点有二：引号（shlex 剥除、read
+    字面）与反斜杠（shlex 转义、read -r 字面——`a\\ b` 两侧词数即不同：
+    2 词 vs 1 词）。故配置值**禁含引号与反斜杠**（引号 review R2-M8；
+    反斜杠 ADR-010 漂移锁收口），含即 fail-closed；纯空白分隔下两拆词器
+    逐词一致，两门 argv 永远相等。
     """
     v = _local_str("final_gate_cmd")
     if "'" in v or '"' in v:
-        raise RuntimeError("final_gate_cmd 禁含引号（read -ra 与 shlex 拆词一致性）")
+        raise RuntimeError("final_gate_cmd 禁含引号（read -r -a 与 shlex 拆词一致性）")
+    if "\\" in v:
+        raise RuntimeError("final_gate_cmd 禁含反斜杠（shlex 转义与 read -r 字面语义分叉，ADR-010）")
     return v
 
 
