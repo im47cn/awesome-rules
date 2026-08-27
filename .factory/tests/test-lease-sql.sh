@@ -6,8 +6,10 @@
 # 覆盖：claim/续约/接管/heartbeat/fence/release 的 epoch 语义、配额、
 # 机器自注册、RLS 直表全拒、worker 不可调管理员函数、吊销/停机即时生效、
 # 未知租户 fail-closed、审计有痕。
-#
 # 用法：bash .factory/tests/test-lease-sql.sh   （root；非 root 需能 runuser postgres）
+#       LEASE_SKIP_PG=1 bash ...                 （强制跳过 PG 仲裁段——
+#       run_tests.sh 全量门用此形态：PG 段需 root+postgres 属手动全跑面，
+#       非仲裁段（machine-id 防篡改 + 单写者降级）零环境依赖，归门禁）
 set -u
 
 # 测试密封性（steering/testing-standards.md §测试密封性，ADR-010）：本脚本
@@ -32,6 +34,9 @@ if command -v initdb >/dev/null && command -v runuser >/dev/null \
    && runuser -u postgres -- true >/dev/null 2>&1; then
   CAN_PG=1
 fi
+# 门禁形态强制跳过（见头部用法注释）：环境差异不入门，PG 段语义完整保留
+# 给手动全跑。
+[ "${LEASE_SKIP_PG:-0}" = 1 ] && CAN_PG=0
 
 # REPO 解析必须在下方 cd /tmp 之前（$0 相对路径 cd 后即失效）
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -127,6 +132,11 @@ fi
 LEASE_SH="${REPO}/.factory/factory-lease.sh"
 tp="$(mktemp -d)"; git -C "$tp" init -q; mkdir -p "$tp/.factory/var"
 printf "x'); drop table factory_leases;--" > "$tp/.factory/var/machine-id"
+# 载荷在位前置（tripwire，steering §自建关卡「前提失效硬失败」）：载荷
+# 行被编辑事故误删时，本用例会退化为「文件缺失拒」假绿（2026-08-27
+# PR #71 实发）——读回比对钉死「测的确实是注入载荷而非空缺拒」。
+ck "篡改载荷在位(drop table)" "y" \
+   "$(grep -q 'drop table factory_leases' "$tp/.factory/var/machine-id" && echo y || echo n)"
 rc=$(REPO="$tp" SUPABASE_DB=unused bash -c "source '${LEASE_SH}'; lease_machine_id >/dev/null 2>&1; echo \$?" 2>/dev/null)
 ck "machine-id 篡改拒"      "1"    "$rc"
 printf '%s' "$(python3 -c 'import uuid; print(uuid.uuid4().hex)')" > "$tp/.factory/var/machine-id"
