@@ -250,3 +250,20 @@ Sourcery 三条审查评论全部成立,处置:
 - 附带:run_gate 安全审计注释更新——tests 分支命令词源自
   factory-local.json(治理周界内,禁引号+shlex 拆词后纯 argv 元素),
   闭集语义随直执重述。mutations 周界内改动 → kill rate 重证。
+
+### ADR-009 附记四 · 2026-08-27 · pre-push 钩子 GIT_* 泄漏夹具污染事故
+
+推送实测:lefthook pre-push 的 git 钩子环境向测试子进程泄漏 GIT_DIR
+等仓库发现变量,`git -C <tmp夹具仓>` 的目标被环境变量优先级覆盖——
+TestStampRoundtrip 的夹具 init/commit 落进真实仓 HEAD(树仅含 2 个
+夹具文件),plugin_lock 随 HEAD 树缺文件连锁失败,推送被误拦。
+处置(环境密闭):
+- tests/gitenv.py git_env():剥除 10 个仓库发现类变量;三处消费
+  (test_factory_local._git / test_breaker_wiring._sandbox /
+  test-lease-sql.sh)接入。
+- mutations/run.py perimeter_blob/tracked_and_dirty 同根因加固
+  (测试 monkeypatch REPO_ROOT 后同样可被劫持),模块级 _GIT_ENV。
+- 回归锁 TestGitEnvSealing:受害者仓复现泄漏机制(无密闭 → 提交落
+  受害者仓;密闭 → -C 语义恢复)。
+教训:与附记二夹具污染事故同类——tmp git 仓夹具必须视为不可信环境
+边界,git 子进程一律显式环境密闭,不依赖 ambient environ。

@@ -99,6 +99,18 @@ def write_stamp(evidence: str = "EVIDENCE-2026-08-24.md") -> str | None:
 # 退出时把 factory-local.json 的 git blob hash 写入 evidence-stamp.json；
 # 下次启动比对，不一致 → 横幅宣告证据过期（本次全绿不构成 auto-merge
 # 依据的既有语义不变：人类看横幅决定是否采信）。
+# git 环境密闭（PR #71 推送实测事故）：pre-push 钩子环境导出的
+# GIT_DIR 等仓库发现变量会劫持 `git -C` 的目标——测试 monkeypatch
+# REPO_ROOT 后 git 操作落到真实仓（夹具污染）。剥除之，-C 语义生效。
+_GIT_DISCOVERY_VARS = (
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_GRAFT_FILE",
+    "GIT_INDEX_VERSION", "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES",
+)
+
+_GIT_ENV = {k: v for k, v in os.environ.items()
+            if k not in _GIT_DISCOVERY_VARS}
+
 LOCAL_CFG = REPO_ROOT / ".factory" / "factory-local.json"
 STAMP = REPO_ROOT / ".factory" / "mutations" / "evidence-stamp.json"
 
@@ -109,7 +121,7 @@ def perimeter_blob() -> str | None:
         rel = LOCAL_CFG.relative_to(REPO_ROOT)
         out = subprocess.run(
             ["git", "-C", str(REPO_ROOT), "ls-files", "-s", "--", str(rel)],
-            capture_output=True, text=True, check=True).stdout.split()
+            capture_output=True, text=True, check=True, env=_GIT_ENV).stdout.split()
         return out[1] if len(out) >= 2 else None
     except Exception:
         return None
@@ -166,13 +178,13 @@ def tracked_and_dirty(rel: str) -> bool:
     """
     ls = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "ls-files", "--error-unmatch", rel],
-        capture_output=True,
+        capture_output=True, env=_GIT_ENV,
     )
     if ls.returncode != 0:
         return False  # 未跟踪（新文件）：内存备份/还原已覆盖安全
     diff = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "diff", "--quiet", "--", rel],
-        capture_output=True,
+        capture_output=True, env=_GIT_ENV,
     )
     return diff.returncode != 0
 

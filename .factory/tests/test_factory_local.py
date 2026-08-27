@@ -6,14 +6,15 @@
 的 git blob hash，run.py 启动比对宣告过期（设计 §11.3）。
 """
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
-
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "mutations"))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from gitenv import git_env  # noqa: E402  (tests/ 兄弟模块，pytest rootdir 注入)
 
 import run as mut  # noqa: E402
 import guard  # noqa: E402
@@ -122,8 +123,11 @@ class TestStampRoundtrip:
     REPO_ROOT 相对路径——一并 patch 到临时仓根）。"""
 
     def _git(self, cwd, *args):
+        # git_env：剥除钩子环境泄漏的 GIT_DIR 等（PR #71 推送实测：
+        # 泄漏时夹具 commit 落进真实仓 HEAD）。
         return subprocess.run(["git", "-C", str(cwd), *args],
-                              capture_output=True, text=True, check=True)
+                              capture_output=True, text=True, check=True,
+                              env=git_env())
 
     def test_full_cycle_announce_then_refresh(self, tmp_path, capsys, monkeypatch):
         repo = tmp_path / "repo"
@@ -178,3 +182,63 @@ class TestStampRoundtrip:
         monkeypatch.setattr(mut, "REPO_ROOT", repo)
         assert mut.perimeter_blob() is None  # 未 add：无法绑定
         assert mut.write_stamp() is None     # 不写 stamp
+
+
+class TestGitEnvSealing:
+    """钩子环境 GIT_* 泄漏防夹具污染（PR #71 推送实测事故回归锁）。
+
+    机制复现（无 git_env）：泄漏 GIT_DIR 指向受害者仓时，`git -C <夹具仓>
+    commit` 实际提交进受害者仓——lefthook pre-push 门禁下即真实仓 HEAD。
+    """
+    def _git(self, cwd, *args):
+        return subprocess.run(["git", "-C", str(cwd), *args],
+                              capture_output=True, text=True, check=True,
+                              env=git_env())
+
+    def _init_repo(self, path):
+        path.mkdir()
+        self._git(path, "init", "-q")
+        self._git(path, "config", "user.email", "t@t")
+        self._git(path, "config", "user.name", "t")
+
+    def test_leaked_git_dir_hijacks_without_sealing(self, tmp_path):
+        """无密闭 → 提交落受害者仓（钉死事故机制，证 git_env 必要性）。"""
+        victim, fixture = tmp_path / "victim", tmp_path / "fixture"
+        self._init_repo(victim)
+        self._init_repo(fixture)
+        (fixture / "factory-local.json").write_text("{}", encoding="utf-8")
+        leaked = {**os.environ, "GIT_DIR": str(victim / ".git")}
+        subprocess.run(["git", "-C", str(fixture), "add", "-A"],
+                       check=True, env=leaked, capture_output=True)
+        subprocess.run(["git", "-C", str(fixture), "commit", "-qm", "x"],
+                       check=True, env=leaked, capture_output=True)
+        # 无密闭：victim 收到提交（= 事故形态），fixture 反而无 HEAD
+        assert self._git(victim, "rev-parse", "HEAD").stdout.strip()
+        rc = subprocess.run(["git", "-C", str(fixture), "rev-parse", "HEAD"],
+                            capture_output=True, env=git_env())
+        assert rc.returncode != 0
+
+    def test_git_env_sealing_targets_cwd_repo(self, tmp_path):
+        """git_env → -C 语义恢复：提交落夹具仓，受害者 HEAD 不动。"""
+        victim, fixture = tmp_path / "victim2", tmp_path / "fixture2"
+        self._init_repo(victim)
+        (victim / "seed").write_text("v", encoding="utf-8")
+        self._git(victim, "add", "-A")
+        self._git(victim, "commit", "-qm", "seed")
+        before = self._git(victim, "rev-parse", "HEAD").stdout.strip()
+        self._init_repo(fixture)
+        (fixture / "factory-local.json").write_text("{}", encoding="utf-8")
+        sealed = {**os.environ, "GIT_DIR": str(victim / ".git")}
+        sealed = git_env(sealed)
+        subprocess.run(["git", "-C", str(fixture), "add", "-A"],
+                       check=True, env=sealed, capture_output=True)
+        subprocess.run(["git", "-C", str(fixture), "commit", "-qm", "x"],
+                       check=True, env=sealed, capture_output=True)
+        assert self._git(victim, "rev-parse", "HEAD").stdout.strip() == before
+        assert self._git(fixture, "rev-parse", "HEAD").stdout.strip()
+
+    def test_git_env_strips_discovery_vars_only(self):
+        env = git_env({"GIT_DIR": "/x", "GIT_WORK_TREE": "/y",
+                       "PATH": "/bin", "HOME": "/u"})
+        assert "GIT_DIR" not in env and "GIT_WORK_TREE" not in env
+        assert env["PATH"] == "/bin" and env["HOME"] == "/u"

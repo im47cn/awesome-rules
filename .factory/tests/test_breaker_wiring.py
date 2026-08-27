@@ -22,6 +22,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from gitenv import git_env  # noqa: E402  (tests/ 兄弟模块，pytest rootdir 注入)
 
 FACTORY = Path(__file__).resolve().parents[1]
 
@@ -51,7 +52,7 @@ def _sandbox(tmp_path: Path, floor: str | None, ledger: str | None) -> Path:
     """tmp git 仓；floor=None 不写 floor.json，ledger=None 不写 ledger.jsonl。"""
     repo = tmp_path / "repo"
     repo.mkdir()
-    env = {**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"}
+    env = git_env({"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"})
     subprocess.run(["git", "init", "-q", str(repo)], check=True, env=env)
     factory = repo / ".factory"
     shutil.copytree(FACTORY, factory,
