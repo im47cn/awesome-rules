@@ -24,11 +24,15 @@ _SCAN_EXTS='\.py$|\.sh$|\.yml$|\.yaml$|\.js$'
 
 _all_args_inside_repo() {
     # _all_args_inside_repo <repo-root> <path>...：每个 arg 都存在且位于 repo 内
-    _root=$1
+    # pwd -P 双侧物理化（PR #71 附记）：逻辑 pwd 与 git rev-parse 的物理输出在
+    # 符号链接挂载点（macOS /tmp→/private/tmp）分叉——worktree 场景 args 被
+    # 误判"仓库外"走退化分支，目录名直传 grep 报 Is a directory（rc2 假失败，
+    # fail-closed 误伤合法环境；/tmp/ar-pr71 实测复现）
+    _root=$(cd "$1" 2>/dev/null && pwd -P) || return 1
     shift
     for _p in "$@"; do
         [ -e "$_p" ] || return 1
-        case "$(cd "$_p" 2>/dev/null && pwd)" in
+        case "$(cd "$_p" 2>/dev/null && pwd -P)" in
             "$_root"|"$_root"/*) ;;
             *) return 1 ;;
         esac
