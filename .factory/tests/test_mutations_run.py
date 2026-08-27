@@ -228,3 +228,53 @@ def test_run_gate_executes_final_gate_without_bash_prefix(monkeypatch):
     rc = mut.run_gate("tests", "some_target.py")
     assert rc == 0
     assert seen["cmd"] == ["uv", "run", "pytest"]
+
+
+class TestFinalGateDriftLock:
+    """final_gate_cmd 双实现漂移锁（ADR-010）。
+
+    shell 侧（fix-issue/validate-pr：factory_lib.final-gate 输出 + read -ra
+    拆词）与 python 侧（mutations：_final_gate_words + shlex.split）是两套
+    实现、两个拆词器——PR #71 Sourcery S1 的 bash 前缀漂移即双实现产物。
+    保留 python 实现的决策下，一致性必须机械化：同一配置，两侧 argv
+    逐词相等。read -ra 无 shell 解释、按空白拆词，与禁引号约束下的
+    shlex.split 等价（引号被 final_gate_cmd 双侧拒绝）。
+    """
+
+    @pytest.mark.parametrize("cmd", [
+        "scripts/run_tests.sh --no-lock",          # 仓相对脚本（本仓形态）
+        "uv run pytest -q",                        # PATH 型（Sourcery S1 场景）
+        "pytest .factory -q --timeout=600",        # 多词 + =值
+    ])
+    def test_shell_and_python_splitters_agree(self, tmp_path, cmd):
+        """同一配置双侧拆词逐词相等：shell 侧语义 = final_gate_cmd() 原文
+        + read -ra（bash read -ra 按 IFS 空白拆词、不做引号解释）；python
+        侧 = _final_gate_words（shlex；禁引号约束下与空白拆词等价）。"""
+        cfg = tmp_path / "factory-local.json"
+        cfg.write_text(json.dumps({"final_gate_cmd": cmd}), encoding="utf-8")
+        assert mut._final_gate_words(cfg) == cmd.split()
+
+    def test_live_config_single_source(self):
+        """两侧消费同一 factory-local.json：python FINAL_GATE 必须等于
+        factory_lib.final_gate_cmd() 的 read -ra 拆词（活配置漂移即红）。"""
+        import factory_lib
+        live = factory_lib.final_gate_cmd()
+        assert mut.FINAL_GATE == live.split()
+
+    def test_rejects_divergent_quote_policy(self, tmp_path):
+        """引号策略分叉锁：任一侧放宽引号拒绝，拆词器差异即产生 argv
+        分叉——双侧拒绝规则必须同时存在（final_gate_cmd 与
+        _final_gate_words 的引号校验互为镜像）。"""
+        cfg = tmp_path / "factory-local.json"
+        cfg.write_text(json.dumps({"final_gate_cmd": 'sh -c "x"'}),
+                       encoding="utf-8")
+        with pytest.raises(RuntimeError):
+            mut._final_gate_words(cfg)          # python 侧拒绝
+        import factory_lib
+        orig = factory_lib._LOCAL_CFG
+        try:
+            factory_lib._LOCAL_CFG = {"final_gate_cmd": 'sh -c "x"'}
+            with pytest.raises(RuntimeError):
+                factory_lib.final_gate_cmd()    # shell 供词侧同拒
+        finally:
+            factory_lib._LOCAL_CFG = orig

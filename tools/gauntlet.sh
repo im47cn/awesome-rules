@@ -142,6 +142,11 @@ print(f"factory-local-validity: perimeter {n} 条 / guidance a,b,c / final-gate+
     # 拆分就绪门（ADR-009）：full 面 + prompts 零宿主专名（P1）、omp 单点
     # （P2）、无平铺 path hack（P3）。负控制 NC13。
     run_layer factory-portability "$PY" tools/check_factory_portability.py .
+    # 测试 git 密封门（ADR-010）：conftest 密封（R1）/ shell 测试密封（R2）/
+    # 负控制登记表完备（R3）。负控制 NC14。规范事实源 =
+    # steering/testing-standards.md §测试密封性；两次事故 2026-08-22 /
+    # 2026-08-27（PR #71 附记四）。
+    run_layer git-sealing "$PY" tools/check_git_sealing.py .
 fi
 
 echo "gauntlet: 全部层通过"

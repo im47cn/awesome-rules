@@ -10,6 +10,12 @@
 # 用法：bash .factory/tests/test-lease-sql.sh   （root；非 root 需能 runuser postgres）
 set -u
 
+# 测试密封性（steering/testing-standards.md §测试密封性，ADR-010）：本脚本
+# 及其 bash -c 子链操作 tmp 夹具仓——顶层剥除 hook 注入的 GIT_*（unset 后
+# 子进程继承，覆盖 source lease.sh 的子链；泄漏时 git -C "$tp" 被劫持）。
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+      GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_NAMESPACE
+
 PGDATA=/tmp/pgfactory-lease-test
 PORT=55432
 PASS=0; FAIL=0; PG_SKIPPED=0
@@ -119,8 +125,7 @@ else
 fi
 
 LEASE_SH="${REPO}/.factory/factory-lease.sh"
-tp="$(mktemp -d)"; env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_COMMON_DIR git -C "$tp" init -q; mkdir -p "$tp/.factory/var"
-printf "x'); drop table factory_leases;--" > "$tp/.factory/var/machine-id"
+tp="$(mktemp -d)"; git -C "$tp" init -q; mkdir -p "$tp/.factory/var"
 rc=$(REPO="$tp" SUPABASE_DB=unused bash -c "source '${LEASE_SH}'; lease_machine_id >/dev/null 2>&1; echo \$?" 2>/dev/null)
 ck "machine-id 篡改拒"      "1"    "$rc"
 printf '%s' "$(python3 -c 'import uuid; print(uuid.uuid4().hex)')" > "$tp/.factory/var/machine-id"
