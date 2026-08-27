@@ -42,18 +42,26 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 GUARD = REPO_ROOT / ".factory" / "guard.py"
 
 
-def _final_gate_words() -> list[str]:
+def _final_gate_words(cfg_path: Path | None = None) -> list[str]:
     """tests 门命令（ADR-009 数据化）：factory-local.json final_gate_cmd 拆词。
 
-    词保持配置原样（不绝对化首词）：run_gate 以 cwd=REPO_ROOT 执行，
-    仓相对路径与 PATH 型命令（如 "uv run pytest"）都正常解析——
-    review R2-M4：绝对化拼接会让 PATH 型命令变 "<repo>/uv" rc=127。
-    fail-closed：配置缺失/缺键/空 → RuntimeError（启动即炸，不产生无效证据）。
+    词保持配置原样（不绝对化首词、不加 bash 前缀）：run_gate 直执
+    （cwd=REPO_ROOT），仓相对脚本（可执行位 + shebang）与 PATH 型命令
+    （如 "uv run pytest"）都正常解析——与 shell 侧 fix-issue/validate-pr
+    的 "${GATE_ARGS[@]}" 直执同构（R2-M4 + PR #71 Sourcery #1：bash
+    前缀会把 PATH 型首词当脚本文件名，必失败）。fail-closed：配置
+    缺失/缺键/非字符串/含引号/空 → RuntimeError（启动即炸，不产生
+    无效证据）。类型校验与 factory_lib._local_str 同规（PR #71
+    Sourcery #2：str() 静默转换会让数字/列表在 py 侧放行而 shell 侧
+    拒绝——两消费方行为必须一致）。
     """
-    cfg_path = REPO_ROOT / ".factory" / "factory-local.json"
+    p = cfg_path or REPO_ROOT / ".factory" / "factory-local.json"
     try:
-        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
-        raw = str(cfg["final_gate_cmd"]).strip()
+        cfg = json.loads(p.read_text(encoding="utf-8"))
+        raw_val = cfg["final_gate_cmd"]
+        if not isinstance(raw_val, str):
+            raise ValueError("final_gate_cmd 须为非空字符串")
+        raw = raw_val.strip()
         if "'" in raw or '"' in raw:
             raise ValueError("final_gate_cmd 禁含引号（与 bash 侧 read -ra 拆词一致性，R2-N8）")
         words = shlex.split(raw)
@@ -173,24 +181,28 @@ def run_gate(gate: str, target: str) -> int | None:
     """跑门返回退出码；超时返回 None（无效运行，见 judge）。
 
     超时杀**整个进程组**（start_new_session + killpg）：run_tests.sh 会
-    派生 pytest 孙进程，只杀 bash 直子会留下孤儿继续读注入中的 target
+    派生 pytest 孙进程，只杀门直子会留下孤儿继续读注入中的 target
     ——finally 还原字节与孤儿运行并发，污染后续缺陷轮（PR #33 审查）。
     """
     if gate == "guard":
         cmd = [sys.executable, str(GUARD), "--files", target]
         timeout = GUARD_TIMEOUT
     else:
-        # ADR-009：tests 门命令自 factory-local.json final_gate_cmd 拆词
-        #（词保持配置原样，cwd=REPO_ROOT 解析；fail-closed 加载于模块常量段）。
-        cmd = ["bash", *FINAL_GATE]
+        # ADR-009：tests 门命令自 factory-local.json final_gate_cmd 拆词后
+        # 直执——无 bash 前缀，与 shell 侧 "${GATE_ARGS[@]}" 同构（PR #71
+        # Sourcery #1：bash 前缀使 PATH 型命令必失败）；fail-closed 加载
+        # 于模块常量段。
+        cmd = list(FINAL_GATE)
         timeout = TESTS_TIMEOUT
     start = time.monotonic()
     # 安全审计落档（PR #33 Sourcery/opengrep dangerous-subprocess-use-audit）：
     # argv 列表形态、无 shell 解释（shell=False 显式）——不存在注入通道。
-    # 可执行位与固定参数为闭集（sys.executable / "bash" + __file__ 推导的
-    # 模块常量）；唯一外部数据 target 源自 defects.json（治理周界 .factory/
-    # 内，仅人类 PR 可改），且经 REPO_ROOT / d.target 与 is_file() 校验后
-    # 作为单个 argv 数据元素传入，不被任何 shell 解析。
+    # guard 分支参数为闭集（sys.executable + __file__ 推导的模块常量）；
+    # tests 分支命令词源自 factory-local.json final_gate_cmd（治理周界
+    # .factory/ 内，仅人类 PR 可改；禁引号校验 + shlex 拆词后作为纯 argv
+    # 元素传入）；另一外部数据 target 源自 defects.json（同周界），经
+    # REPO_ROOT / d.target 与 is_file() 校验后作为单个 argv 数据元素传入，
+    # 均不被任何 shell 解析。
     proc = subprocess.Popen(
         cmd, cwd=str(REPO_ROOT), shell=False,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,

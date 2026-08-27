@@ -668,6 +668,52 @@ else
     grep -q 'P2 引擎旁路' "$TMP/out13b" \
         || bad "NC13b 输出缺 P2: $(cat "$TMP/out13b")"
 fi
+# P2 空白/续行变体（PR #71 Sourcery #3）：字面子串 "omp -p" 被绕过，
+# 词边界正则必须拦 `omp   -p` 与 `omp \↵-p`。
+cat >"$NC13/.factory/chain.sh" <<'EOF'
+echo neutral
+omp    -p "x" --no-session
+EOF
+git -C "$NC13" add .factory
+if "$PY" tools/check_factory_portability.py "$NC13" >"$TMP/out13d" 2>&1; then
+    bad "NC13d 期望 rc=1（P2 多空格变体命中），实际放行"
+else
+    if grep -q 'P2 引擎旁路' "$TMP/out13d"; then
+        ok "NC13d P2 多空格变体（omp   -p）被拦"
+    else
+        bad "NC13d 输出缺 P2: $(cat "$TMP/out13d")"
+    fi
+fi
+cat >"$NC13/.factory/chain.sh" <<'EOF'
+echo neutral
+omp \
+    -p "x" --no-session
+EOF
+git -C "$NC13" add .factory
+if "$PY" tools/check_factory_portability.py "$NC13" >"$TMP/out13e" 2>&1; then
+    bad "NC13e 期望 rc=1（P2 续行变体命中），实际放行"
+else
+    if grep -q 'P2 引擎旁路' "$TMP/out13e"; then
+        ok "NC13e P2 续行变体（omp \\↵-p）被拦"
+    else
+        bad "NC13e 输出缺 P2: $(cat "$TMP/out13e")"
+    fi
+fi
+# P3 点号空白变体（与 P2 同根因）：`sys . path . insert` 是合法 Python。
+cat >"$NC13/.factory/lib.py" <<'EOF'
+import json
+sys . path . insert (0, ".")
+EOF
+git -C "$NC13" add .factory
+if "$PY" tools/check_factory_portability.py "$NC13" >"$TMP/out13f" 2>&1; then
+    bad "NC13f 期望 rc=1（P3 空白点号变体命中），实际放行"
+else
+    if grep -q 'P3 path hack' "$TMP/out13f"; then
+        ok "NC13f P3 空白点号变体（sys . path . insert）被拦"
+    else
+        bad "NC13f 输出缺 P3: $(cat "$TMP/out13f")"
+    fi
+fi
 NC13C="$TMP/nc13c"; mkdir -p "$NC13C/.factory/prompts" "$NC13C/.factory/db"
 echo "db schema" >"$NC13C/.factory/db/schema.sql"
 cp "$NC13/.factory/DISTRIBUTION.json" "$NC13C/.factory/"

@@ -228,3 +228,25 @@ reviewer 审出 3 BLOCKER + 4 MAJOR + 4 MINOR，处置：
 - **N7** ~user 形态误展开:fail-closed 兜底,配置约定 ~/ 形态,记录不改。
 - **N9** evidence-stamp.json 被跟踪 → mutation 重证后须提交 stamp,既有
   设计(证据可审计),非缺陷。
+
+### ADR-009 附记三 · 2026-08-27 · Sourcery R3 三评论处置
+
+Sourcery 三条审查评论全部成立,处置:
+- **S1(bug)** mutations run_gate 硬编码 `bash` 前缀破坏 PATH 型
+  final_gate_cmd(`uv run pytest` 变 `bash uv ...`,首词被当脚本文件名)
+  → 改直执 `FINAL_GATE`,与 shell 侧 fix-issue/validate-pr 的
+  `"${GATE_ARGS[@]}"` 同构——两侧消费方执行形态统一(单测锁行为:
+  monkeypatch Popen 断言 argv 无 bash 前缀)。killpg 审计注释随
+  「bash 直子」措辞一并校正(直子=门命令进程,进程组语义不变)。
+- **S2(bug)** `_final_gate_words` 先 `str()` 再校验:数字/列表等非字符串
+  值 py 侧放行、shell 侧(factory_lib._local_str)拒绝——两消费方行为
+  割裂 → 加 `isinstance(raw_val, str)` 前置校验,参数化负例锁四类
+  JSON 类型;函数签名增可选 cfg_path(可测性,默认调用方不变)。
+- **S3(bypass)** portability P2 字面子串 `omp -p` 可被 `omp   -p`/
+  `omp \↵-p` 绕过 → 词边界正则 `\bomp[\s\\]+-p\b` + 全文 finditer
+  (续行跨行,逐行扫描结构性漏报);P3 `sys . path . insert`(合法
+  Python 空白点号变体)同根因一并正则化。NC13 负控制扩 d/e/f 三
+  变体(多空格/续行/点号空白)。
+- 附带:run_gate 安全审计注释更新——tests 分支命令词源自
+  factory-local.json(治理周界内,禁引号+shlex 拆词后纯 argv 元素),
+  闭集语义随直执重述。mutations 周界内改动 → kill rate 重证。

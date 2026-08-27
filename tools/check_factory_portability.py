@@ -7,11 +7,14 @@
      禁出现宿主仓特定标识（awesome-rules / im47cn / gtsp- / fss- /
      etf-radar / steering/ / scripts/run_tests）。历史考证引用一律中性化
      （「源仓#NN」保留编号可溯），本地化值一律走 factory-local.json。
-  P2 引擎单点：full 面 .sh 中 omp CLI 直调（`omp -p`）只允许出现在
-     factory-lib.sh 的 omp_node——换引擎只改一个函数（设计 §4）。
+  P2 引擎单点：full 面 .sh 中 omp CLI 直调（omp 与 -p 的任意空白/续行
+     变体）只允许出现在 factory-lib.sh 的 omp_node——换引擎只改一个
+     函数（设计 §4）。词边界正则匹配而非字面子串（PR #71 Sourcery
+     #3）：`omp   -p`、`omp \↵-p` 不再绕过。
   P3 无平铺 path hack：full 面 .py（排除 tests/）禁 sys.path.insert——
      布局注入只属于 tests/conftest.py；测试对兄弟源目录的注入在被测
-     布局语义内，不在此门管辖。
+     布局语义内，不在此门管辖。空白点号变体（`sys . path . insert`，
+     合法 Python）同样命中。
 
 语义契约见 docs/design/factory-harness-design.md §11 与 ADR-009。
 退出码：0 = 干净；1 = 有命中；2 = 门自身错误（fail-closed）。
@@ -31,9 +34,12 @@ from pathlib import Path
 P1_PATTERN = re.compile(
     r"awesome-rules|im47cn|gtsp-|fss-|etf-radar|steering/|run_tests")
 
-ENGINE_MARK = "omp -p"
+# P2 词边界 + 任意空白/续行分隔：子串 "omp -p" 会被 `omp   -p`、
+# `omp \↵-p` 绕过（PR #71 Sourcery #3）。[\s\\]+ 同时覆盖行尾续行反斜杠。
+ENGINE_PATTERN = re.compile(r"\bomp[\s\\]+-p\b")
 ENGINE_ALLOWED = "factory-lib.sh"
-PATH_HACK = "sys.path.insert"
+# P3 点号空白变体（`sys . path . insert` 是合法 Python）与 P2 同根因。
+PATH_HACK_PATTERN = re.compile(r"sys\s*\.\s*path\s*\.\s*insert\b")
 
 
 def _fail_closed(cond: bool, msg: str) -> None:
@@ -69,15 +75,19 @@ def scan(repo_root: Path) -> int:
             text = f.read_text(encoding="utf-8")
         except Exception as exc:
             _fail_closed(False, f"{f} 不可读: {exc}")
-        for i, line in enumerate(text.splitlines(), 1):
+        lines = text.splitlines()
+        for i, line in enumerate(lines, 1):
             if P1_PATTERN.search(line):
                 print(f"P1 宿主专名: {f.relative_to(repo_root)}:{i}: {line.strip()[:90]}")
                 hits += 1
-            if ENGINE_MARK in line and f.name != ENGINE_ALLOWED:
-                print(f"P2 引擎旁路: {f.relative_to(repo_root)}:{i}: {line.strip()[:90]}")
-                hits += 1
-            if PATH_HACK in line and f.suffix == ".py":
+            if PATH_HACK_PATTERN.search(line) and f.suffix == ".py":
                 print(f"P3 path hack: {f.relative_to(repo_root)}:{i}: {line.strip()[:90]}")
+                hits += 1
+        if f.name != ENGINE_ALLOWED:
+            # P2 全文匹配：续行变体跨行，逐行扫描会漏（命中行 = omp 所在行）。
+            for m in ENGINE_PATTERN.finditer(text):
+                i = text.count("\n", 0, m.start()) + 1
+                print(f"P2 引擎旁路: {f.relative_to(repo_root)}:{i}: {lines[i - 1].strip()[:90]}")
                 hits += 1
     if hits:
         print(f"factory-portability: {hits} 命中（P1 专名 / P2 引擎旁路 / P3 平铺 hack）")

@@ -183,3 +183,48 @@ def test_probe_fails_when_group_still_alive(monkeypatch):
     monkeypatch.setattr(os, "killpg", lambda pgid, sig: None)
     with pytest.raises(pytest.fail.Exception, match="未消失"):
         _assert_group_dead(4242, timeout=0.2)
+
+
+class TestFinalGateWords:
+    """final_gate_cmd 加载（PR #71 Sourcery #2：类型校验 fail-closed）。"""
+
+    @pytest.mark.parametrize("bad_val", [123, ["uv", "run"], {"cmd": "x"}, True])
+    def test_non_string_fails_closed(self, tmp_path, bad_val):
+        """非字符串 JSON 值（数字/列表/对象/布尔）→ RuntimeError，
+        与 factory_lib._local_str 同规——str() 静默转换会让 py 侧放行
+        而 shell 侧拒绝，两消费方行为必须一致。"""
+        cfg = tmp_path / "factory-local.json"
+        cfg.write_text(json.dumps({"final_gate_cmd": bad_val}), encoding="utf-8")
+        with pytest.raises(RuntimeError, match="final_gate_cmd"):
+            mut._final_gate_words(cfg)
+
+    def test_valid_path_style_splits(self, tmp_path):
+        """PATH 型命令拆词保持原样（首词不被绝对化/不加 bash）。"""
+        cfg = tmp_path / "factory-local.json"
+        cfg.write_text(
+            json.dumps({"final_gate_cmd": "uv run pytest -q"}), encoding="utf-8")
+        assert mut._final_gate_words(cfg) == ["uv", "run", "pytest", "-q"]
+
+
+def test_run_gate_executes_final_gate_without_bash_prefix(monkeypatch):
+    """tests 门直执 FINAL_GATE（PR #71 Sourcery #1）：bash 前缀会把
+    PATH 型首词（如 uv）当脚本文件名，门必失败；直执与 shell 侧
+    fix-issue/validate-pr 的 "${GATE_ARGS[@]}" 同构。"""
+    seen = {}
+
+    class _Proc:
+        returncode = 0
+        pid = -1
+
+        def communicate(self, timeout=None):
+            return ("", "")
+
+    def fake_popen(cmd, **kw):
+        seen["cmd"] = cmd
+        return _Proc()
+
+    monkeypatch.setattr(mut, "FINAL_GATE", ["uv", "run", "pytest"])
+    monkeypatch.setattr(mut.subprocess, "Popen", fake_popen)
+    rc = mut.run_gate("tests", "some_target.py")
+    assert rc == 0
+    assert seen["cmd"] == ["uv", "run", "pytest"]
