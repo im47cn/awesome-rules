@@ -112,7 +112,9 @@ else
     # shellcheck disable=SC2016  # 同上：$1 由内层 sh 展开
     run_layer lint-factory-shellcheck sh -c 'shellcheck -S warning $1' \
         sh "$FACTORY_SH"
-    run_layer lint-factory-inline-python "$PY" tools/check_inline_python.py .factory tools scripts
+    # hooks 纳入（2026-08-28）：load-steering.sh 的 heredoc python 与
+    # .factory 同面受 compile 门（此前仅 sh -n 语法门）
+    run_layer lint-factory-inline-python "$PY" tools/check_inline_python.py .factory tools scripts hooks
     # 管道早退静态门（issue #30 三犯成类）：pipefail 下非末位早退消费者
     # （grep -m/head）与 true 管道段。扫描面 = tracked *.sh（67c2965b 原则）
     run_layer lint-pipe-early-exit "$PY" tools/check_pipe_early_exit.py \

@@ -12,7 +12,9 @@ import pytest
 from factory_lib import (
     CircuitOpen,
     breaker_check,
+    dist_manifest_lines,
     evidence_suites,
+    jfield,
     neutralize_marker,
     node_metric_line,
     node_timeout,
@@ -347,3 +349,90 @@ class TestNodeMetricLine:
         assert json.loads(node_metric_line("t", 5, 5, "fail"))["secs"] == 0
         # ensure_ascii=False：中文状态可读落盘
         assert "中文" in node_metric_line("n", 0, 1, "中文状态")
+
+
+class TestJfield:
+    """json_field 收口(2026-08-28):fix-issue.sh 双引号 -c 形态退役后的契约锁。
+
+    三种 shell 调用形态逐一对齐原语义：取键/缺键给默认/缺键无默认 fail-closed。
+    """
+
+    def _write(self, tmp_path, d):
+        import json
+        p = tmp_path / "x.json"
+        p.write_text(json.dumps(d), encoding="utf-8")
+        return str(p)
+
+    def test_key_present(self, tmp_path, capsys):
+        p = self._write(tmp_path, {"title": "修复 X", "verdict": "PASS"})
+        assert jfield(p, "title") == 0
+        assert capsys.readouterr().out == "修复 X\n"
+        assert jfield(p, "verdict") == 0
+        assert capsys.readouterr().out == "PASS\n"
+
+    def test_missing_key_with_default(self, tmp_path, capsys):
+        p = self._write(tmp_path, {"title": "t"})
+        assert jfield(p, "body", "") == 0
+        assert capsys.readouterr().out == "\n"  # 原 d.get("body") or "" 语义
+
+    def test_missing_key_no_default_fail_closed(self, tmp_path, capsys):
+        p = self._write(tmp_path, {"title": "t"})
+        assert jfield(p, "verdict") == 1  # 空串 + 非零：shell 比较自然走向失败分支
+        assert capsys.readouterr().out == ""
+
+    def test_null_value_treated_as_missing(self, tmp_path, capsys):
+        p = self._write(tmp_path, {"body": None})
+        assert jfield(p, "body", "") == 0
+        assert capsys.readouterr().out == "\n"
+
+    def test_non_str_value_json_encoded(self, tmp_path, capsys):
+        p = self._write(tmp_path, {"n": 3})
+        assert jfield(p, "n") == 0
+        assert capsys.readouterr().out == "3\n"
+
+
+class TestDistManifest:
+    """上游分发清单展开(2026-08-28 自 sync-from-upstream.sh heredoc 下沉)：
+    真跑 git 夹具仓（conftest/gitenv 密闭环境），锚定两条曾靠 heredoc 承载的
+    契约——目录项递归展开（R2-M5：跳过=tests/ 漂移永不告警）与无清单空输出。"""
+
+    def _git(self, repo, *args):
+        import subprocess
+        from gitenv import git_env
+        return subprocess.run(["git", "-C", str(repo), *args],
+                              capture_output=True, text=True, check=True,
+                              env=git_env())
+
+    def _mk_upstream(self, tmp_path, with_manifest):
+        """裸上游夹具：DISTRIBUTION.json(full: 文件+tests/ 目录, local: dict)
+        → 提交 → sha；with_manifest=False 时清单缺席（版本旧形态）。"""
+        import json as _json
+        up = tmp_path / ("up" if with_manifest else "up-old")
+        (up / ".factory" / "tests").mkdir(parents=True)
+        if with_manifest:
+            (up / ".factory" / "DISTRIBUTION.json").write_text(
+                _json.dumps({"full": ["dispatch.py", "tests/"],
+                             "local": {"README.md": "理由"}}), encoding="utf-8")
+            (up / ".factory" / "dispatch.py").write_text("x", encoding="utf-8")
+        (up / ".factory" / "tests" / "t.py").write_text("y", encoding="utf-8")
+        for args in (("init", "-q", "-b", "main"), ("add", "-A"),
+                     ("-c", "user.email=t@t", "-c", "user.name=t",
+                      "commit", "-qm", "seed")):
+            self._git(up, *args)
+        return up, self._git(up, "rev-parse", "HEAD").stdout.strip()
+
+    def test_expands_dirs_and_reads_upstream_object_store(self, tmp_path):
+        up, sha = self._mk_upstream(tmp_path, with_manifest=True)
+        lines = dist_manifest_lines(str(up), sha)
+        assert set(lines) == {"full\tdispatch.py", "full\ttests/t.py",
+                              "local\tREADME.md"}
+
+    def test_missing_manifest_returns_empty_for_local_fallback(self, tmp_path, capsys):
+        up, sha = self._mk_upstream(tmp_path, with_manifest=False)
+        assert dist_manifest_lines(str(up), sha) == []
+        assert "无 DISTRIBUTION.json" in capsys.readouterr().err
+
+    def test_local_reason_values_not_emitted(self, tmp_path):
+        # local 是 {路径: 理由}——清单行只含路径键，理由不进消费循环
+        up, sha = self._mk_upstream(tmp_path, with_manifest=True)
+        assert not any("理由" in l for l in dist_manifest_lines(str(up), sha))

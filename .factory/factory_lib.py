@@ -135,6 +135,26 @@ def node_timeout(name: str, env: dict | None = None) -> str:
     per_node = env.get(f"FACTORY_TIMEOUT_{name.upper().replace('-', '_')}")
     return per_node or env.get("FACTORY_TIMEOUT") or NODE_TIMEOUTS.get(name, "15m")
 
+
+def jfield(path: str, key: str, default: str | None = None) -> int:
+    """json 字段取值（shell json_field wrapper 的实现体，2026-08-28 收口）。
+
+    原 fix-issue.sh 形态 `python3 -c "…print($2)"` 把 shell 变量内插进
+    Python 源码——静态不可验证，check_inline_python R4 已禁形。契约 =
+    原三种调用形态：jfield <file> <key> [default]；键缺失/值为 null →
+    default（未给则 rc=1，stderr 指明缺键——shell 侧空串+非零，fail-closed）；
+    非 str 值以 JSON 编码输出，保持 shell 比较确定性。
+    """
+    d = json.loads(Path(path).read_text(encoding="utf-8"))
+    v = d.get(key) if isinstance(d, dict) else None
+    if v is None:
+        if default is None:
+            print(f"jfield: {path} 缺键 {key}（或值为 null）", file=sys.stderr)
+            return 1
+        v = default
+    print(v if isinstance(v, str) else json.dumps(v, ensure_ascii=False))
+    return 0
+
 def classify_task(files: list[str]) -> str:
     """变更文件 → 任务类型（成本归因用；doc/code 分开统计预算分布）。
 
@@ -256,6 +276,52 @@ def repo_vars_text() -> str:
         skills = _local_str_list("pr_review_skills")
         lines.append(f"- 守卫技能（PR 评审选配面）: {'、'.join(skills)}")
     return "\n".join(lines)
+
+# ═════════════════════════════════════════════════════════════════════
+# 上游分发清单展开（2026-08-28 自 sync-from-upstream.sh 内嵌 heredoc 下沉，
+# 铁律 4：git 子进程编排归 Python；曾处 killpg 门[只扫 *.py]与 pipe 门
+# [只扫 *.sh]的双盲缝隙）
+# ═════════════════════════════════════════════════════════════════════
+
+
+def dist_manifest_lines(up: str, sha: str) -> list[str]:
+    """上游 DISTRIBUTION.json @sha → 分发清单行（kind\\trel_path）。
+
+    清单是上游主权：从上游对象库读（下游本地副本可能滞后甚至缺失，锚点
+    即版本）。目录项递归展开为文件项——full 语义对目录内每个文件成立
+    （review R2-M5：跳过目录项 = tests/ 漂移永不告警）。上游无清单 =
+    版本旧，返回空（调用方全部按 local 报告）。local 是 {路径: 理由}。
+    """
+    out = subprocess.run(
+        ["git", "-C", up, "show", "%s:.factory/DISTRIBUTION.json" % sha],
+        capture_output=True, text=True)
+    if out.returncode != 0:
+        print("警告: 上游无 DISTRIBUTION.json（版本旧），全部按 local 报告",
+              file=sys.stderr)
+        return []
+    manifest = json.loads(out.stdout)
+    lines: list[str] = []
+
+    def emit(kind: str, entry: str) -> None:
+        if entry.endswith("/"):
+            # 目录项（如 tests/）递归展开为文件项
+            r = subprocess.run(
+                ["git", "-C", up, "ls-tree", "-r", "--name-only",
+                 sha, ".factory/" + entry],
+                capture_output=True, text=True)
+            if not r.stdout.strip():
+                print("  [%s] %s: 目录在上游不存在（上游整目录已删？清单待退役甄别）"
+                      % (kind, entry), file=sys.stderr)
+            for line in r.stdout.splitlines():
+                lines.append("%s\t%s" % (kind, line[len(".factory/"):]))
+        else:
+            lines.append("%s\t%s" % (kind, entry))
+
+    for entry in manifest.get("full", []):
+        emit("full", entry)
+    for entry in manifest.get("local", {}):
+        emit("local", entry)
+    return lines
 
 
 def neutralize_marker(text: str) -> str:
@@ -883,6 +949,16 @@ def main(argv: list[str]) -> int:
         # local-list <key> —— 字符串数组键逐行输出（shell for 消费；ADR-009）
         for v in _local_str_list(argv[2]):
             print(v)
+        return 0
+    if cmd == "jfield":
+        # jfield <file> <key> [default] —— shell json_field wrapper 消费
+        # （2026-08-28 收口：双引号 -c 内插形态退役，check_inline_python R4 禁形）
+        return jfield(argv[2], argv[3], argv[4] if len(argv) > 4 else None)
+    if cmd == "dist-manifest":
+        # dist-manifest <upstream_repo> <sha> —— sync-from-upstream 分发
+        # 清单（2026-08-28 自 heredoc 下沉；无清单=空输出，警告走 stderr）
+        for line in dist_manifest_lines(argv[2], argv[3]):
+            print(line)
         return 0
     if cmd == "repo-vars":
         # repo-vars —— prompt 仓库参数段（run_node / pr-review / adapt 注入）

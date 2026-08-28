@@ -278,3 +278,32 @@ def test_superseded_prefix_ledger_sha_matches():
     r3 全量入账，r1 仅前缀入账——两者都算已反哺，pending 只剩 p/r2。"""
     commits, env = _sup_env()
     assert feedback.superseded_map(commits, {"1" * 8, "3" * 40}) == {env["p"]: env["r1"]}
+
+
+# ---- adapt_manifest：适配节点输入契约（manifest.json schema） ----
+
+def test_adapt_manifest_clean_and_conflicted_split():
+    a, b = "a" * 40, "b" * 40
+    items = feedback.adapt_manifest(
+        "%s\tfix(factory): 并发修复\n%s\tfix: 冲突候选" % (a, b), {b})
+    assert items == [
+        {"sha": a, "subject": "fix(factory): 并发修复", "status": "clean",
+         "patch": "patches/%s.patch" % a[:9]},
+        {"sha": b, "subject": "fix: 冲突候选", "status": "conflicted",
+         "patch": "patches/%s.patch" % b[:9]},
+    ]
+
+
+def test_adapt_manifest_takes_shell_filtered_pending_verbatim():
+    # superseded 由 shell 剔除后传入（2026-08-28 下沉时的取舍）——此处不
+    # 重算：重算会把被人工跳过的候选回流进适配节点
+    only = "c" * 40
+    items = feedback.adapt_manifest("%s\t仅存候选" % only, set())
+    assert [i["sha"] for i in items] == [only]
+    assert items[0]["status"] == "clean"
+
+
+def test_adapt_manifest_preserves_old_to_new_order():
+    shas = [c * 40 for c in "abc"]
+    text = "".join("%s\ts%s\n" % (s, i) for i, s in enumerate(shas))
+    assert [i["sha"] for i in feedback.adapt_manifest(text, set())] == shas

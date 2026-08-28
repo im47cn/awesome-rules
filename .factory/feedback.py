@@ -150,6 +150,25 @@ def closure_missing(candidates, upstream_factory_files):
                 missing.setdefault(ref, []).append(c["sha"][:9])
     return missing
 
+def adapt_manifest(pending_text, conflicted_shas):
+    """樱桃后候选清单 → manifest 条目（适配节点输入契约，feedback-adapt.md 消费）。
+
+    pending_text：shell 剔除 superseded 后的最终候选（sha\\tsubject 行，旧→新），
+    不在此重算——superseded 跳过是 shell 的人工确认决策（亮清单 + record 补录）。
+    conflicted_shas：cherry-pick 冲突集。clean 候选同样入清单——审查特化剥离
+    必跑，状态只是分流提示。patch 为 fb_dir 相对路径，与 patches/<sha9>.patch
+    写入位置对应（adapt-prep 子命令，2026-08-28 自 feedback-upstream.sh
+    内嵌 heredoc 下沉，铁律 4：git 子进程编排归 Python）。
+    """
+    conflicted = set(conflicted_shas)
+    items = []
+    for line in pending_text.splitlines():
+        sha, subject = line.split("\t", 1)
+        items.append({"sha": sha, "subject": subject,
+                      "status": "conflicted" if sha in conflicted else "clean",
+                      "patch": "patches/%s.patch" % sha[:9]})
+    return items
+
 def load_ledger(path):
     """读账本 → 条目 dict 列表（sha 集合由调用方派生）。文件不存在视为空。
     patch_id 持久化（源仓 PR#75 审查）：账本提交对象被 GC 后重算不可得，
@@ -332,6 +351,21 @@ def main():
                   "或提交带 trailer 的资产变更后重跑")
             sys.exit(1)
         print("依赖闭包完备: %d 候选引用的 .factory 资产全部可达" % len(cands))
+    elif cmd == "adapt-prep":
+        # adapt-prep <fb_dir> <pending> <conflicted_sha>... —— 写适配节点输入：
+        # patches/<sha9>.patch（git show --format=fuller 全文）+ manifest.json
+        fb_dir = pathlib.Path(sys.argv[2])
+        items = adapt_manifest(sys.argv[3], sys.argv[4:])
+        for it in items:
+            (fb_dir / it["patch"]).write_text(subprocess.run(
+                ["git", "show", "--format=fuller", it["sha"]],
+                capture_output=True, text=True, check=True).stdout,
+                encoding="utf-8")
+        (fb_dir / "manifest.json").write_text(
+            json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+        print("适配输入就绪: %s（%d 候选，冲突 %d）" % (
+            fb_dir / "manifest.json", len(items),
+            sum(i["status"] == "conflicted" for i in items)))
     elif cmd == "status":
         print(status_line(len(pending)))
     elif cmd == "report":
@@ -353,7 +387,8 @@ def main():
         print("账本已更新: %s" % ledger_path)
     else:
         print("用法: feedback.py pending|superseded|status|closure <upstream_wt>|"
-              "report <upstream_path>|record <pr> <sha>:<subject>...",
+              "report <upstream_path>|adapt-prep <fb_dir> <pending> <conflicted>...|"
+              "record <pr> <sha>:<subject>...",
               file=sys.stderr)
         sys.exit(2)
 

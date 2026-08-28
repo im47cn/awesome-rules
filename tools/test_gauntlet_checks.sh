@@ -101,6 +101,8 @@ printf '#!/usr/bin/env bash\n' >"$TMP/nc_inline.sh"
     printf '%s\n)\n' 'PYX'
     # shellcheck disable=SC2016  # 同上
     printf 'b="$(python3 -c %simport sys print(%s)"\n' "'" "'"
+    # shellcheck disable=SC2016  # 同上：夹具字面量防自匹配
+    printf 'd="$(python3 -c %sprint(1)%s)"\n' '"' '"'
 } >>"$TMP/nc_inline.sh"
 if "$PY" tools/check_inline_python.py "$TMP/nc_inline.sh" >"$TMP/out4" 2>&1; then
     _rc4=0
@@ -108,19 +110,19 @@ else
     _rc4=$?
 fi
 if [ "$_rc4" -eq 1 ] && grep -q 'R1' "$TMP/out4" && grep -q 'R2' "$TMP/out4" \
-    && grep -q 'R3' "$TMP/out4"; then
-    ok "NC4 -c - 事故原形 + -c/heredoc 并用 + 语法错误全被拦（rc=1）"
+    && grep -q 'R3' "$TMP/out4" && grep -q 'R4' "$TMP/out4"; then
+    ok "NC4 -c - 事故原形 + -c/heredoc 并用 + 语法错误 + 双引号块全被拦（rc=1）"
 else
-    bad "NC4 期望 rc=1 且 R1/R2/R3 全报，实际 rc=${_rc4}: $(head -3 "$TMP/out4")"
+    bad "NC4 期望 rc=1 且 R1/R2/R3/R4 全报，实际 rc=${_rc4}: $(head -3 "$TMP/out4")"
 fi
 
-# ── NC5 inline-python 好路径：合法双引号形态不误伤 ─────────────────────
-# 本仓 .factory 合法形态（json_field 双引号 $2 展开块）必须放行——
-# 检查器边界是“静态可验证的才拦”，不是见 python 就拦。
+# ── NC5 inline-python 好路径：合法形态不误伤 ────────────────────────────
+# R4 后合法形态 = 单引号 -c 块 + quoted heredoc。原「双引号块放行」契约
+# 2026-08-28 反转（存量清零后禁形，拦截断言并入 NC4）。
 cat >"$TMP/nc_inline_ok.sh" <<'EOF'
 #!/usr/bin/env bash
 json_field() {
-  python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print($2)" "$1"
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$1" "$2"
 }
 c="$(python3 - "$TMP/f" <<'PYX'
 import sys
@@ -129,7 +131,7 @@ PYX
 )"
 EOF
 if "$PY" tools/check_inline_python.py "$TMP/nc_inline_ok.sh" >"$TMP/out5" 2>&1; then
-    ok "NC5 合法内联 python（双引号块 + heredoc）放行"
+    ok "NC5 合法内联 python（单引号 -c + heredoc）放行"
 else
     bad "NC5 期望 rc=0，实际 rc=$?: $(head -3 "$TMP/out5")"
 fi

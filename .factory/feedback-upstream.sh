@@ -162,23 +162,11 @@ done <<< "$PENDING"
 
 # --- 5. 适配节点（必跑：clean 候选也需审查特化剥离） ---
 
-python3 - "$FB_DIR" "$PENDING" ${CONFLICTED[@]+"${CONFLICTED[@]}"} <<'PYEOF'
-import json, pathlib, subprocess, sys
-fb_dir, pending, conflicted = sys.argv[1], sys.argv[2], sys.argv[3:]
-conflicted = set(conflicted)
-items = []
-for line in pending.splitlines():
-    sha, subject = line.split("\t", 1)
-    patch = pathlib.Path(fb_dir) / "patches" / ("%s.patch" % sha[:9])
-    patch.write_text(subprocess.run(
-        ["git", "show", "--format=fuller", sha],
-        capture_output=True, text=True, check=True).stdout, encoding="utf-8")
-    items.append({"sha": sha, "subject": subject, "status":
-                  "conflicted" if sha in conflicted else "clean",
-                  "patch": str(patch.relative_to(fb_dir))})
-pathlib.Path(fb_dir, "manifest.json").write_text(
-    json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
-PYEOF
+# patches/<sha9>.patch + manifest.json 生成在 feedback.py adapt-prep
+# （2026-08-28 自此处 heredoc 下沉：git 子进程编排归 Python，铁律 4；
+# 亦是 killpg 门[只扫 *.py]与 pipe 门[只扫 *.sh]双盲缝隙的收口）
+python3 "$FACTORY/feedback.py" adapt-prep "$FB_DIR" "$PENDING" \
+  ${CONFLICTED[@]+"${CONFLICTED[@]}"}
 PROMPT="$(cat "$FACTORY/prompts/feedback-adapt.md")
 
 

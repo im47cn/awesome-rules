@@ -164,8 +164,9 @@ _node_metric() {  # <node> <t0> <status> → jsonl 行（逻辑在 factory_lib m
   python3 "${REPO}/.factory/factory_lib.py" metric "$1" "$2" "$3"
 }
 
-json_field() {  # json_field <file> <python-expr-on-d>
-  python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print($2)" "$1"
+json_field() {  # json_field <file> <key> [default] → 键值（逻辑在 factory_lib
+  #              jfield；2026-08-28 收口：双引号 -c 内插形态退役，R4 禁形）
+  python3 "${REPO}/.factory/factory_lib.py" jfield "$@"
 }
 
 run_triage() {  # 物理隔离裁决器：--no-tools --no-session，输入全部内联
@@ -177,8 +178,8 @@ run_triage() {  # 物理隔离裁决器：--no-tools --no-session，输入全部
   fi
   local mission title body cmts prompt
   mission="$(cat "${REPO}/MISSION.md")"
-  title="$(json_field "${DIR}/issue.json" 'd["title"]')"
-  body="$(json_field "${DIR}/issue.json" 'd.get("body") or ""')"
+  title="$(json_field "${DIR}/issue.json" title)"
+  body="$(json_field "${DIR}/issue.json" body "")"
   # 评论是重投/整改指令的载体（holdout FAIL 后人类补充验收标准等），
   # 物理隔离裁决器无工具，必须内联；最新 3 条足够传达整改上下文
   cmts="$(python3 - "${DIR}/issue.json" <<'PYC'
@@ -221,7 +222,7 @@ run_holdout() {  # 物理隔离验证器：--no-tools + 输入全部内联，age
     return 0
   fi
   local title out
-  title="$(json_field "${DIR}/issue.json" 'd["title"]')"
+  title="$(json_field "${DIR}/issue.json" title)"
   out="$(cat "${DIR}/tests-output.txt")"
   local prompt
   prompt="$(cat "${REPO}/.factory/prompts/holdout.md")
@@ -284,7 +285,7 @@ if [ "${DRY}" = 0 ]; then
   # type: rejected=triage 拒绝；否则按分支 diff 分类（doc/code/test/mixed）
   write_ledger() {
     local rc=$1 kind
-    if [ -f "${DIR}/triage.json" ] && [ "$(json_field "${DIR}/triage.json" 'd["verdict"]' 2>/dev/null)" = reject ]; then
+    if [ -f "${DIR}/triage.json" ] && [ "$(json_field "${DIR}/triage.json" verdict 2>/dev/null)" = reject ]; then
       kind=rejected
     else
       local -a files=()
@@ -344,7 +345,7 @@ echo "=== fix-issue #${ISSUE} → ${DIR} ==="
 # 函数内显式 return 1 语义不变（顶层简单命令失败即触发 errexit + EXIT trap）。
 run_triage
 if [ "${DRY}" = 0 ]; then
-  VERDICT="$(json_field "${DIR}/triage.json" 'd["verdict"]')"
+  VERDICT="$(json_field "${DIR}/triage.json" verdict)"
   if [ "${VERDICT}" = accept ]; then
     # S1/S2 互斥: in-progress 双标签 + dispatch.sh accepted 队列显式跳过
     # in-progress 条目（gh label 过滤是"含有"非"仅有"，2026-08-21 实证双派）。
@@ -442,7 +443,7 @@ if verdict not in ("PASS", "FAIL") or not isinstance(evidence, str) or not evide
     raise SystemExit("holdout 结果缺 verdict/evidence 字段")
 print(f"holdout round={sys.argv[2]} verdict={verdict} evidence={evidence[:200]}")
 PYA
-  [ "$(json_field "${DIR}/holdout.json" 'd["verdict"]')" = PASS ] \
+  [ "$(json_field "${DIR}/holdout.json" verdict)" = PASS ] \
     || { echo "holdout=FAIL，链终止（不建 PR；evidence 已存 chain-history）"; exit 1; }
 fi
 
