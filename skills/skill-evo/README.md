@@ -66,6 +66,10 @@ python3 skills/skill-evo/scripts/evo.py evolve            # 进化总结 prompt�
 
 - new_text 含【强制】标记（强制级别是人工评审决策）
 - 置信度 Low
+- new_text 与目标文件既有段落语义相似（difflib >= `idempotent_threshold`，默认 0.8；
+  逐字/归档命中为重复沉淀另两分支）——疑似换皮重提，需人工 diff 后改写合并
+- `knowledge_type=instance`（随环境实例变化的 ID/路径/字段名等）→ 不入技能文档，
+  指向代码或 ADR
 - `prompt_evolution` 型提案不走 apply，人工编辑 `evo_prompt.py` 的 `SYSTEM_PROMPT` 采纳
 
 ## 插件哑故障巡检（evo_patrol）

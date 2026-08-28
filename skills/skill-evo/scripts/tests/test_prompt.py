@@ -1,4 +1,5 @@
 """evo_prompt 单测：脱敏、切片截断、目标资产索引。"""
+import json
 from pathlib import Path
 
 import evo_config as C
@@ -81,5 +82,22 @@ def test_build_summary_prompt_contains_sections(tmp_path):
     repo = _mk_repo(tmp_path)
     sess = make_session([Msg(role="user", text="用户要求 X")])
     prompt = P.build_summary_prompt(sess, cfg, repo)
-    for sec in ("# 会话信息", "# 目标资产清单", "# 会话记录", '"no_signal"', "append_under"):
+    for sec in ("# 会话信息", "# 目标资产清单", "# 会话记录", '"no_signal"', "append_under",
+                '"knowledge_type"', "instance", "ADR"):
         assert sec in prompt
+
+
+def test_system_prompt_json_contract_fields_complete():
+    """契约完整性：SYSTEM_PROMPT 的 JSON 示例字段 ⊇ evo.py _mk_proposal 消费的全部键。
+
+    LLM 严格按示例输出；示例删字段（如 target_file 被顶替删除）会让每条自动提案
+    target_file 空 → apply 硬失败（目标不在允许范围，--force 不可越）。
+    键清单须与 evo.py _mk_proposal 的 ls.get(...)/ch_raw.get(...) 同步维护。
+    """
+    head = P.SYSTEM_PROMPT.split("约束：")[0]
+    start = head.rindex("{", 0, head.index('"no_signal"'))
+    example = json.loads(head[start:head.rindex("}") + 1])
+    lesson = example["lessons"][0]
+    assert set(lesson) >= {"type", "evidence", "target_file", "confidence",
+                           "reason", "knowledge_type", "change"}
+    assert set(lesson["change"]) >= {"action", "heading", "new_text"}

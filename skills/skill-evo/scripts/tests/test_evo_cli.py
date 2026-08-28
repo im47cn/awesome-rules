@@ -214,6 +214,51 @@ def test_apply_evidence_miss_requires_force(tmp_path, monkeypatch, capsys):
     assert "- 证据核验测试条款" in (repo / "steering" / "demo-spec.md").read_text(encoding="utf-8")
 
 
+def test_apply_semantic_dup_exitcode(tmp_path, monkeypatch, capsys):
+    """验收 1（CLI 层）：语义重复 apply exit 1 + 拦截原因落 pending .md；--force 越过。"""
+    cfg, base, repo = make_env(tmp_path, monkeypatch)
+    spec = repo / "steering" / "demo-spec.md"
+    para = "禁止使用 select 星号，查询必须显式列出全部字段名，避免列序漂移"
+    spec.write_text(spec.read_text(encoding="utf-8") + f"\n- {para}\n", encoding="utf-8")
+    variant = para.replace("全部", "所有")
+    p = PR.Proposal(id="20260826-100000-cc-semi0001", source_agent="cc",
+                    source_session="s", source_path="/tmp/absent.jsonl", created="T",
+                    lessons=[PR.Lesson(
+                        type="correction", evidence="用户纠正查询写法",
+                        target_file="steering/demo-spec.md",
+                        confidence="High", reason="r", change=PR.Change(
+                            action="append_end", new_text=f"- {variant}"))])
+    path = PR.write_proposal(p, base / "proposals" / "pending")
+
+    assert evo.cmd_apply(SimpleNamespace(id="20260826-10", dry_run=False, force=False)) == 1
+    out = capsys.readouterr().out
+    assert "语义重复" in out and "0.9" in out
+    assert "apply_blocked:" in path.read_text(encoding="utf-8")    # audit 痕迹
+    assert variant not in spec.read_text(encoding="utf-8")         # 未落盘
+
+    assert evo.cmd_apply(SimpleNamespace(id="20260826-10", dry_run=False, force=True)) == 0
+    assert variant in spec.read_text(encoding="utf-8")
+
+
+def test_apply_instance_blocked(tmp_path, monkeypatch, capsys):
+    """验收 3（CLI 层）：instance 提案 apply exit 1，输出指向代码/ADR，痕迹落 .md。"""
+    cfg, base, repo = make_env(tmp_path, monkeypatch)
+    p = PR.Proposal(id="20260826-110000-cc-inst0001", source_agent="cc",
+                    source_session="s", source_path="/tmp/absent.jsonl", created="T",
+                    lessons=[PR.Lesson(
+                        type="success", evidence="会话中发现 fieldId",
+                        target_file="steering/demo-spec.md",
+                        confidence="High", reason="r", knowledge_type="instance",
+                        change=PR.Change(action="append_end",
+                                         new_text="- 云效 fieldId 101586 是选项型字段"))])
+    path = PR.write_proposal(p, base / "proposals" / "pending")
+
+    assert evo.cmd_apply(SimpleNamespace(id="20260826-11", dry_run=False, force=False)) == 1
+    out = capsys.readouterr().out
+    assert "instance" in out and "ADR" in out
+    assert "apply_blocked:" in path.read_text(encoding="utf-8")
+
+
 def test_apply_evidence_hit_passes(tmp_path, monkeypatch, capsys):
     """evidence 逐字命中来源会话 → list 标 ✓、apply 直接通过（无需 force）。"""
     cfg, base, repo = make_env(tmp_path, monkeypatch)

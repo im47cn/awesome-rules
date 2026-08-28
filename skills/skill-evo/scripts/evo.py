@@ -77,6 +77,7 @@ def _mk_proposal(sess: S.Session, data: dict) -> PR.Proposal | None:
             target_file=str(ls.get("target_file", "")),
             confidence=str(ls.get("confidence", "")),
             reason=str(ls.get("reason", "")),
+            knowledge_type=str(ls.get("knowledge_type", "pattern")),  # LLM 缺字段兜底
             change=PR.Change(action=str(ch_raw.get("action", "append_end")),
                              heading=str(ch_raw.get("heading", "")),
                              new_text=str(ch_raw.get("new_text", ""))) if ch_raw else None))
@@ -299,9 +300,14 @@ def cmd_apply(args) -> int:
         report = PR.apply_proposal(proposal, C.repo_root(),
                                    dry_run=args.dry_run, force=args.force,
                                    applied_dir=paths["applied"],
-                                   extra_warnings=_evidence_warnings(checks))
+                                   extra_warnings=_evidence_warnings(checks),
+                                   idempotent_threshold=float(cfg["idempotent_threshold"]))
     except PR.ApplyError as e:
         print(f"❌ 应用失败：{e}")
+        try:    # 拦截原因留痕 pending .md（audit；含相似度数值），失败不影响退出码
+            PR.annotate_pending_block(path, str(e))
+        except OSError:
+            pass
         return 1
     for line in report:
         print(("DRY-RUN " if args.dry_run else "APPLIED ") + line)

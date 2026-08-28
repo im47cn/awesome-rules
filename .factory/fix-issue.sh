@@ -402,6 +402,19 @@ while :; do
   break
 done
 
+# --- 5.5 未提交改动机械收编（review 修复纪律的脚本兜底）---
+# gate/holdout 验证工作区，push 只发 HEAD——不收编则「验证态 ≠ 发布态」，
+# 修复以工作区态存在即随 worktree 清理丢失（issue #63 实证：target_file
+# 契约修复因此丢失，origin 分支缺字段）。收编先于 guard --files 的
+# BASE...BRANCH 计算，周界检查因此覆盖全部实际改动（含兜底提交）。
+if [ "${DRY}" = 0 ] && [ -n "$(git -C "${WT}" status --porcelain)" ]; then
+  echo "    [backstop] 工作区有未提交改动，机械收编（节点应自行提交，见 prompts/review.md 纪律）："
+  git -C "${WT}" status --porcelain | sed 's/^/      /'
+  git -C "${WT}" add -A \
+    && git -C "${WT}" commit -m "chore(chain): 机械收编链内未提交改动（backstop；节点应自行提交）" \
+    || { echo "backstop 提交失败（hook 拒绝？），链终止" >&2; exit 1; }
+fi
+
 # --- 6. 确定性门：周界 + 测试（tests-output.txt 由脚本生成，不依赖节点自觉） ---
 if [ "${DRY}" = 0 ]; then
   CHANGED="$(git -C "${WT}" diff --name-only ${BASE_BRANCH}..."${BRANCH}" 2>/dev/null \
