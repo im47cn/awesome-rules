@@ -348,6 +348,13 @@ _CU_STATE = {"UNDER_DEV": "open", "UNDER_REVIEW": "open", "TO_BE_MERGED": "open"
              "opened": "open", "reopened": "open", "closed": "closed",
              "accepted": "open", "merged": "merged", "locked": "open"}
 _CU_MERGE_METHOD = {"merge": "no-fast-forward", "squash": "squash", "rebase": "rebase"}
+# 评论标记模型（#66，ADR-007 forge 期已 live 验证的等价物迁移）：
+# add 标记 = MR 评论「[factory:label:add] X」（resolved=false）；
+# remove = 将该 X 未 resolved 的标记评论置 resolved（内容保留）；
+# 人工打回手势 = MR 评论含「[factory:changes-requested]」。字节级对齐
+# forge 时代格式——ADR-007 期的存量标记评论可被本实现读取。
+_CU_LABEL_ADD = "[factory:label:add] "
+_CU_CHANGES_REQ = "[factory:changes-requested]"
 
 
 def _unsupported(op, why):
@@ -694,24 +701,56 @@ class CodeupAdapter:
                 number = (det or {}).get("serialNumber") or wid
                 url = (det or {}).get("detailUrl") or url
             except HostingError as e:
-                print(f"[hosting] [warn] serialNumber 回查失败,返回 id: {e}",
+                print(f"[hosting] serialNumber 回查失败，降级 id: {e}",
                       file=sys.stderr)
         return {"number": number, "url": url}
 
+    def _marker_comments(self, p):
+        # 【live 契约，ADR-007/#66】comments/list 两态各拉一次取全集
+        out = []
+        for resolved in (False, True):
+            payload = self._req(
+                "POST", f"{self._base()}/changeRequests/{p}/comments/list",
+                body={"patchSetBizIds": [], "commentType": "GLOBAL_COMMENT",
+                      "state": "OPENED", "resolved": resolved})
+            items = payload if isinstance(payload, list) else (payload.get("result") or [])
+            for c in items:
+                content = c.get("content") or ""
+                if content.startswith(_CU_LABEL_ADD) or _CU_CHANGES_REQ in content:
+                    out.append({"id": c.get("id") or c.get("commentBizId")
+                                or c.get("commentId"),
+                                "content": content, "resolved": resolved})
+        return out
+
     def _pr_labels(self, p):
+        # 两载体合并（#66）：类标 Link（平台原生）∪ 未 resolved 的 add 标记
         # 【live 2026-08-26】MR 详情响应无 labels 字段——类标须专用端点读回
+        names = []
         try:
             payload = self._req("GET", f"{self._base()}/changeRequests/{p}/labels")
             items = payload if isinstance(payload, list) else (payload.get("result") or [])
-            return [l.get("name") for l in items if l.get("name")]
+            names += [l.get("name") for l in items if l.get("name")]
         except HostingError:
-            return []  # 类标读失败不阻断详情（labels 置空，消费方按无类标处理）
+            pass  # 类标读失败不阻断详情（标记评论仍可承载）
+        names += [self._marker_label(m["content"]) for m in self._marker_comments(p)
+                  if not m["resolved"] and m["content"].startswith(_CU_LABEL_ADD)]
+        return sorted({n for n in names if n})
+
+    @staticmethod
+    def _marker_label(content):
+        return content[len(_CU_LABEL_ADD):].splitlines()[0].strip()
 
     def pr_view(self, p, repo=None):
         # 【live 2026-08-26】单体端点是仓库级（仓库级集合 404、单体正常）
         d = self._req("GET", f"{self._base()}/changeRequests/{p}")
         out = self._pr(d.get("result", d))
         out["labels"] = self._pr_labels(p)
+        # 人工打回手势（#66）：[factory:changes-requested] 评论 →
+        # changes_requested（Codeup 无 reviewDecision 等价物的场景；
+        # reviewer 意见 NOTPASS 映射保留，两者取严）
+        if out["review"] != "changes_requested" and any(
+                _CU_CHANGES_REQ in m["content"] for m in self._marker_comments(p)):
+            out["review"] = "changes_requested"
         return out
 
     def pr_list(self, state="open", label=None, limit=100, repo=None):
@@ -740,10 +779,34 @@ class CodeupAdapter:
         return out[:limit]
 
     def pr_set_labels(self, p, add=(), remove=(), repo=None):
-        if remove:
-            _unsupported("pr set-labels --remove",
-                         "Codeup 类标仅有 Link 端点、无 Unlink")
-        ids = [self._label_id(name) for name in add]
+        # 评论标记模型（#66，承载平台缺口 b）：remove = 置 resolved
+        # （内容保留，轮次计数不减——对齐 GitHub label-add 事件语义）；
+        # add = 发标记评论 + 类标 Link 平台原生补充（两载体并存）。
+        for name in remove:
+            hits = [m for m in self._marker_comments(p)
+                    if not m["resolved"] and m["content"].startswith(_CU_LABEL_ADD)
+                    and self._marker_label(m["content"]) == name]
+            if not hits:
+                print(f"[hosting] remove {name}: 无未 resolved 标记（幂等跳过）",
+                      file=sys.stderr)
+            for m in hits:
+                self._req("PUT",
+                          f"{self._base()}/changeRequests/{p}/comments/{m['id']}",
+                          body={"resolved": True})
+        for name in add:
+            self._req("POST", f"{self._base()}/changeRequests/{p}/comments",
+                      body={"comment_type": "GLOBAL_COMMENT",
+                            "content": f"{_CU_LABEL_ADD}{name}",
+                            "resolved": False})
+        # 类标 Link best-effort：不存在（label create 未破案，界面人工路径）
+        # 时降级告警——标记评论已承载状态机语义，链不因平台类标缺失受阻
+        ids = []
+        for name in add:
+            try:
+                ids.append(self._label_id(name))
+            except HostingError as e:
+                print(f"[hosting] 类标 Link 降级（标记评论已承载）: {e}",
+                      file=sys.stderr)
         # 【live 2026-08-26】LinkMergeRequestLabel body 键是 labelIdList
         # （labelIds/labels/labelId 均被拒："Invalid param value [null]"）
         if ids:
@@ -817,12 +880,7 @@ class CodeupAdapter:
                         "removeSourceBranch": False})
         return True
 
-    def pr_close(self, p, repo=None):
-        # 【live 2026-08-26】唯一生效形态 = POST /close 空 body（实测项目
-        # MR#7 实测：POST {} → 200 且状态转 CLOSED）。陷阱：PUT 详情端点带
-        # {"state":"closed"} 返回 {"result":true} 但状态不变——假阳性，勿用。
-        self._req("POST", f"{self._base()}/changeRequests/{p}/close", body={})
-        return True
+    # （pr_close 唯一定义在上文——曾出现双定义后者遮蔽前者，已收口）
 
     def label_ensure(self, name, color, desc):
         # 【文档推导】CreateProjectLabel；已存在（409/重复码）视为成功
@@ -836,7 +894,12 @@ class CodeupAdapter:
             raise
 
     def label_history(self, p):
-        _unsupported("label history", "Codeup 无标签事件时间线（轮次计数不可派生）")
+        # 评论标记承载（#66，平台缺口 c）：全部 add 标记 → 事件流。
+        # resolved 不减计数（重派前 remove、再打回再 add，轮次单调递增
+        # ——对齐 GitHub label-add 事件语义）；中立 schema 同 GitHub 侧。
+        return [{"op": "add", "label": self._marker_label(m["content"])}
+                for m in self._marker_comments(p)
+                if m["content"].startswith(_CU_LABEL_ADD)]
 
 
 ADAPTERS = {"github": GitHubAdapter, "codeup": CodeupAdapter}
