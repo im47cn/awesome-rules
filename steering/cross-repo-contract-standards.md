@@ -124,6 +124,9 @@ commit hook 仅做防呆提示（检测到契约模块 diff 时打印提醒"走 
 不承担拦截职责。提示脚本见 `skills/contract-guard/scripts/check-contract.sh`。
 
 ## 外部依赖假设（接入前须确认）
+
+- SNAPSHOT 版本的契约 jar 会无预警自动拉取新快照：上游破坏性改名（仅类名变、字段不变）可在下游零变更时突然打断编译。归因路径：对报「找不到符号」的类，在本地仓库并存的两个快照 jar 中对比类清单（unzip -l），先确认是上游改名而非本地笔误，再决定修复面（通常为纯改名对齐）
+- 下游编译基线应感知快照漂移：本地构建突然失败且本仓无变更时，第一怀疑对象是 SNAPSHOT 依赖拉新，而非本地环境损坏
 - SHA 重建 baseline 不受依赖快照漂移影响存在前提：契约模块依赖须全为 `provided`（不进 jar）且 japicmp 开启 `ignoreMissingClasses=true`；一旦契约模块引入 compile 期 SNAPSHOT 依赖，重建产物会渗入依赖漂移，须重新评估该方案可靠性
 
 1. ~~云效私服保留历史 SNAPSHOT~~——已由 sha 重建方案消灭（baseline 只依赖 git）；

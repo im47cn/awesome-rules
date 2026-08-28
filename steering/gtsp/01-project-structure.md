@@ -136,6 +136,7 @@ gtsp-{域}-api/src/main/java/com/acme/{module}/
 读可绕过 Domain，但事务边界仍在 AppService；写**禁止**绕过 Domain 直调 Mapper。用例复杂时可引入执行器 `CmdExe`/`QryExe`（命名见 [02](02-naming.md)），AppService 仅分发。
 
 ## 12. 状态机
+- 终态与自动化清理防死循环：机器不可继续的失败（熔断、轮次耗尽）应转入人工终态，且落标/落库须先于锁与租约的释放；重试与清理流程不得剥除人工终态标记——否则会形成「清标回零态 → 自动重派 → 再次失败」的静默死循环。
 
 核心域对象生命周期建模为显式状态机（Cola Statemachine / 状态枚举+流转），非散落 if-else。状态流转属领域知识，收敛在 Domain 层，AppService 编排触发，adapter 只传事件不判断。
 
