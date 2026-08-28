@@ -56,31 +56,9 @@ echo "上游: ${UP} @ ${ANCHOR} (${HEAD_SHA:0:9})"
 
 # 分发清单——从**上游**对象库读（下游本地副本可能滞后甚至缺失；
 # 清单是上游主权，锚点即版本）。无清单=上游版本旧，全部按 local。
-python3 - "$UP" "$HEAD_SHA" <<'PY' > /tmp/.factory-dist.$$
-import json, subprocess, sys
-up, sha = sys.argv[1], sys.argv[2]
-out = subprocess.run(["git", "-C", up, "show", "%s:.factory/DISTRIBUTION.json" % sha],
-                     capture_output=True, text=True)
-if out.returncode != 0:
-    sys.stderr.write("警告: 上游无 DISTRIBUTION.json（版本旧），全部按 local 报告\n")
-    sys.exit(0)
-d = json.loads(out.stdout)
-def emit(kind, entry):
-    if entry.endswith("/"):
-        # 目录项（如 tests/）递归展开为文件项——full 语义对目录内每个
-        # 文件成立（review R2-M5：跳过目录项 = tests/ 漂移永不告警）
-        r = subprocess.run(["git", "-C", up, "ls-tree", "-r", "--name-only",
-                            sha, ".factory/" + entry],
-                           capture_output=True, text=True)
-        if not r.stdout.strip():
-            sys.stderr.write("  [%s] %s: 目录在上游不存在（上游整目录已删？清单待退役甄别）\n" % (kind, entry))
-        for line in r.stdout.splitlines():
-            print("%s\t%s" % (kind, line[len(".factory/"):]))
-    else:
-        print("%s\t%s" % (kind, entry))
-for f in d.get("full", []): emit("full", f)
-for f in d.get("local", {}): emit("local", f)
-PY
+# 展开逻辑在 factory_lib.py dist-manifest（2026-08-28 自此处 heredoc 下沉，
+# 铁律 4：git 子进程编排归 Python；无清单=空输出，警告走 stderr）
+python3 "$FACTORY/factory_lib.py" dist-manifest "$UP" "$HEAD_SHA" > /tmp/.factory-dist.$$
 
 # 上游 mode+blob（git show 丢 mode，覆盖后须恢复执行位）
 up_tree() { git -C "$UP" ls-tree "$HEAD_SHA" -- ".factory/$1"; }
