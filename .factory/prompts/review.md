@@ -22,7 +22,11 @@
 - 小问题（命名、遗漏测试断言、文档拼写）：直接修复并重跑相关 verify；
   **若修复触及了代码或测试，重跑 final_gate 并按 implement 纪律 4
   刷新 `$ISSUE_DIR/tests-output.txt`（含 -v 冗长证据）**——holdout
-  的证据必须反映最终代码状态，陈旧证据等同无证据
+  的证据必须反映最终代码状态，陈旧证据等同无证据；
+  **且修复必须当即 commit 到分支**——推送节点只发 HEAD，工作区态
+  修复不随 PR 走、且随 worktree 清理被销毁（issue #63 实证：提取器
+  target_file 修复因此丢失）。commit message 引用对应审查发现。
+  链脚本在 gate 前有机械收编兜底（5.5），但走到兜底即本节点纪律失守
 - 可行动发现（具体、可修、非设计歧义——含你自审中承认却未处理的一切）：
   除报告外逐条写入 `$ISSUE_DIR/ralph-todo.md`，每行一条：
   `- [ ] <severity> <file:line> <问题一句话> | 验收: <命令>`。
