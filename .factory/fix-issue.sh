@@ -9,7 +9,7 @@
 # 每节点 = 独立 omp 进程（物理级 fresh context，A1）。
 # holdout 与实现链无共享上下文：--no-tools 无工具形态，白名单输入（issue
 # 标题 + tests-output.txt）由本脚本内联进 prompt，issue 正文不进验证器。
-# 门: implement 后 guard.py（周界）+ run_tests.sh（测试）；holdout FAIL 即停。
+# 门: implement 后 guard.py（周界）+ 测试门（final_gate_cmd）；holdout FAIL 即停。
 # 预算: 每节点 omp --max-time（默认 30m，可 env 覆盖）。
 # 残留通道（诚实声明）: 会话 hooks/memory 注入仍在；S2 以 SDK inMemory 收口。
 set -euo pipefail
@@ -110,7 +110,7 @@ if [ "${FACTORY_DISPATCHED:-0}" != 1 ] && [ "${DRY}" = 0 ]; then
   LOCKDIR="${MAIN_FACTORY:-${REPO}/.factory}/locks/dispatcher"
   # 父目录预建：下方 mkdir 是单级原子声明（-p 会吞 EEXIST 破坏互斥），
   # 父缺时 ENOENT 被 2>/dev/null 吞成"锁被持"假象（派发器机器 locks/
-  # 常驻故未暴露，净克隆首跑必现——etf-radar PR#79）
+  # 常驻故未暴露，净克隆首跑必现——源仓 PR#79）
   mkdir -p "${LOCKDIR%/*}" 2>/dev/null || true
   if mkdir "$LOCKDIR" 2>/dev/null; then
     echo $$ > "$LOCKDIR/pid"; MANUAL_LOCK=1
@@ -131,20 +131,23 @@ run_node() {  # run_node <name> — 拼接静态 prompt + 任务参数，独立�
   local name="$1" t0 t1
   echo "==> 节点 ${name}（fresh context 进程，预算 $(node_timeout "${name}")）"
   if [ "${DRY}" = 1 ]; then
-    echo "    [dry-run] omp -p <prompts/${name}.md + 任务参数> --max-time $(node_timeout "${name}")"
+    echo "    [dry-run] omp_node <prompts/${name}.md + 任务参数> --max-time $(node_timeout "${name}")"
     echo "    产物: ${DIR}/${name}.(json|md|log)"
     return 0
   fi
   local prompt
+  # ADR-009 prompt 参数化：仓库参数（身份/阅读范围/审查依据/final_gate）
+  # 从 factory-local.json 注入（fail-closed：repo-vars 失败此处即链终止）。
   prompt="$(cat "${REPO}/.factory/prompts/${name}.md")
+
+$(python3 "${REPO}/.factory/factory_lib.py" repo-vars)
 
 任务参数:
 - ISSUE_DIR: ${DIR}
 - 仓库根: ${WT}（链独立 worktree，勿越界改主工作区）
 - issue 编号: ${ISSUE}"
   t0=$(date +%s)
-  if ! (cd "${WT}" && omp -p "${prompt}" --no-session --max-time "$(node_timeout "${name}")" < /dev/null) \
-      > "${DIR}/${name}.log" 2>&1; then
+  if ! omp_node "${WT}" "${DIR}/${name}.log" "$(node_timeout "${name}")" -- "${prompt}"; then
     _node_metric "${name}" "${t0}" "fail" >> "${DIR}/node-metrics.jsonl"
     echo "    节点 ${name} 失败（详见 ${DIR}/${name}.log）" >&2; return 1
   fi
@@ -157,12 +160,8 @@ run_node() {  # run_node <name> — 拼接静态 prompt + 任务参数，独立�
   printf '    耗时 %ss\n' "$(( t1 - t0 ))"
 }
 
-_node_metric() {  # _node_metric <node> <t0> <status> → jsonl 行（节点级计时数据源）
-  python3 - "$1" "$2" "$3" "$(date +%s)" <<'PYM'
-import json, sys
-node, t0, status, now = sys.argv[1:5]
-print(json.dumps({"node": node, "secs": int(now) - int(t0), "status": status}, ensure_ascii=False))
-PYM
+_node_metric() {  # <node> <t0> <status> → jsonl 行（逻辑在 factory_lib metric；ADR-005 下沉）
+  python3 "${REPO}/.factory/factory_lib.py" metric "$1" "$2" "$3"
 }
 
 json_field() {  # json_field <file> <python-expr-on-d>
@@ -172,7 +171,7 @@ json_field() {  # json_field <file> <python-expr-on-d>
 run_triage() {  # 物理隔离裁决器：--no-tools --no-session，输入全部内联
   echo "==> 节点 triage（物理隔离：--no-tools，白名单内联）"
   if [ "${DRY}" = 1 ]; then
-    echo "    [dry-run] omp -p <prompts/triage.md + 内联 MISSION/issue 标题正文> --no-tools --config .factory/omp-isolated.yml --max-time $(node_timeout triage)"
+    echo "    [dry-run] omp_node <prompts/triage.md + 内联 MISSION/issue 标题正文> --no-tools --config .factory/omp-isolated.yml --max-time $(node_timeout triage)"
     echo "    产物: ${DIR}/triage.(json|log)"
     return 0
   fi
@@ -204,8 +203,8 @@ ${body}
 ${cmts}
 ——评论结束——"
   local t0; t0=$(date +%s)
-  if ! (cd "${REPO}" && omp -p "${prompt}" --no-tools --no-session --config "${REPO}/.factory/omp-isolated.yml" --max-time "$(node_timeout triage)" < /dev/null) \
-      > "${DIR}/triage.log" 2>&1; then
+  if ! omp_node "${REPO}" "${DIR}/triage.log" "$(node_timeout triage)" --no-tools \
+      --config "${REPO}/.factory/omp-isolated.yml" -- "${prompt}"; then
     _node_metric triage "${t0}" "fail" >> "${DIR}/node-metrics.jsonl"
     echo "    triage 节点失败（详见 ${DIR}/triage.log）" >&2; return 1
   fi
@@ -217,7 +216,7 @@ ${cmts}
 run_holdout() {  # 物理隔离验证器：--no-tools + 输入全部内联，agent 无任何工具
   echo "==> 节点 holdout（物理隔离：--no-tools，白名单内联）"
   if [ "${DRY}" = 1 ]; then
-    echo "    [dry-run] omp -p <prompts/holdout.md + 内联 title/tests-output> --no-tools --config .factory/omp-isolated.yml --max-time $(node_timeout holdout)"
+    echo "    [dry-run] omp_node <prompts/holdout.md + 内联 title/tests-output> --no-tools --config .factory/omp-isolated.yml --max-time $(node_timeout holdout)"
     echo "    产物: ${DIR}/holdout.json"
     return 0
   fi
@@ -234,8 +233,8 @@ run_holdout() {  # 物理隔离验证器：--no-tools + 输入全部内联，age
 ${out}
 ——tests-output.txt 结束——"
   local t0; t0=$(date +%s)
-  if ! (cd "${REPO}" && omp -p "${prompt}" --no-tools --no-session --config "${REPO}/.factory/omp-isolated.yml" --max-time "$(node_timeout holdout)" < /dev/null) \
-      > "${DIR}/holdout.log" 2>&1; then
+  if ! omp_node "${REPO}" "${DIR}/holdout.log" "$(node_timeout holdout)" --no-tools \
+      --config "${REPO}/.factory/omp-isolated.yml" -- "${prompt}"; then
     _node_metric holdout "${t0}" "fail" >> "${DIR}/node-metrics.jsonl"
     echo "    holdout 节点失败（详见 ${DIR}/holdout.log）" >&2; return 1
   fi
@@ -295,7 +294,7 @@ if [ "${DRY}" = 0 ]; then
       # 曾误写 `| true`：diff 输出喂给 true，changed 恒空，台账全记 no-diff，
       # PR #9 审查评论1）
       # NUL 分隔读入数组（bash 3.2 无 mapfile）：文件名含空白/通配符不拆分
-      # （etf-radar#70 审查）；classify 失败降级 no-diff，trap 不因分类器死
+      # （源仓#70 审查）；classify 失败降级 no-diff，trap 不因分类器死
       while IFS= read -r -d '' f; do files+=("$f"); done \
         < <(git -C "${REPO}" diff --name-only -z ${BASE_BRANCH}..."${BRANCH}" 2>/dev/null || true)
       [ "${#files[@]}" -eq 0 ] && while IFS= read -r -d '' f; do files+=("$f"); done \
@@ -314,7 +313,7 @@ if [ "${DRY}" = 0 ]; then
   # 失败清理 + 台账 + 产出抢救 + worktree 回收：
   # - set +e 首动作（#23）：trap 是状态机复位的唯一保障，内部任一命令
   #   非零不得中止清理链——trap 失败模式收敛为"多打日志"而非"静默中断"
-  #   （etf-radar#57 实证：write_ledger 内 git 竞态 141 → 标签/worktree/
+  #   （源仓#57 实证：write_ledger 内 git 竞态 141 → 标签/worktree/
   #   台账三重残留 → 队列死锁）
   # - 失败且分支有新提交 → push 抢救产出（#14：否则随 worktree 强删 +
   #   下轮 -B 重置回基线孤儿化，implement 成果湮灭）。--force：下轮
@@ -405,7 +404,11 @@ if [ "${DRY}" = 0 ]; then
   CHANGED="$(git -C "${WT}" diff --name-only ${BASE_BRANCH}..."${BRANCH}" 2>/dev/null \
     || git -C "${WT}" diff --name-only HEAD~1)"
   python3 "${REPO}/.factory/guard.py" --files ${CHANGED}
-  if ! (cd "${WT}" && scripts/run_tests.sh --no-lock) > "${DIR}/tests-output.txt" 2>&1; then
+  # ADR-009 门命令数据化：final_gate_cmd 来自 factory-local.json（fail-closed：
+  # factory_lib 加载失败此处即非零终止）；read -ra 拆词为 argv 数组执行。
+  GATE_CMD="$(python3 "${REPO}/.factory/factory_lib.py" final-gate)"
+  read -r -a GATE_ARGS <<< "${GATE_CMD}"
+  if ! (cd "${WT}" && "${GATE_ARGS[@]}") > "${DIR}/tests-output.txt" 2>&1; then
     echo "测试门失败（详见 ${DIR}/tests-output.txt）" >&2; exit 1
   fi
   # 证据段：触及的测试套件以 -v 重跑附于末尾——holdout 不许推测，
@@ -417,7 +420,7 @@ if [ "${DRY}" = 0 ]; then
     (cd "${WT}/${suite}" && python3 -m pytest -o addopts="" -v) >> "${DIR}/tests-output.txt" 2>&1 || true
   done
 else
-  echo "[dry-run] guard.py --files <changed> + run_tests.sh → ${DIR}/tests-output.txt（脚本生成）"
+  echo "[dry-run] guard.py --files <changed> + 测试门(final_gate_cmd) → ${DIR}/tests-output.txt（脚本生成）"
 fi
 
 # --- 7. holdout（独立验证；输入白名单见 prompt） ---
@@ -444,7 +447,7 @@ fi
 # --- 8. 开 PR（S1 到此为止：merge 由人类决定，铁律 5） ---
 if [ "${DRY}" = 0 ]; then
   # --no-verify：新分支首推无 @{push}，lefthook {push_files} 模板必然 exit 128；
-  # 链内等价门（run_tests.sh/guard/holdout）已在本链跑过，此处跳过的是
+  # 链内等价门（测试门/guard/holdout）已在本链跑过，此处跳过的是
   # 与链重复的人工推送门，非绕过验证
   git -C "${WT}" push -u origin "${BRANCH}" --no-verify
   # 标题取 HEAD 提交主题（原 gh --fill 的平台特例，中立化：链自控输入）

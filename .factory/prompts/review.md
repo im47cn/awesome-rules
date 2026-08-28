@@ -8,12 +8,12 @@
 
 - `$ISSUE_DIR/plan.json`、`$ISSUE_DIR/implement.md`
 - `git diff main...HEAD`（或工作区 diff，以实际改动为准）
-- `steering/` 各标准（审查依据，尤其 review 相关条款）
+- 审查依据目录（任务参数「仓库参数」段）下各标准（尤其 review 相关条款）
 
 ## 审查清单
 
 1. 改动与 plan 声明一致？有无未声明文件被改？
-2. 对照 steering/ 对应标准逐条过（测试、文档、commit 规范）
+2. 对照审查依据目录对应标准逐条过（测试、文档、commit 规范）
 3. 有无夹带：无关重构、调试残留、被注释掉的代码
 4. 边界：空输入、并发、错误路径是否处理
 

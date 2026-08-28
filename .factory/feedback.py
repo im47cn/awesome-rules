@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""feedback.py — 反哺上游（awesome-rules）的纯函数决策层。
+"""feedback.py — 反哺上游的纯函数决策层（上游指针见 factory-local.json）。
 
 与 state.py 同构：bash（feedback-upstream.sh）编排 git/gh/omp，本模块承载
 全部判定逻辑，零 LLM、零副作用（append_ledger 是唯一写操作，由编排器调用）。
@@ -23,7 +23,7 @@ import re
 import subprocess
 import sys
 
-# 移植点：2026-08-21 自 awesome-rules 移植工厂（该提交本身是本仓特化，永不反哺）
+# 移植点：2026-08-21 自上游仓移植工厂（该提交本身是本仓特化，永不反哺）
 PORT_POINT = "f6835d15"
 
 # trailer 机制诞生前的可泛化提交（人工判定补录；反哺入账后由账本排除）
@@ -107,7 +107,7 @@ def collect_pending(commits, ledger_shas, ledger_patch_ids=frozenset()):
 def superseded_map(commits, ledger_shas):
     """疑似已随演化反哺：pending 提交的文件集 ⊆ 某更晚已反哺提交的文件集。
 
-    SHA 语义缺口补丁（etf-radar#66 实证）：反哺走 cherry-pick+适配演化，内容等价
+    SHA 语义缺口补丁（源仓#66 实证）：反哺走 cherry-pick+适配演化，内容等价
     但 SHA 不一的提交永久 pending，人工识别孪生不可持续。本函数只做确定性
     文件集覆盖判定，产出"疑似"清单供人工确认后 record 补录——不自动入账
     （文件集覆盖是强信号，非内容等价证明）。commits 为 git log 顺序（新→旧），
@@ -152,7 +152,7 @@ def closure_missing(candidates, upstream_factory_files):
 
 def load_ledger(path):
     """读账本 → 条目 dict 列表（sha 集合由调用方派生）。文件不存在视为空。
-    patch_id 持久化（etf-radar PR#75 审查）：账本提交对象被 GC 后重算不可得，
+    patch_id 持久化（源仓 PR#75 审查）：账本提交对象被 GC 后重算不可得，
     账本是唯一可靠载体；旧条目无此字段 → 调用方退化为重算兜底。"""
     p = pathlib.Path(path)
     if not p.exists():
@@ -270,7 +270,7 @@ def _files_by_sha():
 def _patch_id(sha):
     """提交 → patch-id（--stable，跨 rebase/amend 内容不变即同 id）。
     空 diff（纯 merge/空提交）返回 None——此类退化纯 SHA 匹配。
-    argv 直传不经 shell（etf-radar PR#75 审查：注入面收口；--no-ext-diff
+    argv 直传不经 shell（源仓 PR#75 审查：注入面收口；--no-ext-diff
     隔离外部 diff 驱动配置，保住 --stable 的跨环境可比性）。"""
     show = subprocess.run(
         ["git", "show", "--format=", "--no-ext-diff", sha],
@@ -291,7 +291,7 @@ def main():
     entries = load_ledger(ledger_path)
     ledger = {e["sha"] for e in entries}
     # patch-id 只为触碰 feedable 资产的提交计算（候选判定必要条件，
-    # 全历史逐条子进程不可承受）；账本侧优先持久化值（etf-radar PR#75 审查）
+    # 全历史逐条子进程不可承受）；账本侧优先持久化值（源仓 PR#75 审查）
     assets = feedable_assets(commits)
     commits = [dict(c, patch_id=_patch_id(c["sha"]) if set(c.get("files", ())) & assets else None)
                for c in commits]
@@ -342,10 +342,14 @@ def main():
         print(render_report(pending, classify_drift(diff, "%s/.factory" % upstream)))
     elif cmd == "record":
         upstream_pr = sys.argv[2]
+        # ADR-009：账本的上游 repo 记 factory-local.json（fail-closed，禁止硬编码）
+        cfg = json.loads(pathlib.Path(__file__).parent.joinpath(
+            "factory-local.json").read_text(encoding="utf-8"))
+        upstream_repo = str(cfg["upstream_repo"])
         for arg in sys.argv[3:]:
             sha, subject = arg.split(":", 1)
             append_ledger(ledger_path, sha, subject, upstream_pr,
-                          "im47cn/awesome-rules", patch_id=_patch_id(sha))
+                          upstream_repo, patch_id=_patch_id(sha))
         print("账本已更新: %s" % ledger_path)
     else:
         print("用法: feedback.py pending|superseded|status|closure <upstream_wt>|"

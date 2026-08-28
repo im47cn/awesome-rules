@@ -25,8 +25,9 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# (套件 scripts 目录, pytest node id)——覆盖全部 4 个含 git init/add/commit
-# 夹具的测试（见任务简报劫持点清单；新增 git 夹具测试须同步补行）
+# (套件 scripts 目录, pytest node id)——覆盖全部含 git init/add/commit 夹具
+# 的测试（新增 git 夹具测试须同步补行；完备性由 tools/check_git_sealing.py
+# R3 强制——手工登记无强制力，PR #71 漏 .factory/tests 一次）
 GIT_FIXTURE_CASES = [
     ("skills/arch-guard/scripts",
      "tests/test_arch_check.py::test_commit_binding_git_semantics"),
@@ -36,8 +37,9 @@ GIT_FIXTURE_CASES = [
      "tests/test_risks.py::test_blame_file_batch_parses_full_file"),
     ("arch-hawkeye/scripts",
      "tests/test_integration.py::test_handoff_docgen_manifest_to_hawkeye"),
-]
-
+    (".factory",
+     "tests/test_factory_local.py::TestStampRoundtrip::test_full_cycle_announce_then_refresh"),
+ ]
 
 @pytest.mark.parametrize("suite,nodeid", GIT_FIXTURE_CASES)
 def test_git_fixture_hermetic_under_injected_git_dir(tmp_path, suite, nodeid):

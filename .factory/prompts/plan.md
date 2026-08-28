@@ -28,8 +28,8 @@ implement 节点可以不做任何设计决策地照做。
    {"id": 1, "goal": "...", "files": ["..."], "verify": "..."},
    ...
  ],
- "forbidden": ["MISSION.md", "steering/", "..."],
- "final_gate": "scripts/run_tests.sh --no-lock"}
+ "forbidden": ["<MISSION 周界路径，以 MISSION.md「周界」清单为准>"],
+ "final_gate": "<final_gate 命令，见任务参数「仓库参数」段>"}
 ```
 
 stdout 最后一行输出：`ARTIFACT: $ISSUE_DIR/plan.json`

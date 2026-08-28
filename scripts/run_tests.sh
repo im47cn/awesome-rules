@@ -45,6 +45,16 @@ if ! "$PY" scripts/badcase_runner.py | tail -3; then
 fi
 echo
 
+# lease 机器注册防篡改 + 单写者降级（test-lease-sql.sh 非仲裁段；此前为
+# 门禁盲区——手动 root/PG 测试，pytest/gauntlet 均不覆盖，2026-08-27
+# PR #71 编辑事故借盲区逃逸。LEASE_SKIP_PG=1 强制跳过 PG 仲裁段：环境
+# 差异不入门，PG 段语义完整保留给手动全跑）。
+echo "── lease-sql(非PG段)"
+if ! LEASE_SKIP_PG=1 bash .factory/tests/test-lease-sql.sh; then
+  FAILED+=("lease-sql")
+fi
+echo
+
 # 安装入口锁定（zero-regression 门禁，与测试同为推送前置）
 if [ "${1:-}" != "--no-lock" ]; then
   echo "── plugin_lock"
@@ -59,7 +69,6 @@ fi
 
 # 文档新鲜度（实现↔文档一致性，R1-R5 见 tools/check_doc_freshness.py 头注释）。
 # 刻意放在 --no-lock 分支外：工厂链 final_gate 跑的就是本脚本 --no-lock 形态
-# （.factory/prompts/plan.md），文档漂移必须在链内被拦——不能随发布面门
 # （plugin_lock/md_link_check）一起被 --no-lock 跳过。
 echo "── doc_freshness"
 if ! "$PY" tools/check_doc_freshness.py; then
@@ -70,4 +79,4 @@ if [ "${#FAILED[@]}" -gt 0 ]; then
   echo "❌ 门禁失败: ${FAILED[*]}" >&2
   exit 1
 fi
-echo "✅ 全量测试门禁通过（${#SUITES[@]} 个套件 + badcase）"
+echo "✅ 全量测试门禁通过（${#SUITES[@]} 个套件 + badcase + lease非PG段）"

@@ -1,5 +1,5 @@
 {
-  "description": "工厂本地化配置（M4 本地化外置）：周界与重投判据措辞是数据不是代码——guard.py / factory_lib.py 因此零本地化、按 DISTRIBUTION.json full 分发；本文件每仓一份（skip 分发，永不跨仓覆盖）。fail-closed：缺失/损坏/缺键 = guard 与 triage 回执直接非零退出。周界仍须与 MISSION.md「周界（PERIMETER）」一致——guard.self_check 每次运行强制核对（MISSION 是真相源，本文件是机械化载体）；改本文件后必须重跑 .factory/mutations/run.py 重证 kill rate，evidence-stamp.json 指纹绑定会强制这一点（gauntlet factory-local-validity 层）。",
+  "description": "工厂本地化配置（M4 本地化外置 + 拆分前置 ADR-009）：周界/判据措辞/门命令/prompt 仓库参数/上游指针是数据不是代码——guard.py / factory_lib.py / 链脚本 / prompts 因此零本地化、按 DISTRIBUTION.json full 分发；本文件每仓一份（skip 分发，永不跨仓覆盖）。fail-closed：缺失/损坏/缺键 = 使用方直接非零退出。周界仍须与 MISSION.md「周界（PERIMETER）」一致——guard.self_check 每次运行强制核对（MISSION 是真相源，本文件是机械化载体）；改本文件后必须重跑 .factory/mutations/run.py 重证 kill rate，evidence-stamp.json 指纹绑定会强制这一点（gauntlet factory-local-validity 层）。",
   "perimeter": [
     "MISSION.md",
     "steering/",
@@ -28,5 +28,13 @@
     "a": "判据a（使命一致）：写明落点——规范（steering/）、技能（skills/）、审查工具链或文档中的哪个文件/模块；",
     "b": "判据b（可判定）：把完成标准写成可机械验证的形式——验收 = 具体测试/脚本的断言（公式、逐条清单、file:line 级差异），避免「持续 / 优化 / 失修」类开放措辞；doc-only（纯文档）改动在验证门零投影——补可执行验收载体（markdownlint / CI 链接检查 / 可断言测试）或转人工 PR；",
     "c": "判据c（不触周界）：触及 PERIMETER 的部分拆成独立 issue 走人类 PR（清单见 MISSION.md）；"
-  }
+  },
+  "repo_identity": "awesome-rules",
+  "reading_scopes": ["README.md", "skills/", "steering/", "scripts/", "tools/", "docs/"],
+  "review_basis": "steering/",
+  "final_gate_cmd": "scripts/run_tests.sh --no-lock",
+  "pr_review_skills": ["api-guard", "ddl-guard", "arch-guard", "impact-guard", "contract-guard"],
+  "upstream_repo": "im47cn/awesome-rules",
+  "upstream_path": "~/sources/awesome-rules",
+  "feedback_branch_prefix": "feedback/etf-radar"
 }

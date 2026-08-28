@@ -60,7 +60,7 @@ def evidence_suites(changed_files: list[str]) -> list[str]:
     """变更文件 → 需 verbose 证据段的测试套件（布局双适配，M4）。
 
     monorepo（backend|frontend）与 skills/<name>/scripts 两种布局都识别
-    （对齐 etf-radar 生产版）；套件名与测试门 --evidence <suite> 的取值
+    （对齐 下游生产版）；套件名与测试门 --evidence <suite> 的取值
     一一对应。不存在的套件由调用方（fix-issue.sh）的 -d 探测过滤，
     引擎不做仓假设——双布局识别让本函数零本地化（full 分发）。
     """
@@ -118,11 +118,22 @@ NODE_TIMEOUTS = {
 }
 
 
+def node_metric_line(node: str, t0: int, now: int, status: str) -> str:
+    """节点级计时 jsonl 行（report 子命令的数据源）。
+
+    ADR-005 缺陷驱动下沉（2026-08-27）：fix-issue.sh / validate-pr.sh 各自
+    内嵌的逐字节等价 heredoc 收口至此（shell 侧仅留调用 wrapper，与
+    node_timeout 同款）；渲染契约与消费端（report）同模块，drift 即测试红。
+    """
+    return json.dumps(
+        {"node": node, "secs": int(now) - int(t0), "status": status},
+        ensure_ascii=False)
+
+
 def node_timeout(name: str, env: dict | None = None) -> str:
     env = env if env is not None else {}
     per_node = env.get(f"FACTORY_TIMEOUT_{name.upper().replace('-', '_')}")
     return per_node or env.get("FACTORY_TIMEOUT") or NODE_TIMEOUTS.get(name, "15m")
-
 
 def classify_task(files: list[str]) -> str:
     """变更文件 → 任务类型（成本归因用；doc/code 分开统计预算分布）。
@@ -135,7 +146,7 @@ def classify_task(files: list[str]) -> str:
         return "empty"
 
     def _is_test(f: str) -> bool:
-        # 前端约定也算 test（etf-radar#69 审查）：.test.* / .spec.* / __tests__
+        # 前端约定也算 test（源仓#69 审查）：.test.* / .spec.* / __tests__
         return ("/tests/" in f or f.startswith("tests/")
                 or "/__tests__/" in f or f.startswith("__tests__/")
                 or "/test_" in f or f.startswith("test_")
@@ -154,22 +165,97 @@ def classify_task(files: list[str]) -> str:
     return "code"
 
 
-# 重投指引模板：键 = 未通过的 MISSION 判据（a 使命一致 / b 可判定 / c 不触周界）。
-# M4 本地化外置（设计 §11.3）：措辞锚定各仓 MISSION，从 factory-local.json
-# 载入——本文件零本地化、跨仓 full 分发。fail-closed：配置缺失/缺键 →
-# RuntimeError（triage 回执生成失败，链侧 issue_reject 降级为回执告警）。
-def _load_reject_guidance() -> dict[str, str]:
-    import json
+# 工厂本地化配置（M4 + 拆分前置 ADR-009）：guard.py / 链脚本 / prompts 的
+# 仓特定内容（周界、判据措辞、门命令、仓库参数、上游指针）统一由
+# factory-local.json 提供——本文件零本地化、跨仓 full 分发。
+# fail-closed：配置缺失/损坏/缺键 → RuntimeError（调用方非零退出，禁止降级）。
+def _load_local_cfg() -> dict:
     cfg_path = Path(__file__).resolve().parent / "factory-local.json"
     try:
         cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
-        guidance = {k: str(cfg["reject_guidance"][k]) for k in ("a", "b", "c")}
+        if not isinstance(cfg, dict):
+            raise ValueError("顶层不是对象")
+    except Exception as exc:
+        raise RuntimeError(f"factory-local.json 不可用（fail-closed）: {exc}") from exc
+    return cfg
+
+
+_LOCAL_CFG: dict = _load_local_cfg()
+
+
+def _local_str(key: str) -> str:
+    try:
+        v = _LOCAL_CFG[key]
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError(f"键 {key} 须为非空字符串")
+        return v
+    except Exception as exc:
+        raise RuntimeError(f"factory-local.json 键 {key} 不可用（fail-closed）: {exc}") from exc
+
+
+def _local_str_list(key: str) -> list[str]:
+    try:
+        v = _LOCAL_CFG[key]
+        if not isinstance(v, list) or not v or not all(isinstance(x, str) and x.strip() for x in v):
+            raise ValueError(f"键 {key} 须为非空字符串数组")
+        return list(v)
+    except Exception as exc:
+        raise RuntimeError(f"factory-local.json 键 {key} 不可用（fail-closed）: {exc}") from exc
+
+
+# 重投指引模板：键 = 未通过的 MISSION 判据（a 使命一致 / b 可判定 / c 不触周界）。
+# M4 本地化外置（设计 §11.3）：措辞锚定各仓 MISSION。fail-closed：配置缺失/
+# 缺键 → RuntimeError（triage 回执生成失败，链侧 issue_reject 降级为回执告警）。
+def _load_reject_guidance() -> dict[str, str]:
+    try:
+        rg = _LOCAL_CFG["reject_guidance"]
+        return {k: str(rg[k]) for k in ("a", "b", "c")}
     except Exception as exc:
         raise RuntimeError(f"factory-local.json reject_guidance 不可用: {exc}") from exc
-    return guidance
 
 
 REJECT_GUIDANCE: dict[str, str] = _load_reject_guidance()
+
+
+def final_gate_cmd() -> str:
+    """确定性测试门命令（整条 shell 词序列，取值见 factory-local.json）。
+
+    ADR-009 门命令数据化：fix-issue / validate-pr / mutations 共用此配置，
+    消灭三处硬编码漂移面。拆词由调用方执行——bash 侧 read -r -a 与
+    mutations 侧 shlex.split 的语义分叉点有二：引号（shlex 剥除、read
+    字面）与反斜杠（shlex 转义、read -r 字面——`a\\ b` 两侧词数即不同：
+    2 词 vs 1 词）。故配置值**禁含引号与反斜杠**（引号 review R2-M8；
+    反斜杠 ADR-010 漂移锁收口），含即 fail-closed；纯空白分隔下两拆词器
+    逐词一致，两门 argv 永远相等。
+    """
+    v = _local_str("final_gate_cmd")
+    if "'" in v or '"' in v:
+        raise RuntimeError("final_gate_cmd 禁含引号（read -r -a 与 shlex 拆词一致性）")
+    if "\\" in v:
+        raise RuntimeError("final_gate_cmd 禁含反斜杠（shlex 转义与 read -r 字面语义分叉，ADR-010）")
+    return v
+
+
+def repo_vars_text() -> str:
+    """拼进工作节点 prompt 的「仓库参数」段（prompts 零宿主专名的注入面）。
+
+    run_node / pr-review / feedback-adapt 拼装 prompt 时追加本段；triage 与
+    holdout 是物理隔离节点（无工具），不注入——其输入（MISSION/tests-output）
+    已由链脚本内联。
+    """
+    lines = [
+        "——仓库参数（本仓工厂本地化配置，prompt 正文不重复这些值）——",
+        f"- 仓库身份: {_local_str('repo_identity')}",
+        f"- 阅读范围（研究/评审自由阅读）: {'、'.join(_local_str_list('reading_scopes'))}",
+        f"- 审查依据目录: {_local_str('review_basis')}",
+        f"- final_gate 命令: {final_gate_cmd()}",
+    ]
+    if "pr_review_skills" in _LOCAL_CFG:
+        # 键存在即严格校验（与 local-list 同规）：值损坏 fail-closed；
+        # 键缺失 = 本仓无守卫技能面（如纯后端仓），合法省略该行。
+        skills = _local_str_list("pr_review_skills")
+        lines.append(f"- 守卫技能（PR 评审选配面）: {'、'.join(skills)}")
+    return "\n".join(lines)
 
 
 def neutralize_marker(text: str) -> str:
@@ -378,7 +464,7 @@ def acquire_dispatch_lock(lock_dir: Path, pid: int) -> bool:
 
     锁挂主树 .factory（调用方以 git-common-dir 锚定，39b6b8ec：worktree
     隔离后各树 locks/ 互不可见，锁随树走会绕开互斥）；父目录预建——父缺
-    ENOENT 会被误读为「另一 dispatcher 运行中」（etf-radar PR#79）。
+    ENOENT 会被误读为「另一 dispatcher 运行中」（源仓 PR#79）。
     cron 重叠是常态：忙时返回 False，调用方 exit 0。
     """
     lock_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -781,9 +867,28 @@ def main(argv: list[str]) -> int:
         for s in evidence_suites(argv[2:]):
             print(s)
         return 0
+    if cmd == "final-gate":
+        # final-gate —— 确定性测试门命令（ADR-009 数据化；链脚本 read -ra 拆词执行）
+        print(final_gate_cmd())
+        return 0
+    if cmd == "local-str":
+        # local-str <key> —— 单字符串键输出（feedback-upstream 上游指针等；ADR-009）
+        print(_local_str(argv[2]))
+        return 0
+    if cmd == "metric":
+        # metric <node> <t0> <status> —— 节点计时 jsonl 行（shell wrapper 消费）
+        print(node_metric_line(argv[2], int(argv[3]), int(time.time()), argv[4]))
+        return 0
+    if cmd == "local-list":
+        # local-list <key> —— 字符串数组键逐行输出（shell for 消费；ADR-009）
+        for v in _local_str_list(argv[2]):
+            print(v)
+        return 0
+    if cmd == "repo-vars":
+        # repo-vars —— prompt 仓库参数段（run_node / pr-review / adapt 注入）
+        print(repo_vars_text())
+        return 0
     print(f"未知子命令: {cmd}", file=sys.stderr)
     return 2
-
-
 if __name__ == "__main__":
     sys.exit(main(sys.argv))

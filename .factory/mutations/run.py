@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import signal
 import subprocess
 import sys
@@ -39,9 +40,43 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 GUARD = REPO_ROOT / ".factory" / "guard.py"
-TESTS = REPO_ROOT / "scripts" / "run_tests.sh"
 
-# 门超时预算（run_tests.sh 自身无超时参数，此处兜底）。tests 门实测基线
+
+def _final_gate_words(cfg_path: Path | None = None) -> list[str]:
+    """tests 门命令（ADR-009 数据化）：factory-local.json final_gate_cmd 拆词。
+
+    词保持配置原样（不绝对化首词、不加 bash 前缀）：run_gate 直执
+    （cwd=REPO_ROOT），仓相对脚本（可执行位 + shebang）与 PATH 型命令
+    （如 "uv run pytest"）都正常解析——与 shell 侧 fix-issue/validate-pr
+    的 "${GATE_ARGS[@]}" 直执同构（R2-M4 + PR #71 Sourcery #1：bash
+    前缀会把 PATH 型首词当脚本文件名，必失败）。fail-closed：配置
+    缺失/缺键/非字符串/含引号/空 → RuntimeError（启动即炸，不产生
+    无效证据）。类型校验与 factory_lib._local_str 同规（PR #71
+    Sourcery #2：str() 静默转换会让数字/列表在 py 侧放行而 shell 侧
+    拒绝——两消费方行为必须一致）。
+    """
+    p = cfg_path or REPO_ROOT / ".factory" / "factory-local.json"
+    try:
+        cfg = json.loads(p.read_text(encoding="utf-8"))
+        raw_val = cfg["final_gate_cmd"]
+        if not isinstance(raw_val, str):
+            raise ValueError("final_gate_cmd 须为非空字符串")
+        raw = raw_val.strip()
+        if "'" in raw or '"' in raw:
+            raise ValueError("final_gate_cmd 禁含引号（与 bash 侧 read -r -a 拆词一致性，R2-N8）")
+        if "\\" in raw:
+            raise ValueError("final_gate_cmd 禁含反斜杠（shlex 转义与 read -r 字面语义分叉，ADR-010）")
+        words = shlex.split(raw)
+        if not words:
+            raise ValueError("final_gate_cmd 为空")
+    except Exception as exc:
+        raise RuntimeError(f"factory-local.json final_gate_cmd 不可用（fail-closed）: {exc}") from exc
+    return list(words)
+
+
+FINAL_GATE = _final_gate_words()
+
+# 门超时预算（tests 门自身无超时参数，此处兜底）。tests 门实测基线
 # ~10s；600s ≈ 60 倍余量，超时即无效运行（judge 判 FAIL，不计击杀/放行）。
 GUARD_TIMEOUT = 300
 TESTS_TIMEOUT = 600
@@ -66,6 +101,18 @@ def write_stamp(evidence: str = "EVIDENCE-2026-08-24.md") -> str | None:
 # 退出时把 factory-local.json 的 git blob hash 写入 evidence-stamp.json；
 # 下次启动比对，不一致 → 横幅宣告证据过期（本次全绿不构成 auto-merge
 # 依据的既有语义不变：人类看横幅决定是否采信）。
+# git 环境密闭（PR #71 推送实测事故）：pre-push 钩子环境导出的
+# GIT_DIR 等仓库发现变量会劫持 `git -C` 的目标——测试 monkeypatch
+# REPO_ROOT 后 git 操作落到真实仓（夹具污染）。剥除之，-C 语义生效。
+_GIT_DISCOVERY_VARS = (
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_GRAFT_FILE",
+    "GIT_INDEX_VERSION", "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES",
+)
+
+_GIT_ENV = {k: v for k, v in os.environ.items()
+            if k not in _GIT_DISCOVERY_VARS}
+
 LOCAL_CFG = REPO_ROOT / ".factory" / "factory-local.json"
 STAMP = REPO_ROOT / ".factory" / "mutations" / "evidence-stamp.json"
 
@@ -76,7 +123,7 @@ def perimeter_blob() -> str | None:
         rel = LOCAL_CFG.relative_to(REPO_ROOT)
         out = subprocess.run(
             ["git", "-C", str(REPO_ROOT), "ls-files", "-s", "--", str(rel)],
-            capture_output=True, text=True, check=True).stdout.split()
+            capture_output=True, text=True, check=True, env=_GIT_ENV).stdout.split()
         return out[1] if len(out) >= 2 else None
     except Exception:
         return None
@@ -133,13 +180,13 @@ def tracked_and_dirty(rel: str) -> bool:
     """
     ls = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "ls-files", "--error-unmatch", rel],
-        capture_output=True,
+        capture_output=True, env=_GIT_ENV,
     )
     if ls.returncode != 0:
         return False  # 未跟踪（新文件）：内存备份/还原已覆盖安全
     diff = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "diff", "--quiet", "--", rel],
-        capture_output=True,
+        capture_output=True, env=_GIT_ENV,
     )
     return diff.returncode != 0
 
@@ -148,22 +195,28 @@ def run_gate(gate: str, target: str) -> int | None:
     """跑门返回退出码；超时返回 None（无效运行，见 judge）。
 
     超时杀**整个进程组**（start_new_session + killpg）：run_tests.sh 会
-    派生 pytest 孙进程，只杀 bash 直子会留下孤儿继续读注入中的 target
+    派生 pytest 孙进程，只杀门直子会留下孤儿继续读注入中的 target
     ——finally 还原字节与孤儿运行并发，污染后续缺陷轮（PR #33 审查）。
     """
     if gate == "guard":
         cmd = [sys.executable, str(GUARD), "--files", target]
         timeout = GUARD_TIMEOUT
     else:
-        cmd = ["bash", str(TESTS), "--no-lock"]
+        # ADR-009：tests 门命令自 factory-local.json final_gate_cmd 拆词后
+        # 直执——无 bash 前缀，与 shell 侧 "${GATE_ARGS[@]}" 同构（PR #71
+        # Sourcery #1：bash 前缀使 PATH 型命令必失败）；fail-closed 加载
+        # 于模块常量段。
+        cmd = list(FINAL_GATE)
         timeout = TESTS_TIMEOUT
     start = time.monotonic()
     # 安全审计落档（PR #33 Sourcery/opengrep dangerous-subprocess-use-audit）：
     # argv 列表形态、无 shell 解释（shell=False 显式）——不存在注入通道。
-    # 可执行位与固定参数为闭集（sys.executable / "bash" + __file__ 推导的
-    # 模块常量）；唯一外部数据 target 源自 defects.json（治理周界 .factory/
-    # 内，仅人类 PR 可改），且经 REPO_ROOT / d.target 与 is_file() 校验后
-    # 作为单个 argv 数据元素传入，不被任何 shell 解析。
+    # guard 分支参数为闭集（sys.executable + __file__ 推导的模块常量）；
+    # tests 分支命令词源自 factory-local.json final_gate_cmd（治理周界
+    # .factory/ 内，仅人类 PR 可改；禁引号校验 + shlex 拆词后作为纯 argv
+    # 元素传入）；另一外部数据 target 源自 defects.json（同周界），经
+    # REPO_ROOT / d.target 与 is_file() 校验后作为单个 argv 数据元素传入，
+    # 均不被任何 shell 解析。
     proc = subprocess.Popen(
         cmd, cwd=str(REPO_ROOT), shell=False,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,

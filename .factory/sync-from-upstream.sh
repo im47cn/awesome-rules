@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# sync-from-upstream.sh — 下游从上游（awesome-rules）拉取 .factory 工具链。
+# sync-from-upstream.sh — 下游从上游仓库拉取 .factory 工具链。
 #
 # 定位：替代「移植后手工 diff 对账」。上游是唯一真相源（.factory/
 # DISTRIBUTION.json 分类），本脚本按分类三态处理：
@@ -41,7 +41,7 @@ LOCKFILE="$FACTORY/upstream-lock.json"
 git -C "$UP" rev-parse --git-dir >/dev/null 2>&1 \
   || { echo "上游仓不可用: $UP" >&2; exit 2; }
 
-# 锚点解析：--anchor > 上次 lock > main（优先级左→右；gtsp-wop-gateway
+# 锚点解析：--anchor > 上次 lock > main（优先级左→右；下游迁移
 # sync 实测：lock 读取无条件覆盖会把 --anchor main 吞掉——只在未显式
 # 指定时才读 lock，--anchor 成为唯一强制追新出口）
 if [ -z "${ANCHOR:-}" ]; then
@@ -69,8 +69,21 @@ if out.returncode != 0:
     sys.stderr.write("警告: 上游无 DISTRIBUTION.json（版本旧），全部按 local 报告\n")
     sys.exit(0)
 d = json.loads(out.stdout)
-for f in d.get("full", []): print("full\t%s" % f)
-for f in d.get("local", {}): print("local\t%s" % f)
+def emit(kind, entry):
+    if entry.endswith("/"):
+        # 目录项（如 tests/）递归展开为文件项——full 语义对目录内每个
+        # 文件成立（review R2-M5：跳过目录项 = tests/ 漂移永不告警）
+        r = subprocess.run(["git", "-C", up, "ls-tree", "-r", "--name-only",
+                            sha, ".factory/" + entry],
+                           capture_output=True, text=True)
+        if not r.stdout.strip():
+            sys.stderr.write("  [%s] %s: 目录在上游不存在（上游整目录已删？清单待退役甄别）\n" % (kind, entry))
+        for line in r.stdout.splitlines():
+            print("%s\t%s" % (kind, line[len(".factory/"):]))
+    else:
+        print("%s\t%s" % (kind, entry))
+for f in d.get("full", []): emit("full", f)
+for f in d.get("local", {}): emit("local", f)
 PY
 
 # 上游 mode+blob（git show 丢 mode，覆盖后须恢复执行位）

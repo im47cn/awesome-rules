@@ -126,7 +126,7 @@ def test_timeout_kills_process_group(tmp_path, monkeypatch):
     下 == 自身 pid）、派生 sleep 孙进程后挂起；断言超时后整组无存活。"""
     import time as _time
     pgid_file, gate = _slow_gate(tmp_path)
-    monkeypatch.setattr(mut, "TESTS", gate)
+    monkeypatch.setattr(mut, "FINAL_GATE", [str(gate)])
     monkeypatch.setattr(mut, "TESTS_TIMEOUT", 1)
     t0 = _time.monotonic()
     assert mut.run_gate("tests", "whatever") is None
@@ -149,7 +149,7 @@ def test_timeout_sigkill_eperm_tolerated(tmp_path, monkeypatch):
             raise PermissionError(errno.EPERM, "zombie-only pgroup")
 
     monkeypatch.setattr(os, "killpg", killpg_then_eperm)
-    monkeypatch.setattr(mut, "TESTS", gate)
+    monkeypatch.setattr(mut, "FINAL_GATE", [str(gate)])
     monkeypatch.setattr(mut, "TESTS_TIMEOUT", 1)
     assert mut.run_gate("tests", "whatever") is None
     _assert_group_dead(int(pgid_file.read_text().strip()))
@@ -183,3 +183,118 @@ def test_probe_fails_when_group_still_alive(monkeypatch):
     monkeypatch.setattr(os, "killpg", lambda pgid, sig: None)
     with pytest.raises(pytest.fail.Exception, match="未消失"):
         _assert_group_dead(4242, timeout=0.2)
+
+
+class TestFinalGateWords:
+    """final_gate_cmd 加载（PR #71 Sourcery #2：类型校验 fail-closed）。"""
+
+    @pytest.mark.parametrize("bad_val", [123, ["uv", "run"], {"cmd": "x"}, True])
+    def test_non_string_fails_closed(self, tmp_path, bad_val):
+        """非字符串 JSON 值（数字/列表/对象/布尔）→ RuntimeError，
+        与 factory_lib._local_str 同规——str() 静默转换会让 py 侧放行
+        而 shell 侧拒绝，两消费方行为必须一致。"""
+        cfg = tmp_path / "factory-local.json"
+        cfg.write_text(json.dumps({"final_gate_cmd": bad_val}), encoding="utf-8")
+        with pytest.raises(RuntimeError, match="final_gate_cmd"):
+            mut._final_gate_words(cfg)
+
+    def test_valid_path_style_splits(self, tmp_path):
+        """PATH 型命令拆词保持原样（首词不被绝对化/不加 bash）。"""
+        cfg = tmp_path / "factory-local.json"
+        cfg.write_text(
+            json.dumps({"final_gate_cmd": "uv run pytest -q"}), encoding="utf-8")
+        assert mut._final_gate_words(cfg) == ["uv", "run", "pytest", "-q"]
+
+
+def test_run_gate_executes_final_gate_without_bash_prefix(monkeypatch):
+    """tests 门直执 FINAL_GATE（PR #71 Sourcery #1）：bash 前缀会把
+    PATH 型首词（如 uv）当脚本文件名，门必失败；直执与 shell 侧
+    fix-issue/validate-pr 的 "${GATE_ARGS[@]}" 同构。"""
+    seen = {}
+
+    class _Proc:
+        returncode = 0
+        pid = -1
+
+        def communicate(self, timeout=None):
+            return ("", "")
+
+    def fake_popen(cmd, **kw):
+        seen["cmd"] = cmd
+        return _Proc()
+
+    monkeypatch.setattr(mut, "FINAL_GATE", ["uv", "run", "pytest"])
+    monkeypatch.setattr(mut.subprocess, "Popen", fake_popen)
+    rc = mut.run_gate("tests", "some_target.py")
+    assert rc == 0
+    assert seen["cmd"] == ["uv", "run", "pytest"]
+
+
+class TestFinalGateDriftLock:
+    """final_gate_cmd 双实现漂移锁（ADR-010）。
+
+    shell 侧（fix-issue/validate-pr：factory_lib.final-gate 输出 +
+    read -r -a 拆词）与 python 侧（mutations：_final_gate_words +
+    shlex.split）是两套实现、两个拆词器——PR #71 Sourcery S1 的 bash
+    前缀漂移即双实现产物。保留 python 实现的决策下，一致性必须机械化。
+    拆词器分叉点闭集：引号（shlex 剥除 / read 字面）与反斜杠（shlex
+    转义 / read -r 字面）——双侧校验同禁后，纯空白分隔下两拆词器逐词
+    相等；活配置单一事实源断言锁住「两侧永远消费同一字符串」。
+    """
+
+    @pytest.mark.parametrize("cmd", [
+        "scripts/run_tests.sh --no-lock",          # 仓相对脚本（本仓形态）
+        "uv run pytest -q",                        # PATH 型（Sourcery S1 场景）
+        "pytest .factory -q --timeout=600",        # 多词 + =值
+    ])
+    def test_shell_and_python_splitters_agree(self, tmp_path, cmd):
+        """同一配置双侧拆词逐词相等：shell 侧语义 = final_gate_cmd() 原文
+        + read -ra（bash read -ra 按 IFS 空白拆词、不做引号解释）；python
+        侧 = _final_gate_words（shlex；禁引号约束下与空白拆词等价）。"""
+        cfg = tmp_path / "factory-local.json"
+        cfg.write_text(json.dumps({"final_gate_cmd": cmd}), encoding="utf-8")
+        assert mut._final_gate_words(cfg) == cmd.split()
+
+    def test_live_config_single_source(self):
+        """两侧消费同一 factory-local.json：python FINAL_GATE 必须等于
+        factory_lib.final_gate_cmd() 的 read -ra 拆词（活配置漂移即红）。"""
+        import factory_lib
+        live = factory_lib.final_gate_cmd()
+        assert mut.FINAL_GATE == live.split()
+
+    def test_rejects_divergent_quote_policy(self, tmp_path):
+        """引号策略分叉锁：任一侧放宽引号拒绝，拆词器差异即产生 argv
+        分叉——双侧拒绝规则必须同时存在（final_gate_cmd 与
+        _final_gate_words 的引号校验互为镜像）。"""
+        cfg = tmp_path / "factory-local.json"
+        cfg.write_text(json.dumps({"final_gate_cmd": 'sh -c "x"'}),
+                       encoding="utf-8")
+        with pytest.raises(RuntimeError):
+            mut._final_gate_words(cfg)          # python 侧拒绝
+        import factory_lib
+        orig = factory_lib._LOCAL_CFG
+        try:
+            factory_lib._LOCAL_CFG = {"final_gate_cmd": 'sh -c "x"'}
+            with pytest.raises(RuntimeError):
+                factory_lib.final_gate_cmd()    # shell 供词侧同拒
+        finally:
+            factory_lib._LOCAL_CFG = orig
+
+    @pytest.mark.parametrize("bad", ["a\\ b", "x\\y", "tail\\"])
+    def test_rejects_backslash_divergence(self, tmp_path, bad):
+        """反斜杠分叉锁（ADR-010）：shlex 把反斜杠当转义（`a\\ b` → 1 词
+        `a b`）、read -r -a 当字面（→ 2 词 `a\\` / `b`）——词数即不同，
+        且旧校验（仅禁引号）双侧都放行。双侧同拒后「过校验 ⇒ 两侧拆词
+        逐词一致」不变量才闭环。"""
+        cfg = tmp_path / "factory-local.json"
+        cfg.write_text(json.dumps({"final_gate_cmd": bad}), encoding="utf-8")
+        with pytest.raises(RuntimeError):
+            mut._final_gate_words(cfg)
+        import factory_lib
+        orig = factory_lib._LOCAL_CFG
+        try:
+            factory_lib._LOCAL_CFG = {"final_gate_cmd": bad}
+            with pytest.raises(RuntimeError):
+                factory_lib.final_gate_cmd()
+        finally:
+            factory_lib._LOCAL_CFG = orig

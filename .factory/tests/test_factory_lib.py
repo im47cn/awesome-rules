@@ -14,6 +14,7 @@ from factory_lib import (
     breaker_check,
     evidence_suites,
     neutralize_marker,
+    node_metric_line,
     node_timeout,
     parse_agent_json,
     reject_receipt,
@@ -330,3 +331,19 @@ class TestNeutralizeMarker:
         published = neutralize_marker(md)
         assert "[factory:rejected]" not in published
         assert "factory:rejected" in published  # 语义保留
+
+
+class TestNodeMetricLine:
+    """ADR-005 下沉(2026-08-27):jsonl 渲染契约与 report 消费端同模块锁定。"""
+
+    def test_metric_line_fields(self):
+        import json
+        line = node_metric_line("implement", 100, 160, "ok")
+        d = json.loads(line)
+        assert d == {"node": "implement", "secs": 60, "status": "ok"}
+
+    def test_metric_line_zero_and_non_ascii(self):
+        import json
+        assert json.loads(node_metric_line("t", 5, 5, "fail"))["secs"] == 0
+        # ensure_ascii=False：中文状态可读落盘
+        assert "中文" in node_metric_line("n", 0, 1, "中文状态")

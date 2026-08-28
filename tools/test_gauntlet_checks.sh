@@ -7,6 +7,12 @@ PY=${GAUNTLET_PY:-$(command -v python3)}
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
+# 测试密封性（steering/testing-standards.md §测试密封性，ADR-010）：本脚本
+# 大量建 tmp 夹具仓（git init/-C）；hook 注入的 GIT_* 会劫持仓库发现
+# （2026-08-22 事故）。顶层剥除，子进程继承。
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+      GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_NAMESPACE
+
 fails=0
 ok()  { echo "  ok:   $1"; }
 bad() { echo "  FAIL: $1"; fails=$((fails + 1)); }
@@ -627,6 +633,162 @@ if "$PY" tools/check_hosting_exit.py "$NC12B" >"$TMP/out12b" 2>&1; then
     ok "NC12b 行文/创建/PR 侧写不误报（收口边界 = issue 评论与标签写）"
 else
     bad "NC12b 期望 rc=0, 实际输出: $(cat "$TMP/out12b")"
+fi
+
+# ── NC13 factory-portability 负控制：P1/P2/P3 都会拦，中性形态不误报 ──
+# 夹具 = 临时 git 仓（含最小 DISTRIBUTION.json + prompts）；bad 形态三规则
+# 各一处（宿主专名 / omp 旁路 / 平铺 path hack），ok 形态全中性。
+NC13="$TMP/nc13"; mkdir -p "$NC13/.factory/prompts" "$NC13/.factory/db"
+git init -q "$NC13"
+cat >"$NC13/.factory/DISTRIBUTION.json" <<'EOF'
+{"full": ["chain.sh", "lib.py", "db/schema.sql"], "local": {}, "skip": []}
+EOF
+cat >"$NC13/.factory/chain.sh" <<'EOF'
+# 借鉴源仓#42 审查（中性考证：不命中）
+awesome-rules && steering/ x
+EOF
+cat >"$NC13/.factory/lib.py" <<'EOF'
+import json
+sys.path.insert(0, ".")
+EOF
+echo "db schema" >"$NC13/.factory/db/schema.sql"
+printf '使用阅读范围参数\n' >"$NC13/.factory/prompts/p.md"
+git -C "$NC13" add .factory
+if "$PY" tools/check_factory_portability.py "$NC13" >"$TMP/out13" 2>&1; then
+    bad "NC13 期望 rc=1（P1+P3 命中），实际放行"
+else
+    if grep -q 'P1 宿主专名' "$TMP/out13" && grep -q 'P3 path hack' "$TMP/out13"; then
+        ok "NC13 P1（宿主专名）+P3（平铺 hack）被拦"
+    else
+        bad "NC13 输出缺 P1/P3 报告: $(cat "$TMP/out13")"
+    fi
+fi
+# P2 引擎旁路：chain.sh 直调 omp
+cat >>"$NC13/.factory/chain.sh" <<'EOF'
+omp -p "x" --no-session
+EOF
+git -C "$NC13" add .factory
+if "$PY" tools/check_factory_portability.py "$NC13" >"$TMP/out13b" 2>&1; then
+    bad "NC13b 期望 rc=1（P2 命中），实际放行"
+else
+    grep -q 'P2 引擎旁路' "$TMP/out13b" \
+        || bad "NC13b 输出缺 P2: $(cat "$TMP/out13b")"
+fi
+# P2 空白/续行变体（PR #71 Sourcery #3）：字面子串 "omp -p" 被绕过，
+# 词边界正则必须拦 `omp   -p` 与 `omp \↵-p`。
+cat >"$NC13/.factory/chain.sh" <<'EOF'
+echo neutral
+omp    -p "x" --no-session
+EOF
+git -C "$NC13" add .factory
+if "$PY" tools/check_factory_portability.py "$NC13" >"$TMP/out13d" 2>&1; then
+    bad "NC13d 期望 rc=1（P2 多空格变体命中），实际放行"
+else
+    if grep -q 'P2 引擎旁路' "$TMP/out13d"; then
+        ok "NC13d P2 多空格变体（omp   -p）被拦"
+    else
+        bad "NC13d 输出缺 P2: $(cat "$TMP/out13d")"
+    fi
+fi
+cat >"$NC13/.factory/chain.sh" <<'EOF'
+echo neutral
+omp \
+    -p "x" --no-session
+EOF
+git -C "$NC13" add .factory
+if "$PY" tools/check_factory_portability.py "$NC13" >"$TMP/out13e" 2>&1; then
+    bad "NC13e 期望 rc=1（P2 续行变体命中），实际放行"
+else
+    if grep -q 'P2 引擎旁路' "$TMP/out13e"; then
+        ok "NC13e P2 续行变体（omp \\↵-p）被拦"
+    else
+        bad "NC13e 输出缺 P2: $(cat "$TMP/out13e")"
+    fi
+fi
+# P3 点号空白变体（与 P2 同根因）：`sys . path . insert` 是合法 Python。
+cat >"$NC13/.factory/lib.py" <<'EOF'
+import json
+sys . path . insert (0, ".")
+EOF
+git -C "$NC13" add .factory
+if "$PY" tools/check_factory_portability.py "$NC13" >"$TMP/out13f" 2>&1; then
+    bad "NC13f 期望 rc=1（P3 空白点号变体命中），实际放行"
+else
+    if grep -q 'P3 path hack' "$TMP/out13f"; then
+        ok "NC13f P3 空白点号变体（sys . path . insert）被拦"
+    else
+        bad "NC13f 输出缺 P3: $(cat "$TMP/out13f")"
+    fi
+fi
+NC13C="$TMP/nc13c"; mkdir -p "$NC13C/.factory/prompts" "$NC13C/.factory/db"
+echo "db schema" >"$NC13C/.factory/db/schema.sql"
+cp "$NC13/.factory/DISTRIBUTION.json" "$NC13C/.factory/"
+cat >"$NC13C/.factory/chain.sh" <<'EOF'
+source lib.sh
+omp_node . log 5m -- "prompt"
+EOF
+cat >"$NC13C/.factory/lib.py" <<'EOF'
+import json
+print(json.dumps({"ok": 1}))
+EOF
+printf '仓库参数注入\n' >"$NC13C/.factory/prompts/p.md"
+git -C "$NC13C" add .factory
+if "$PY" tools/check_factory_portability.py "$NC13C" >"$TMP/out13c" 2>&1; then
+    ok "NC13c 中性形态零误报（源仓#NN 考证 / omp_node / 无 hack）"
+else
+    bad "NC13c 期望 rc=0, 实际: $(cat "$TMP/out13c")"
+fi
+# ── NC14 git-sealing 负控制：R1/R2/R3 都会拦，中性形态不误报 ──────────
+# 夹具 = 临时 git 仓（含未密封 test_*.py + conftest 与登记表原件）。
+NC14="$TMP/nc14"; mkdir -p "$NC14/mylib/tests" "$NC14/tools"
+git init -q "$NC14"
+printf 'import subprocess\nsubprocess.run(["git", "init", "-q", "x"])\n' \
+    >"$NC14/mylib/tests/test_bad.py"
+mkdir -p "$NC14/scripts/tests"
+cat >"$NC14/scripts/tests/test_hermetic_git.py" <<'EOF'
+GIT_FIXTURE_CASES = []
+EOF
+cp tools/check_git_sealing.py "$NC14/tools/"
+git -C "$NC14" add -A
+if "$PY" tools/check_git_sealing.py "$NC14" >"$TMP/out14" 2>&1; then
+    bad "NC14 期望 rc=1（R1 未密封+R3 未登记），实际放行"
+else
+    if grep -q 'R1 conftest 未密封' "$TMP/out14" \
+       && grep -q 'R3 负控制登记缺' "$TMP/out14"; then
+        ok "NC14 R1（conftest 未密封）+R3（登记缺）被拦"
+    else
+        bad "NC14 输出缺 R1/R3 报告: $(cat "$TMP/out14")"
+    fi
+fi
+# R2：test*.sh 调 git 无顶层 unset
+printf '#!/bin/sh\ngit init -q x\n' >"$NC14/scripts/test_bad.sh"
+git -C "$NC14" add -A
+if "$PY" tools/check_git_sealing.py "$NC14" >"$TMP/out14b" 2>&1; then
+    bad "NC14b 期望 rc=1（R2 命中），实际放行"
+else
+    if grep -q 'R2 shell 未密封' "$TMP/out14b"; then
+        ok "NC14b R2（shell 未密封）被拦"
+    else
+        bad "NC14b 输出缺 R2: $(cat "$TMP/out14b")"
+    fi
+fi
+# 中性形态：密封 conftest + 登记完备 + shell 有 unset → 零误报
+cat >"$NC14/mylib/tests/conftest.py" <<'EOF'
+import os
+for _k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+           "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE"):
+    os.environ.pop(_k, None)
+EOF
+cat >"$NC14/scripts/tests/test_hermetic_git.py" <<'EOF'
+GIT_FIXTURE_CASES = [("mylib", "tests/test_bad.py::x")]
+EOF
+printf '#!/bin/sh\nunset GIT_DIR GIT_WORK_TREE\ngit init -q x\n' \
+    >"$NC14/scripts/test_bad.sh"
+git -C "$NC14" add -A
+if "$PY" tools/check_git_sealing.py "$NC14" >"$TMP/out14c" 2>&1; then
+    ok "NC14c 中性形态零误报（密封+登记+unset 全就位）"
+else
+    bad "NC14c 期望 rc=0, 实际: $(cat "$TMP/out14c")"
 fi
 # ── 汇总 ───────────────────────────────────────────────────────────────
 if [ "$fails" -gt 0 ]; then

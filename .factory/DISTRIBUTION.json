@@ -1,5 +1,5 @@
 {
-  "description": ".factory 工具链分发清单。awesome-rules 是唯一上游真相源；下游仓库（etf-radar 等）用 sync-from-upstream.sh 按本清单拉取，替代手工拷贝（README 移植四步的持续维护部分）。分类语义——full: 零本地化，blob 可直接覆盖（漂移=门禁失败）；local: 含仓特定区（同步只报告不覆盖，漂移经 feedback-upstream 反哺管线收敛）；skip: 仓特定或运行时产物，永不跨仓。M4 后（guard.py/factory_lib.py 周界与判据措辞数据化到 factory-local.json）local 面仅剩下游视角命名与测试布局。 清单修正（2026-08-26）：sync-from-upstream.sh 由 skip 移 full——它零本地化（锚点优先级修复无法经 sync 自身到达下游，gtsp-wop-gateway 迁移实测鸡生蛋）。",
+  "description": ".factory 工具链分发清单。awesome-rules 是唯一上游真相源；下游仓库（etf-radar 等）用 sync-from-upstream.sh 按本清单拉取，替代手工拷贝（README 移植的持续维护部分）。分类语义——full: 零本地化，blob 可直接覆盖（漂移=门禁失败）；local: 含仓特定区（同步只报告不覆盖，漂移经 feedback-upstream 反哺管线收敛）；skip: 仓特定或运行时产物，永不跨仓。ADR-009（拆分前置）后 local 面归零：周界/判据措辞/门命令/仓库参数/上游指针全部数据化到 factory-local.json（skip 分发，每仓一份），full 面脚本与 prompts 零宿主专名（gauntlet factory-portability 门机械化盯防）。清单修正（2026-08-26）：sync-from-upstream.sh 由 skip 移 full——它零本地化（锚点优先级修复无法经 sync 自身到达下游，gtsp-wop-gateway 迁移实测鸡生蛋）。",
   "full": [
     "cron-dispatch.sh",
     "dispatch.sh",
@@ -16,19 +16,19 @@
     "factory_lib.py",
     "upstream-sync-check.sh",
     "hosting.py",
+    "feedback-upstream.sh",
+    "omp-isolated.yml",
+    "db/schema.sql",
+    "tests/",
+    "prompts/",
     "sync-from-upstream.sh"
   ],
-  "local": {
-    "feedback-upstream.sh": "UPSTREAM_REPO/BRANCH 前缀/PR 文案从下游视角命名，每仓指向自己的上游；上游这份是模板真相源",
-    "tests/": "测试布局已分叉（本仓 tests/ 子目录 + conftest 注入，下游平铺 + sys.path hack）；用例宜随源文件走，人工对齐（目录项不做 blob 级处理）",
-    "test_state.py": "state.py 的测试，语义通用但断言措辞可能含仓特定锚"
-  },
+  "local": {},
   "skip": [
     "README.md",
     "MISSION.md",
     "factory-local.json",
     "mutations/",
-    "prompts/",
     "artifacts/",
     "locks/",
     "worktrees/",

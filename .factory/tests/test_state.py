@@ -2,14 +2,14 @@
 
 meta-test（test_table_full_coverage）强制 TRANSITIONS 每条边都有对应
 场景 fixture——新增转移漏写场景直接红，这是"转移实现一半"的结构性防御。
-运行：python3 -m pytest .factory/test_state.py -o addopts= -q
+运行：python3 -m pytest .factory/tests/test_state.py -o addopts= -q
+（.factory 目录经 tests/conftest.py 注入 sys.path，测试不自带 path hack）
 """
 import json
 import pathlib
 import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).parent))
-import state  # noqa: E402
+import state  # noqa: E402  (conftest 已注入 .factory)
 
 F = state.plan_phase  # (issue, pr, events, current_pr_labels?) -> (phase, ops)
 
@@ -162,7 +162,7 @@ def test_helpers():
 
 def test_cli_table_and_plan(tmp_path):
     import subprocess
-    d = pathlib.Path(__file__).parent
+    d = pathlib.Path(__file__).parent.parent  # state.py 在 .factory/（tests/ 随源走）
     out = subprocess.run([sys.executable, str(d / "state.py"), "table"],
                          capture_output=True, text=True, check=True).stdout
     assert out.splitlines()[0].startswith("id\tfrom\tevent\tto\towner")
