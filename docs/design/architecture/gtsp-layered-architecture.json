@@ -1,0 +1,319 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "gtsp-* 标准分层架构（完整档）",
+    "locale": "zh-CN",
+    "output": "gtsp-layered-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/im47cn/awesome-rules",
+      "revision": "15115803badf8704062ea4d23f3ac83ecc516bd4"
+    },
+    "views": [
+      {
+        "id": "dep-chain",
+        "label": "主依赖链",
+        "focus": [
+          "adapter",
+          "app",
+          "domain",
+          "infra"
+        ],
+        "note": "adapter → app → domain ← infrastructure，依赖倒置：仓储接口在 domain，实现在 infrastructure"
+      },
+      {
+        "id": "cross-domain",
+        "label": "跨域解耦",
+        "focus": [
+          "otherd",
+          "client",
+          "eventbus",
+          "domain"
+        ],
+        "note": "禁止跨域 Maven 依赖：client Inter 同步 / 领域事件异步 / 复制值对象零耦合"
+      },
+      {
+        "id": "modules",
+        "label": "完整档六模块",
+        "focus": [
+          "adapter",
+          "client",
+          "start",
+          "app",
+          "domain",
+          "infra"
+        ],
+        "note": "每业务域 6 个 Maven 模块，编译期强制依赖矩阵"
+      }
+    ],
+    "viewBox": [
+      1000,
+      540
+    ]
+  },
+  "components": [
+    {
+      "id": "otherd",
+      "type": "external",
+      "label": "他业务域",
+      "sublabel": "gtsp-{他域}",
+      "pos": [
+        40,
+        36
+      ],
+      "size": [
+        180,
+        64
+      ],
+      "sources": [
+        {
+          "path": "steering/gtsp/01-project-structure.md",
+          "line": 87,
+          "label": "跨域约束"
+        }
+      ]
+    },
+    {
+      "id": "adapter",
+      "type": "frontend",
+      "label": "adapter",
+      "sublabel": "Controller · Consumer · Scheduler",
+      "pos": [
+        330,
+        36
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "steering/gtsp/01-project-structure.md",
+          "line": 46,
+          "label": "HTTP 入口"
+        }
+      ]
+    },
+    {
+      "id": "start",
+      "type": "backend",
+      "label": "start",
+      "sublabel": "启动装配 · 独立可部署",
+      "pos": [
+        680,
+        36
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "steering/gtsp/01-project-structure.md",
+          "line": 48,
+          "label": "启动引导"
+        }
+      ]
+    },
+    {
+      "id": "client",
+      "type": "external",
+      "label": "client",
+      "sublabel": "Inter · DTO · Command/Query",
+      "tag": "零内部依赖",
+      "pos": [
+        330,
+        218
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "steering/gtsp/01-project-structure.md",
+          "line": 47,
+          "label": "对外契约"
+        }
+      ]
+    },
+    {
+      "id": "app",
+      "type": "backend",
+      "label": "app",
+      "sublabel": "AppService · 事务边界",
+      "pos": [
+        680,
+        218
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "steering/gtsp/01-project-structure.md",
+          "line": 49,
+          "label": "应用层"
+        }
+      ]
+    },
+    {
+      "id": "eventbus",
+      "type": "messagebus",
+      "label": "领域事件 / MQ",
+      "sublabel": "domain/event ↔ infrastructure/exchange",
+      "pos": [
+        40,
+        402
+      ],
+      "size": [
+        180,
+        64
+      ],
+      "sources": [
+        {
+          "path": "steering/gtsp/01-project-structure.md",
+          "line": 177,
+          "label": "事件发布适配"
+        }
+      ]
+    },
+    {
+      "id": "domain",
+      "type": "backend",
+      "label": "domain",
+      "sublabel": "实体 · DomainService · 仓储接口",
+      "tag": "零框架依赖",
+      "pos": [
+        330,
+        402
+      ],
+      "size": [
+        170,
+        72
+      ],
+      "sources": [
+        {
+          "path": "steering/gtsp/01-project-structure.md",
+          "line": 50,
+          "label": "领域层"
+        }
+      ]
+    },
+    {
+      "id": "infra",
+      "type": "database",
+      "label": "infrastructure",
+      "sublabel": "RepositoryImpl · PO · Mapper",
+      "pos": [
+        680,
+        402
+      ],
+      "size": [
+        170,
+        72
+      ],
+      "sources": [
+        {
+          "path": "steering/gtsp/01-project-structure.md",
+          "line": 51,
+          "label": "基础设施层"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "gtsp-{业务域} · 完整档 6 模块（Maven 编译期依赖矩阵）",
+      "wraps": [
+        "adapter",
+        "start",
+        "app",
+        "client",
+        "domain",
+        "infra"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "g1",
+      "from": "adapter",
+      "to": "app",
+      "label": "Controller → AppService",
+      "variant": "emphasis"
+    },
+    {
+      "id": "g2",
+      "from": "app",
+      "to": "domain",
+      "label": "业务规则",
+      "variant": "emphasis"
+    },
+    {
+      "id": "g3",
+      "from": "infra",
+      "to": "domain",
+      "label": "依赖倒置",
+      "variant": "emphasis",
+      "labelDy": 20
+    },
+    {
+      "id": "g4",
+      "from": "app",
+      "to": "client",
+      "label": "契约引用",
+      "labelDx": -50
+    },
+    {
+      "id": "g5",
+      "from": "otherd",
+      "to": "client",
+      "label": "Inter 同步"
+    },
+    {
+      "id": "g6",
+      "from": "domain",
+      "to": "eventbus",
+      "label": "事件发布"
+    },
+    {
+      "id": "g8",
+      "from": "start",
+      "to": "adapter",
+      "label": "启动装配"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "完整档六模块",
+      "items": [
+        "每业务域 6 个 Maven 模块，pom 编译期强制依赖矩阵",
+        "start 仅启动装配不含业务；client 可单独发布 JAR",
+        "全员继承 gtsp-parent，公共依赖版本父 POM 统一"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "依赖纪律",
+      "items": [
+        "依赖方向 adapter → app → domain ← infrastructure，禁止反向",
+        "domain 不依赖 Spring Boot Starter / MyBatis（JPA 标注豁免）",
+        "写操作禁止绕过 Domain 直调 Mapper；值对象不可变"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "跨域解耦",
+      "items": [
+        "禁止跨业务域直接 Maven 依赖，仅三种通信方式",
+        "client Inter 同步 · 领域事件异步（MQ）· 复制值对象零耦合",
+        "CQRS：读可绕 Domain 直连 Mapper，事务边界仍在 AppService"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,299 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": ".factory 工厂链执行时序",
+    "locale": "zh-CN",
+    "output": "factory-chain-sequence.html",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1640,
+      780
+    ],
+    "views": [
+      {
+        "id": "intake",
+        "label": "派单与裁决",
+        "focus": [
+          "human",
+          "gh",
+          "disp",
+          "chain",
+          "triage"
+        ],
+        "note": "零 LLM 派单 + 二值 triage，不可信输入经结构化 JSON 下游"
+      },
+      {
+        "id": "loop",
+        "label": "实现循环",
+        "focus": [
+          "chain",
+          "work"
+        ],
+        "note": "fresh context 进程 + ralph 修复轮，文件非空判定零 LLM"
+      },
+      {
+        "id": "verify",
+        "label": "门禁与验证",
+        "focus": [
+          "chain",
+          "gate",
+          "holdout",
+          "gh",
+          "human"
+        ],
+        "note": "确定性门 → holdout 独立验证 → 人类合并（铁律 1/5）"
+      }
+    ]
+  },
+  "participants": [
+    {
+      "id": "human",
+      "type": "external",
+      "label": "人类工程师"
+    },
+    {
+      "id": "gh",
+      "type": "cloud",
+      "label": "GitHub"
+    },
+    {
+      "id": "disp",
+      "type": "backend",
+      "label": "dispatch"
+    },
+    {
+      "id": "chain",
+      "type": "backend",
+      "label": "fix-issue 链"
+    },
+    {
+      "id": "triage",
+      "type": "security",
+      "label": "triage 裁决"
+    },
+    {
+      "id": "work",
+      "type": "backend",
+      "label": "omp 工作节点"
+    },
+    {
+      "id": "gate",
+      "type": "security",
+      "label": "确定性门"
+    },
+    {
+      "id": "holdout",
+      "type": "security",
+      "label": "holdout 验证"
+    }
+  ],
+  "segments": [
+    {
+      "from": 148,
+      "to": 322,
+      "label": "派单与裁决"
+    },
+    {
+      "from": 332,
+      "to": 462,
+      "label": "实现与 ralph 循环"
+    },
+    {
+      "from": 472,
+      "to": 690,
+      "label": "门禁 · holdout · PR"
+    }
+  ],
+  "messages": [
+    {
+      "id": "m1",
+      "from": "human",
+      "to": "gh",
+      "y": 160,
+      "label": "写 Issue（使命内 · 可判定）"
+    },
+    {
+      "id": "m2",
+      "from": "gh",
+      "to": "disp",
+      "y": 196,
+      "label": "cron label 扫描"
+    },
+    {
+      "id": "m3",
+      "from": "disp",
+      "to": "chain",
+      "y": 232,
+      "label": "租约仲裁 → fix-issue #N（worktree add）",
+      "variant": "emphasis",
+      "note": "链独立 worktree；+ factory:triaging"
+    },
+    {
+      "id": "m5",
+      "from": "chain",
+      "to": "triage",
+      "y": 268,
+      "label": "MISSION 判据 + issue 正文",
+      "variant": "security",
+      "note": "裁决器 5m · omp-isolated · no-tools；铁律 6：issue 正文视为不可信文本"
+    },
+    {
+      "id": "m6",
+      "from": "triage",
+      "to": "chain",
+      "y": 304,
+      "label": "verdict: accept",
+      "variant": "return",
+      "note": "reject → factory:rejected + 判据回执，链终止；accept → swap accepted + in-progress"
+    },
+    {
+      "id": "m8",
+      "from": "chain",
+      "to": "work",
+      "y": 340,
+      "label": "prime → plan（15m 预算）",
+      "variant": "emphasis"
+    },
+    {
+      "id": "m10",
+      "from": "chain",
+      "to": "work",
+      "y": 376,
+      "label": "implement（30m 预算）",
+      "variant": "emphasis",
+      "note": "各节点独立 fresh context 进程，产物落盘（上下文 / 规划 / diff）"
+    },
+    {
+      "id": "m12",
+      "from": "chain",
+      "to": "work",
+      "y": 412,
+      "label": "review → ralph-todo.md"
+    },
+    {
+      "id": "m13",
+      "from": "work",
+      "to": "chain",
+      "y": 448,
+      "label": "可行动发现清单",
+      "variant": "return",
+      "note": "清单非空 → 再跑 implement（≤2 轮，文件判定零 LLM）；耗尽则残留随 review.md 进 PR 交人类"
+    },
+    {
+      "id": "m14",
+      "from": "chain",
+      "to": "gate",
+      "y": 484,
+      "label": "guard.py 周界 + final_gate_cmd",
+      "variant": "security",
+      "note": "触及测试套件 -v 重跑附证据段——holdout 不许推测"
+    },
+    {
+      "id": "m15",
+      "from": "gate",
+      "to": "chain",
+      "y": 520,
+      "label": "tests-output.txt",
+      "variant": "return"
+    },
+    {
+      "id": "m16",
+      "from": "chain",
+      "to": "holdout",
+      "y": 556,
+      "label": "issue 标题 + tests-output（白名单）",
+      "variant": "security"
+    },
+    {
+      "id": "m17",
+      "from": "holdout",
+      "to": "chain",
+      "y": 592,
+      "label": "verdict: PASS + evidence",
+      "variant": "return",
+      "note": "FAIL → 按 round 存档 chain-history，不建 PR；铁律 1：只验结果，不读实现计划"
+    },
+    {
+      "id": "m18",
+      "from": "chain",
+      "to": "gh",
+      "y": 628,
+      "label": "push + PR（factory:needs-review）",
+      "variant": "emphasis",
+      "note": "issue → factory:in-review，PR 状态接管"
+    },
+    {
+      "id": "m19",
+      "from": "gh",
+      "to": "human",
+      "y": 664,
+      "label": "人类裁决合并（铁律 5）",
+      "variant": "emphasis"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "gh",
+      "from": 150,
+      "to": 682,
+      "type": "cloud"
+    },
+    {
+      "participant": "disp",
+      "from": 196,
+      "to": 260,
+      "type": "backend"
+    },
+    {
+      "participant": "chain",
+      "from": 220,
+      "to": 677,
+      "type": "backend"
+    },
+    {
+      "participant": "triage",
+      "from": 258,
+      "to": 316,
+      "type": "security"
+    },
+    {
+      "participant": "work",
+      "from": 330,
+      "to": 460,
+      "type": "backend"
+    },
+    {
+      "participant": "gate",
+      "from": 474,
+      "to": 530,
+      "type": "security"
+    },
+    {
+      "participant": "holdout",
+      "from": 548,
+      "to": 604,
+      "type": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "治理铁律",
+      "items": [
+        "零 LLM 派单：label 驱动 + 租约仲裁（epoch 互斥）；二值 triage 无中间态",
+        "铁律 1：holdout 只验结果 against issue，不读实现计划",
+        "铁律 5：merge 由人类决定——工厂永不自批"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "实现与门禁",
+      "items": [
+        "prime · plan · implement · review 各为独立 fresh context 进程（预算 5/15/30m 分级）",
+        "ralph 回流以 ralph-todo.md 文件非空为信号，终止判断零 LLM",
+        "guard.py 周界 + final_gate_cmd（fail-closed）；失败链产出经 EXIT trap salvage 推送，不静默丢失"
+      ]
+    }
+  ]
+}

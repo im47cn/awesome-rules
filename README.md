@@ -102,6 +102,9 @@ Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分�
 | [Factory Harness 设计](docs/design/factory-harness-design.md) | L4 自举工厂：第一性原理推导、方案 B（omp headless）、治理锁与 mutation 门（S0 已落地） |
 | [Gauntlet 门禁入口 SPEC](docs/design/spec-2026-08-21-gauntlet-entry.md) | 单一门禁入口 tools/gauntlet.sh：层编排 fail-closed + 检查器负控制 + 手动变异冒烟 |
 | [Gauntlet 门禁入口 EVIDENCE](docs/design/evidence-2026-08-21-gauntlet-entry.md) | 15 层全绿（927 tests / 4/4 变异击杀）证据报告，含三次门拦真问题与 errexit 缺陷修复记录 |
+| [项目架构图](docs/design/architecture/awesome-rules-architecture.html) | 仓库整体架构交互图（治理闭环 / 规范供给 / 分发消费，archify 生成，规格 JSON 同目录） |
+| [GTSP 分层架构图](docs/design/architecture/gtsp-layered-architecture.html) | gtsp-* 完整档六模块分层与跨域解耦交互图（依据 steering/gtsp/01） |
+| [工厂链执行时序图](docs/design/architecture/factory-chain-sequence.html) | .factory 工厂链 issue→triage→holdout→PR 全流程时序（依据 fix-issue.sh 实现真相） |
 
 ## 安装
 

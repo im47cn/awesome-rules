@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "awesome-rules 项目架构",
+    "locale": "zh-CN",
+    "output": "awesome-rules-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/im47cn/awesome-rules",
+      "revision": "2a868b8bac2744db48d1e247d5f88998a5ef2718"
+    },
+    "views": [
+      { "id": "gov-loop", "label": "治理闭环", "focus": ["human", "github", "factory", "gate"], "note": "issue 到 auto-merge 的自动化维护链，人类只保留写 issue 与晋升 release" },
+      { "id": "spec-supply", "label": "规范供给", "focus": ["steering", "hooks", "skills", "aitools"], "note": "规范如何被注入会话上下文并成为审查唯一依据" },
+      { "id": "dist", "label": "分发与消费", "focus": ["skills", "manifests", "aitools", "hawkeye"], "note": "7 平台插件分发面与 arch-hawkeye 独立工程的消费关系" }
+    ]
+  },
+  "components": [
+    {
+      "id": "human",
+      "type": "external",
+      "label": "人类工程师",
+      "sublabel": "写 Issue · 晋升 Release",
+      "pos": [40, 64],
+      "size": [150, 64],
+      "sources": [{ "path": "MISSION.md", "line": 21, "label": "人类只保留两件事" }]
+    },
+    {
+      "id": "github",
+      "type": "cloud",
+      "label": "GitHub",
+      "sublabel": "Issues · PR · Release",
+      "pos": [300, 64],
+      "size": [150, 64],
+      "sources": [{ "path": "MISSION.md", "line": 18, "label": "维护循环" }]
+    },
+    {
+      "id": "factory",
+      "type": "backend",
+      "label": ".factory/ 工厂链",
+      "sublabel": "triage → 实现 → holdout → merge",
+      "tag": "Dispatcher 零 LLM",
+      "pos": [520, 64],
+      "size": [190, 72],
+      "sources": [{ "path": "MISSION.md", "line": 17, "label": "工厂使命" }]
+    },
+    {
+      "id": "gate",
+      "type": "security",
+      "label": "确定性门禁",
+      "sublabel": "gauntlet · 变异负控制",
+      "tag": "fail-closed",
+      "pos": [790, 64],
+      "size": [190, 72],
+      "sources": [{ "path": "tools/gauntlet.sh", "label": "单一门禁入口" }]
+    },
+    {
+      "id": "steering",
+      "type": "database",
+      "label": "steering/ 规范",
+      "sublabel": "通用设计 + GTSP 工程规范",
+      "tag": "唯一真相源",
+      "pos": [300, 280],
+      "size": [190, 72],
+      "sources": [
+        { "path": "README.md", "line": 9, "label": "目录结构" },
+        { "path": "MISSION.md", "line": 9, "label": "唯一真相源" }
+      ]
+    },
+    {
+      "id": "hooks",
+      "type": "messagebus",
+      "label": "hooks/ 会话桥",
+      "sublabel": "SessionStart · SessionEnd",
+      "pos": [790, 280],
+      "size": [180, 72],
+      "sources": [{ "path": "hooks/load-steering.sh", "label": "SessionStart 注入" }]
+    },
+    {
+      "id": "skills",
+      "type": "backend",
+      "label": "skills/ 审查技能",
+      "sublabel": "guard 系列 · code-review · doc-gen",
+      "pos": [520, 460],
+      "size": [190, 72],
+      "sources": [{ "path": "README.md", "line": 16, "label": "技能清单" }]
+    },
+    {
+      "id": "hawkeye",
+      "type": "backend",
+      "label": "arch-hawkeye",
+      "sublabel": "全局架构观测与治理",
+      "pos": [40, 460],
+      "size": [180, 64],
+      "sources": [{ "path": "arch-hawkeye/README.md", "label": "独立工程" }]
+    },
+    {
+      "id": "manifests",
+      "type": "cloud",
+      "label": "插件清单",
+      "sublabel": ".claude-plugin 等 7 平台",
+      "tag": "blob 锁定",
+      "pos": [790, 460],
+      "size": [180, 72],
+      "sources": [{ "path": "scripts/plugin_lock.py", "label": "zero-regression 锁定" }]
+    },
+    {
+      "id": "aitools",
+      "type": "external",
+      "label": "AI 编程工具",
+      "sublabel": "Claude Code · Codex · Cursor 等",
+      "pos": [1010, 280],
+      "size": [190, 84],
+      "sources": [{ "path": "docs/ai-coding-tools-setup.md", "label": "安装指南" }]
+    }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "工厂可自动化变更区（issue → auto-merge）", "wraps": ["skills", "hawkeye"] }
+  ],
+  "connections": [
+    { "id": "c1", "from": "human", "to": "github", "label": "Issue · Release", "variant": "emphasis" },
+    { "id": "c2", "from": "github", "to": "factory", "label": "派单", "variant": "emphasis" },
+    { "id": "c3", "from": "factory", "to": "gate", "label": "验证", "variant": "emphasis" },
+    { "id": "c4", "from": "gate", "to": "github", "label": "auto-merge", "variant": "emphasis", "fromSide": "top", "toSide": "top" },
+    { "id": "c5", "from": "human", "to": "steering", "label": "人工 PR（周界）", "variant": "dashed" },
+    { "id": "c7", "from": "steering", "to": "skills", "label": "审查唯一依据" },
+    { "id": "c8", "from": "steering", "to": "hooks", "label": "frontmatter 扫描" },
+    { "id": "c9", "from": "hooks", "to": "aitools", "label": "注入规范索引", "labelDy": -55 },
+    { "id": "c10", "from": "skills", "to": "manifests", "label": "注册入口" },
+    { "id": "c11", "from": "manifests", "to": "aitools", "label": "一行安装" },
+    { "id": "c12", "from": "skills", "to": "hawkeye", "label": "manifest 聚合" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "治理闭环",
+      "items": [
+        "零 LLM 工厂链：issue → triage → 实现 → holdout → auto-merge",
+        "确定性门禁 fail-closed：gauntlet 分层编排 + 变异负控制",
+        "MISSION 周界（治理 / 质检线 / 发布面）仅人工 PR 可变更"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "规范供给",
+      "items": [
+        "steering/ 唯一真相源：通用设计规范 + GTSP 工程规范",
+        "SessionStart hook 扫描 frontmatter，动态注入规范索引",
+        "guard 技能以 steering 为审查唯一依据"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "分发与进化",
+      "items": [
+        "7 平台插件清单受 plugin_lock blob 锁定（zero-regression）",
+        "doc-gen manifest 供 arch-hawkeye 联邦聚合",
+        "skill-evo：SessionEnd 提炼经验 → 人工审核 → 规范进化"
+      ]
+    }
+  ]
+}
