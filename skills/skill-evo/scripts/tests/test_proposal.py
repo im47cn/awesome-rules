@@ -585,3 +585,41 @@ def test_normalize_headings_no_guess_on_miss_or_ambiguity(tmp_path):
     # 多命中拒绝猜测 → apply 以原 heading 找不到锚点失败（fail-closed 保留）
     with pytest.raises(PR.ApplyError, match="找不到标题锚点"):
         PR.apply_proposal(p2, repo)
+
+
+class TestAttributionWarnings:
+    """归因断言核验：2026-08-27 实证「引文真实 ≠ 判断正确」事故的机械化防线。"""
+
+    def test_incident_scenario_blocks(self):
+        # 事故原样：归因 + 推断语气 + 无锚 → 两条警告（当年引文核验放行的正是这条）
+        ls = make_lesson(
+            evidence="会话里推测 .factory 流水线可能把主仓置为 bare",
+            change=PR.Change(action="append_end",
+                             new_text="2026-08 实证：.factory 流水线把主仓置为 bare，hermetic 4 例连带失败"))
+        ws = PR.attribution_warnings(ls)
+        assert len(ws) == 2
+        assert any("推断语气" in w for w in ws)
+        assert any("缺可核对锚" in w for w in ws)
+
+    def test_anchored_evidence_passes(self):
+        ls = make_lesson(
+            evidence="dispatch.log 行 23031: 13:23:51 triage exit=128，上一轮 13:13:51 exit=0",
+            change=PR.Change(action="append_end",
+                             new_text="主仓 bare 发生在 13:13–13:23 空档，dispatch 主链日志排除"))
+        assert PR.attribution_warnings(ls) == []
+
+    def test_non_attribution_passes(self):
+        ls = make_lesson(
+            evidence="用户要求先查插件市场再说自研",
+            change=PR.Change(action="append_end",
+                             new_text="集成类需求先找现成插件再谈自研"))
+        assert PR.attribution_warnings(ls) == []
+
+    def test_attribution_warns_flow_into_proposal_guard(self):
+        # warnings() 集成：归因证据不足 → apply 护栏阻断（--force 语义）
+        p = PR.Proposal(id="t1", source_agent="a", source_session="s",
+                        source_path="x", created="now", lessons=[
+            make_lesson(evidence="可能是流水线干的",
+                        change=PR.Change(action="append_end",
+                                         new_text="流水线造成主仓损坏"))])
+        assert any("归因" in w for w in p.warnings())

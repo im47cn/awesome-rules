@@ -76,6 +76,7 @@ class Proposal:
                            "强制级别应由人工评审设定（apply 需 --force）")
             if ls.confidence == "Low":
                 out.append(f"lesson {i}: 置信度 Low，建议人工核实后再应用")
+            out.extend(f"lesson {i}: {w}" for w in attribution_warnings(ls))
             if ls.knowledge_type == "instance":
                 out.append(f"lesson {i}: instance 类知识（随环境实例变化，ID/路径/字段名/"
                            "账号/时间戳/版本号）不入技能文档，正确位置是代码（运行时发现）"
@@ -269,6 +270,48 @@ PARAPHRASE_MIN_CHARS = 16
 连接词缝合成整段 evidence，整段逐字核验必 miss，但最长连续命中普遍 ≥16 字
 （编造型通常只有 <8 字的公共短语命中）。转述降级为 ⚠ 由人复核，不阻断应用。
 """
+
+
+# ── 归因断言核验（2026-08-28 实证：引文真实 ≠ 判断正确）────────────────────
+# 事故：会话推测「.factory 流水线把主仓置 bare」被逐字引文核验放行（evidence
+# 确实出自会话原文），但 dispatch 日志后证主链清白（作案在两轮空档 13:13–13:23，
+# 系流水线调度的 agent 会话误操作）。错误归因随 CLAUDE.md 条款扩散。故归因类
+# 断言升级证据等级：推断语气不得沉淀为断言，且必须带可核对锚。
+
+_ATTRIBUTION_RE = re.compile(
+    r"把.{1,24}?(置为|篡改|改成|删除|清掉|搞坏|写坏)|"
+    r"(造成|导致|所致|所为)|"
+    r"归因于"
+)
+_SPECULATION_RE = re.compile(r"可能|推测|疑似|大概|似乎|估计|猜测|应该|仿佛")
+_ANCHOR_RE = re.compile(
+    r"\d{2}:\d{2}|\d{4}-\d{2}-\d{2}|"                       # 时刻 / 日期
+    r"[A-Za-z_][\w./-]*\.(?:py|sh|md|json|log|ts|sql):\d+|"  # file:line
+    r"exit[= ]\d+|grep -n|sed -n"                            # 命令/日志形态
+)
+
+
+def attribution_warnings(ls: Lesson) -> List[str]:
+    """归因断言的证据等级核验：比引文核验高一档。
+
+    verify_evidence 只证明「evidence 出自会话原文」（引文真实），不证明
+    「evidence 的判断正确」——会话原文本身可以是错的（推测被当成结论）。
+    归因句式（X 把 Y 置为/造成/所为）一旦落库会被后续会话当事实引用，
+    故要求：① evidence 无推断语气；② evidence 带可核对锚（时间窗/file:line/
+    命令输出）。命中警告 → apply 阻断，人工核实后 --force。
+    """
+    nt = ls.change.new_text if ls.change else ""
+    if not _ATTRIBUTION_RE.search(nt):
+        return []
+    out = []
+    if _SPECULATION_RE.search(ls.evidence or ""):
+        out.append("归因断言的 evidence 含推断语气（可能/疑似/推测…）——"
+                   "推测不得沉淀为断言式条款，须先以时间窗/日志证据定案")
+    if not _ANCHOR_RE.search(ls.evidence or ""):
+        out.append("归因断言的 evidence 缺可核对锚（时刻/file:line/命令输出）——"
+                   "无法复核归因主体，2026-08-27 实证：在场≠所为，dispatch 日志"
+                   "曾排除主链而条款误记流水线所为")
+    return out
 
 
 def _longest_match_len(quote: str, corpus: str, floor: int = 4) -> int:
