@@ -23,6 +23,19 @@ FAKE_LESSONS = {
 }
 
 
+MULTILINE_FAKE = {
+    "no_signal": False,
+    "lessons": [{
+        "type": "correction",
+        "evidence": "用户原话（多行）：\n\n```sql\nselect *\nfrom t_order\n```\n",
+        "target_file": "steering/demo-spec.md", "confidence": "High",
+        "reason": "补充条款",
+        "change": {"action": "append_under", "heading": "## 强制条款",
+                   "new_text": "- 禁止 `select *`\n- 必须显式列出列名"},
+    }],
+}
+
+
 def make_env(tmp_path, monkeypatch):
     """统一测试环境：临时 base_dir + 临时 repo（skills/steering）。"""
     cfg = dict(C.DEFAULTS)
@@ -61,6 +74,32 @@ def test_run_creates_proposal_and_state(tmp_path, monkeypatch):
     report = PR.apply_proposal(proposal, repo)
     assert "- 禁止 `select *`" in (repo / "steering" / "demo-spec.md").read_text(encoding="utf-8")
     assert len(report) == 1
+
+
+def test_run_multiline_strict_and_apply(tmp_path, monkeypatch):
+    """issue #81 判据 3（e2e）：多行 evidence 生成 → 机读块 strict 可解析 → apply 落盘。"""
+    cfg, base, repo = make_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(evo, "call_claude",
+                        lambda prompt, c: json.loads(json.dumps(MULTILINE_FAKE)))
+    transcript = tmp_path / "s-multiline.jsonl"
+    cc_fixture(transcript, cwd=str(tmp_path / "demo-repo"), extra_users=6, sid=transcript.stem)
+
+    args = SimpleNamespace(hook_json_file=None, transcript=str(transcript),
+                           session_file=None, cwd=None, agent="auto",
+                           no_omp=True, dry_run=False)
+    assert evo.cmd_run(args) == 0
+
+    pendings = list((base / "proposals" / "pending").glob("*.md"))
+    assert len(pendings) == 1
+    # strict json.loads（默认）：裸换行缺陷在此暴露
+    m = PR._JSON_BLOCK_RE.search(pendings[0].read_text(encoding="utf-8"))
+    assert m, "机读 JSON 块缺失"
+    json.loads(m.group(1))
+    proposal = PR.load_proposal(pendings[0])
+    assert proposal.lessons[0].evidence == MULTILINE_FAKE["lessons"][0]["evidence"]
+    PR.apply_proposal(proposal, repo)
+    spec = (repo / "steering" / "demo-spec.md").read_text(encoding="utf-8")
+    assert "- 禁止 `select *`" in spec and "- 必须显式列出列名" in spec
 
 
 def test_run_dedup_by_state(tmp_path, monkeypatch):
