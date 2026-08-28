@@ -12,7 +12,11 @@
 #   sync --all    同步所有带 factory:* 标签的 issue
 #   --plan        只打印计划操作，不执行
 set -u
-REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "不在 git 仓库" >&2; exit 2; }
+REPO="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+  # 诊断附着（2026-08-27 bare 事故：笼统「不在 git 仓库」掩盖 core.bare=true 8 小时）
+  echo "不在 git 仓库（诊断: core.bare=$(git config core.bare 2>/dev/null || echo '?') .git=$([ -e .git ] && echo 存在 || echo 缺失)）" >&2
+  exit 2
+}
 FACTORY="$REPO/.factory"
 HOST="python3 ${FACTORY}/hosting.py"
 # 平台选择与 slug/凭据解析收敛在 hosting.py（ADR-008）；入口一次性探测，

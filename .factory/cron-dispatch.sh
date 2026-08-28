@@ -48,7 +48,14 @@ trap 'rm -f "$LOCK"' EXIT INT TERM
     n=$((n + 1)); printf '%s\n' "$n" > "$STREAK"
     if [ "$n" -ge "${DISPATCH_STALLED_N:-3}" ]; then
       mkdir -p "$METRICS"
+      # 环境自检快照随标记落盘 + macOS 桌面通知（2026-08-27 bare 事故：
+      # 仅文件标记无人盯，主仓 core.bare=true 停摆 8h 无告警）
       printf 'dispatch 停摆：连续 %s 轮 exit 2（自 %s）；见 locks/dispatch.log 尾部与环境自检\n' "$n" "$(ts)" > "$STALLED_MARK"
+      printf '环境自检: core.bare=%s git-toplevel=%s worktrees=%s\n' \
+        "$(git -C "$REPO" config core.bare 2>/dev/null || echo '?')" \
+        "$(git -C "$REPO" rev-parse --show-toplevel 2>/dev/null || echo FAIL)" \
+        "$(git -C "$REPO" worktree list 2>/dev/null | wc -l | tr -d ' ')" >> "$STALLED_MARK"
+      /usr/bin/osascript -e "display notification \"dispatch 连续 ${n} 轮 exit=2（环境自检见 ${METRICS}/dispatch-stalled）\" with title \"factory 工厂停摆（${REPO##*/}）\"" >/dev/null 2>&1 || true
     fi
   elif [ "$drc" -eq 0 ]; then
     rm -f "$STREAK" "$STALLED_MARK"

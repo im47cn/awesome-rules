@@ -807,7 +807,10 @@ def dispatch_main(args: list[str]) -> int:
     r = subprocess.run(["git", "rev-parse", "--show-toplevel"],
                        capture_output=True, text=True)
     if r.returncode != 0:
-        print("不在 git 仓库", file=sys.stderr)
+        # 诊断附着（2026-08-27 bare 事故：笼统消息掩盖 core.bare=true 8 小时）
+        bare = subprocess.run(["git", "config", "core.bare"],
+                              capture_output=True, text=True).stdout.strip()
+        print(f"不在 git 仓库（诊断: core.bare={bare or '?'}）", file=sys.stderr)
         return 2
     repo = Path(r.stdout.strip())
     factory = repo / ".factory"
