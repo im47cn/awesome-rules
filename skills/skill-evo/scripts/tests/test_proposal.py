@@ -104,6 +104,19 @@ def test_finalize_review_corrupt_block_clean_error(tmp_path):
         PR.finalize_review(path, [], rejected=True)
 
 
+def test_load_proposal_flags_missing_lessons_key(tmp_path):
+    """dict 机读块缺 lessons 键（plan 任务 2 声明分支）：诊断入 parse_errors。"""
+    path = PR.write_proposal(make_proposal(tmp_path), tmp_path / "pending")
+    text = path.read_text(encoding="utf-8")
+    m = PR._JSON_BLOCK_RE.search(text)
+    path.write_text(text[:m.start()] + "```json\n{\"no_lessons\": true}\n```"
+                    + text[m.end():], encoding="utf-8")
+    p = PR.load_proposal(path)
+    assert any("缺 lessons 字段" in e for e in p.parse_errors)
+    with pytest.raises(PR.ApplyError, match="缺 lessons 字段"):
+        PR.apply_proposal(p, make_repo(tmp_path))
+
+
 # ── lesson_id 与 supersedes ─────────────────────────────────────────────────
 
 def test_derive_lesson_id_deterministic():
