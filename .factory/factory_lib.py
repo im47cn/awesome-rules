@@ -135,6 +135,26 @@ def node_timeout(name: str, env: dict | None = None) -> str:
     per_node = env.get(f"FACTORY_TIMEOUT_{name.upper().replace('-', '_')}")
     return per_node or env.get("FACTORY_TIMEOUT") or NODE_TIMEOUTS.get(name, "15m")
 
+
+def jfield(path: str, key: str, default: str | None = None) -> int:
+    """json 字段取值（shell json_field wrapper 的实现体，2026-08-28 收口）。
+
+    原 fix-issue.sh 形态 `python3 -c "…print($2)"` 把 shell 变量内插进
+    Python 源码——静态不可验证，check_inline_python R4 已禁形。契约 =
+    原三种调用形态：jfield <file> <key> [default]；键缺失/值为 null →
+    default（未给则 rc=1，stderr 指明缺键——shell 侧空串+非零，fail-closed）；
+    非 str 值以 JSON 编码输出，保持 shell 比较确定性。
+    """
+    d = json.loads(Path(path).read_text(encoding="utf-8"))
+    v = d.get(key) if isinstance(d, dict) else None
+    if v is None:
+        if default is None:
+            print(f"jfield: {path} 缺键 {key}（或值为 null）", file=sys.stderr)
+            return 1
+        v = default
+    print(v if isinstance(v, str) else json.dumps(v, ensure_ascii=False))
+    return 0
+
 def classify_task(files: list[str]) -> str:
     """变更文件 → 任务类型（成本归因用；doc/code 分开统计预算分布）。
 
@@ -884,6 +904,10 @@ def main(argv: list[str]) -> int:
         for v in _local_str_list(argv[2]):
             print(v)
         return 0
+    if cmd == "jfield":
+        # jfield <file> <key> [default] —— shell json_field wrapper 消费
+        # （2026-08-28 收口：双引号 -c 内插形态退役，check_inline_python R4 禁形）
+        return jfield(argv[2], argv[3], argv[4] if len(argv) > 4 else None)
     if cmd == "repo-vars":
         # repo-vars —— prompt 仓库参数段（run_node / pr-review / adapt 注入）
         print(repo_vars_text())

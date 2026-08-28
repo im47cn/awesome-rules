@@ -13,6 +13,7 @@ from factory_lib import (
     CircuitOpen,
     breaker_check,
     evidence_suites,
+    jfield,
     neutralize_marker,
     node_metric_line,
     node_timeout,
@@ -347,3 +348,43 @@ class TestNodeMetricLine:
         assert json.loads(node_metric_line("t", 5, 5, "fail"))["secs"] == 0
         # ensure_ascii=False：中文状态可读落盘
         assert "中文" in node_metric_line("n", 0, 1, "中文状态")
+
+
+class TestJfield:
+    """json_field 收口(2026-08-28):fix-issue.sh 双引号 -c 形态退役后的契约锁。
+
+    三种 shell 调用形态逐一对齐原语义：取键/缺键给默认/缺键无默认 fail-closed。
+    """
+
+    def _write(self, tmp_path, d):
+        import json
+        p = tmp_path / "x.json"
+        p.write_text(json.dumps(d), encoding="utf-8")
+        return str(p)
+
+    def test_key_present(self, tmp_path, capsys):
+        p = self._write(tmp_path, {"title": "修复 X", "verdict": "PASS"})
+        assert jfield(p, "title") == 0
+        assert capsys.readouterr().out == "修复 X\n"
+        assert jfield(p, "verdict") == 0
+        assert capsys.readouterr().out == "PASS\n"
+
+    def test_missing_key_with_default(self, tmp_path, capsys):
+        p = self._write(tmp_path, {"title": "t"})
+        assert jfield(p, "body", "") == 0
+        assert capsys.readouterr().out == "\n"  # 原 d.get("body") or "" 语义
+
+    def test_missing_key_no_default_fail_closed(self, tmp_path, capsys):
+        p = self._write(tmp_path, {"title": "t"})
+        assert jfield(p, "verdict") == 1  # 空串 + 非零：shell 比较自然走向失败分支
+        assert capsys.readouterr().out == ""
+
+    def test_null_value_treated_as_missing(self, tmp_path, capsys):
+        p = self._write(tmp_path, {"body": None})
+        assert jfield(p, "body", "") == 0
+        assert capsys.readouterr().out == "\n"
+
+    def test_non_str_value_json_encoded(self, tmp_path, capsys):
+        p = self._write(tmp_path, {"n": 3})
+        assert jfield(p, "n") == 0
+        assert capsys.readouterr().out == "3\n"

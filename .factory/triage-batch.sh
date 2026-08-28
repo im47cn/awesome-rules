@@ -2,8 +2,9 @@
 # triage 批次: 每轮对无任何 factory:* 标签的 open issue 跑物理隔离 triage 裁决。
 # 补齐 S2 缺口: "写 issue → 工厂自动看见"——裁决落标后自然流入 dispatch 队列。
 #
-# 铁律 4 边界(有意设计): 本脚本作为调度是纯 bash + gh 读标签(无标签=待裁决);
-# accept/reject 由 triage 节点按 MISSION 裁决, LLM 不参与调度决策。
+# 铁律 4 边界(有意设计): 本脚本作为调度是纯 bash + hosting 读标签
+# (无标签=待裁决; ADR-008 起 gh 由 hosting.py 收口); accept/reject 由
+# triage 节点按 MISSION 裁决, LLM 不参与调度决策。
 # 与 S1 链的竞态窗口: 链启动即打 factory:triaging, 本批次只挑零标签 issue,
 # 秒级窗口可忽略。
 #

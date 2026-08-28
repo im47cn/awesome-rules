@@ -9,17 +9,19 @@ BRANCH="factory/issue-${ISSUE}" 定义行改丢，set -u 下链启动即死—�
 SyntaxError；bash -n 无感（shell 语法合法）、shellcheck 无感（不解析
 python）、上游 pytest 门禁全绿放行。
 
-覆盖形态（本仓 .factory/ tools/ scripts/ 实际使用的全部形态）：
+覆盖形态（本仓 .factory/ tools/ scripts/ hooks/ 实际使用的全部形态）：
   1. python3 … -c '<代码>'        单引号字面块 → 提取 compile()
   2. python3 … <<'TAG' … TAG      quoted heredoc（无 shell 展开）→ 提取 compile()
 规则：
   R1  -c 的参数是字面量 `-` → 违规：-c - 把 `-` 当程序体，运行时必然
-      SyntaxError（事故原形）。双引号块（含 shell 展开）无法静态验证，
-      不在此层判定——这是诚实的边界，不是放水：双引号形态无事故史，
-      且任何静态判定都会是猜测而非确定性检查
+      SyntaxError（事故原形）。
   R2  -c 与 <<'TAG' heredoc 并用 → 违规：-c 已取程序体，heredoc 沦为
       无人消费的 stdin，语义错乱（事故原形的完整形态）
   R3  提取的代码块 compile() 失败 → 违规：报告文件与起始行号
+  R4  -c 的程序体为双引号块 → 违规：含 shell 展开，静态不可验证。
+      存量（fix-issue.sh json_field 双引号 $2 内插）2026-08-28 收口
+      factory_lib jfield 清零，自此禁形——此前本层明示不判定该形态
+      （「诚实的边界」），存量既清，新增即红，不再留猜测空间
 
 用法: check_inline_python.py <file-or-dir>...
 rc:  0 = 全部通过（或无内联 python）
@@ -33,6 +35,8 @@ import sys
 
 # 形态 1：python3 … -c '…'（单引号块，DOTALL 跨行；shell 单引号内无转义）
 RE_DASH_C = re.compile(r"\bpython3?\s+(?:-[^\s']+\s+)*-c\s+'(.*?)'", re.DOTALL)
+# 形态 3（R4 禁形）：python3 … -c "…"（双引号块，含 shell 展开）
+RE_DASH_C_DQ = re.compile(r"\bpython3?\s+(?:-[^\s\"]+\s+)*-c\s+\"")
 # 形态 2：命令行以 heredoc 结尾（<<'TAG'，起始行匹配到行尾）
 RE_HEREDOC_CMD = re.compile(r"^\s*.*\bpython3?\b.*<<'([A-Za-z_][A-Za-z0-9_]*)'\s*$")
 
@@ -87,12 +91,21 @@ def check_file(path):
             violations.append((lineno, f"R3: -c 内联 python 语法错误: {e}"))
 
     # R1：-c 后跟 `-`（dash 字面量）——`-c -` 把 `-` 当程序体，运行时必然
-    # SyntaxError。双引号块（含 shell 展开）无法静态验证，不在此层判定。
+    # SyntaxError。双引号块的静态不可验证问题由 R4 禁形解决（不再是盲区）。
     for idx, line in enumerate(lines):
         for m in re.finditer(r"\bpython3?\s+(?:-[^\s']+\s+)*-c\s+(\S)", line):
             if m.group(1) == "-":
                 violations.append((idx + 1, "R1: -c 参数为字面量 `-`——-c - 把 `-` 当程序体，"
                                             "运行时必然 SyntaxError（2026-08-22 事故原形）"))
+    # R4：-c 双引号块（含 shell 展开，静态不可验证）——2026-08-28 存量清零
+    # （fix-issue.sh json_field 收口 factory_lib jfield）后禁形，见模块头 R4。
+    # heredoc 体（consumed）内的同形文本是 python 字符串字面量，跳过。
+    for idx, line in enumerate(lines):
+        if idx in consumed:
+            continue
+        if RE_DASH_C_DQ.search(line):
+            violations.append((idx + 1, "R4: -c 双引号块——含 shell 展开，静态不可验证；"
+                                        "改单引号块或下沉 factory_lib 子命令"))
     return violations
 
 
