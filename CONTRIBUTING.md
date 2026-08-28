@@ -48,6 +48,16 @@ npm test                   # bash scripts/run_tests.sh
   `--cov-fail-under`），运行前需安装测试依赖：`pip3 install pytest pytest-cov`，
   否则 pytest 会以 `unrecognized arguments: --cov` 拒绝启动
 
+### push 报 exit 141（SIGPIPE）
+
+pre-push hook 全量运行约 45s+，期间 git 已打开的 `ssh.github.com:443`
+连接可能被中间设备空闲回收，hook 结束后复用死连接即死（exit 141）。
+处置（ADR-010 决策 4，仓本地配置不入库）：
+
+```bash
+git config core.sshCommand 'ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=4'
+```
+
 ### Merge Request
 
 - MR 标题格式：`[模块] 功能描述`
