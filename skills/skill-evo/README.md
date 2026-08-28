@@ -85,6 +85,9 @@ CC 插件 `failed to load` 不弹通知，hook 静默失效无感知（曾发生
 
 ## 设计边界（v2）
 
+- apply 的人工审核不可降级为 AI 链自审（AI 初审 + AI 终审批量落盘）：2026-08-28 一次批量 apply 30 条 lessons 的计划被硬护栏拦截后撤销——AI 审 AI 会自我强化偏差，批量产出正是提案机制要消除的垃圾信息
+- 扩展 SYSTEM_PROMPT 契约（如锚点层级从 `##` 扩到 `##`/`###`）时，须同步更新 `validate_candidate` 契约关键词与既有契约测试：reflector 重写掉新指引的候选要能被拒绝，防历史 ## 样本混训导致契约回退
+
 - 排查「会话被跳过/被重复处理」时先查 state.json 的内容哈希记账（omp 退出 flush 会碰 mtime，mtime 不可作为处理依据）
 - 进化目标：`skills/**/*.md`、`steering/**/*.md`、根 `README.md`（索引表，表格感知追加）、
   根 `CLAUDE.md`（AI 操作指引）；只做**追加**，不做改写/删除，不做「新增 skill」级提案
