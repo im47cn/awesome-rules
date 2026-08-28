@@ -145,7 +145,9 @@ class TestCodeupShapes:
                        "title": "T", "description": "D"}},
             # 【live 2026-08-26】MR 详情无 labels 字段，类标专用端点读回
             ("GET", "/changeRequests/3/labels"): [
-                {"name": "factory:needs-fix"}]}, monkeypatch)
+                {"name": "factory:needs-fix"}],
+            # #66 评论标记模型：pr_view 兼查标记评论（空集 = 无标记）
+            ("POST", "/comments/list"): {"result": []}}, monkeypatch)
         n = ad.pr_view(3)
         assert n["review"] == "changes_requested"
         assert n["state"] == "open"
@@ -155,7 +157,8 @@ class TestCodeupShapes:
         ad2 = self._ad({("GET", "/changeRequests/4"): {
             "result": {"localId": 4, "newVersionState": "MERGED",
                        "reviewers": [{"reviewOpinionStatus": "PASS"},
-                                     {"reviewOpinionStatus": "PASS"}]}}}, monkeypatch)
+                                     {"reviewOpinionStatus": "PASS"}]}},
+            ("POST", "/comments/list"): {"result": []}}, monkeypatch)
         n2 = ad2.pr_view(4)
         assert n2["review"] == "approved" and n2["state"] == "merged"
 
@@ -216,14 +219,20 @@ class TestCodeupShapes:
         ad = self._ad({
             ("GET", "/labels"): {"result": [
                 {"id": "lbl-9", "name": "factory:needs-review"}]},
+            # #66 标记模型：add 先发标记评论，类标 Link 为补充载体
+            ("POST", "/comments"): {"success": True},
             ("POST", "/changeRequests/7/labels"): {"success": True}}, monkeypatch)
         ad.pr_set_labels(7, add=["factory:needs-review"])
+        marker = [s for s in ad.seen if s[0] == "POST"
+                  and s[1].endswith("/comments")][0]
+        assert marker[2]["content"] == "[factory:label:add] factory:needs-review"
+        assert marker[2]["resolved"] is False
         link = [s for s in ad.seen if s[0] == "POST" and "labels" in s[1]][0]
         assert link[2] == {"labelIdList": ["lbl-9"]}  # live 破案键名（labelIds 拒）
 
 
 class TestCodeupGaps:
-    """平台缺口三件套必须 fail-closed（exit 2），静默降级=状态机半转移。"""
+    """平台缺口收敛后仍 fail-closed（exit 2）的操作集。"""
 
     def _ad(self, monkeypatch):
         monkeypatch.setenv("YUNXIAO_ACCESS_TOKEN", "t")
@@ -233,10 +242,8 @@ class TestCodeupGaps:
         ad._req = lambda *a, **k: {"success": True, "result": []}
         return ad
 
-    # issue 面已实装（#67）;此处收敛 MR 面真缺口（#66 范围）
+    # 缺口 (b)(c) 已由评论标记模型承载（#66）；真缺口仅剩 diff 全文
     @pytest.mark.parametrize("fn", [
-        lambda ad: ad.label_history(2),
-        lambda ad: ad.pr_set_labels(2, remove=["x"]),
         lambda ad: ad.pr_diff(2),
     ])
     def test_unsupported_ops_exit2(self, fn, monkeypatch):
@@ -244,6 +251,88 @@ class TestCodeupGaps:
             fn(self._ad(monkeypatch))
         assert e.value.code == 2
         assert "ADR-008" in str(e.value)
+
+
+class TestCodeupMarkerModel:
+    """#66 评论标记模型：add/remove 序列、label_history 轮次语义、
+    changes-requested 手势映射。"""
+
+    def _ad(self, monkeypatch, comments_by_resolved):
+        """comments_by_resolved: {False: [未resolved评论], True: [已resolved评论]}
+        自定义 mock 按 body['resolved'] 分流（_ad 简单路由无法区分两态）。"""
+        monkeypatch.setenv("YUNXIAO_ACCESS_TOKEN", "t")
+        monkeypatch.setenv("CODEUP_ORG_ID", "org")
+        monkeypatch.setenv("CODEUP_REPO_ID", "42")
+        ad = hosting.CodeupAdapter()
+        ad.seen = []
+
+        def fake_req(method, path, body=None, query=None, _retry_rdc=True):
+            ad.seen.append((method, path, body, query))
+            if method == "POST" and path.endswith("/comments/list"):
+                return {"result": comments_by_resolved.get(
+                    (body or {}).get("resolved"), [])}
+            return {"success": True, "result": []}
+        ad._req = fake_req
+        return ad
+
+    def test_remove_resolves_marker_keeps_content(self, monkeypatch):
+        """remove = 置 resolved（PUT comments/{id}），内容保留——轮次不减。"""
+        ad = self._ad(monkeypatch, {False: [
+            {"id": "c-1", "content": "[factory:label:add] factory:needs-fix"},
+            {"id": "c-2", "content": "[factory:label:add] factory:approved"}]})
+        ad.pr_set_labels(7, remove=["factory:needs-fix"])
+        puts = [s for s in ad.seen if s[0] == "PUT"]
+        assert len(puts) == 1  # 只 resolve needs-fix，approved 不动
+        assert puts[0][1].endswith("/changeRequests/7/comments/c-1")
+        assert puts[0][2] == {"resolved": True}
+
+    def test_remove_idempotent_no_marker(self, monkeypatch, capsys):
+        ad = self._ad(monkeypatch, {})
+        assert ad.pr_set_labels(7, remove=["x"]) is True
+        assert not [s for s in ad.seen if s[0] == "PUT"]
+        assert "幂等跳过" in capsys.readouterr().err
+
+    def test_pr_labels_merges_two_carriers(self, monkeypatch):
+        """labels = 类标 Link ∪ 未 resolved 标记（两载体合并去重）。"""
+        ad = self._ad(monkeypatch, {False: [
+            {"id": "c-1", "content": "[factory:label:add] factory:needs-fix"}]})
+
+        real_req = ad._req
+
+        def fake_req(method, path, body=None, query=None, _retry_rdc=True):
+            if method == "GET" and path.endswith("/labels"):
+                return [{"name": "factory:needs-fix"}, {"name": "factory:extra"}]
+            return real_req(method, path, body, query, _retry_rdc)
+        ad._req = fake_req
+        assert ad._pr_labels(7) == ["factory:extra", "factory:needs-fix"]
+
+    def test_label_history_resolved_does_not_decrease(self, monkeypatch):
+        """轮次语义：resolved 不减计数——全部 add 标记都计入事件流。"""
+        ad = self._ad(monkeypatch, {
+            False: [{"id": "c-2", "content": "[factory:label:add] factory:needs-fix"}],
+            True: [{"id": "c-1", "content": "[factory:label:add] factory:needs-fix"}]})
+        hist = ad.label_history(7)
+        assert hist == [{"op": "add", "label": "factory:needs-fix"},
+                        {"op": "add", "label": "factory:needs-fix"}]
+
+    def test_changes_requested_gesture_maps_review(self, monkeypatch):
+        """[factory:changes-requested] 评论 → changes_requested（无
+        reviewDecision 等价物场景）；reviewer PASS 映射不覆盖手势。"""
+        ad = self._ad(monkeypatch, {False: [
+            {"id": "c-9", "content": "[factory:changes-requested] 命名漂移"}]})
+
+        real_req = ad._req
+
+        def fake_req(method, path, body=None, query=None, _retry_rdc=True):
+            if method == "GET" and path.endswith("/changeRequests/5"):
+                return {"result": {"localId": 5, "newVersionState": "TO_BE_MERGED",
+                                   "reviewers": [{"reviewOpinionStatus": "PASS"}]}}
+            if method == "GET" and path.endswith("/labels"):
+                return []
+            return real_req(method, path, body, query, _retry_rdc)
+        ad._req = fake_req
+        n = ad.pr_view(5)
+        assert n["review"] == "changes_requested"  # 手势取严于 reviewer PASS
 
 
 

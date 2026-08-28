@@ -142,6 +142,25 @@
   「纯 bash/Python + 托管适配层」，2026-08-24/08-28 两次修宪注记见
   MISSION）；triage-batch.sh 头注释「纯 bash + gh 读标签」同步更正。
 
+
+### ADR-008 附记 · 2026-08-28 · MR 面缺口 (b)(c) 由评论标记模型承载（#66 人工实施）
+
+- **背景**：缺口 (b)(c)（类标无 Unlink、无标签事件时间线）曾判定全链
+  状态机在 Codeup 不可运行；承载 issue #66 经链 triage reject（判据 c：
+  触周界），按处置协议转人工路径实施。
+- **实施**（ADR-007 forge 期已 live 验证的等价物迁移进 hosting）：
+  add 标记 = MR 评论 `[factory:label:add] X`（resolved=false）；remove =
+  将该 X 未 resolved 的标记评论 PUT 置 resolved（内容保留——轮次计数
+  不减，对齐 GitHub label-add 事件语义）；`label_history` = 全部 add
+  标记事件流；`[factory:changes-requested]` 评论 → pr_view review
+  changes_requested（与 reviewer NOTPASS 取严）。类标 Link 降级为
+  best-effort 补充载体（label create 未破案，界面人工路径）。
+- **验证**：39 hosting 测试全绿（新增 6：remove 置 resolved 幂等、两
+  载体合并、resolved 不减计数、手势映射）；live 冒烟（gtsp MR）待
+  Codeup 环境执行后补录。标记格式与 forge 字节级一致——存量标记可读。
+- **后果**：真缺口仅剩 diff 全文（变更树可查路径）；`pr_close` 双定义
+  事故（后者遮蔽前者）一并收口。
+
 ## ADR-009 · 2026-08-27 · 拆分前置：本地化全量数据化 + 引擎单点 + portability 门
 
 **背景**：工厂拆独立仓库的评估结论（S2 会话）——现在不拆（实例 2 < 3 阈值，
