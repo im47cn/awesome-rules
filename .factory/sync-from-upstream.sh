@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# sync-from-upstream.sh — 下游从上游（awesome-rules）拉取 .factory 工具链。
+# sync-from-upstream.sh — 下游从上游仓库拉取 .factory 工具链。
 #
 # 定位：替代「移植后手工 diff 对账」。上游是唯一真相源（.factory/
 # DISTRIBUTION.json 分类），本脚本按分类三态处理：
@@ -41,7 +41,7 @@ LOCKFILE="$FACTORY/upstream-lock.json"
 git -C "$UP" rev-parse --git-dir >/dev/null 2>&1 \
   || { echo "上游仓不可用: $UP" >&2; exit 2; }
 
-# 锚点解析：--anchor > 上次 lock > main（优先级左→右；gtsp-wop-gateway
+# 锚点解析：--anchor > 上次 lock > main（优先级左→右；下游迁移
 # sync 实测：lock 读取无条件覆盖会把 --anchor main 吞掉——只在未显式
 # 指定时才读 lock，--anchor 成为唯一强制追新出口）
 if [ -z "${ANCHOR:-}" ]; then
