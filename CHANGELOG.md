@@ -2,6 +2,82 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [0.5.0](https://github.com/im47cn/awesome-rules/compare/v0.4.0...v0.5.0) (2026-08-26)
+
+### ✨ 新功能
+
+* **code-review:** 可视化输出转默认——时序图+技术风险点标注为标配 ([9bec1ab](https://github.com/im47cn/awesome-rules/commit/9bec1aba386e49920c8505aeed0f51289f3f3fe4))
+* **code-review:** 新增可视化输出模式 ([886284a](https://github.com/im47cn/awesome-rules/commit/886284aea686b48e24b44b82dbef14a030970431))
+* **code-review:** 新增可视化输出模式 ([2e79cb4](https://github.com/im47cn/awesome-rules/commit/2e79cb4cb4583c682ef5e3dbd15040a43b77aca7))
+* dispatch 停摆标记 + skill-evo heading 自动规范化 ([df67e3f](https://github.com/im47cn/awesome-rules/commit/df67e3f7130949af8537b681f2c4b386a86f476c))
+* **factory:** .factory 上游同步机制——分发清单三态 + 下游拉取脚本 ([9d6ccc6](https://github.com/im47cn/awesome-rules/commit/9d6ccc6aabbfdf4f1c853349c1b8321fa8f07011))
+* **factory:** forge 平台适配层（ADR-007） ([faaad2d](https://github.com/im47cn/awesome-rules/commit/faaad2dc8b20d9672f55ab71472fdc3cd8bcc937))
+* **factory:** herdr 四任务并发落地——单写者降级/周回归闭环/A3 记账/技能消融 ([61aa67f](https://github.com/im47cn/awesome-rules/commit/61aa67fcfb03f94a556fe63a05cbc71254fd3889))
+* **factory:** holdout FAIL 证据按轮存档 + prime/plan 回流 + worktree 兼容 ([c6df5ec](https://github.com/im47cn/awesome-rules/commit/c6df5ece998d856d022144a13170ffd09c58033f)), references [#5](https://github.com/im47cn/awesome-rules/issues/5)
+* **factory:** issue create 破案实装 + kill-rate 12/12 重证与 marker 重签 ([9bfc258](https://github.com/im47cn/awesome-rules/commit/9bfc258cf8cbfcfd7bf33b877be8edd2565d0409))
+* **factory:** M2/M4 落地——上游同步自动化与本地化外置 ([e832ac1](https://github.com/im47cn/awesome-rules/commit/e832ac1671957d51ca10b9a815ffc4ab3524d312))
+* **factory:** R4 成本熔断接线四入口，扩状态机 breaker→needs-human ([327d307](https://github.com/im47cn/awesome-rules/commit/327d307d9ba62a31d0c2e3d5542d638b8ce444d2))
+* **factory:** 专属分支+main 防护落地 ([0bcfe1d](https://github.com/im47cn/awesome-rules/commit/0bcfe1dbe69471740fdaff26507ebd9b0d0c8ff1))
+* **factory:** 吸收 [#62](https://github.com/im47cn/awesome-rules/issues/62) issue create 破案实装 ([fdcae94](https://github.com/im47cn/awesome-rules/commit/fdcae9432382a7c6fa986214af91bb9b39bbd3a5))
+* **factory:** 工作项面五方法实装（[#67](https://github.com/im47cn/awesome-rules/issues/67)） ([6d3c917](https://github.com/im47cn/awesome-rules/commit/6d3c917c0b36eb0e2a1d81386aa5ab6fad49cac4))
+* **factory:** 恢复 c6df5ece——holdout 证据按轮存档 + prime/plan 回流 + worktree 兼容 ([1ffba90](https://github.com/im47cn/awesome-rules/commit/1ffba9048f0616f8c4b3f2d42d8beb6645ab35f0))
+* **factory:** 托管平台抽象层——核心与 gh/Codeup 解耦 ([2e44769](https://github.com/im47cn/awesome-rules/commit/2e44769b802dadafc38fc1d834ad2ceccf3998c3))
+* **factory:** 链内 ralph 修复轮与裁决器 advisor 隔离 ([faeb39c](https://github.com/im47cn/awesome-rules/commit/faeb39c7dfa63dd83a2abeb929967d7ff59d3735))
+* **regression:** dispatch-liveness 多仓化——复用 hub 注册表 repos.conf ([e0c678a](https://github.com/im47cn/awesome-rules/commit/e0c678acb253a16bdafc5f8cd9740a09ac8f4d4f))
+* **scripts:** owner_check 所有权比对门——并发批次集成验收机械化 ([6d6d38e](https://github.com/im47cn/awesome-rules/commit/6d6d38ef188dc30e0c48a01a372abd2cb22a1f87))
+* **skill-evo:** 证据核验三态化 + 并发锁 ([0274848](https://github.com/im47cn/awesome-rules/commit/027484870ee64fdfcd9858d767a58ffca8dc4d7a))
+* **tools:** doc-freshness 守门层——工厂自守实现与文档一致性 ([20b2b0d](https://github.com/im47cn/awesome-rules/commit/20b2b0df215a26acad080177863841428a3c6e01))
+* **tools:** doc-freshness 扩 R6/R7——平台清单与枚举完整性守门，发布面收口 ([35f65e5](https://github.com/im47cn/awesome-rules/commit/35f65e544780cafa65c5a7aaa22e8b1d81cd0c4e))
+* **tools:** watch poll interval 1800s to 300s ([48bf306](https://github.com/im47cn/awesome-rules/commit/48bf3062e2b09aaeb2b94ed606ce6b5645dc8187)), references [#5](https://github.com/im47cn/awesome-rules/issues/5)
+
+### 🐛 Bug 修复
+
+* **ci:** doc-gen build workflow 补最小 permissions 声明 ([beb7694](https://github.com/im47cn/awesome-rules/commit/beb76943144f18efdf0609d042432eab6d49dcda))
+* **factory:** Codeup MR 面 live 验证修正五处文档推导偏差 ([80c53b4](https://github.com/im47cn/awesome-rules/commit/80c53b4e3619b69df087496d63af64f9f6c02e93)), references [#64](https://github.com/im47cn/awesome-rules/issues/64)
+* **factory:** PR [#61](https://github.com/im47cn/awesome-rules/issues/61) Sourcery 两项 + codeup issue create 诚实边界 ([59faeec](https://github.com/im47cn/awesome-rules/commit/59faeec8c7ff3b088603e0f7516f8923fdde0b21))
+* **factory:** PR [#64](https://github.com/im47cn/awesome-rules/issues/64) Sourcery 两项 bug_risk + JSON 守卫 ([1dbf1c6](https://github.com/im47cn/awesome-rules/commit/1dbf1c619b0ad815604c3f9b854c15659160a6c5))
+* **factory:** pr_close 实装 + create 序号回查 ([95427d6](https://github.com/im47cn/awesome-rules/commit/95427d6c7a86a9e53905117227ab21dcbf9ce85e))
+* **factory:** ssh.github.com 权威主机回归 ([479e46c](https://github.com/im47cn/awesome-rules/commit/479e46cbb6f169f3adf41a4a3ac792c7834cdf4c)), references [#53](https://github.com/im47cn/awesome-rules/issues/53)
+* **factory:** sync --anchor 被 lock 覆盖 ([c798c94](https://github.com/im47cn/awesome-rules/commit/c798c94384799042e609e78018289e996e92fcd0))
+* **factory:** sync 脚本移入 full 分发面 ([2a868b8](https://github.com/im47cn/awesome-rules/commit/2a868b8bac2744db48d1e247d5f88998a5ef2718))
+* **factory:** 单写者锁原子接管与围栏实租期 ([a7d52b7](https://github.com/im47cn/awesome-rules/commit/a7d52b7dd09f3e1a808f1513a0ba06e77361f9a5)), references [#53](https://github.com/im47cn/awesome-rules/issues/53)
+* **factory:** 回流 etf-radar 工具链五组修复——锁预建/反哺三缺陷 ([fe8bacc](https://github.com/im47cn/awesome-rules/commit/fe8baccd031e056c64b71dcaa3da6b3575b45ab1)), references [PR#79](https://github.com/im47cn/awesome-rules/issues/79)
+* **mutations:** G-03 锚点适配 M4——配置载入破坏形态 + 首个周界指纹 stamp ([89909b1](https://github.com/im47cn/awesome-rules/commit/89909b1a7b63cf65132006c816d042fe6b9a6ae5))
+* PR [#58](https://github.com/im47cn/awesome-rules/issues/58) 审查四项 + 日回归与调度活性第四层 ([4e90823](https://github.com/im47cn/awesome-rules/commit/4e90823cce942d58f89e9c2015138cd55b2b59b8))
+* **scripts:** md_link_check 补 tracked-but-deleted 缺口 ([9abb3b1](https://github.com/im47cn/awesome-rules/commit/9abb3b16bc4f329e164b60ca9b85f5b12e34e942))
+* **scripts:** 所有权门重命名双侧 + 消融臂名校验 ([8b49cb9](https://github.com/im47cn/awesome-rules/commit/8b49cb92b7e153b04080270e2df6c02c36625820)), references [#53](https://github.com/im47cn/awesome-rules/issues/53)
+* **skill-evo:** 核验转述降级与会话锁，堵重复总结 ([21a1cf6](https://github.com/im47cn/awesome-rules/commit/21a1cf65007508079b6d5ea872cf3022c00e0955))
+* 合流 origin/main（c6df5ece）——恢复链与远端对齐 ([0aa01e7](https://github.com/im47cn/awesome-rules/commit/0aa01e7f09ab1347546d75001eb86e609aa3efc7))
+* 套件测试密封化——import 期剥 GIT_* 根治 GIT_DIR 劫持 ([b87a069](https://github.com/im47cn/awesome-rules/commit/b87a069e9a694298d9913c41888af0ee5d7ed824))
+* 补齐 1ffba904 恢复残留——解 fix-issue.sh 冲突标记 ([cd476f4](https://github.com/im47cn/awesome-rules/commit/cd476f4cdea984361a2d8dbf762f6a480492ec34))
+
+### ♻️ 重构
+
+* **factory:** dispatch 进程编排下沉 factory_lib.py（ADR-005，并行会话落地集成） ([bff2ac9](https://github.com/im47cn/awesome-rules/commit/bff2ac9bd80713e6ea269a31afa57fecc9cd5fde))
+* **tools:** plugin_lock 版本检查委托单一真相源 ([f0aece8](https://github.com/im47cn/awesome-rules/commit/f0aece837780ef85b2940a40098c3260423e4667))
+
+### 📝 文档
+
+* **alibabacloud-devops:** 沉淀 Codeup 工作项 OpenAPI 实测知识，去重追加残留 ([d78861e](https://github.com/im47cn/awesome-rules/commit/d78861efff5f0832b847b80ddc4d671a5d8ba3ae))
+* **factory:** [#53](https://github.com/im47cn/awesome-rules/issues/53)/[#54](https://github.com/im47cn/awesome-rules/issues/54) 合并后文档同步 ([929ed95](https://github.com/im47cn/awesome-rules/commit/929ed952bd1da29592882a669e8ed6f4519cb7e7))
+* **factory:** ADR-002 证据清单记账两条审查修复 ([6f8fb40](https://github.com/im47cn/awesome-rules/commit/6f8fb400c4bf67065d29557b89014f51ef74a84c)), references [#53](https://github.com/im47cn/awesome-rules/issues/53)
+* **factory:** ADR-006 触发器计数口径——合并前自愈不计数 ([ea8300e](https://github.com/im47cn/awesome-rules/commit/ea8300e9faaec18803b6d51243b75a3c4d334cfa))
+* **factory:** forge 收尾——README 登记与移植节、G-05 负例 ([f82292e](https://github.com/im47cn/awesome-rules/commit/f82292e2b9e840d99a71217b663554abc695bbb0))
+* **factory:** 上游同步 M1-M4 路线定稿——M2 确定性 PR 流与 M4 证据指纹绑定 ([e2fd0e2](https://github.com/im47cn/awesome-rules/commit/e2fd0e2947e1d95a50a4364e922b2b4d729b5386))
+* **factory:** 协议补一条——历史重写后 fsck 盘点孤儿、人工鉴定再丢弃 ([2a52701](https://github.com/im47cn/awesome-rules/commit/2a52701f9aa79028058f2cce970aa08f741a755e))
+* PR62 审查修复 + alibabacloud-devops 技能按官方最佳实践重构 ([728a1e0](https://github.com/im47cn/awesome-rules/commit/728a1e040351ddce2b86f7b6ab52726970a952da))
+* **steering:** 高密度小节分子节重排，留 apply 落点 ([cde64ef](https://github.com/im47cn/awesome-rules/commit/cde64efed82cfe99d2110fa6fc67172ce4308369))
+* 交付前强制 reviewer 子代理审查条款 ([88f5c51](https://github.com/im47cn/awesome-rules/commit/88f5c51bfc9133f085cd76909762ebe7597e0a99))
+* 修复审查 FAIL 项与文档漂移，删除易腐测试数 ([83ac871](https://github.com/im47cn/awesome-rules/commit/83ac87195bb26e86ea63dd52fe6982e92b6d97d5))
+* 治理层收口——设计文档状态戳对齐 + 五段式契约覆盖 + 清单互备 ([20efc39](https://github.com/im47cn/awesome-rules/commit/20efc39a0ada3d1dfa940cc335f66c0afd277c72))
+* 状态机标签流转图（mermaid，权威=state.py TRANSITIONS） ([6de5a95](https://github.com/im47cn/awesome-rules/commit/6de5a9529a5d26ad884ddff1d5357ee9db15a98d))
+* 移除 share-docs/（早期分享稿，迁往别处） ([c529cc0](https://github.com/im47cn/awesome-rules/commit/c529cc05aa235febc95b7e621811f3a90b68c424))
+* 落地 skill-evo 预审裁决第一批——12 份提案条款应用 ([6ca778b](https://github.com/im47cn/awesome-rules/commit/6ca778b9248f77870b24c51890ad337aa0771322))
+* 落地 skill-evo 预审裁决第二批——23 份提案条款 ([23f074d](https://github.com/im47cn/awesome-rules/commit/23f074d97a9b7ebd5aafd2551695e95e86b3f42c))
+
+### ✅ 测试
+
+* **mutations:** stamp git 往返闭环覆盖 + README 下游采纳 checklist 与时序约束 ([bcc4026](https://github.com/im47cn/awesome-rules/commit/bcc40267362cc27ad899932092b1d41fbead7b0b))
 ## [0.4.0](https://ssh.github.com/443/im47cn/awesome-rules/compare/v0.3.0...v0.4.0) (2026-08-24)
 
 ### ✨ 新功能
