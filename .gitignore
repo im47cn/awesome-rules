@@ -20,10 +20,12 @@ __pycache__/
 *.pdf
 target/
 **/.coverage
+
+# 黑盒工厂
 .factory/artifacts/
 .factory/locks/
 .factory/var/
+.factory/worktrees/
 
 # Node（release 工具链 devDependencies 安装产物）
 node_modules/
-.factory/worktrees/
