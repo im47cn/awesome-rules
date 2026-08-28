@@ -126,6 +126,7 @@ SYSTEM_PROMPT = """你是研发规范仓库 awesome-rules 的「经验提炼器�
     {
       "type": "correction | failure | success",
       "evidence": "会话原文片段（逐字引用，可追溯）",
+      "target_file": "目标资产清单中的相对路径",
       "confidence": "High | Medium | Low",
       "knowledge_type": "pattern | instance",
       "reason": "为什么要改这个文件（一句话）",
