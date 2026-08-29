@@ -65,6 +65,7 @@ class Proposal:
     created: str
     status: str = "pending"
     lessons: List[Lesson] = field(default_factory=list)
+    parse_errors: List[str] = field(default_factory=list)   # 坏机读块诊断（issue #81）
 
     def warnings(self) -> List[str]:
         """应用前的护栏检查（不阻断，apply 时要求确认/--force）。"""
@@ -137,15 +138,19 @@ def load_proposal(path: Path) -> Proposal:
                 key, _, val = line.partition(":")
                 fm[key.strip()] = val.strip()
     lessons: List[Lesson] = []
+    errors: List[str] = []
     payload = None
     for m in _JSON_BLOCK_RE.finditer(content):
         try:
             candidate_payload = json.loads(m.group(1))
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:   # 坏块不静默跳过：诊断上浮（Tripwire）
+            errors.append(f"{path.name}: 机读 JSON 块解析失败: {e.msg}（line {e.lineno} col {e.colno}）")
             continue
         if isinstance(candidate_payload, dict):   # 跳过非 lessons 载荷（如迭代日志 list）
             payload = candidate_payload
             break
+    if payload is not None and "lessons" not in payload:
+        errors.append(f"{path.name}: 机读块缺 lessons 字段")
     if payload:
         try:
             for ls in payload.get("lessons", []):
@@ -170,7 +175,8 @@ def load_proposal(path: Path) -> Proposal:
     return Proposal(
         id=fm.get("id", path.stem), source_agent=fm.get("source_agent", "?"),
         source_session=fm.get("source_session", "?"), source_path=fm.get("source_path", "?"),
-        created=fm.get("created", "?"), status=fm.get("status", "pending"), lessons=lessons)
+        created=fm.get("created", "?"), status=fm.get("status", "pending"), lessons=lessons,
+        parse_errors=errors)
 
 
 def list_proposals(status_dir: Path) -> List[Proposal]:
@@ -513,7 +519,8 @@ def apply_proposal(p: Proposal, repo_root: Path, *, dry_run: bool = False,
     需 --force 越过；supersedes 引用无效为硬错（输入非法，force 不可越过）。
     """
     if not p.lessons:
-        raise ApplyError("提案无 lesson")
+        raise ApplyError("提案无 lesson"
+                         + (f"（{'；'.join(p.parse_errors)}）" if p.parse_errors else ""))
     # 阶段 1：内存计算（同一文件多个 lesson 顺序叠加）+ 重复沉淀检测
     new_contents: dict = {}
     report: List[str] = []
@@ -683,7 +690,12 @@ def finalize_review(path: Path, raw_codes: List[str], *, rejected: bool) -> Path
     m = _JSON_BLOCK_RE.search(content)
     if not m:
         raise ApplyError(f"{path.name}: 找不到机读 JSON 块")
-    payload = json.loads(m.group(1))
+    try:
+        payload = json.loads(m.group(1))
+    except json.JSONDecodeError as e:
+        raise ApplyError(f"{path.name}: 机读 JSON 块解析失败: {e.msg}"
+                         f"（line {e.lineno} col {e.colno}）；机读块勿手改，"
+                         "如需回退请用同名 .orig 覆盖后重试") from e
     for ls_json, ls in zip(payload.get("lessons", []), p.lessons):
         ls_json["verdict"] = ls.verdict
         ls_json["verdict_codes"] = ls.verdict_codes

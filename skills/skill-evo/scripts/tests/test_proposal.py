@@ -47,6 +47,76 @@ def test_write_load_roundtrip(tmp_path):
     assert "select" in ls.change.new_text and "select" in ls.evidence
 
 
+def _multiline_lesson():
+    """issue #81 缺陷形态样本：evidence 含多行原文与围栏代码块。"""
+    return make_lesson(
+        evidence="用户原话（多行）：\n\n```sql\nselect *\nfrom t_order\n```\n要求列名",
+        change=PR.Change(action="append_under", heading="## 强制条款",
+                         new_text="- 禁止 `select *`\n- 必须显式列出列名"))
+
+
+def test_write_multiline_lesson_strict_roundtrip(tmp_path):
+    """多行 evidence/new_text（含围栏）：机读块严格 JSON 可解析且逐字符保真。
+
+    回归锁（issue #81 判据 1）：json.dumps 转义链被后处理破坏（\n 裸化）时，
+    本测试以 strict json.loads 的 Invalid control character 变红。
+    """
+    ls = _multiline_lesson()
+    path = PR.write_proposal(make_proposal(tmp_path, lessons=[ls]), tmp_path / "pending")
+    for f in (path, path.parent / f"{path.stem}.orig"):
+        m = PR._JSON_BLOCK_RE.search(f.read_text(encoding="utf-8"))
+        assert m, f"{f.name}: 机读 JSON 块缺失"
+        json.loads(m.group(1))                       # strict 默认：裸换行即抛
+    p = PR.load_proposal(path)
+    assert p.lessons[0].evidence == ls.evidence      # 围栏不截断，含 \n 逐字符相等
+    assert p.lessons[0].change.new_text == ls.change.new_text
+
+
+def _corrupt_machine_block(path):
+    """块内首个转义换行 \\n → 裸换行（重现 issue #81 坏件：非法控制字符）。"""
+    text = path.read_text(encoding="utf-8")
+    m = PR._JSON_BLOCK_RE.search(text)
+    assert m, "机读 JSON 块缺失"
+    corrupt = text[:m.start()] + m.group(0).replace("\\n", "\n", 1) + text[m.end():]
+    path.write_text(corrupt, encoding="utf-8")
+
+
+def test_load_proposal_flags_corrupt_block(tmp_path):
+    """坏机读块：诊断上浮 parse_errors（Tripwire：禁静默降级为空 lessons）。"""
+    path = PR.write_proposal(make_proposal(tmp_path, lessons=[_multiline_lesson()]),
+                             tmp_path / "pending")
+    _corrupt_machine_block(path)
+    p = PR.load_proposal(path)
+    assert p.parse_errors, "坏块必须留下诊断痕迹"
+    assert any("解析失败" in e and "line" in e for e in p.parse_errors)
+    with pytest.raises(PR.ApplyError, match="解析失败"):   # 真因直指坏块，非裸『提案无 lesson』
+        PR.apply_proposal(p, make_repo(tmp_path))
+    PR.list_proposals(tmp_path / "pending")               # 宽松语义保持：list 不抛
+
+
+def test_finalize_review_corrupt_block_clean_error(tmp_path):
+    """坏机读块 finalize：收敛为 ApplyError 直指解析失败（原裸抛 JSONDecodeError）。"""
+    path = PR.write_proposal(
+        make_proposal(tmp_path, lessons=[_multiline_lesson()], pid="20260821-000001-cc-corrupt1"),
+        tmp_path / "pending")
+    _corrupt_machine_block(path)
+    with pytest.raises(PR.ApplyError, match="解析失败"):
+        PR.finalize_review(path, [], rejected=True)
+
+
+def test_load_proposal_flags_missing_lessons_key(tmp_path):
+    """dict 机读块缺 lessons 键（plan 任务 2 声明分支）：诊断入 parse_errors。"""
+    path = PR.write_proposal(make_proposal(tmp_path), tmp_path / "pending")
+    text = path.read_text(encoding="utf-8")
+    m = PR._JSON_BLOCK_RE.search(text)
+    path.write_text(text[:m.start()] + "```json\n{\"no_lessons\": true}\n```"
+                    + text[m.end():], encoding="utf-8")
+    p = PR.load_proposal(path)
+    assert any("缺 lessons 字段" in e for e in p.parse_errors)
+    with pytest.raises(PR.ApplyError, match="缺 lessons 字段"):
+        PR.apply_proposal(p, make_repo(tmp_path))
+
+
 # ── lesson_id 与 supersedes ─────────────────────────────────────────────────
 
 def test_derive_lesson_id_deterministic():
