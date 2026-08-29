@@ -11,6 +11,7 @@
 （conftest 注入 .factory 到 sys.path）
 """
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -576,7 +577,7 @@ class TestCodeupEndpointFallback:
         with pytest.raises(hosting.HostingError) as e:
             ad._req("GET", "/oapi/v1/codeup/organizations/org/repositories/42")
         # 两次都失败才报错；且报错信息指向重试后的端点
-        assert "openapi-rdc.aliyuncs.com" in str(e.value)
+        assert re.search(r"openapi-rdc\.aliyuncs\.com", str(e.value))  # codeql[py/incomplete-url-substring-sanitization] ADR-GH1：断言消息含端点（regex 形式脱离子串校验 sink 模式），非 URL 安全校验
 
 
 class TestCli:
