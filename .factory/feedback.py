@@ -323,9 +323,11 @@ def _patch_id(sha):
     return out.split()[0] if out else None
 
 def _gather_commits():
-    """git log 提交链；_files_by_sha 沿用既有调用序（结果未消费，保持原行为）。"""
+    """git log 提交链；files 合并（_files_by_sha 结果挂回提交，供 feedable/pending 判定）。"""
     commits = _git_log_commits()
     fbs = _files_by_sha()
+    for c in commits:
+        c["files"] = fbs.get(c["sha"], set())
     return commits
 
 
