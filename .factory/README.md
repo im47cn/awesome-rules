@@ -100,7 +100,7 @@ triage 的输入，不是决策手势；标签才是）。
 | `issue.json` | 链脚本 | `gh issue view --json` 原始数据 |
 | `triage.json` | triage | verdict / priority / reasons |
 | `tests-output.txt` | implement（review 修复后刷新） | final_gate 完整输出 + 触及套件 `-v` 测试名证据（holdout 唯一证据源；静默点号输出 = 证据饥饿，holdout 将合法 FAIL） |
-| `docstring-output.txt` | implement（review 修复后刷新） | docstring 门输出（docstring_gate_cmd 配置时；对外 API 100% + 内部 ≥80% 逐符号缺失清单；门失败 = 链终止） |
+| `docstring-output.txt` | implement（review 修复后刷新） | docstring 门输出（配置 docstring_gate_cmd 时由其命令生成；阈值/格式由各仓检查器自定；门失败 = 链终止） |
 | `plan.json` | plan | tasks[] 每项含 verify 命令；forbidden 周界清单 |
 | `implement.md` | implement | 执行日志（每任务改动与 verify 结果） |
 | `review.md` | review | 自审报告（已修复 / 待人类） |

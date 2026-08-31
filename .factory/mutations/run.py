@@ -83,12 +83,12 @@ FINAL_GATE = _final_gate_words()
 def _docstring_gate_words(cfg_path: Path | None = None) -> list[str] | None:
     """docstring 门命令（可选键）：factory-local.json docstring_gate_cmd 拆词。
 
-    与 _final_gate_words 同构但为**可选**门：键缺失/空 → None（未启用，
+    与 _final_gate_words 同构但为**可选**门：仅键缺失 → None（未启用，
     链脚本跳过；mutations 中 docstring 缺陷 SKIP——未启用的门无灵敏度
-    可证，不构成全绿）。键存在 → 校验同 final_gate_cmd（非空字符串 +
-    禁引号 + 禁反斜杠，fail-closed：配置损坏即 RuntimeError，禁止静默
-    降级为无门）。阈值（对外 API 100% + 内部 ≥80%）由各仓检查器自定，
-    本处只承载命令词。
+    可证，不构成全绿）。键存在即校验（非空字符串 + 禁引号 +
+    禁反斜杠；键存在但空 = 非法配置，fail-closed RuntimeError，
+    禁止静默降级为无门）。阈值（对外 API 100% + 内部 ≥80%）由各仓
+    检查器自定，本处只承载命令词。
     """
     p = cfg_path or REPO_ROOT / ".factory" / "factory-local.json"
     try:

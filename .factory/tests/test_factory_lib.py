@@ -486,3 +486,15 @@ class TestDocstringGateCmd:
                             {"docstring_gate_cmd": "scripts/docstring_gate.py"})
         assert factory_lib.main(["factory_lib.py", "docstring-gate"]) == 0
         assert capsys.readouterr().out == "scripts/docstring_gate.py\n"
+
+
+class TestFinalGateSubcommand:
+    """final-gate CLI 子命令（ADR-009 唯一取值口）：fix-issue.sh /
+    validate-pr.sh read -ra 拆词消费。回归锚定：分发段曾整段丢失该
+    子命令（#85 审查发现），链脚本一调即"未知子命令" rc=2 炸链。"""
+
+    def test_main_subcommand_prints_command(self, capsys, monkeypatch):
+        monkeypatch.setattr(factory_lib, "_LOCAL_CFG",
+                            {"final_gate_cmd": "python3 tools/final_gate.py"})
+        assert factory_lib.main(["factory_lib.py", "final-gate"]) == 0
+        assert capsys.readouterr().out == "python3 tools/final_gate.py\n"

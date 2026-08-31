@@ -3,18 +3,19 @@
 ## 1. 需求条款（唯一事实源，全部可测）
 
 每条需求 = 一个可判定通过/失败的断言。命名空间 `spec:<代号>-<序号>`。
-`<代号>` = 变更短名（如 `claim-status`），测试用 `// spec:claim-status-001` 标签建立 grep 索引。
+`<代号>` = 变更短名（如 `claim-status`），测试按其语言注释语法贴标签建立 grep 索引（Python `# spec:claim-status-001`；Java/JS/TS/Go `// spec:claim-status-001`）。
 
 | ID | 条款（断言式表述） | 类型 | 关联 intent 约束 |
 |---|---|---|---|
-| spec:claim-status-001 | 未登录用户访问状态页必须返回 401 且不泄露 claim 信息 | 正例 | Constraints #2 |
+| spec:claim-status-001 | 未登录用户访问状态页必须返回 401 且不泄露 claim 信息 | 正例 | C2 |
 | spec:claim-status-002 | 已登录用户可查询自己名下 claim 的 4 种状态 | 正例 | — |
-| spec:claim-status-003 | 第三方理赔员（非授权角色）不得访问；缺席即合法（无需任何配置） | 否定式 | Constraints #3 |
-| spec:claim-status-004 | 面板不得引入新 PII 字段到 portal session | 否定式 | Constraints #1 |
+| spec:claim-status-003 | 第三方理赔员（非授权角色）不得访问；缺席即合法（无需任何配置） | 否定式 | C3 |
+| spec:claim-status-004 | 面板不得引入新 PII 字段到 portal session | 否定式 | C1 |
 
 规则：
 - 否定式条款（"X 必须缺席 / 不允许"）必须存在专门测试，禁止只测正例。（D2 digest 教训：31 个测试全绿共存于违规实现）
 - 无法写成断言的需求退回 intent 阶段澄清，不得以"设计取舍"名义降级。（gtsp-wop-gateway 教训）
+- intent Constraints 每条（C1、C2…）必须在"关联 intent 约束"列恰好映射一次，无法映射者在受影响面一节记录明确例外，禁止静默丢弃。
 
 ## 2. 设计决策
 | 决策点 | 选择 | 被否方案 | 理由 |
@@ -33,4 +34,4 @@
 | spec:claim-status-001 | test_status.py::test_unauth_401 | [ ] | |
 | spec:claim-status-003 | test_status.py::test_no_adjuster_by_default | [ ] | 否定式 |
 
-核对方式：从条款出发找测试（grep `// spec:<ID>` 或 spec_check.py），不是从测试反推条款。
+核对方式：从条款出发找测试（grep -E '# spec:<ID>|// spec:<ID>' 或 spec_check.py），不是从测试反推条款。

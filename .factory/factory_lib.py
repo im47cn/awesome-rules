@@ -290,7 +290,7 @@ def repo_vars_text() -> str:
         f"- final_gate 命令: {final_gate_cmd()}",
     ]
     if (dg := docstring_gate_cmd()) is not None:
-        lines.append(f"- docstring 门命令（对外 API 100% + 内部 ≥80%）: {dg}")
+        lines.append(f"- docstring 门命令: {dg}")
     if "pr_review_skills" in _LOCAL_CFG:
         # 键存在即严格校验（与 local-list 同规）：值损坏 fail-closed；
         # 键缺失 = 本仓无守卫技能面（如纯后端仓），合法省略该行。
@@ -950,6 +950,11 @@ def main(argv: list[str]) -> int:
     if cmd == "suites":
         for s in evidence_suites(argv[2:]):
             print(s)
+        return 0
+    if cmd == "final-gate":
+        # final-gate —— 确定性测试门命令（ADR-009 唯一取值口；fix-issue.sh
+        # / validate-pr.sh read -ra 拆词执行；配置损坏 fail-closed 非零终止）
+        print(final_gate_cmd())
         return 0
     if cmd == "docstring-gate":
         # docstring-gate —— docstring 门命令（可选键；空输出=未启用，链脚本跳过）

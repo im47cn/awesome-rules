@@ -190,5 +190,46 @@ else
     bad "NC15i 缺口语义异常: $(head -5 "$TMP/untagged_out")"
 fi
 
+# ── NC15j 粘滞作用域负控制：test_ 函数之后的标签不得闭合缺口 ────────────
+# 旧逐行状态机 current_test 首次设置后永不清除：任一 test_ 函数之后的
+# 模块级/普通函数注释会被误计入。锁 ast+tokenize 作用域判定。
+cat >"$TMP/tests/test_demo.py" <<'EOF'
+def test_unauth():
+    assert True
+
+# spec:demo-001 模块级注释（位于 test_ 函数之后）：不得计入覆盖
+
+def helper_not_test():
+    # spec:demo-002 普通函数内注释：同样不得计入
+    return 1
+EOF
+if "$PY" tools/spec_check.py --spec "$TMP/spec.md" --tests "$TMP/tests" >"$TMP/sticky" 2>&1; then
+    bad "NC15j 粘滞标签闭合了缺口（期望 rc!=0）"
+elif grep -q '\[GAP\]' "$TMP/sticky" && grep -q 'spec:demo-001' "$TMP/sticky" \
+     && grep -q 'spec:demo-002' "$TMP/sticky"; then
+    ok "NC15j test_ 后模块级/普通函数标签不计入，001/002 仍按缺口拦"
+else
+    bad "NC15j 缺口语义异常: $(head -5 "$TMP/sticky")"
+fi
+
+# ── NC15k 字符串字面量负控制：test_ 函数体内字符串里的标签不得闭合缺口 ──
+cat >"$TMP/tests/test_demo.py" <<'EOF'
+def test_str_literal():
+    msg = "see spec:demo-001 in docs"
+    assert msg
+
+def test_docstring_literal():
+    """docstring 提及 spec:demo-002 也不算注释标签"""
+    assert True
+EOF
+if "$PY" tools/spec_check.py --spec "$TMP/spec.md" --tests "$TMP/tests" >"$TMP/strlit" 2>&1; then
+    bad "NC15k 字符串字面量标签闭合了缺口（期望 rc!=0）"
+elif grep -q '\[GAP\]' "$TMP/strlit" && grep -q 'spec:demo-001' "$TMP/strlit" \
+     && grep -q 'spec:demo-002' "$TMP/strlit"; then
+    ok "NC15k 字符串/docstring 内标签不计入，001/002 仍按缺口拦"
+else
+    bad "NC15k 缺口语义异常: $(head -5 "$TMP/strlit")"
+fi
+
 [ "$fails" -eq 0 ] || { echo "test_spec_check: $fails 项失败"; exit 1; }
 echo "test_spec_check: 全部通过"

@@ -17,8 +17,11 @@
 """
 
 import argparse
+import ast
+import io
 import re
 import sys
+import tokenize
 from pathlib import Path
 
 # 示例：代号可含连字符，序号为数字结尾（如 spec:claim-status-<N>）。
@@ -28,7 +31,6 @@ CLAUSE_RE = re.compile(r"spec:[A-Za-z0-9][A-Za-z0-9_-]*-\d+")
 
 # 测试名/用例名提取，按语言分派（矩阵「条款 <- 测试::用例名」的可读性要求：
 # 非 Python 测试方法名不得退化为 <line N>；2026-08-31 审查发现，已补）。
-TEST_FUNC_RE    = re.compile(r"^\s*(?:async\s+def|def)\s+(test_\w+)\s*\(")   # .py
 GO_TEST_FUNC_RE = re.compile(r"^\s*func\s+(Test\w+)\s*\(")                    # .go
 JAVA_ANNOT_RE   = re.compile(r"^\s*@Test\b")                                  # .java 注解行
 JAVA_SIG_RE     = re.compile(r"(?:public|protected|private)?\s*(?:static\s+)?[\w<>\[\],. ]+\s+(\w+)\s*\(")
@@ -48,30 +50,68 @@ def extract_spec_clauses(spec_path: Path) -> dict[str, int]:
     return clauses
 
 
+def _collect_py_tags(
+    f: Path, text: str, tags: dict[str, list[tuple[Path, str, int]]]
+) -> None:
+    """收集 .py 测试标签：仅 test_ 函数体内 COMMENT token 计入覆盖。
+
+    ast 定 test_ 函数体行范围（装饰器行不算体；嵌套 def 归最外层
+    test_）；tokenize 只认 COMMENT token——字符串字面量/docstring 里的
+    spec:<ID> 天然不是注释，不计入（D2 教训：贴字面不等于贴测试）。
+    语法错误 → 无函数范围，全部标签不计（宽松降级：不炸进程，条款按
+    缺口拦，fail-closed 语义保守）；TokenError（截断文件）→ 保留已
+    收集部分。
+    """
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return
+    ranges = [
+        (n.lineno, n.end_lineno or n.lineno, n.name)
+        for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and n.name.startswith("test_")
+    ]
+    if not ranges:
+        return
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+            if tok.type != tokenize.COMMENT:
+                continue
+            for m in CLAUSE_RE.finditer(tok.string):
+                for lo, hi, name in ranges:
+                    if lo <= tok.start[0] <= hi:
+                        tags.setdefault(m.group(0), []).append(
+                            (f, name, tok.start[0]))
+                        break
+    except tokenize.TokenError:
+        pass
+
+
 def extract_test_tags(files: list[Path]) -> dict[str, list[tuple[Path, str, int]]]:
     """返回 {条款ID: [(文件, 用例名, 行号)]}。
 
-    标签计入覆盖的规则：.py 文件要求标签位于 test_ 函数体内（模块 docstring、
-    TODO 注释、字符串字面量里的 spec:<ID> 不闭合缺口，否则一行
-    "# TODO: 补 spec:demo-002 测试" 即可让门禁全绿——D2 教训：31 个测试全绿
-    共存于违规实现）。非 .py（java/go/ts 等，测试方法由框架注解标记）维持
-    宽松匹配（current_test 为空时记录为 <line N>）。
+    标签计入覆盖的规则：.py 文件要求标签位于 test_ 函数体内的注释
+    （_collect_py_tags：ast+tokenize 作用域判定——旧逐行状态机
+    current_test 首次设置后永不清除，test_ 函数之后的模块级/普通函数
+    注释会被误计入，2026-08-31 审查发现）。非 .py（java/go/ts 等，
+    测试方法由框架注解标记）维持宽松匹配（current_test 为空时记录为
+    <line N>）。
     """
     tags: dict[str, list[tuple[Path, str, int]]] = {}
     for f in files:
         try:
-            lines = f.read_text(encoding="utf-8").splitlines()
+            text = f.read_text(encoding="utf-8")
         except OSError as exc:
             sys.exit(f"spec_check: 无法读取 {f}: {exc}")
         ext = f.suffix
+        if ext == ".py":
+            _collect_py_tags(f, text, tags)
+            continue
         current_test = ""
         java_pending = False  # @Test 独占一行时，方法签名在下一行
-        for i, line in enumerate(lines, 1):
-            if ext == ".py":
-                m = TEST_FUNC_RE.match(line)
-                if m:
-                    current_test = m.group(1)
-            elif ext == ".go":
+        for i, line in enumerate(text.splitlines(), 1):
+            if ext == ".go":
                 m = GO_TEST_FUNC_RE.match(line)
                 if m:
                     current_test = m.group(1)
@@ -93,8 +133,6 @@ def extract_test_tags(files: list[Path]) -> dict[str, list[tuple[Path, str, int]
                 if m:
                     current_test = m.group(1)
             for m in CLAUSE_RE.finditer(line):
-                if ext == ".py" and not current_test:
-                    continue
                 tags.setdefault(m.group(0), []).append((f, current_test or f"<line {i}>", i))
     return tags
 

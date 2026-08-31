@@ -7,6 +7,8 @@
 #       - 孤儿（测试有、spec 无条款）→ 阻断提交（--ignore-orphans 可降级）
 #       - 无 spec 变更 / spec 文档不含 spec:<ID> 条款 → 跳过（非 spec 工作流文档）
 # 判定"是 spec 文档"：文件名含 spec 子串且内容含 CLAUSE_RE 匹配的 spec:<ID> 字面量。
+# 判定与核对一律读暂存快照（git show :<f>）：部分暂存（index 与工作树分叉）时，
+# 核对面必须是将要提交的 index 内容——读工作树会放行未核验条款、误拦已修复内容。
 # 判定后缺条款仍 fail-closed（spec_check.py 零条款 rc=1）。
 # 解释器缺失 / 脚本缺失 → 提示后放行（全量兜底在 CI gauntlet spec-check-self-test 层）
 # 跳过门禁: git commit --no-verify
@@ -24,8 +26,8 @@ for f in "$@"; do
   case "$f" in
     *spec*.md)
       # 文件名含 spec 子串不等于 spec 工作流文档（inspection.md 等普通文档）。
-      # 内容不含 spec:<ID> 条款字面量 → 视为非 spec 文档跳过，不拦。
-      if grep -qE 'spec:[A-Za-z0-9][A-Za-z0-9_-]*-[0-9]+' "$f"; then
+      # 内容不含 spec:<ID> 条款字面量 → 视为非 spec 文档跳过，不拦（读暂存快照）。
+      if git show :"$f" 2>/dev/null | grep -qE 'spec:[A-Za-z0-9][A-Za-z0-9_-]*-[0-9]+'; then
         SPECS+=("$f")
       fi;;
     *.py|*.java|*.go|*.ts|*.tsx|*.js|*.jsx|*.kt) TESTS+=("$f");;
@@ -49,15 +51,14 @@ SPEC_CHECK="$ROOT/.lefthook/spec_check.py"
 [ -f "$SPEC_CHECK" ] || SPEC_CHECK="$ROOT/tools/spec_check.py"
 [ -f "$SPEC_CHECK" ] || { echo "[spec-check] 缺 spec_check.py（.lefthook/ 与 tools/ 均无），跳过（CI gauntlet 兜底）"; exit 0; }
 
-# 本次提交未带测试文件时，回落 tracked 测试文件清单（spec 早已合入、测试在后续提交的场景）。
-# 扫 tracked 面（与 gauntlet 扫描面一致，67c2965b 原则）；显式排除 .lefthook/ 自身——
-# 否则 spec_check.py 副本会被扫入，其源码中的示例串/注释会误报为孤儿标签。
-if [ "${#TESTS[@]}" -eq 0 ]; then
-  while IFS= read -r f; do TESTS+=("$f"); done < <(
-    git ls-files '*.py' '*.java' '*.go' '*.ts' '*.tsx' '*.js' '*.jsx' '*.kt' \
-      | grep -v '^\.lefthook/'
-  )
-fi
+# 测试集始终合并 tracked 全集（与 gauntlet 扫描面一致，67c2965b 原则；显式排除
+# .lefthook/ 自身——否则 spec_check.py 副本会被扫入，其源码中的示例串会误报为
+# 孤儿标签）：条款可由未修改的存量测试覆盖，只传本次提交的测试文件会误报 GAP
+# （2026-08-31 审查发现）。工作树已删的 tracked 文件跳过。
+while IFS= read -r f; do
+  [ -f "$f" ] && TESTS+=("$f")
+done < <(git ls-files '*.py' '*.java' '*.go' '*.ts' '*.tsx' '*.js' '*.jsx' '*.kt' \
+  | grep -v '^\.lefthook/')
 if [ "${#TESTS[@]}" -eq 0 ]; then
   # 有 spec 条款却无任何测试文件：全部条款按缺口计，fail-closed 拦截。
   # 不给 spec_check.py 传裸 --tests（argparse rc=2 用法错误，误导排障）。
@@ -65,9 +66,33 @@ if [ "${#TESTS[@]}" -eq 0 ]; then
   exit 1
 fi
 
+# 暂存快照导出：SPECS/TESTS 逐个 git show 到镜像目录，spec_check.py 在镜像内
+# 以相对路径核对（报告路径与仓内一致）。导出失败（如 index 并发变化）不静默
+# 放行：spec 导出失败 / 测试全导出失败均 fail-closed 拦截。
+SNAP="$(mktemp -d)"
+trap 'rm -rf "$SNAP"' EXIT
+for f in "${SPECS[@]}" "${TESTS[@]}"; do
+  mkdir -p "$SNAP/$(dirname "$f")"
+  git show :"$f" > "$SNAP/$f" 2>/dev/null || true
+done
+SPEC_SNAP=()
+TEST_SNAP=()
+for f in "${SPECS[@]}"; do [ -f "$SNAP/$f" ] && SPEC_SNAP+=("$f"); done
+for f in "${TESTS[@]}"; do [ -f "$SNAP/$f" ] && TEST_SNAP+=("$f"); done
+if [ "${#SPEC_SNAP[@]}" -eq 0 ]; then
+  echo "[spec-check] spec 暂存快照导出失败，阻断提交"; exit 1
+fi
+if [ "${#TEST_SNAP[@]}" -eq 0 ]; then
+  echo "[spec-check] 测试暂存快照导出失败，阻断提交"; exit 1
+fi
+
 rc=0
-for s in "${SPECS[@]}"; do
+# --tests 是 argparse append 单值项：多文件必须逐个 --tests <f>，
+# 展开成裸位置参数会被拒（rc=2 用法错误，旧回落路径同此 bug）。
+TEST_ARGS=()
+for f in "${TEST_SNAP[@]}"; do TEST_ARGS+=(--tests "$f"); done
+for s in "${SPEC_SNAP[@]}"; do
   echo "[spec-check] 核对 $s"
-  "$PY" "$SPEC_CHECK" --spec "$s" --tests "${TESTS[@]}" || rc=$?
+  (cd "$SNAP" && "$PY" "$SPEC_CHECK" --spec "$s" "${TEST_ARGS[@]}") || rc=$?
 done
 exit $rc
