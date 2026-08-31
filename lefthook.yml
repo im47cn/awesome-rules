@@ -15,6 +15,9 @@ pre-commit:
   commands:
     coverage-light:
       run: bash tools/git/lefthook/coverage.sh light {staged_files}
+    # spec 条款 <-> 测试反向核对（与分发模板 tools/git/lefthook.yml 一致，仅路径不同）
+    spec-check:
+      run: bash tools/git/lefthook/spec-check.sh {staged_files}
 
 pre-push:
   commands:
@@ -23,3 +26,6 @@ pre-push:
     # 项目自定义测试入口: scripts/pre-push-tests.sh（本仓库私有门禁 = run_tests.sh）
     tests:
       run: bash tools/git/lefthook/run-tests.sh {push_files}
+    # Sourcery 硬闸: 仓库 opt-in（.sourcery.yaml 存在）才启用（与分发模板一致，仅路径不同）
+    sourcery-gate:
+      run: bash tools/git/lefthook/sourcery-gate.sh {push_files}

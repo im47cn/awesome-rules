@@ -307,3 +307,54 @@ class TestFinalGateDriftLock:
                 factory_lib.final_gate_cmd()
         finally:
             factory_lib._LOCAL_CFG = orig
+
+
+class TestDocstringGateWords:
+    """docstring_gate_cmd 加载（2026-08-31 可选门）：键缺失 → None；
+    键存在 → 与 final_gate_cmd 同规（非空字符串 + 禁引号/反斜杠）。"""
+
+    def test_missing_key_returns_none(self, tmp_path):
+        cfg = tmp_path / "factory-local.json"
+        cfg.write_text(json.dumps({"final_gate_cmd": "x"}), encoding="utf-8")
+        assert mut._docstring_gate_words(cfg) is None
+
+    def test_valid_command_splits(self, tmp_path):
+        cfg = tmp_path / "factory-local.json"
+        cfg.write_text(json.dumps({"docstring_gate_cmd": "scripts/docstring_gate.py"}),
+                       encoding="utf-8")
+        assert mut._docstring_gate_words(cfg) == ["scripts/docstring_gate.py"]
+
+    @pytest.mark.parametrize("bad_val", [123, ["a"], True, ""])
+    def test_non_string_or_empty_fails_closed(self, tmp_path, bad_val):
+        cfg = tmp_path / "factory-local.json"
+        cfg.write_text(json.dumps({"docstring_gate_cmd": bad_val}), encoding="utf-8")
+        with pytest.raises(RuntimeError, match="docstring_gate_cmd"):
+            mut._docstring_gate_words(cfg)
+
+    def test_quote_or_backslash_fails_closed(self, tmp_path):
+        cfg = tmp_path / "factory-local.json"
+        cfg.write_text(json.dumps({"docstring_gate_cmd": 'sh -c "x"'}),
+                       encoding="utf-8")
+        with pytest.raises(RuntimeError, match="docstring_gate_cmd"):
+            mut._docstring_gate_words(cfg)
+
+
+class TestDocstringGateJudge:
+    """docstring 门退出码域 {0,1}（与 tests 同规）：rc=2/超时 = 无效运行 FAIL。"""
+
+    def _def(self, expect_block):
+        return mut.Defect("D-01", "d", "t", "f", "r", "docstring", expect_block)
+
+    def test_rc1_blocks(self):
+        assert mut.judge(self._def(True), 1) == ("PASS", "blocked=True（rc=1）符合预期")
+
+    def test_rc0_passes_negative(self):
+        assert mut.judge(self._def(False), 0) == ("PASS", "blocked=False（rc=0）符合预期")
+
+    def test_rc2_invalid_run(self):
+        verdict, detail = mut.judge(self._def(True), 2)
+        assert verdict == "FAIL" and "无效退出码" in detail
+
+    def test_timeout_invalid_run(self):
+        verdict, _ = mut.judge(self._def(True), None)
+        assert verdict == "FAIL"
