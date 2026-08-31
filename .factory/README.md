@@ -19,12 +19,12 @@
 | `cron-dispatch.sh` | hub kick 入口（LaunchAgent 600s → 锁 + dispatch 单轮） |
 | `factory-state.sh` | 标签同步器（托管平台事实 → state.py 推导 → 幂等收敛） |
 | `hosting.py` + `tests/test_hosting.py` | 托管平台抽象层（ADR-008）：中立 schema（issue/pr/label history）+ GitHub（gh）/Codeup（云效 oapi）双适配器；核心脚本零 gh 直调。Codeup 评论标记模型（#66）：add 标记评论/置 resolved/changes-requested 手势承载类标与轮次语义，全链状态机可跑 |
-| `validate-pr.sh` | S3 PR 门禁链（guard → tests → AI 评审 → holdout，人类合并前独立验证） |
+| `validate-pr.sh` | S3 PR 门禁链（guard → tests → docstring(可选) → AI 评审 → holdout，人类合并前独立验证） |
 | `state.py` + `tests/`（含 test_state.py） | 状态机权威（TRANSITIONS 唯一 spec）与全套测试 |
 | `feedback.py` + `feedback-upstream.sh` | 本仓工厂改进反哺上游（决策零 LLM，AI 仅适配内容；上游指针 = factory-local.json，ADR-009） |
 | `breaker.sh` | R4 成本熔断门（fix-issue/dispatch/cron-dispatch/triage-batch 四入口共用接线点，透传 factory_lib breaker 码） |
 | `factory-lib.sh` + `factory_lib.py` | 链副作用共享库（issue 评论唯一出口/拒绝单一动作/租约围栏钩位）+ python 工具箱（timeout 分级预算/breaker/回执解析 + dispatch 进程编排：并发槽/收割/硬锁，ADR-005）。`omp_node()` 是 omp CLI 唯一执行点（ADR-009 引擎收口）——换引擎只改此函数 |
-| `factory-local.json` | 工厂本地化配置（M4 + ADR-009）：perimeter/reject_guidance（guard 判据）+ repo_identity/reading_scopes/review_basis/final_gate_cmd/pr_review_skills（prompt 仓库参数与门命令）+ upstream_repo/upstream_path/feedback_branch_prefix（反哺上游指针）——链脚本与 prompts 零本地化的全部数据载体；改后须重跑 mutations 重证 |
+| `factory-local.json` | 工厂本地化配置（M4 + ADR-009）：perimeter/reject_guidance（guard 判据）+ repo_identity/reading_scopes/review_basis/final_gate_cmd/docstring_gate_cmd（可选门，缺省不启用）/pr_review_skills（prompt 仓库参数与门命令）+ upstream_repo/upstream_path/feedback_branch_prefix（反哺上游指针）——链脚本与 prompts 零本地化的全部数据载体；改后须重跑 mutations 重证 |
 | `upstream-sync-check.sh` | M2 上游同步检查（dispatch 轮末）：full 漂移→确定性 PR 流；local 漂移→needs-human issue；无凭据降级仅报告 |
 | `sync-from-upstream.sh` + `DISTRIBUTION.json` | M1 上游同步：三态分发清单（full/local/skip）+ 下游拉取（--check 门禁/--apply 追平+锚点） |
 | `decisions.md` | 工厂决策记录（ADR-001~008：租约仲裁/A3 记账/单写者降级/周回归/dispatch 下沉/触发器计数口径/forge 平台适配/托管平台抽象层）；进程管理类缺陷须在此记账（ADR-002，合并前自愈不计数，ADR-006） |
@@ -74,7 +74,8 @@ NODE_TIMEOUT=30m .factory/fix-issue.sh 42           # 重跑链，triage 全新�
   → prime（研究笔记，不做设计）
   → plan（任务级计划 plan.json，含每任务 verify 命令）
   → implement ↔ review ralph 修复轮（implement 逐任务执行，周界任务
-               跳过标 blocked，末尾跑 final_gate 存 tests-output.txt，
+               跳过标 blocked，末尾跑 final_gate 存 tests-output.txt 与
+               docstring 门（docstring_gate_cmd 配置时）存 docstring-output.txt，
                提交不推送；review 链内自审修小问题，可行动发现落
                ralph-todo.md——非空即回流 implement 再修再审，
                ≤FACTORY_RALPH_MAX 轮（默认 2），耗尽的残留随 review.md
@@ -99,6 +100,7 @@ triage 的输入，不是决策手势；标签才是）。
 | `issue.json` | 链脚本 | `gh issue view --json` 原始数据 |
 | `triage.json` | triage | verdict / priority / reasons |
 | `tests-output.txt` | implement（review 修复后刷新） | final_gate 完整输出 + 触及套件 `-v` 测试名证据（holdout 唯一证据源；静默点号输出 = 证据饥饿，holdout 将合法 FAIL） |
+| `docstring-output.txt` | implement（review 修复后刷新） | docstring 门输出（docstring_gate_cmd 配置时；对外 API 100% + 内部 ≥80% 逐符号缺失清单；门失败 = 链终止） |
 | `plan.json` | plan | tasks[] 每项含 verify 命令；forbidden 周界清单 |
 | `implement.md` | implement | 执行日志（每任务改动与 verify 结果） |
 | `review.md` | review | 自审报告（已修复 / 待人类） |

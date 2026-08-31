@@ -60,6 +60,15 @@ if [ "${DRY}" = 0 ]; then
   if ! (cd "${REPO}" && "${GATE_ARGS[@]}") > "${DIR}/tests-output.txt" 2>&1; then
     fail tests "测试门失败（详见 ${DIR}/tests-output.txt）" 1
   fi
+  # docstring 门（可选门：docstring_gate_cmd 未配置 → 空输出跳过；配置损坏
+  # → factory_lib fail-closed 非零终止）。产物独立落 docstring-output.txt。
+  DG_CMD="$(python3 "${REPO}/.factory/factory_lib.py" docstring-gate)"
+  if [ -n "${DG_CMD}" ]; then
+    read -r -a DG_ARGS <<< "${DG_CMD}"
+    if ! (cd "${REPO}" && "${DG_ARGS[@]}") > "${DIR}/docstring-output.txt" 2>&1; then
+      fail docstring "docstring 门失败（详见 ${DIR}/docstring-output.txt）" 1
+    fi
+  fi
   for suite in $(python3 "${REPO}/.factory/factory_lib.py" suites "${CHANGED[@]}"); do
     [ -d "${REPO}/${suite}" ] || continue
     echo "" >> "${DIR}/tests-output.txt"
@@ -68,6 +77,7 @@ if [ "${DRY}" = 0 ]; then
   done
 else
   echo "[dry-run] 测试门（final_gate_cmd） → ${DIR}/tests-output.txt + 证据段"
+  echo "[dry-run] docstring 门（docstring_gate_cmd，未配置则跳过） → ${DIR}/docstring-output.txt"
 fi
 
 # --- 3. AI 评审（按触及面选配；PR 级独立进程，不共享 fix-issue 会话） ---

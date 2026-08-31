@@ -427,6 +427,16 @@ if [ "${DRY}" = 0 ]; then
   if ! (cd "${WT}" && "${GATE_ARGS[@]}") > "${DIR}/tests-output.txt" 2>&1; then
     echo "测试门失败（详见 ${DIR}/tests-output.txt）" >&2; exit 1
   fi
+  # docstring 门（可选门：docstring_gate_cmd 未配置 → 空输出跳过；配置损坏
+  # → factory_lib fail-closed 非零终止）。对外 API 100% + 内部 ≥80% 阈值
+  # 由各仓检查器自定；产物独立落 docstring-output.txt，不污染测试证据。
+  DG_CMD="$(python3 "${REPO}/.factory/factory_lib.py" docstring-gate)"
+  if [ -n "${DG_CMD}" ]; then
+    read -r -a DG_ARGS <<< "${DG_CMD}"
+    if ! (cd "${WT}" && "${DG_ARGS[@]}") > "${DIR}/docstring-output.txt" 2>&1; then
+      echo "docstring 门失败（详见 ${DIR}/docstring-output.txt）" >&2; exit 1
+    fi
+  fi
   # 证据段：触及的测试套件以 -v 重跑附于末尾——holdout 不许推测，
   # 需要可引用的测试名/参数化用例名（-q 点号无法建立诉求对应关系）
   for suite in $(python3 "${REPO}/.factory/factory_lib.py" suites ${CHANGED}); do
@@ -437,6 +447,7 @@ if [ "${DRY}" = 0 ]; then
   done
 else
   echo "[dry-run] guard.py --files <changed> + 测试门(final_gate_cmd) → ${DIR}/tests-output.txt（脚本生成）"
+  echo "[dry-run] docstring 门（docstring_gate_cmd，未配置则跳过） → ${DIR}/docstring-output.txt"
 fi
 
 # --- 7. holdout（独立验证；输入白名单见 prompt） ---

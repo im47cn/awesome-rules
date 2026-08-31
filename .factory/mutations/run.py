@@ -9,6 +9,9 @@
 - tests（行为破坏类）：run_tests.sh --no-lock 全量测试门（8 套件 +
   badcase 双通道；--no-lock 跳过 plugin_lock/md_link_check——它们是
   blob 锁与链接门，不消费被注入的行为面），单条分钟级，输出带耗时。
+- docstring（文档契约类）：factory-local.json docstring_gate_cmd（可选门，
+  缺省不启用；未配置时 docstring 缺陷 SKIP，不构成全绿）——删除公开/内部
+  符号 docstring → 门应拦截（对外 API 100% + 内部 ≥80%），单条秒级。
 
 用法:
   python3 .factory/mutations/run.py [--only G-01,B-101] [--defects <path>]
@@ -75,6 +78,40 @@ def _final_gate_words(cfg_path: Path | None = None) -> list[str]:
 
 
 FINAL_GATE = _final_gate_words()
+
+
+def _docstring_gate_words(cfg_path: Path | None = None) -> list[str] | None:
+    """docstring 门命令（可选键）：factory-local.json docstring_gate_cmd 拆词。
+
+    与 _final_gate_words 同构但为**可选**门：键缺失/空 → None（未启用，
+    链脚本跳过；mutations 中 docstring 缺陷 SKIP——未启用的门无灵敏度
+    可证，不构成全绿）。键存在 → 校验同 final_gate_cmd（非空字符串 +
+    禁引号 + 禁反斜杠，fail-closed：配置损坏即 RuntimeError，禁止静默
+    降级为无门）。阈值（对外 API 100% + 内部 ≥80%）由各仓检查器自定，
+    本处只承载命令词。
+    """
+    p = cfg_path or REPO_ROOT / ".factory" / "factory-local.json"
+    try:
+        cfg = json.loads(p.read_text(encoding="utf-8"))
+        if "docstring_gate_cmd" not in cfg:
+            return None
+        raw_val = cfg["docstring_gate_cmd"]
+        if not isinstance(raw_val, str):
+            raise ValueError("docstring_gate_cmd 须为非空字符串")
+        raw = raw_val.strip()
+        if "'" in raw or '"' in raw:
+            raise ValueError("docstring_gate_cmd 禁含引号（与 bash 侧 read -r -a 拆词一致性，R2-N8）")
+        if "\\" in raw:
+            raise ValueError("docstring_gate_cmd 禁含反斜杠（shlex 转义与 read -r 字面语义分叉，ADR-010）")
+        words = shlex.split(raw)
+        if not words:
+            raise ValueError("docstring_gate_cmd 为空")
+    except Exception as exc:
+        raise RuntimeError(f"factory-local.json docstring_gate_cmd 不可用（fail-closed）: {exc}") from exc
+    return list(words)
+
+
+DOCSTRING_GATE = _docstring_gate_words()
 
 # 门超时预算（tests 门自身无超时参数，此处兜底）。tests 门实测基线
 # ~10s；600s ≈ 60 倍余量，超时即无效运行（judge 判 FAIL，不计击杀/放行）。
@@ -167,7 +204,7 @@ def load_defects(path: Path) -> list[Defect]:
         if d.id in seen:
             raise ValueError(f"缺陷 id 重复: {d.id}")
         seen.add(d.id)
-        if d.gate not in ("guard", "tests"):
+        if d.gate not in ("guard", "tests", "docstring"):
             raise ValueError(f"{d.id}: 未知 gate '{d.gate}'")
     return defects
 
@@ -202,11 +239,12 @@ def run_gate(gate: str, target: str) -> int | None:
         cmd = [sys.executable, str(GUARD), "--files", target]
         timeout = GUARD_TIMEOUT
     else:
-        # ADR-009：tests 门命令自 factory-local.json final_gate_cmd 拆词后
-        # 直执——无 bash 前缀，与 shell 侧 "${GATE_ARGS[@]}" 同构（PR #71
+        # ADR-009：tests/docstring 门命令自 factory-local.json 拆词后直执
+        # ——无 bash 前缀，与 shell 侧 "${GATE_ARGS[@]}" 同构（PR #71
         # Sourcery #1：bash 前缀使 PATH 型命令必失败）；fail-closed 加载
-        # 于模块常量段。
-        cmd = list(FINAL_GATE)
+        # 于模块常量段。docstring 门未配置的缺陷已由 main 前置 SKIP，
+        # 此处 DOCSTRING_GATE 必非 None。
+        cmd = list(FINAL_GATE if gate == "tests" else DOCSTRING_GATE)
         timeout = TESTS_TIMEOUT
     start = time.monotonic()
     # 安全审计落档（PR #33 Sourcery/opengrep dangerous-subprocess-use-audit）：
@@ -259,8 +297,8 @@ def judge(defect: Defect, rc: int | None) -> tuple[str, str]:
     """
     if rc is None:
         return "FAIL", "门超时（无效运行：不构成击杀/放行证据）"
-    if defect.gate == "tests" and rc not in (0, 1):
-        return "FAIL", f"无效退出码 rc={rc}（run_tests.sh 域为 0/1）"
+    if defect.gate in ("tests", "docstring") and rc not in (0, 1):
+        return "FAIL", f"无效退出码 rc={rc}（{defect.gate} 门域为 0/1）"
     blocked = rc != 0
     if blocked == defect.expect_block:
         return "PASS", f"blocked={blocked}（rc={rc}）符合预期"
@@ -304,6 +342,10 @@ def main() -> int:
             outcomes.append(Outcome(d, "SKIP", "target 含人工未提交修改"))
             print("    SKIP: target 含人工未提交修改，避免交叠")
             continue
+        if d.gate == "docstring" and DOCSTRING_GATE is None:
+            outcomes.append(Outcome(d, "SKIP", "docstring 门未配置（factory-local.json 缺 docstring_gate_cmd，缺省不启用）"))
+            print("    SKIP: docstring 门未配置（缺省不启用），缺陷无法验证")
+            continue
 
         original: str | None = None
         try:
@@ -339,7 +381,8 @@ def main() -> int:
         print(f"  [{o.defect.id}] {o.status:10s} {o.detail}")
     total_killed = total_positive = 0
     for gate, label in (("guard", "篡改类拦截（guard 门）"),
-                        ("tests", "行为破坏类拦截（tests 门）")):
+                        ("tests", "行为破坏类拦截（tests 门）"),
+                        ("docstring", "docstring 缺陷拦截（docstring 门）")):
         positive = [o for o in outcomes if o.defect.gate == gate and o.defect.expect_block]
         killed = [o for o in positive if o.status == "PASS"]
         total_killed += len(killed)
