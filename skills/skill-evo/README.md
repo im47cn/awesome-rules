@@ -2,7 +2,7 @@
 
 会话经验自动总结与规范/技能进化 — 参考 Hermes self-evolution 的闭环：会话结束后自动提炼「用户纠正 / 失败模式 / 成功模式」，生成对 `skills/*/SKILL.md` 与 `steering/*.md` 的进化提案，人工审核后应用。
 
-> **状态**：✅ v2 已实现（CC SessionEnd hook + omp 原生 hook 双端自动触发；GEPA 进化引擎待标注积累）。测试：`pytest skills/skill-evo/scripts/tests -q`（LLM 调用全 mock）。
+> **状态**：✅ v2 已实现（CC SessionEnd hook + omp 原生 hook 双端自动触发；GEPA 进化引擎已落地 replay-eval 确定性评估集打分链路，见 `docs/design/skill-evo-replay-eval.md`）。测试：`pytest skills/skill-evo/scripts/tests -q`（LLM 调用全 mock）。
 
 ## 架构
 
@@ -58,7 +58,11 @@ GEPA 进化（冷启动保护：标注 ≥10 cases 且 ≥8 sessions 才可运�
 ```bash
 python3 skills/skill-evo/scripts/evo.py evolve --dry-run  # 查看标注积累进度
 python3 skills/skill-evo/scripts/evo.py evolve            # 进化总结 prompt（预算默认 16 rollouts）
+python3 skills/skill-evo/scripts/evo.py evolve --skill ddl-guard  # replay-eval 评估集链路
+
 ```
+
+replay-eval 链路（详见 `docs/design/skill-evo-replay-eval.md`）：以 `skills/<skill>/badcase/`（拦截）+ `eval/`（放行/混合）确定性评估集为打分信号源，GEPA 候选经 headless claude 审查、确定性解析器提取检出清单、逐 case F1 打分；holdout 集独立于 rollout 预算必评（baseline c0 作改善锚），门禁拒绝「全盘拒绝」型退化，改善 > 0.2 才生成 prompt_evolution 型 pending 提案（人工采纳，不自动 apply）。
 
 ## 提案格式
 
