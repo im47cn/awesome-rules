@@ -48,10 +48,10 @@ def test_f1_recall_and_precision_dimensions():
     assert R.f1_score(1, 2, 2, 1) == 2 * (0.5 * 0.5) / (0.5 + 0.5) == 0.5
     # 放行型：expected 空 + actual 非空 → precision 0 → F1 0（全盘拒绝被对称惩罚）
     assert R.f1_score(tp=0, n_expected=0, n_actual=3, n_hit_actual=0) == 0.0
-    # 完美（n_hit_actual 默认 None → 按 n_actual，语义等价）
-    assert R.f1_score(tp=2, n_expected=2, n_actual=2) == 1.0
+    # 完美：2 actual 全命中 → n_hit_actual=2
+    assert R.f1_score(tp=2, n_expected=2, n_actual=2, n_hit_actual=2) == 1.0
     # 双零 = 空 expected + 空 actual = 干净放行 → F1 1（与实现语义一致）
-    assert R.f1_score(tp=0, n_expected=0, n_actual=0) == 1.0
+    assert R.f1_score(tp=0, n_expected=0, n_actual=0, n_hit_actual=0) == 1.0
 
 
 def test_reconcile_missing_and_unexpected():
@@ -171,8 +171,6 @@ def test_f1_score_merged_hit_bounded():
     assert tp == 2 and unexpected == []
     s = R.f1_score(tp, 2, 1, 1 - len(unexpected))
     assert s == 1.0                      # 全检出，F1=1 不越界
-    # 未传 n_hit_actual（旧调用）：按 n_actual 兼容
-    assert R.f1_score(1, 2, 1) == 2 * 0.5 * 1.0 / 1.5
     # 全 miss：命中 actual=0 → precision=0 → F1=0
     tp2, _, unexpected2 = R.reconcile(["拼音"], ["无关评论"])
     assert R.f1_score(tp2, 1, 1, 1 - len(unexpected2)) == 0.0
@@ -270,6 +268,7 @@ def test_control_gate_reject_all_below_clean():
     assert gate == 0.0
     # 干净执行参照：逐 case F1=1 → 门禁 F1 显著更低
     clean = sum(R.f1_score(len(c.reference["expected_rules"]),
+                           len(c.reference["expected_rules"]),
                            len(c.reference["expected_rules"]),
                            len(c.reference["expected_rules"])) for c in [release, intercept]) / 2
     assert gate < clean

@@ -195,18 +195,18 @@ def reconcile(expected_rules: List[str], actual_rules: List[str]) -> Tuple[int, 
     return tp, missing, unexpected
 
 
-def f1_score(tp: int, n_expected: int, n_actual: int, n_hit_actual: int = None) -> float:
+def f1_score(tp: int, n_expected: int, n_actual: int, n_hit_actual: int) -> float:
     """逐 case F1：recall=TP/|expected|（空=1）、precision=命中 actual 数/|actual|（空=1）。
 
     n_hit_actual = 至少命中一条 expected 的 actual 条数（len(actual)-len(unexpected)）。
     子串匹配下「一条 actual 命中多条 expected」（如「表名使用拼音和泛化词」含两个
     子串）是常态，tp 是 expected 口径可 > n_actual；precision 若直接用 tp/n_actual
     会 >1 越界（F1>1，违反 score∈[0,1] 契约，且合并检出可被 gaming 抬高 precision）。
-    命中 actual 数只计一次 → precision ≤ 1。默认 None 兼容旧调用（未传按 n_actual）。
+    命中 actual 数只计一次 → precision ≤ 1。必传参数：漏传即 TypeError，避免静默
+    回退抬高 precision。
     """
     recall = 1.0 if n_expected == 0 else tp / n_expected
-    hit = n_actual if n_hit_actual is None else n_hit_actual
-    precision = 1.0 if n_actual == 0 else hit / n_actual
+    precision = 1.0 if n_actual == 0 else n_hit_actual / n_actual
     if recall + precision == 0:
         return 0.0
     return 2 * precision * recall / (precision + recall)
