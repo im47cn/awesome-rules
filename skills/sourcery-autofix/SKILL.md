@@ -28,7 +28,7 @@ description: >
    `.py|.go|.java|.cs|.php|.ts|.js`；全仓扫描禁止（翻历史 issue 噪音）；
 2. **同配置**：仓库有 `.sourcery.yaml` 必须 `--config .sourcery.yaml`——
    本地、CI gate、sourcery-ai[bot] 三方同引擎同配置，否则本地修的 gate 不认；
-3. 执行 `sourcery review --fix <files>`；
+3. 执行 `sourcery review --fix --config .sourcery.yaml <files>`；
 4. fix 产生了 diff → **探测测试命令**（pom.xml→`mvn verify`；
    pyproject/pytest 配置→`pytest`；package.json `scripts.test`→`npm test`；
    均无→明确告知未探测到），**明示探测结果请用户确认后**再跑全量测试；
