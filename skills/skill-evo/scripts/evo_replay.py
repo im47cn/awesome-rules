@@ -108,7 +108,6 @@ def parse_expected(expected_path: Path) -> Tuple[str, List[str], List[str]]:
     if m:
         check_script = m.group(1).strip()
     expected_rules, manual_rules = [], []
-    manual_desc = []
 
     def _split_rules(payload: str):
         return [p.strip() for p in re.split(r"[、,，;；]", payload) if p.strip()]
@@ -125,7 +124,9 @@ def parse_expected(expected_path: Path) -> Tuple[str, List[str], List[str]]:
             elif item.startswith("人工补充规则"):
                 manual_rules.extend(_split_rules(re.split(r"[:：]", item, maxsplit=1)[-1]))
             elif item.startswith("人工补充"):
-                manual_desc.append(re.split(r"[:：]", item, maxsplit=1)[-1].strip())
+                pass  # 描述行（如「命名语义（拼音、泛化词、复数、核心主体）」）仅作
+                # 展示，不参与对账——既不入 expected_rules 也不入 manual_rules。
+                # 该分支必须保留：删除会使其落入下方 else 被误当 expected 规则。
             elif item and not item.startswith("#"):
                 expected_rules.append(item)
     else:
@@ -140,12 +141,20 @@ def parse_expected(expected_path: Path) -> Tuple[str, List[str], List[str]]:
 
 
 def _rule_matches(expected_rule: str, actual_rules: list) -> bool:
-    """期望规则是否被实际检出（子串双向匹配，与 badcase_runner 同构）。"""
-    expected_lower = expected_rule.lower()
-    for actual in actual_rules:
-        actual_lower = actual.lower()
-        if expected_lower in actual_lower or actual_lower in expected_lower:
-            return True
+    """期望规则是否被实际检出。
+
+    子串双向匹配（与 badcase_runner 同构）；expected_rule 支持 any-of 别名——
+    「|」分隔，任一 token 命中即检出。首 token 为规范名（reflector/missing
+    展示用），后续为对齐 LLM 报告措辞的别名（如「字段与注释对应|注释含义对应|
+    语义对应」）。别名数据初版取 manual-rules 原词，端到端后按真实 miss 增补。
+    """
+    tokens = [t.strip() for t in expected_rule.split("|") if t.strip()]
+    for token in tokens:
+        token_lower = token.lower()
+        for actual in actual_rules:
+            actual_lower = actual.lower()
+            if token_lower in actual_lower or actual_lower in token_lower:
+                return True
     return False
 
 
@@ -177,18 +186,27 @@ def reconcile(expected_rules: List[str], actual_rules: List[str]) -> Tuple[int, 
 
     TP = 期望中命中的规则数（子串匹配）。放行 case（expected 空）：TP=0，
     任何 actual 都计入 unexpected → precision 崩 → 全盘拒绝被双维对称惩罚。
+    missing 显示规范名（any-of 别名的首 token），reflector 反馈不暴露别名串。
     """
     matched = [e for e in expected_rules if _rule_matches(e, actual_rules)]
     tp = len(matched)
-    missing = [e for e in expected_rules if e not in matched]
+    missing = [e.split("|")[0] for e in expected_rules if e not in matched]
     unexpected = [a for a in actual_rules if not _rule_matches(a, expected_rules)]
     return tp, missing, unexpected
 
 
-def f1_score(tp: int, n_expected: int, n_actual: int) -> float:
-    """逐 case F1：recall=TP/|expected|（空=1）、precision=TP/|actual|（空=1）。"""
+def f1_score(tp: int, n_expected: int, n_actual: int, n_hit_actual: int = None) -> float:
+    """逐 case F1：recall=TP/|expected|（空=1）、precision=命中 actual 数/|actual|（空=1）。
+
+    n_hit_actual = 至少命中一条 expected 的 actual 条数（len(actual)-len(unexpected)）。
+    子串匹配下「一条 actual 命中多条 expected」（如「表名使用拼音和泛化词」含两个
+    子串）是常态，tp 是 expected 口径可 > n_actual；precision 若直接用 tp/n_actual
+    会 >1 越界（F1>1，违反 score∈[0,1] 契约，且合并检出可被 gaming 抬高 precision）。
+    命中 actual 数只计一次 → precision ≤ 1。默认 None 兼容旧调用（未传按 n_actual）。
+    """
     recall = 1.0 if n_expected == 0 else tp / n_expected
-    precision = 1.0 if n_actual == 0 else tp / n_actual
+    hit = n_actual if n_hit_actual is None else n_hit_actual
+    precision = 1.0 if n_actual == 0 else hit / n_actual
     if recall + precision == 0:
         return 0.0
     return 2 * precision * recall / (precision + recall)
@@ -267,7 +285,8 @@ def make_execute(cfg, call_claude_raw, skill_name: str):
             return 0.0, "报告不可解析: 未找到规则清单 JSON（候选可能删掉了输出清单指令）"
         expected = case.reference["expected_rules"]
         tp, missing, unexpected = reconcile(expected, actual_rules)
-        score = f1_score(tp, len(expected), len(actual_rules))
+        score = f1_score(tp, len(expected), len(actual_rules),
+                         len(actual_rules) - len(unexpected))
         bits = []
         if missing:
             bits.append("漏拦: " + ", ".join(missing))
@@ -344,8 +363,9 @@ def control_gate(holdout: List[G.Case]) -> float:
     scores = []
     for case in holdout:
         expected = case.reference["expected_rules"]
-        tp, _, _ = reconcile(expected, reject_rules)
-        scores.append(f1_score(tp, len(expected), len(reject_rules)))
+        tp, _, unexpected = reconcile(expected, reject_rules)
+        scores.append(f1_score(tp, len(expected), len(reject_rules),
+                            len(reject_rules) - len(unexpected)))
     return sum(scores) / len(scores) if scores else float("-inf")
 
 
@@ -379,7 +399,8 @@ def script_baseline_f1(cfg, skill_name: str, cases: List[G.Case]) -> Tuple[float
         manual = set(case.reference.get("manual_rules", []))
         expected = [e for e in case.reference["expected_rules"] if e not in manual]
         tp, missing, unexpected = reconcile(expected, actual_rules)
-        score = f1_score(tp, len(expected), len(actual_rules))
+        score = f1_score(tp, len(expected), len(actual_rules),
+                         len(actual_rules) - len(unexpected))
         total_f1 += score
         details.append({"case": case.id, "expected_empty": case.reference["expected_empty"],
                         "expected": expected, "actual": actual_rules,

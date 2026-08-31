@@ -95,13 +95,20 @@ case 必须构造**（最小合规 DDL，含必含字段、合理索引命名、
 - 「人工补充：<说明>」→ 仅展示（描述性文字，不参与对账）
 - 放行型 case：无「脚本自动检出」行 → expected_rules = 空集
 
-> **规则 ID = 检出信号词，非章节名**（预检实证，2026-09-01）：LLM 报告按第 3 步
-> 复述 manual-rules **检查清单**措辞（「围绕核心主体」「细化到属性级别」），而非
-> 表格规则名（「表名主体」「属性级别命名」）。曾用规则名作 ID，reconcile 预检
-> 0/21 命中（连「字段与注释不对应」都因否定插入失配）；改信号词后 27/40。
-> 且短信号词天然抗否定插入：「不对应」可命中「字段与注释不对应」，而
-> 「字段与注释对应」被中间的「不」截断失配。信号词取 manual-rules 原词，
-> 选 LLM 报告违规时的高频措辞。
+> **规则 ID = 规范名 + any-of 别名**（reconcile 预检实证，2026-09-01）：LLM 报告按
+> 第 3 步复述 manual-rules **检查清单**措辞（「围绕核心主体」「细化到属性级别」），
+> 而非表格规则名（「表名主体」「属性级别命名」）——单用规则名作 ID 时 0/21 命中
+> （连「字段与注释不对应」都因否定插入失配）。规则行用「|」连接别名
+> （「表名主体|核心主体」），`_rule_matches` 逐 token 双向匹配，任一命中即检出；
+> 首 token 规范名留给 reflector/missing 展示（反馈不暴露别名串，SKILL 不会被
+> 进化成规则名复读）。别名初版取 manual-rules 原词，**端到端后用真实 miss 措辞
+> 增补**——预检变体是自拟的，真实 LLM 报告才是措辞 ground truth。
+>
+> **F1 口径：precision 用命中 actual 数**（f1_score 防越界）：子串匹配下一条 actual
+> 可命中多条 expected（如「表名使用拼音和泛化词」→ tp=2 但 actual=1），precision
+> 若用 tp/n_actual 会 >1（F1>1 违反 score 契约，且合并检出可 gaming 抬高）。
+> precision = 命中 actual 数 / |actual|（命中 actual 数 = |actual| - |unexpected|），
+> 一条 actual 只计一次 → F1 ∈ [0,1]。
 
 **GEPA 评估集（include_manual=True）**：manual_rules 并入 expected_rules——execute 的
 LLM 走完整 SKILL 工作流（SKILL.md 第 3 步要求读取 `ddl-manual-rules.md` 逐表核对
@@ -127,12 +134,18 @@ strict 双向比对无条件生效（`if strict_exact:`），空 expected 时 un
 
 ```
 对每个 case：
-  TP           = actual_rules ∩ expected_rules（命中）
+  TP           = 命中的 expected 规则数（一条 actual 命中多条 expected 都计入）
+  命中 actual   = |actual_rules| − |unexpected|（至少命中一条 expected 的 actual 条数）
   recall       = TP / |expected_rules|        （expected 空时视为 1）
-  precision    = TP / |actual_rules|          （actual 空时视为 1）
+  precision    = 命中 actual / |actual_rules| （actual 空时视为 1）
   score        = F1 = 2·P·R / (P+R)           ∈ [0,1]
-  feedback     = missing（漏拦）+ unexpected（误拦）逐条明细文本 → 供 reflector
+  feedback     = missing（漏拦，规范名）+ unexpected（误拦）逐条明细文本 → 供 reflector
 ```
+
+precision 用「命中 actual 数」而非 TP：子串匹配下一条 actual 可命中多条 expected
+（如「表名使用拼音和泛化词」→ TP=2 但 actual=1），若 precision=TP/|actual| 会 >1
+越界，且「输出单条合并检出清单」可 gaming 抬高 precision；命中 actual 只计一次
+保证 F1 ∈ [0,1]。
 
 **防 gaming 论证**：
 - 「一律拒绝」候选：拦截型 case precision→0；放行型 case actual 非空 → F1=0 → 全盘失败

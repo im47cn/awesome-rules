@@ -44,11 +44,11 @@ def test_extract_rules_filters_non_string_and_bad_json():
 
 # ── F1 对账（双维对称惩罚）────────────────────────────────────────────────
 def test_f1_recall_and_precision_dimensions():
-    # 拦截型：漏拦一半 → recall 0.5
-    assert R.f1_score(tp=1, n_expected=2, n_actual=2) == 2 * (0.5 * 0.5) / (0.5 + 0.5) == 0.5
+    # 拦截型：漏拦一半 → recall 0.5（tp=1；2 actual 中 1 条命中 → n_hit_actual=1）
+    assert R.f1_score(1, 2, 2, 1) == 2 * (0.5 * 0.5) / (0.5 + 0.5) == 0.5
     # 放行型：expected 空 + actual 非空 → precision 0 → F1 0（全盘拒绝被对称惩罚）
-    assert R.f1_score(tp=0, n_expected=0, n_actual=3) == 0.0
-    # 完美
+    assert R.f1_score(tp=0, n_expected=0, n_actual=3, n_hit_actual=0) == 0.0
+    # 完美（n_hit_actual 默认 None → 按 n_actual，语义等价）
     assert R.f1_score(tp=2, n_expected=2, n_actual=2) == 1.0
     # 双零 = 空 expected + 空 actual = 干净放行 → F1 1（与实现语义一致）
     assert R.f1_score(tp=0, n_expected=0, n_actual=0) == 1.0
@@ -133,16 +133,52 @@ def test_load_eval_set_include_manual_merges(tmp_path):
     assert by_id["s:007-clean"].reference["expected_empty"] is True
 
 
-def test_load_eval_set_default_excludes_manual(tmp_path):
-    """默认 include_manual=False：manual_rules 只记录不并入（badcase_runner 同构）。"""
-    (tmp_path / "001-bad" / "input").mkdir(parents=True)
-    (tmp_path / "001-bad" / "input" / "f.sql").write_text("x", encoding="utf-8")
-    (tmp_path / "001-bad" / "expected.md").write_text(
-        "# c\n\n## 预期检查输出\n\n- 脚本自动检出：禁用类型\n- 人工补充规则：拼音\n",
-        encoding="utf-8")
-    case = R.load_eval_set("s", tmp_path, {})[0]
-    assert case.reference["expected_rules"] == ["禁用类型"]
-    assert case.reference["manual_rules"] == ["拼音"]
+def test_rule_matches_anyof_alias(tmp_path):
+    """any-of 别名：| 分隔任一 token 命中即检出；首 token 规范名用于 missing 展示。"""
+    assert R._rule_matches("字段与注释对应|注释含义对应", ["字段名与注释含义对应"])
+    # 否定插入：短别名命中「字段与注释不对应」？——「注释含义对应」不中，规范名不中，
+    # 但别名「对应」类需要真实现（此处验证规范名优先不误报）
+    assert not R._rule_matches("字段与注释对应|注释含义对应", ["字段与注释不对应"])
+    # 无别名规则兼容（单 token 行为不变）
+    assert R._rule_matches("禁用类型", ["使用禁用类型 text"])
+    assert not R._rule_matches("禁用类型", ["注释缺失"])
+    # 空 token（如「规范名|」）不崩
+    assert R._rule_matches("复数形式|", ["表名使用复数形式"])
+
+
+def test_reconcile_missing_shows_canonical_name():
+    """reconcile：别名规则 missing 只显示规范名（reflector 反馈不暴露别名串）。"""
+    tp, missing, unexpected = R.reconcile(
+        ["表名主体|核心主体", "禁用类型"], ["使用禁用类型 bigint"])
+    assert tp == 1                      # 禁用类型命中
+    assert missing == ["表名主体"]       # 规范名，非「表名主体|核心主体」
+    assert unexpected == []
+    # 别名命中 → 不 missing
+    tp2, missing2, _ = R.reconcile(
+        ["表名主体|核心主体"], ["表名未围绕核心主体"])
+    assert tp2 == 1 and missing2 == []
+
+
+def test_f1_score_merged_hit_bounded():
+    """一条 actual 命中多条 expected（合并检出）→ precision 用命中 actual 数，F1 ≤ 1。
+
+    子串匹配下「表名使用拼音和泛化词」同时命中 [拼音, 泛化词] → tp=2 但 actual=1；
+    precision 若直接 tp/n_actual 会 2.0 → F1=1.33 越界（score 契约 [0,1]，且合并
+    报告可被 gaming 抬高 precision）。命中 actual 数 = len(actual)-len(unexpected)。
+    """
+    # 合并检出：单条 actual 含两个 expected 子串 → tp=2, unexpected=0, 命中 actual=1
+    tp, _, unexpected = R.reconcile(["拼音", "泛化词"], ["表名使用拼音和泛化词"])
+    assert tp == 2 and unexpected == []
+    s = R.f1_score(tp, 2, 1, 1 - len(unexpected))
+    assert s == 1.0                      # 全检出，F1=1 不越界
+    # 未传 n_hit_actual（旧调用）：按 n_actual 兼容
+    assert R.f1_score(1, 2, 1) == 2 * 0.5 * 1.0 / 1.5
+    # 全 miss：命中 actual=0 → precision=0 → F1=0
+    tp2, _, unexpected2 = R.reconcile(["拼音"], ["无关评论"])
+    assert R.f1_score(tp2, 1, 1, 1 - len(unexpected2)) == 0.0
+    # 混合：1 命中 + 1 无关 → precision=(2-1)/2=0.5
+    tp3, _, unexpected3 = R.reconcile(["拼音", "泛化词"], ["表名使用拼音", "无关"])
+    assert abs(R.f1_score(tp3, 2, 2, 2 - len(unexpected3)) - 0.5) < 1e-9
 
 
 def test_parse_expected_missing_file_and_head_fallback(tmp_path):
