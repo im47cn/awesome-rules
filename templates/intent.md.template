@@ -1,0 +1,24 @@
+# Intent: <一句话目标>
+
+- 作者: <姓名/角色>
+- 日期: <YYYY-MM-DD>
+- 来源: idea | ticket | incident | 监控告警   <!-- 必须标，决定链路入口 -->
+- 状态: draft | review | accepted | rejected  <!-- 被拒也留档，合入即审计记录 -->
+
+## Problem（现状痛点，不写方案）
+<今天不能做什么，谁受影响，一句话量化损失。写现象，不写方案。>
+
+## Proposed outcome（期望结果）
+<完成后用户/系统能做什么。可观察、可验证，不写实现细节。>
+
+## Affected users and systems
+<用户角色；涉及的 repo/服务/接口。>
+
+## Constraints（写死的不变量）
+<合规、安全、性能、兼容、禁止事项。此节条款在 spec 阶段必须逐条继承，不得静默丢弃。>
+
+## Open questions
+- [ ] <问题，标注需要谁拍板>
+
+## Success looks like（1-3 条客观判据）
+- [ ] <如：客服电话中状态查询占比 <10%>
