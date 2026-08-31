@@ -342,7 +342,7 @@ final_gate_cmd 与 _final_gate_words 互为镜像），TestFinalGateDriftLock
 ## ADR-GH1 — test_hosting.py CodeQL 行内抑制（2026-08-30，上游根修）
 
 - **背景**：wop-python-sdk 移植本工厂后，GitHub org ruleset（main）code_scanning 规则对
-  `tests/test_hosting.py` `TestCodeupEndpointFallback.test_urLError_retries_rdc` 的断言报
+  `.factory/tests/test_hosting.py` `TestCodeupEndpointFallback.test_urLError_retries_rdc` 的断言报
   py/incomplete-url-substring-sanitization（high）——规则针对「URL 授权用子串包含判断」的反模式；
   此处是测试断言异常消息包含端点域名，非安全校验，属测试夹具误报（本仓托管 Codeup，无 CodeQL，
   从未暴露此告警）。
