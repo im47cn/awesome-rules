@@ -152,8 +152,7 @@ class GitHubAdapter:
         # 只对语义上指向仓库的子命令追加 --repo（auth status 等全局命令不追加）
         if args and args[0] in ("issue", "pr", "label", "api"):
             cmd += ["--repo", slug]
-        r = subprocess.run(cmd, capture_output=True, text=True, input=stdin)
-        return r
+        return subprocess.run(cmd, capture_output=True, text=True, input=stdin)
 
     def _gh_json(self, args, repo_override=None):
         r = self._gh(args, repo_override)
@@ -161,8 +160,8 @@ class GitHubAdapter:
             raise HostingError(f"gh {' '.join(args)} 失败: {r.stderr.strip()[:300]}")
         try:
             return json.loads(r.stdout)
-        except json.JSONDecodeError:
-            raise HostingError(f"gh {' '.join(args)} 输出非 JSON（网络截断/stub）")
+        except json.JSONDecodeError as e:
+            raise HostingError(f"gh {' '.join(args)} 输出非 JSON（网络截断/stub）") from e
 
     # -- 归一化 --
     @staticmethod
@@ -245,7 +244,7 @@ class GitHubAdapter:
             raise HostingError(f"issue 创建失败: {r.stderr.strip()[:200]}")
         url = r.stdout.strip().splitlines()[-1] if r.stdout.strip() else ""
         m = re.search(r"/issues/(\d+)$", url)
-        return {"number": int(m.group(1)) if m else None, "url": url}
+        return {"number": int(m[1]) if m else None, "url": url}
 
     def pr_view(self, p, repo=None):
         return self._pr(self._gh_json(
@@ -285,7 +284,7 @@ class GitHubAdapter:
             raise HostingError(f"PR 创建失败: {r.stderr.strip()[:200]}")
         url = r.stdout.strip().splitlines()[-1] if r.stdout.strip() else ""
         m = re.search(r"/pull/(\d+)$", url)
-        return {"number": int(m.group(1)) if m else None, "url": url}
+        return {"number": int(m[1]) if m else None, "url": url}
 
     def pr_comment(self, p, body, repo=None):
         r = self._gh(["pr", "comment", str(p), "--body", body], repo)
@@ -375,18 +374,16 @@ class CodeupAdapter:
         if not token:
             raise HostingError("codeup 需要 YUNXIAO_ACCESS_TOKEN（云效个人访问令牌）",
                                code=2)
-        org = os.environ.get("CODEUP_ORG_ID")
-        if not org:
+        if org := os.environ.get("CODEUP_ORG_ID"):
+            return token, org
+        else:
             raise HostingError("codeup 需要 CODEUP_ORG_ID（组织管理后台-基本信息）",
                                code=2)
-        return token, org
 
     def repo_ref(self):
-        rid = os.environ.get("CODEUP_REPO_ID")
-        if rid:
+        if rid := os.environ.get("CODEUP_REPO_ID"):
             return rid
-        path = os.environ.get("CODEUP_REPO_PATH")
-        if path:
+        if path := os.environ.get("CODEUP_REPO_PATH"):
             return urllib.parse.quote(path, safe="")
         raise HostingError(
             "codeup 需要 CODEUP_REPO_ID 或 CODEUP_REPO_PATH（URL 编码全路径）",
@@ -400,7 +397,7 @@ class CodeupAdapter:
                                             "openapi.aliyun.com")
         url = f"https://{self._endpoint}{path}"
         if query:
-            url += "?" + urllib.parse.urlencode(query)
+            url += f"?{urllib.parse.urlencode(query)}"
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(url, data=data, method=method)
         req.add_header("x-yunxiao-token", token)
@@ -414,16 +411,18 @@ class CodeupAdapter:
             if _retry_rdc and self._endpoint == "openapi.aliyun.com":
                 self._endpoint = "openapi-rdc.aliyuncs.com"
                 return self._req(method, path, body, query, _retry_rdc=False)
-            raise HostingError(f"codeup 请求不可达（{self._endpoint}）: {e}")
+            raise HostingError(f"codeup 请求不可达（{self._endpoint}）: {e}") from e
         except urllib.error.HTTPError as e:
             detail = e.read().decode()[:300]
             raise HostingError(
-                f"codeup {method} {path} HTTP {e.code}: {detail}")
+                f"codeup {method} {path} HTTP {e.code}: {detail}"
+            ) from e
         except json.JSONDecodeError as e:
             # 200 + 空/畸形体（代理、网关截断）：fail-closed 成 HostingError，
             # 不让裸 JSONDecodeError 逃出适配器边界（PR #64 Sourcery）
             raise HostingError(
-                f"codeup {method} {path} 响应格式错误（{self._endpoint}）: {e}")
+                f"codeup {method} {path} 响应格式错误（{self._endpoint}）: {e}"
+            ) from e
         # 【live 2026-08-26】组织级端点（MR 集合等）直接返回 JSON 数组——
         # success/errorCode 包裹仅 dict 形态才有；列表响应原样透传
         if isinstance(payload, dict) and payload.get("success") is False:
@@ -441,7 +440,7 @@ class CodeupAdapter:
     def _pr(d):
         reviewers = d.get("reviewers") or []
         opinions = [r.get("reviewOpinionStatus") for r in reviewers]
-        if any(o == "NOT_PASS" for o in opinions):
+        if "NOT_PASS" in opinions:
             review = "changes_requested"
         elif reviewers and all(o == "PASS" for o in opinions):
             review = "approved"
@@ -539,9 +538,7 @@ class CodeupAdapter:
             "GET",
             f"/oapi/v1/projex/organizations/{org}/workitems/{n}")
         # live 形态：详情返回裸工作项 dict（无 result 包裹）;search 才包 result
-        if isinstance(r, dict):
-            return r.get("result") or r
-        return r or {}
+        return r.get("result") or r if isinstance(r, dict) else r or {}
 
     def issue_view(self, n, repo=None):
         return self._wi_normalize(self._wi_get(n))
@@ -655,10 +652,15 @@ class CodeupAdapter:
         space = os.environ.get("CODEUP_SPACE_ID")
         wit = os.environ.get("CODEUP_WORKITEM_TYPE_ID")
         assignee = os.environ.get("CODEUP_ASSIGN_USER_ID")
-        missing = [k for k, v in (("CODEUP_SPACE_ID", space),
-                                  ("CODEUP_WORKITEM_TYPE_ID", wit),
-                                  ("CODEUP_ASSIGN_USER_ID", assignee)) if not v]
-        if missing:
+        if missing := [
+            k
+            for k, v in (
+                ("CODEUP_SPACE_ID", space),
+                ("CODEUP_WORKITEM_TYPE_ID", wit),
+                ("CODEUP_ASSIGN_USER_ID", assignee),
+            )
+            if not v
+        ]:
             raise HostingError(
                 "codeup issue create 需要 " + "/".join(missing)
                 + "（space=项目 id、wit=工作项类型 id、assign=指派人 24-hex"
@@ -833,8 +835,7 @@ class CodeupAdapter:
         result = payload.get("result", payload)
         url = result.get("detailUrl") or result.get("webUrl") or ""
         if label:
-            local_id = result.get("localId")
-            if local_id:
+            if local_id := result.get("localId"):
                 try:
                     self.pr_set_labels(local_id, add=[label])
                 except HostingError as e:
@@ -906,10 +907,10 @@ ADAPTERS = {"github": GitHubAdapter, "codeup": CodeupAdapter}
 
 
 def current_adapter(repo="."):
-    cls = ADAPTERS.get(FACTORY_HOSTING)
-    if not cls:
+    if cls := ADAPTERS.get(FACTORY_HOSTING):
+        return cls(repo)
+    else:
         raise HostingError(f"未知 FACTORY_HOSTING: {FACTORY_HOSTING}", code=2)
-    return cls(repo)
 
 
 # ---------------------------------------------------------------------------
@@ -931,7 +932,8 @@ def _emit(obj):
     print(json.dumps(obj, ensure_ascii=False))
 
 
-def main(argv):
+def _build_parser():
+    """构造 CLI 参数解析器（子命令定义原样迁自 main）。"""
     p = argparse.ArgumentParser(prog="hosting.py", add_help=True,
                                  description="托管平台抽象层（ADR-008）")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -985,8 +987,119 @@ def main(argv):
     pm.add_argument("p")
     pm.add_argument("--method", default="merge",
                     choices=["merge", "squash", "rebase"])
+    return p
 
-    args = p.parse_args(argv)
+
+def _cmd_label(ad, args):
+    """label 子命令分派（ensure / history）。"""
+    if args.label_cmd == "ensure":
+        _cmd_label_ensure(ad, args)
+    else:
+        _cmd_label_history(ad, args)
+
+
+def _cmd_label_ensure(ad, args):
+    sys.exit(0 if ad.label_ensure(args.name, args.color, args.desc) else 1)
+
+
+def _cmd_label_history(ad, args):
+    _emit(ad.label_history(args.pr))
+
+
+def _cmd_issue(ad, args):
+    """issue 子命令分派。"""
+    if args.issue_cmd == "view":
+        _cmd_issue_view(ad, args)
+    elif args.issue_cmd == "get-labels":
+        _cmd_issue_get_labels(ad, args)
+    elif args.issue_cmd == "list":
+        _cmd_issue_list(ad, args)
+    elif args.issue_cmd == "set-labels":
+        _cmd_issue_set_labels(ad, args)
+    elif args.issue_cmd == "comment":
+        _cmd_issue_comment(ad, args)
+    elif args.issue_cmd == "create":
+        _cmd_issue_create(ad, args)
+
+
+def _cmd_issue_view(ad, args):
+    _emit(ad.issue_view(args.n))
+
+
+def _cmd_issue_get_labels(ad, args):
+    _emit(ad.issue_labels(args.n))
+
+
+def _cmd_issue_list(ad, args):
+    _emit(ad.issue_list(state=args.state, label=args.label,
+                        limit=args.limit, comments=args.comments))
+
+
+def _cmd_issue_set_labels(ad, args):
+    ad.issue_set_labels(args.n, add=_csv(args.add), remove=_csv(args.remove))
+
+
+def _cmd_issue_comment(ad, args):
+    ad.issue_comment(args.n, _body(args), marker=args.marker)
+
+
+def _cmd_issue_create(ad, args):
+    _emit(ad.issue_create(args.title, _body(args),
+                          label=args.label, repo=args.repo))
+
+
+def _cmd_pr(ad, args):
+    """pr 子命令分派。"""
+    if args.pr_cmd == "view":
+        _cmd_pr_view(ad, args)
+    elif args.pr_cmd == "list":
+        _cmd_pr_list(ad, args)
+    elif args.pr_cmd == "set-labels":
+        _cmd_pr_set_labels(ad, args)
+    elif args.pr_cmd == "create":
+        _cmd_pr_create(ad, args)
+    elif args.pr_cmd == "comment":
+        _cmd_pr_comment(ad, args)
+    elif args.pr_cmd == "diff":
+        _cmd_pr_diff(ad, args)
+    elif args.pr_cmd == "merge":
+        _cmd_pr_merge(ad, args)
+
+
+def _cmd_pr_view(ad, args):
+    _emit(ad.pr_view(args.p, repo=args.repo))
+
+
+def _cmd_pr_list(ad, args):
+    _emit(ad.pr_list(state=args.state, label=args.label,
+                     limit=args.limit, repo=args.repo))
+
+
+def _cmd_pr_set_labels(ad, args):
+    ad.pr_set_labels(args.p, add=_csv(args.add), remove=_csv(args.remove))
+
+
+def _cmd_pr_create(ad, args):
+    _emit(ad.pr_create(args.head, args.title, _body(args),
+                       label=args.label, base=args.base, repo=args.repo))
+
+
+def _cmd_pr_comment(ad, args):
+    ad.pr_comment(args.p, _body(args))
+
+
+def _cmd_pr_diff(ad, args):
+    out = ad.pr_diff(args.p, name_only=args.name_only)
+    print(out if isinstance(out, str) else json.dumps(out))
+
+
+def _cmd_pr_merge(ad, args):
+    ad.pr_merge(args.p, method=args.method)
+
+
+def main(argv):
+    """CLI 入口：解析 → 取适配器 → 命令分派。"""
+    args = _build_parser().parse_args(argv)
     try:
         ad = current_adapter()
 
@@ -994,44 +1107,11 @@ def main(argv):
             sys.exit(0 if ad.auth_ok() else 1)
 
         if args.cmd == "label":
-            if args.label_cmd == "ensure":
-                sys.exit(0 if ad.label_ensure(args.name, args.color, args.desc) else 1)
-            _emit(ad.label_history(args.pr))
-
+            _cmd_label(ad, args)
         elif args.cmd == "issue":
-            if args.issue_cmd == "view":
-                _emit(ad.issue_view(args.n))
-            elif args.issue_cmd == "get-labels":
-                _emit(ad.issue_labels(args.n))
-            elif args.issue_cmd == "list":
-                _emit(ad.issue_list(state=args.state, label=args.label,
-                                    limit=args.limit, comments=args.comments))
-            elif args.issue_cmd == "set-labels":
-                ad.issue_set_labels(args.n, add=_csv(args.add), remove=_csv(args.remove))
-            elif args.issue_cmd == "comment":
-                ad.issue_comment(args.n, _body(args), marker=args.marker)
-            elif args.issue_cmd == "create":
-                _emit(ad.issue_create(args.title, _body(args),
-                                      label=args.label, repo=args.repo))
-
+            _cmd_issue(ad, args)
         elif args.cmd == "pr":
-            if args.pr_cmd == "view":
-                _emit(ad.pr_view(args.p, repo=args.repo))
-            elif args.pr_cmd == "list":
-                _emit(ad.pr_list(state=args.state, label=args.label,
-                                 limit=args.limit, repo=args.repo))
-            elif args.pr_cmd == "set-labels":
-                ad.pr_set_labels(args.p, add=_csv(args.add), remove=_csv(args.remove))
-            elif args.pr_cmd == "create":
-                _emit(ad.pr_create(args.head, args.title, _body(args),
-                                   label=args.label, base=args.base, repo=args.repo))
-            elif args.pr_cmd == "comment":
-                ad.pr_comment(args.p, _body(args))
-            elif args.pr_cmd == "diff":
-                out = ad.pr_diff(args.p, name_only=args.name_only)
-                print(out if isinstance(out, str) else json.dumps(out))
-            elif args.pr_cmd == "merge":
-                ad.pr_merge(args.p, method=args.method)
+            _cmd_pr(ad, args)
     except HostingError as e:
         print(f"[hosting] {e}", file=sys.stderr)
         sys.exit(e.code)

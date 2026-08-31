@@ -86,7 +86,7 @@ def _run(cmd: list[str], repo: Path, tmp_path: Path, *, with_stubs: bool,
            "GH_REPO": "sandbox/repo", "SENTINEL_MARK": str(tmp_path / "sentinel"),
            "STUB_CALLS": str(tmp_path / "calls"),
            "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"}
-    env.update(extra_env or {})
+    env |= (extra_env or {})
     return subprocess.run(cmd, cwd=repo, env=env, capture_output=True,
                           text=True, timeout=120)
 
@@ -217,8 +217,10 @@ class TestFixIssueWiring:
         assert "--add-label factory:needs-human" in labels[0]
         for name in ("factory:in-progress", "factory:triaging", "factory:accepted"):
             assert any(f"--remove-label {name}" in ln for ln in labels), name
-        assert not any("remove-label factory:needs-human" in ln
-                       for ln in _stub_lines(tmp_path))
+        assert all(
+            "remove-label factory:needs-human" not in ln
+            for ln in _stub_lines(tmp_path)
+        )
         assert not (repo / ".factory/locks/dispatcher").exists()  # 连锁都没占
 
     def test_dry_run_does_not_trip(self, tmp_path):

@@ -5,6 +5,7 @@ issue #63 实证缺口：gate/holdout 验证工作区、push 只发 HEAD，revie
 prompts/review.md），三态钉死：脏树收编 / 净树零动作 / 提交被拒 fail-closed。
 """
 
+
 import re
 import subprocess
 import tempfile
@@ -18,7 +19,9 @@ FACTORY = Path(__file__).resolve().parents[1]
 _BACKSTOP = re.search(
     r'\n(if \[ "\$\{DRY\}" = 0 \] && \[ -n "\$\(git -C "\$\{WT\}" '
     r'status --porcelain\)" \]; then\n.*?\nfi)\n',
-    (FACTORY / "fix-issue.sh").read_text(encoding="utf-8"), re.S).group(1)
+    (FACTORY / "fix-issue.sh").read_text(encoding="utf-8"),
+    re.S,
+)[1]
 
 SANDBOX = r"""#!/usr/bin/env bash
 WT="__WT__"

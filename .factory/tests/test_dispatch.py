@@ -52,6 +52,14 @@ def _lines(factory: Path, issue: int) -> list[str]:
     log = factory / "artifacts" / f"issue-{issue}" / "dispatch.log"
     return [ln for ln in log.read_text(encoding="utf-8").splitlines() if ln]
 
+def _peak_concurrency(marks: list[tuple[float, int]]) -> int:
+    """按 start/end 时间戳区间的重叠峰值（并发上界测量）。"""
+    running = peak = 0
+    for _, delta in sorted(marks):
+        running += delta
+        peak = max(peak, running)
+    return peak
+
 
 class TestChainPool:
     def test_max_parallel_respected_and_all_ran(self, tmp_path):
@@ -67,15 +75,11 @@ class TestChainPool:
         for n in range(1, 6):
             lines = _lines(f, n)
             assert len(lines) == 2 and lines[0].startswith("start") \
-                and lines[1].startswith("end"), f"issue-{n} 链未完整跑完: {lines}"
-            marks.append((float(lines[0].split()[2]), 1))   # 区间开
-            marks.append((float(lines[1].split()[2]), -1))  # 区间闭
-        marks.sort()
-        running = peak = 0
-        for _, delta in marks:
-            running += delta
-            peak = max(peak, running)
-        assert peak == 2
+                    and lines[1].startswith("end"), f"issue-{n} 链未完整跑完: {lines}"
+            marks.extend(
+                ((float(lines[0].split()[2]), 1), (float(lines[1].split()[2]), -1))
+            )
+        assert _peak_concurrency(marks) == 2
 
     def test_wait_all_collects_exit_codes(self, tmp_path, monkeypatch):
         """bash 轮末裸 wait 无退出码 → done 收割 (issue, rc) 链路失败可观测。"""

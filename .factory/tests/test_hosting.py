@@ -21,6 +21,11 @@ import pytest
 import hosting
 
 
+def _raise(exc: BaseException) -> None:
+    """异常注入辅助：mock 回调用（lambda 内不能 raise 语句）。"""
+    raise exc
+
+
 def _cp(rc=0, out="", err=""):
     return subprocess.CompletedProcess([], rc, out, err)
 
@@ -186,7 +191,7 @@ class TestCodeupShapes:
         ad = self._ad({("POST", "/close"): {"result": True}}, monkeypatch)
         ad.pr_close(7)
         m, p, body, _q = ad.seen[0]
-        assert (m, p) == ("POST", ad._base() + "/changeRequests/7/close")
+        assert (m, p) == ("POST", f"{ad._base()}/changeRequests/7/close")
         assert body == {}  # 空 body；PUT /changeRequests/7 假阳性形态禁用
 
     def test_pr_close_github_uses_gh(self, monkeypatch):
@@ -363,14 +368,13 @@ class TestCodeupWorkItemFace:
                     return payload
             if path.endswith("/comments"):
                 return self.WI["_comments"]
-                if m == method and path.endswith(suf):
-                    return payload
             if path.endswith("/workitems/KFPT-18") or path.endswith("/workitems/wid1"):
                 return self.WI["result"]
             if path.endswith("/workitems:search"):
                 return {"result": [self.WI["result"], {"id": "wid2", "serialNumber": "KFPT-19",
                               "subject": "旧", "logicalStatus": "FINISHED", "description": ""}]}
             raise hosting.HostingError(f"mock 未路由: {method} {path}")
+
         ad._req = fake_req
         return ad
 
@@ -568,9 +572,11 @@ class TestCodeupEndpointFallback:
             pass
 
         import urllib.error as ue
-        monkeypatch.setattr(hosting.urllib.request, "urlopen",
-                            lambda req, timeout=None: (_ for _ in ()).throw(
-                                ue.URLError("tls dropped")))
+        monkeypatch.setattr(
+            hosting.urllib.request,
+            "urlopen",
+            lambda req, timeout=None: _raise(ue.URLError("tls dropped")),
+        )
         monkeypatch.setenv("YUNXIAO_ACCESS_TOKEN", "t")
         monkeypatch.setenv("CODEUP_ORG_ID", "org")
         monkeypatch.setenv("CODEUP_REPO_ID", "42")

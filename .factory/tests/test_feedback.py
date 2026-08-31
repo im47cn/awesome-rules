@@ -167,13 +167,15 @@ def test_stored_patch_id_survives_object_loss(tmp_path, monkeypatch):
 
 def test_classify_drift_sides_and_excludes():
     up = "/tmp/up/.factory"
-    out = "\n".join([
-        "Only in %s: cron-dispatch.sh" % up,
-        "Only in /tmp/etf/.factory: triage-batch.sh",
-        "Only in %s/artifacts: issue-2" % up,        # 运行时目录 → 排除
-        "Files %s/state.py and /tmp/etf/.factory/state.py differ" % up,
-        "Files %s/locks/x and /tmp/etf/.factory/locks/x differ" % up,  # 排除
-    ])
+    out = "\n".join(
+        [
+            f"Only in {up}: cron-dispatch.sh",
+            "Only in /tmp/etf/.factory: triage-batch.sh",
+            f"Only in {up}/artifacts: issue-2",
+            f"Files {up}/state.py and /tmp/etf/.factory/state.py differ",
+            f"Files {up}/locks/x and /tmp/etf/.factory/locks/x differ",
+        ]
+    )
     drift = feedback.classify_drift(out, up)
     assert len(drift["upstream_only"]) == 1
     assert len(drift["local_only"]) == 1
@@ -287,10 +289,18 @@ def test_adapt_manifest_clean_and_conflicted_split():
     items = feedback.adapt_manifest(
         "%s\tfix(factory): 并发修复\n%s\tfix: 冲突候选" % (a, b), {b})
     assert items == [
-        {"sha": a, "subject": "fix(factory): 并发修复", "status": "clean",
-         "patch": "patches/%s.patch" % a[:9]},
-        {"sha": b, "subject": "fix: 冲突候选", "status": "conflicted",
-         "patch": "patches/%s.patch" % b[:9]},
+        {
+            "sha": a,
+            "subject": "fix(factory): 并发修复",
+            "status": "clean",
+            "patch": f"patches/{a[:9]}.patch",
+        },
+        {
+            "sha": b,
+            "subject": "fix: 冲突候选",
+            "status": "conflicted",
+            "patch": f"patches/{b[:9]}.patch",
+        },
     ]
 
 
@@ -307,3 +317,17 @@ def test_adapt_manifest_preserves_old_to_new_order():
     shas = [c * 40 for c in "abc"]
     text = "".join("%s\ts%s\n" % (s, i) for i, s in enumerate(shas))
     assert [i["sha"] for i in feedback.adapt_manifest(text, set())] == shas
+
+def test_gather_commits_merges_files(monkeypatch):
+    """_files_by_sha 结果必须挂回 commits（feedable/pending 判定的 files 来源）。"""
+    commits = [{"sha": "a" * 40, "subject": "s", "feedable": True},
+               {"sha": "b" * 40, "subject": "t", "feedable": False}]
+    fbs = {"a" * 40: {"factory_lib.py"}, "b" * 40: {"hosting.py"}}
+    monkeypatch.setattr(feedback, "_git_log_commits", lambda: commits)
+    monkeypatch.setattr(feedback, "_files_by_sha", lambda: fbs)
+    out = feedback._gather_commits()
+    assert out[0]["files"] == {"factory_lib.py"}
+    assert out[1]["files"] == {"hosting.py"}
+    # 未触碰资产的提交 → 空集（feedable_assets/collect_pending 的 .get 契约）
+    assert out[0]["files"] == fbs["a" * 40]
+    assert out[1]["feedable"] is False
