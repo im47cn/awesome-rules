@@ -12,6 +12,9 @@ pre-commit:
   commands:
     coverage-light:
       run: bash .lefthook/coverage.sh light {staged_files}
+    # spec 条款↔测试反向核对: 提交含 spec*.md 时验证条款均有测试（有 spec 变更才触发）
+    spec-check:
+      run: bash .lefthook/spec-check.sh {staged_files}
 
 pre-push:
   commands:
@@ -20,3 +23,6 @@ pre-push:
     # 项目自定义测试入口: 有 scripts/pre-push-tests.sh 则执行（全量测试/构建检查等），无则跳过
     tests:
       run: bash .lefthook/run-tests.sh {push_files}
+    # Sourcery 硬闸: 仓库 opt-in（.sourcery.yaml 存在）才启用，语言文件 push 前 review --check
+    sourcery-gate:
+      run: bash .lefthook/sourcery-gate.sh {push_files}

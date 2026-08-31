@@ -256,6 +256,25 @@ def final_gate_cmd() -> str:
     return v
 
 
+def docstring_gate_cmd() -> str | None:
+    """docstring 门命令（可选键，缺省不启用；取值见 factory-local.json）。
+
+    与 final_gate_cmd 同构但为**可选**门：键缺失/不存在 → 返回 None（链脚本
+    跳过，仓库无 docstring 门）；键存在 → 语义与 final_gate_cmd 完全一致
+    （非空字符串 + 禁引号 + 禁反斜杠，fail-closed：配置损坏即 RuntimeError，
+    禁止静默降级为无门）。对外 API 100% 可文档化 + 内部 API ≥80% 的阈值由
+    各仓检查器自定（语言 AST 异构，不在此数据化），本键只承载命令。
+    """
+    if "docstring_gate_cmd" not in _LOCAL_CFG:
+        return None
+    v = _local_str("docstring_gate_cmd")
+    if "'" in v or '"' in v:
+        raise RuntimeError("docstring_gate_cmd 禁含引号（read -r -a 与 shlex 拆词一致性）")
+    if "\\" in v:
+        raise RuntimeError("docstring_gate_cmd 禁含反斜杠（shlex 转义与 read -r 字面语义分叉，ADR-010）")
+    return v
+
+
 def repo_vars_text() -> str:
     """拼进工作节点 prompt 的「仓库参数」段（prompts 零宿主专名的注入面）。
 
@@ -270,18 +289,14 @@ def repo_vars_text() -> str:
         f"- 审查依据目录: {_local_str('review_basis')}",
         f"- final_gate 命令: {final_gate_cmd()}",
     ]
+    if (dg := docstring_gate_cmd()) is not None:
+        lines.append(f"- docstring 门命令: {dg}")
     if "pr_review_skills" in _LOCAL_CFG:
         # 键存在即严格校验（与 local-list 同规）：值损坏 fail-closed；
         # 键缺失 = 本仓无守卫技能面（如纯后端仓），合法省略该行。
         skills = _local_str_list("pr_review_skills")
         lines.append(f"- 守卫技能（PR 评审选配面）: {'、'.join(skills)}")
     return "\n".join(lines)
-
-# ═════════════════════════════════════════════════════════════════════
-# 上游分发清单展开（2026-08-28 自 sync-from-upstream.sh 内嵌 heredoc 下沉，
-# 铁律 4：git 子进程编排归 Python；曾处 killpg 门[只扫 *.py]与 pipe 门
-# [只扫 *.sh]的双盲缝隙）
-# ═════════════════════════════════════════════════════════════════════
 
 
 def dist_manifest_lines(up: str, sha: str) -> list[str]:
@@ -937,8 +952,14 @@ def main(argv: list[str]) -> int:
             print(s)
         return 0
     if cmd == "final-gate":
-        # final-gate —— 确定性测试门命令（ADR-009 数据化；链脚本 read -ra 拆词执行）
+        # final-gate —— 确定性测试门命令（ADR-009 唯一取值口；fix-issue.sh
+        # / validate-pr.sh read -ra 拆词执行；配置损坏 fail-closed 非零终止）
         print(final_gate_cmd())
+        return 0
+    if cmd == "docstring-gate":
+        # docstring-gate —— docstring 门命令（可选键；空输出=未启用，链脚本跳过）
+        if (v := docstring_gate_cmd()) is not None:
+            print(v)
         return 0
     if cmd == "local-str":
         # local-str <key> —— 单字符串键输出（feedback-upstream 上游指针等；ADR-009）

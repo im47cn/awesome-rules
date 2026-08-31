@@ -51,6 +51,10 @@ done
 copy_one "lefthook/coverage.sh" "$TARGET/.lefthook/coverage.sh"
 copy_one "lefthook/commitmsg-check.sh" "$TARGET/.lefthook/commitmsg-check.sh"
 copy_one "lefthook/run-tests.sh" "$TARGET/.lefthook/run-tests.sh"
+copy_one "lefthook/spec-check.sh" "$TARGET/.lefthook/spec-check.sh"
+copy_one "lefthook/sourcery-gate.sh" "$TARGET/.lefthook/sourcery-gate.sh"
+# spec 反向核对脚本（与 spec-check.sh 配套，随 hook 分发到项目 .lefthook/）
+copy_one "../spec_check.py" "$TARGET/.lefthook/spec_check.py"
 
 # commit 模板 → 用户主目录 ~/.gitmessage（全局，所有仓库/IDEA 一次识别）
 skip_tmpl=0

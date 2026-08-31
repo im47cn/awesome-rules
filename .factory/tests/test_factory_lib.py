@@ -9,6 +9,7 @@
 
 import pytest
 
+import factory_lib
 from factory_lib import (
     CircuitOpen,
     breaker_check,
@@ -16,6 +17,8 @@ from factory_lib import (
     evidence_suites,
     jfield,
     neutralize_marker,
+    docstring_gate_cmd,
+    main,
     node_metric_line,
     node_timeout,
     parse_agent_json,
@@ -436,3 +439,62 @@ class TestDistManifest:
         # local 是 {路径: 理由}——清单行只含路径键，理由不进消费循环
         up, sha = self._mk_upstream(tmp_path, with_manifest=True)
         assert not any("理由" in l for l in dist_manifest_lines(str(up), sha))
+
+
+class TestDocstringGateCmd:
+    """docstring_gate_cmd（2026-08-31 新增可选门）：键缺失 → None（不启用）；
+    键存在 → 与 final_gate_cmd 同规校验（非空字符串 + 禁引号/反斜杠，
+    fail-closed）。锚定：可选门绝不许静默降级为无门，也不许缺失键炸链。"""
+
+    def test_missing_key_returns_none(self, monkeypatch):
+        """键缺失 = 合法省略（仓库无 docstring 门），返回 None 而非报错。"""
+        monkeypatch.setattr(factory_lib, "_LOCAL_CFG", {"final_gate_cmd": "x"})
+        assert factory_lib.docstring_gate_cmd() is None
+
+    def test_valid_command_returns_verbatim(self, monkeypatch):
+        monkeypatch.setattr(factory_lib, "_LOCAL_CFG",
+                            {"docstring_gate_cmd": "scripts/docstring_gate.py"})
+        assert factory_lib.docstring_gate_cmd() == "scripts/docstring_gate.py"
+
+    @pytest.mark.parametrize("bad_val", [123, ["a"], {"k": "v"}, True, ""])
+    def test_non_string_or_empty_fails_closed(self, monkeypatch, bad_val):
+        """配置存在但损坏（非字符串/空）→ RuntimeError（fail-closed，
+        禁止降级为无门）。与 _local_str 同规（PR #71 Sourcery #2）。"""
+        monkeypatch.setattr(factory_lib, "_LOCAL_CFG",
+                            {"docstring_gate_cmd": bad_val})
+        with pytest.raises(RuntimeError, match="docstring_gate_cmd"):
+            factory_lib.docstring_gate_cmd()
+
+    @pytest.mark.parametrize("bad_val", ['sh -c "x"', "a\\ b", "a'b"])
+    def test_quote_or_backslash_fails_closed(self, monkeypatch, bad_val):
+        """引号/反斜杠与 final_gate_cmd 同禁（read -r -a 与 shlex 拆词
+        一致性 + ADR-010 漂移锁）。"""
+        monkeypatch.setattr(factory_lib, "_LOCAL_CFG",
+                            {"docstring_gate_cmd": bad_val})
+        with pytest.raises(RuntimeError, match="docstring_gate_cmd"):
+            factory_lib.docstring_gate_cmd()
+
+    def test_main_subcommand_empty_when_disabled(self, capsys, monkeypatch):
+        """docstring-gate 子命令：未配置 → 空输出 + rc=0（链脚本 [ -n ]
+        跳过）；绝不出 "None" 字面或非零（链侧会误判为门故障）。"""
+        monkeypatch.setattr(factory_lib, "_LOCAL_CFG", {"final_gate_cmd": "x"})
+        assert factory_lib.main(["factory_lib.py", "docstring-gate"]) == 0
+        assert capsys.readouterr().out == ""
+
+    def test_main_subcommand_prints_command_when_enabled(self, capsys, monkeypatch):
+        monkeypatch.setattr(factory_lib, "_LOCAL_CFG",
+                            {"docstring_gate_cmd": "scripts/docstring_gate.py"})
+        assert factory_lib.main(["factory_lib.py", "docstring-gate"]) == 0
+        assert capsys.readouterr().out == "scripts/docstring_gate.py\n"
+
+
+class TestFinalGateSubcommand:
+    """final-gate CLI 子命令（ADR-009 唯一取值口）：fix-issue.sh /
+    validate-pr.sh read -ra 拆词消费。回归锚定：分发段曾整段丢失该
+    子命令（#85 审查发现），链脚本一调即"未知子命令" rc=2 炸链。"""
+
+    def test_main_subcommand_prints_command(self, capsys, monkeypatch):
+        monkeypatch.setattr(factory_lib, "_LOCAL_CFG",
+                            {"final_gate_cmd": "python3 tools/final_gate.py"})
+        assert factory_lib.main(["factory_lib.py", "final-gate"]) == 0
+        assert capsys.readouterr().out == "python3 tools/final_gate.py\n"
