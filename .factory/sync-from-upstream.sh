@@ -112,6 +112,7 @@ while IFS=$'\t' read -r kind rel; do
     echo "  [$kind] $rel: 本地缺失"
     [ "$kind" = full ] && DRIFT=1
     if [ "$MODE" = apply ] && [ "$kind" = full ]; then
+      mkdir -p "$(dirname "$dst")" # 缺失父目录先建（wop-skills：tests/ 整缺，重定向即崩）
       git -C "$UP" cat-file blob "$up_blob" > "$dst"
       chmod "${up_mode: -3}" "$dst" 2>/dev/null || chmod +x "$dst"
       echo "    → 已补齐"; APPLIED=$((APPLIED+1))
