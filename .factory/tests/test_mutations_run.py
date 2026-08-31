@@ -358,3 +358,28 @@ class TestDocstringGateJudge:
     def test_timeout_invalid_run(self):
         verdict, _ = mut.judge(self._def(True), None)
         assert verdict == "FAIL"
+
+
+class TestMainSmoke:
+    """main() CLI 入口冒烟（2026-08-31 事故锚）。
+
+    三方合并曾吞掉 _process_defect/_check_restored 的函数头（函数体悬空在
+    _load_and_filter 内，main() 一调即 NameError），当时 302 测试全绿掩盖了
+    它——main 属 CLI 入口，不在任何单测触达面。本冒烟固化入口契约：
+    argparse 解析 → 过滤 → 汇总 → 判定全链路不炸，退出码语义正确。
+    """
+
+    def test_main_only_nonexistent_id_exit0(self, monkeypatch, capsys):
+        """--only 不存在的 id → 空清单零注入 → 全绿路径退出码 0。"""
+        monkeypatch.setattr(mut, "write_stamp", lambda *a, **k: None)  # 不动 evidence-stamp
+        monkeypatch.setattr(sys, "argv", ["run.py", "--only", "X-nonexistent"])
+        rc = mut.main()
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "门灵敏度冒烟通过" in out
+
+    def test_main_missing_defects_file_raises(self, monkeypatch, tmp_path):
+        """--defects 指向缺失文件 → FileNotFoundError 传播（fail-fast，无静默空跑）。"""
+        monkeypatch.setattr(sys, "argv", ["run.py", "--defects", str(tmp_path / "nope.json")])
+        with pytest.raises(FileNotFoundError):
+            mut.main()
