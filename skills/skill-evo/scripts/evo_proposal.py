@@ -101,16 +101,20 @@ def _render_lesson(i: int, ls: Lesson) -> str:
             f"- **变更**：{where}{body}")
 
 
-_CTRL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+_CTRL_CHARS_RE = re.compile(r"[\x00-\x09\x0b\x0c\x0e-\x1f]")
 
 
 def _machine_block(payload: dict) -> str:
     """机读 JSON 块：strict 可解析是生成器不变量（issue #81 净化层）。
 
-    CPython json.dumps 对全部 <0x20 控制字符转义（\\n→字面序列、\\x08→\\b），
-    正常产物必然合法；但 LLM 输出可夹带裸控制字符，若序列化路径改动或环境
-    差异导致未转义，此处防御性转义并用 strict loads 自检——写盘前 fail-fast，
-    坏件永不静默产出。
+    CPython json.dumps 对字符串内全部 <0x20 控制字符转义（\\n→字面序列、
+    \\x08→\\b），正常产物必然合法；但 LLM 输出可夹带裸控制字符，若序列化
+    路径改动或环境差异导致未转义，此处防御性转义并用 strict loads 自检——
+    写盘前 fail-fast，坏件永不静默产出。
+
+    正则覆盖除 LF(\\x0a)/CR(\\x0d) 外的全部 <0x20：二者是 JSON 合法结构空白
+    （indent 产物含真实换行），与"字符串内被破坏的裸 CR/LF"不可区分，统一
+    交由 strict loads 自检兜底（合法空白通过，字符串内破坏则 fail-fast）。
     """
     raw = json.dumps(payload, ensure_ascii=False, indent=1)
     safe = _CTRL_CHARS_RE.sub(lambda m: f"\\u{ord(m.group()):04x}", raw)

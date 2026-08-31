@@ -109,6 +109,39 @@ def test_write_proposal_sanitizes_raw_ctrl_chars(tmp_path):
         assert loaded["lessons"][0]["reason"] == "r\x00尾"
 
 
+def test_write_proposal_sanitizes_raw_tab(tmp_path):
+    """净化层（issue #81）：裸 tab（\\x09）是 <0x20 唯一漏网可救字符——必须转义。
+
+    dumps 结构空白用空格+换行，裸 tab 只可能出现在字符串值内（外部破坏
+    \\t/\\u0009 转义序列所致），转义为 \\u0009 合法且 roundtrip 保真；
+    且产物文本中不得残留裸 tab 字节。
+    """
+    ls = make_lesson(evidence="a\tb", reason="r\t尾")
+    path = PR.write_proposal(make_proposal(tmp_path, lessons=[ls]), tmp_path / "pending")
+    for f in (path, path.parent / f"{path.stem}.orig"):
+        text = f.read_text(encoding="utf-8")
+        m = PR._JSON_BLOCK_RE.search(text)
+        assert "\t" not in m.group(1), f"{f.name}: 机读块内裸 tab 未防御转义"
+        loaded = json.loads(m.group(1))                  # strict：裸 tab 即抛
+        assert loaded["lessons"][0]["evidence"] == "a\tb"
+        assert loaded["lessons"][0]["reason"] == "r\t尾"
+
+def test_write_proposal_keeps_structural_newlines(tmp_path):
+    """净化层（issue #81）：indent=1 的结构换行（真实 \\n）不得被防御转义误伤。
+
+    LF/CR 是 JSON 合法结构空白，_CTRL_CHARS_RE 显式排除——若改成 [\\x00-\\x1f]
+    全量覆盖，结构换行转义为 \\u000a 将破坏可解析性，正常产物全断。此测试
+    钉死该不变量：块内真实换行保留且 strict 可解析。
+    """
+    path = PR.write_proposal(make_proposal(tmp_path, lessons=[_multiline_lesson()]),
+                             tmp_path / "pending")
+    for f in (path, path.parent / f"{path.stem}.orig"):
+        text = f.read_text(encoding="utf-8")
+        m = PR._JSON_BLOCK_RE.search(text)
+        assert "\n" in m.group(1), f"{f.name}: 结构换行缺失（indent 形态漂移）"
+        assert json.loads(m.group(1))["lessons"], f"{f.name}: strict 解析失败"
+
+
 def test_write_proposal_gate_rejects_corrupt_block(tmp_path, monkeypatch):
     """净化层闸门（issue #81 根修）：序列化产物非 strict 可解析 → 落盘前 fail-fast。
 
