@@ -100,6 +100,51 @@ def test_load_eval_set_skips_dir_without_input(tmp_path):
     assert [c.id for c in cases] == ["s:ok"]
 
 
+def test_parse_expected_manual_rule_ids_vs_desc(tmp_path):
+    """「人工补充规则：」行 → manual_rules 精确规则 ID；「人工补充：」描述行
+    不进 manual_rules（不参与对账）。"""
+    f = tmp_path / "e.md"
+    f.write_text(
+        "# c\n\n## 预期检查输出\n\n"
+        "- 脚本自动检出：禁用类型\n"
+        "- 人工补充：命名语义（拼音、泛化词）\n"
+        "- 人工补充规则：拼音、泛化词、复数形式\n",
+        encoding="utf-8")
+    script, rules, manual = R.parse_expected(f)
+    assert rules == ["禁用类型"]
+    assert manual == ["拼音", "泛化词", "复数形式"]   # 描述行不混入
+
+
+def test_load_eval_set_include_manual_merges(tmp_path):
+    """include_manual=True：manual_rules 并入 expected_rules（GEPA 专用），
+    放行型（无人工规则）expected_empty 不受影响。"""
+    for name, content in {
+        "001-bad": "- 脚本自动检出：禁用类型\n- 人工补充规则：拼音、泛化词",
+        "007-clean": "（无脚本自动检出项）",
+    }.items():
+        (tmp_path / name / "input").mkdir(parents=True)
+        (tmp_path / name / "input" / "f.sql").write_text("x", encoding="utf-8")
+        (tmp_path / name / "expected.md").write_text(
+            f"# c\n\n## 预期检查输出\n\n{content}\n", encoding="utf-8")
+    by_id = {c.id: c for c in R.load_eval_set("s", tmp_path, {}, include_manual=True)}
+    assert by_id["s:001-bad"].reference["expected_rules"] == ["禁用类型", "拼音", "泛化词"]
+    assert by_id["s:001-bad"].reference["expected_empty"] is False
+    assert by_id["s:007-clean"].reference["expected_rules"] == []
+    assert by_id["s:007-clean"].reference["expected_empty"] is True
+
+
+def test_load_eval_set_default_excludes_manual(tmp_path):
+    """默认 include_manual=False：manual_rules 只记录不并入（badcase_runner 同构）。"""
+    (tmp_path / "001-bad" / "input").mkdir(parents=True)
+    (tmp_path / "001-bad" / "input" / "f.sql").write_text("x", encoding="utf-8")
+    (tmp_path / "001-bad" / "expected.md").write_text(
+        "# c\n\n## 预期检查输出\n\n- 脚本自动检出：禁用类型\n- 人工补充规则：拼音\n",
+        encoding="utf-8")
+    case = R.load_eval_set("s", tmp_path, {})[0]
+    assert case.reference["expected_rules"] == ["禁用类型"]
+    assert case.reference["manual_rules"] == ["拼音"]
+
+
 def test_parse_expected_missing_file_and_head_fallback(tmp_path):
     assert R.parse_expected(tmp_path / "absent.md") == (None, [], [])
     # 无「## 预期检查输出」段 → head 兜底解析；check_script 行提取

@@ -94,7 +94,12 @@ def scorer_registry() -> dict:
 
 # ── expected.md 解析（与 badcase_runner.parse_expected 同构，见其 docstring）──
 def parse_expected(expected_path: Path) -> Tuple[str, List[str], List[str]]:
-    """返回 (check_script, expected_rules, manual_rules)。人工补充仅记录不比对。"""
+    """返回 (check_script, expected_rules, manual_rules)。
+
+    manual_rules 语义 = 「人工补充规则：」行的规则 ID（LLM 按 SKILL 第 3 步可
+    检出，GEPA 评估集 include_manual 时并入 expected）；「人工补充：」描述行
+    仅作展示不参与比对（不返回）。
+    """
     if not expected_path.is_file():
         return None, [], []
     text = expected_path.read_text(encoding="utf-8")
@@ -103,6 +108,7 @@ def parse_expected(expected_path: Path) -> Tuple[str, List[str], List[str]]:
     if m:
         check_script = m.group(1).strip()
     expected_rules, manual_rules = [], []
+    manual_desc = []
 
     def _split_rules(payload: str):
         return [p.strip() for p in re.split(r"[、,，;；]", payload) if p.strip()]
@@ -116,8 +122,10 @@ def parse_expected(expected_path: Path) -> Tuple[str, List[str], List[str]]:
             item = m.group(1).strip()
             if item.startswith("脚本自动检出"):
                 expected_rules.extend(_split_rules(re.split(r"[:：]", item, maxsplit=1)[-1]))
+            elif item.startswith("人工补充规则"):
+                manual_rules.extend(_split_rules(re.split(r"[:：]", item, maxsplit=1)[-1]))
             elif item.startswith("人工补充"):
-                manual_rules.append(re.split(r"[:：]", item, maxsplit=1)[-1].strip())
+                manual_desc.append(re.split(r"[:：]", item, maxsplit=1)[-1].strip())
             elif item and not item.startswith("#"):
                 expected_rules.append(item)
     else:
@@ -187,11 +195,16 @@ def f1_score(tp: int, n_expected: int, n_actual: int) -> float:
 
 
 # ── 评估集加载 ────────────────────────────────────────────────────────────
-def load_eval_set(skill: str, eval_dir: Path, cfg: dict) -> List[G.Case]:
+def load_eval_set(skill: str, eval_dir: Path, cfg: dict,
+                  include_manual: bool = False) -> List[G.Case]:
     """遍历 eval_dir 下 case 目录（input/ + expected.md），构建 Case 列表。
 
     Case.inputs = {input_dir, files: {文件名: 内容}}
     Case.reference = {expected_rules, manual_rules, expected_empty}
+
+    include_manual=True：把「人工补充」规则（manual-rules 规则名，LLM 按 SKILL
+    第 3 步可检出）并入 expected_rules——GEPA 评估集专用；badcase_runner 的
+    脚本回归语义不变（脚本检不出语义类规则，仍只比对脚本自动检出部分）。
     """
     cases = []
     for case_dir in sorted(p for p in eval_dir.iterdir() if p.is_dir()):
@@ -199,6 +212,8 @@ def load_eval_set(skill: str, eval_dir: Path, cfg: dict) -> List[G.Case]:
         if not input_dir.is_dir():
             continue
         _, expected_rules, manual_rules = parse_expected(case_dir / "expected.md")
+        if include_manual:
+            expected_rules = list(dict.fromkeys([*expected_rules, *manual_rules]))
         files = {}
         for f in sorted(input_dir.iterdir()):
             if f.is_file():
@@ -359,11 +374,15 @@ def script_baseline_f1(cfg, skill_name: str, cases: List[G.Case]) -> Tuple[float
                 details.append({"case": case.id, "error": f"{script.name}: {e}"})
                 continue
         actual_rules = list(dict.fromkeys(r for r in actual_rules if r))
-        expected = case.reference["expected_rules"]
+        # baseline 只对「脚本可及」规则求 F1：人工补充规则（拼音/语义类）脚本
+        # 本就检不出，混入会让基线失真（无从区分脚本缺陷 vs 规则本质）。
+        manual = set(case.reference.get("manual_rules", []))
+        expected = [e for e in case.reference["expected_rules"] if e not in manual]
         tp, missing, unexpected = reconcile(expected, actual_rules)
         score = f1_score(tp, len(expected), len(actual_rules))
         total_f1 += score
         details.append({"case": case.id, "expected_empty": case.reference["expected_empty"],
                         "expected": expected, "actual": actual_rules,
+                        "manual_rules": case.reference.get("manual_rules", []),
                         "score": round(score, 4)})
     return (total_f1 / len(cases) if cases else 0.0), details

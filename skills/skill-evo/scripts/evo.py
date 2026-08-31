@@ -381,7 +381,9 @@ def cmd_evolve(args) -> int:
                     eval_dirs.append(d)
         cases = []
         for d in eval_dirs:
-            cases += R.load_eval_set(args.skill, d, cfg)
+            # include_manual=True：人工补充规则（拼音/语义类）纳入 expected，
+            # execute 的 LLM 按 SKILL 第 3 步可检出——评估集对齐完整 SKILL 工作流。
+            cases += R.load_eval_set(args.skill, d, cfg, include_manual=True)
         if len(cases) < int(cfg["replay_min_cases"]):
             print(f"评估集不足：{len(cases)} cases（需 ≥{cfg['replay_min_cases']}，"
                   f"含拦截/放行/混合型；持续补充后重试，可 --dry-run 查看构成）")
