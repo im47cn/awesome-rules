@@ -353,6 +353,7 @@ _CU_MERGE_METHOD = {"merge": "no-fast-forward", "squash": "squash", "rebase": "r
 # 人工打回手势 = MR 评论含「[factory:changes-requested]」。字节级对齐
 # forge 时代格式——ADR-007 期的存量标记评论可被本实现读取。
 _CU_LABEL_ADD = "[factory:label:add] "
+_CU_FACTORY_PREFIX = "factory:"
 _CU_CHANGES_REQ = "[factory:changes-requested]"
 
 
@@ -724,18 +725,41 @@ class CodeupAdapter:
                                 "content": content, "resolved": resolved})
         return out
 
+    def _marker_comments_best_effort(self, p):
+        # 读路径专用（Sourcery #11）：评论端点失败不阻断 PR 详情。
+        # 返回 (markers, ok)：ok=False = 端点降级——调用方不得把空集当
+        # 「无标记」真相（advisory #11：降级时回退展示原生类标，宁可多显示
+        # 不可隐藏真实标签）；写路径（pr_set_labels）仍用 _marker_comments
+        # 显式失败。
+        try:
+            return self._marker_comments(p), True
+        except HostingError as e:
+            print(f"[hosting] 标记评论读取失败，降级空集: {e}", file=sys.stderr)
+            return [], False
+
     def _pr_labels(self, p):
-        # 两载体合并（#66）：类标 Link（平台原生）∪ 未 resolved 的 add 标记
-        # 【live 2026-08-26】MR 详情响应无 labels 字段——类标须专用端点读回
+        # 两载体合并（#66）：类标 Link（平台原生）∪ 未 resolved 的 add 标记。
+        # 【live 2026-08-26】MR 详情响应无 labels 字段——类标须专用端点读回。
+        # 标记是唯一真相源：工厂类标无未 resolved 标记即视为已移除
+        #（平台无类标 unlink API，remove 只 resolve 标记——CodeRabbit PR #11）
+        markers, ok = self._marker_comments_best_effort(p)
+        active = {self._marker_label(m["content"]) for m in markers
+                  if not m["resolved"] and m["content"].startswith(_CU_LABEL_ADD)}
         names = []
         try:
             payload = self._req("GET", f"{self._base()}/changeRequests/{p}/labels")
             items = payload if isinstance(payload, list) else (payload.get("result") or [])
-            names += [l.get("name") for l in items if l.get("name")]
+            for l in items:
+                name = l.get("name")
+                if not name:
+                    continue
+                if ok and name.startswith(_CU_FACTORY_PREFIX) and name not in active:
+                    continue  # 工厂类标投影失真：以标记生命周期为准（仅读成功时）
+                names.append(name)
         except HostingError:
             pass  # 类标读失败不阻断详情（标记评论仍可承载）
-        names += [self._marker_label(m["content"]) for m in self._marker_comments(p)
-                  if not m["resolved"] and m["content"].startswith(_CU_LABEL_ADD)]
+        if ok:
+            names += active
         return sorted({n for n in names if n})
 
     @staticmethod
@@ -750,8 +774,9 @@ class CodeupAdapter:
         # 人工打回手势（#66）：[factory:changes-requested] 评论 →
         # changes_requested（Codeup 无 reviewDecision 等价物的场景；
         # reviewer 意见 NOTPASS 映射保留，两者取严）
+        markers, _ = self._marker_comments_best_effort(p)  # 降级 → 空集 → 不误报
         if out["review"] != "changes_requested" and any(
-                _CU_CHANGES_REQ in m["content"] for m in self._marker_comments(p)):
+                _CU_CHANGES_REQ in m["content"] for m in markers):
             out["review"] = "changes_requested"
         return out
 
