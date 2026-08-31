@@ -22,7 +22,7 @@ source "${FACTORY}/factory-lib.sh"
 # 保留镜像拓扑逃生口）；fail-closed——配置缺失即终止。
 UPSTREAM_PATH="${UPSTREAM_PATH:-$(python3 "$FACTORY/factory_lib.py" local-str upstream_path)}" \
   || { echo "factory-local.json upstream_path 不可用（fail-closed）" >&2; exit 2; }
-UPSTREAM_PATH="${UPSTREAM_PATH/#\~/\$HOME}"   # 配置 ~/ 形态的消费端展开（git -C 不做 tilde 展开，review R2-B2）
+UPSTREAM_PATH="${UPSTREAM_PATH/#\~/$HOME}"   # 配置 ~/ 形态的消费端展开（git -C 不做 tilde 展开，review R2-B2；原写法 \$HOME 是字面量非展开——git -C 收到 "$HOME/..." 原文即不可用）
 UPSTREAM_REPO="${UPSTREAM_REPO:-$(python3 "$FACTORY/factory_lib.py" local-str upstream_repo)}" \
   || { echo "factory-local.json upstream_repo 不可用（fail-closed）" >&2; exit 2; }
 FB_PREFIX="${FB_PREFIX:-$(python3 "$FACTORY/factory_lib.py" local-str feedback_branch_prefix)}" \
