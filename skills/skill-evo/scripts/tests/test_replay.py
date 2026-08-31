@@ -108,11 +108,11 @@ def test_parse_expected_manual_rule_ids_vs_desc(tmp_path):
         "# c\n\n## 预期检查输出\n\n"
         "- 脚本自动检出：禁用类型\n"
         "- 人工补充：命名语义（拼音、泛化词）\n"
-        "- 人工补充规则：拼音、泛化词、复数形式\n",
+        "- 人工补充规则：拼音、泛化词、复数\n",
         encoding="utf-8")
     script, rules, manual = R.parse_expected(f)
     assert rules == ["禁用类型"]
-    assert manual == ["拼音", "泛化词", "复数形式"]   # 描述行不混入
+    assert manual == ["拼音", "泛化词", "复数"]   # 描述行不混入
 
 
 def test_load_eval_set_include_manual_merges(tmp_path):
