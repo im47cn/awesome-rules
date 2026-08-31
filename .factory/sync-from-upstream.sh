@@ -64,6 +64,32 @@ echo "上游: ${UP} @ ${ANCHOR} (${HEAD_SHA:0:9})"
 # 铁律 4：git 子进程编排归 Python；无清单=空输出，警告走 stderr）
 python3 "$FACTORY/factory_lib.py" dist-manifest "$UP" "$HEAD_SHA" > /tmp/.factory-dist.$$
 
+# Sourcery 回归闸（2026-08-31 事故锚：追平所取上游快照早于下游已修复版，
+# 100 个已清零 issue 整体回退，PR gate 才拦截——闸前移到追平时点）。
+# 语义与 sourcery-review-gate 同构：exit code（0=干净 1=有 issue 其余=异常）。
+# 不解析 stdout：CLI 在管道（命令替换）下精简输出、干净时零输出，
+# 人类概览（Total 表/No issues detected）仅 tty 形态存在——解析它必脆。
+# 注意：多文件入参须相对路径（绝对路径仅接受单个）；点目录不可整目录扫描。
+_sr_py_files() {
+  (cd "$REPO" && find .factory -name '*.py' -type f | sort)
+}
+_sr_clean() {  # 0=干净 1=有 issue 2=CLI 异常
+  local files rc
+  files="$(_sr_py_files | tr '\n' ' ')"
+  [ -n "$files" ] || return 0
+  sourcery review --check $files >/dev/null 2>&1
+  rc=$?
+  [ "$rc" -eq 0 ] && return 0
+  [ "$rc" -eq 1 ] && return 1
+  return 2
+}
+SR_GATE_ON=0
+if [ "$MODE" = apply ] && command -v sourcery >/dev/null 2>&1; then
+  SR_GATE_ON=1
+  _sr_clean && echo "Sourcery 回归闸基线: .factory 干净" \
+            || { echo "Sourcery 回归闸基线: .factory 已有 issue——先清零再追平（闸口径=PR gate）" >&2; exit 2; }
+fi
+
 # 上游 mode+blob（git show 丢 mode，覆盖后须恢复执行位）
 up_tree() { git -C "$UP" ls-tree "$HEAD_SHA" -- ".factory/$1"; }
 
@@ -86,6 +112,7 @@ while IFS=$'\t' read -r kind rel; do
     echo "  [$kind] $rel: 本地缺失"
     [ "$kind" = full ] && DRIFT=1
     if [ "$MODE" = apply ] && [ "$kind" = full ]; then
+      mkdir -p "$(dirname "$dst")" # 缺失父目录先建（wop-skills：tests/ 整缺，重定向即崩）
       git -C "$UP" cat-file blob "$up_blob" > "$dst"
       chmod "${up_mode: -3}" "$dst" 2>/dev/null || chmod +x "$dst"
       echo "    → 已补齐"; APPLIED=$((APPLIED+1))
@@ -115,6 +142,19 @@ done < /tmp/.factory-dist.$$
 rm -f /tmp/.factory-dist.$$
 
 if [ "$MODE" = apply ]; then
+  # 追平后 Sourcery 回归闸：.factory 必须仍清零（不写锁点，下次重跑）
+  if [ "$SR_GATE_ON" = 1 ]; then
+    rc=0; _sr_clean || rc=$?
+    case $rc in
+      0) echo "Sourcery 回归闸通过: .factory 干净" ;;
+      1) echo "Sourcery 回归闸拦截: 追平把 issue 带回 .factory（上游快照含已修复回退或新问题）" >&2
+         echo "  先在本地修复这批文件后重试追平，或走 feedback-upstream.sh 反哺上游（正道），" >&2
+         echo "  不得以静默回退换追平。定位: sourcery review --check \$(_sr_py_files | tr '\\n' ' ')" >&2
+         exit 1 ;;
+      *) echo "Sourcery 回归闸计数失败（CLI 限流/异常，fail-closed 拦截）" >&2; exit 2 ;;
+    esac
+  fi
+
   python3 - "$LOCKFILE" "$HEAD_SHA" <<'PY'
 import json, sys, pathlib, datetime
 p = pathlib.Path(sys.argv[1])

@@ -152,8 +152,11 @@ class TestCodeupShapes:
             # 【live 2026-08-26】MR 详情无 labels 字段，类标专用端点读回
             ("GET", "/changeRequests/3/labels"): [
                 {"name": "factory:needs-fix"}],
-            # #66 评论标记模型：pr_view 兼查标记评论（空集 = 无标记）
-            ("POST", "/comments/list"): {"result": []}}, monkeypatch)
+            # #66 评论标记模型：pr_view 兼查标记评论（active 承载 needs-fix——
+            # 投影语义：无 active 标记的原生工厂类标视为投影失真被过滤）
+            ("POST", "/comments/list"): {"result": [
+                {"id": "c1", "content": "[factory:label:add] factory:needs-fix",
+                 "resolved": False}]}}, monkeypatch)
         n = ad.pr_view(3)
         assert n["review"] == "changes_requested"
         assert n["state"] == "open"
@@ -307,10 +310,49 @@ class TestCodeupMarkerModel:
 
         def fake_req(method, path, body=None, query=None, _retry_rdc=True):
             if method == "GET" and path.endswith("/labels"):
-                return [{"name": "factory:needs-fix"}, {"name": "factory:extra"}]
+                return [{"name": "factory:needs-fix"}, {"name": "factory:extra"},
+                        {"name": "release/x"}]
             return real_req(method, path, body, query, _retry_rdc)
         ad._req = fake_req
-        assert ad._pr_labels(7) == ["factory:extra", "factory:needs-fix"]
+        # 标记是真相源：factory:extra 无未 resolved 标记 → 屏蔽；
+        # 非 factory 前缀类标（release/x）不受标记生命周期约束
+        assert ad._pr_labels(7) == ["factory:needs-fix", "release/x"]
+
+    def test_pr_labels_marker_failure_degrades_best_effort(self, monkeypatch, capsys):
+        """Sourcery #11：评论端点失败降级空集——标签读失败不阻断 PR 详情
+        （尽力而为契约；写路径 pr_set_labels 仍显式失败）。"""
+        ad = self._ad(monkeypatch, {})
+        real_req = ad._req
+
+        def fake_req(method, path, body=None, query=None, _retry_rdc=True):
+            if method == "GET" and path.endswith("/labels"):
+                return [{"name": "factory:needs-fix"}]
+            if method == "POST" and path.endswith("/comments/list"):
+                raise hosting.HostingError("comments endpoint down")
+            return real_req(method, path, body, query, _retry_rdc)
+        ad._req = fake_req
+        assert ad._pr_labels(7) == ["factory:needs-fix"]  # 类标保留，标记载体降级
+        assert "降级空集" in capsys.readouterr().err
+
+    def test_pr_view_marker_failure_keeps_review(self, monkeypatch, capsys):
+        """手势载体失败：review 维持平台原生映射，pr_view 不抛、不误报。"""
+        ad = self._ad(monkeypatch, {})
+        real_req = ad._req
+
+        def fake_req(method, path, body=None, query=None, _retry_rdc=True):
+            if method == "GET" and path.endswith("/changeRequests/5"):
+                return {"result": {"localId": 5, "newVersionState": "TO_BE_MERGED",
+                                   "reviewers": [{"reviewOpinionStatus": "PASS"}]}}
+            if method == "GET" and path.endswith("/labels"):
+                return []
+            if method == "POST" and path.endswith("/comments/list"):
+                raise hosting.HostingError("comments endpoint down")
+            return real_req(method, path, body, query, _retry_rdc)
+        ad._req = fake_req
+        out = ad.pr_view(5)
+        assert out["labels"] == []
+        assert out["review"] != "changes_requested"  # 载体缺席不得误报打回
+        assert "降级空集" in capsys.readouterr().err
 
     def test_label_history_resolved_does_not_decrease(self, monkeypatch):
         """轮次语义：resolved 不减计数——全部 add 标记都计入事件流。"""
