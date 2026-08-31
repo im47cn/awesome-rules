@@ -4,15 +4,25 @@ import json
 import pytest
 
 import evo_proposal as PR
+from pathlib import Path
 
 
 def make_lesson(**kw):
-    base = dict(type="correction", evidence="用户说'不要用 select *'",
-                target_file="steering/demo-spec.md", confidence="Medium",
-                reason="补充条款", change=PR.Change(
-                    action="append_under", heading="## 强制条款",
-                    new_text="- 禁止 `select *`，明确列名"))
-    base.update(kw)
+    base = (
+        dict(
+            type="correction",
+            evidence="用户说'不要用 select *'",
+            target_file="steering/demo-spec.md",
+            confidence="Medium",
+            reason="补充条款",
+            change=PR.Change(
+                action="append_under",
+                heading="## 强制条款",
+                new_text="- 禁止 `select *`，明确列名",
+            ),
+        )
+        | kw
+    )
     return PR.Lesson(**base)
 
 
@@ -91,7 +101,68 @@ def test_load_proposal_flags_corrupt_block(tmp_path):
     assert any("解析失败" in e and "line" in e for e in p.parse_errors)
     with pytest.raises(PR.ApplyError, match="解析失败"):   # 真因直指坏块，非裸『提案无 lesson』
         PR.apply_proposal(p, make_repo(tmp_path))
-    PR.list_proposals(tmp_path / "pending")               # 宽松语义保持：list 不抛
+
+def test_write_proposal_sanitizes_raw_ctrl_chars(tmp_path):
+    """净化层（issue #81 根修）：夹带裸控制字符的 lesson，落盘后机读块 strict 可解析。
+
+    LLM 输出可夹带 \x08/\x0b/\x00 等裸控制字符；无论序列化路径如何漂移，
+    生成器最终产物必须 strict 可解析，且 roundtrip 逐字符保真（\\uXXXX 转义
+    复原为原值）。
+    """
+    ls = make_lesson(evidence="a\x08b\x0bc", reason="r\x00尾")
+    path = PR.write_proposal(make_proposal(tmp_path, lessons=[ls]), tmp_path / "pending")
+    for f in (path, path.parent / f"{path.stem}.orig"):
+        m = PR._JSON_BLOCK_RE.search(f.read_text(encoding="utf-8"))
+        assert m, f"{f.name}: 机读 JSON 块缺失"
+        loaded = json.loads(m.group(1))                  # strict 默认：裸 <0x20 即抛
+        assert loaded["lessons"][0]["evidence"] == "a\x08b\x0bc"
+        assert loaded["lessons"][0]["reason"] == "r\x00尾"
+
+
+def test_write_proposal_sanitizes_raw_tab(tmp_path):
+    """净化层（issue #81）：裸 tab（\\x09）是 <0x20 唯一漏网可救字符——必须转义。
+
+    dumps 结构空白用空格+换行，裸 tab 只可能出现在字符串值内（外部破坏
+    \\t/\\u0009 转义序列所致），转义为 \\u0009 合法且 roundtrip 保真；
+    且产物文本中不得残留裸 tab 字节。
+    """
+    ls = make_lesson(evidence="a\tb", reason="r\t尾")
+    path = PR.write_proposal(make_proposal(tmp_path, lessons=[ls]), tmp_path / "pending")
+    for f in (path, path.parent / f"{path.stem}.orig"):
+        text = f.read_text(encoding="utf-8")
+        m = PR._JSON_BLOCK_RE.search(text)
+        assert "\t" not in m.group(1), f"{f.name}: 机读块内裸 tab 未防御转义"
+        loaded = json.loads(m.group(1))                  # strict：裸 tab 即抛
+        assert loaded["lessons"][0]["evidence"] == "a\tb"
+        assert loaded["lessons"][0]["reason"] == "r\t尾"
+
+def test_write_proposal_keeps_structural_newlines(tmp_path):
+    """净化层（issue #81）：indent=1 的结构换行（真实 \\n）不得被防御转义误伤。
+
+    LF/CR 是 JSON 合法结构空白，_CTRL_CHARS_RE 显式排除——若改成 [\\x00-\\x1f]
+    全量覆盖，结构换行转义为 \\u000a 将破坏可解析性，正常产物全断。此测试
+    钉死该不变量：块内真实换行保留且 strict 可解析。
+    """
+    path = PR.write_proposal(make_proposal(tmp_path, lessons=[_multiline_lesson()]),
+                             tmp_path / "pending")
+    for f in (path, path.parent / f"{path.stem}.orig"):
+        text = f.read_text(encoding="utf-8")
+        m = PR._JSON_BLOCK_RE.search(text)
+        assert "\n" in m.group(1), f"{f.name}: 结构换行缺失（indent 形态漂移）"
+        assert json.loads(m.group(1))["lessons"], f"{f.name}: strict 解析失败"
+
+
+def test_write_proposal_gate_rejects_corrupt_block(tmp_path, monkeypatch):
+    """净化层闸门（issue #81 根修）：序列化产物非 strict 可解析 → 落盘前 fail-fast。
+
+    负控制：_machine_block 被替换为含裸控制字符的坏块时，write_proposal 必须
+    在写出前抛 ApplyError——坏件永不静默进入 pending/归档。
+    """
+    p = make_proposal(tmp_path, lessons=[_multiline_lesson()])
+    monkeypatch.setattr(PR, "_machine_block",
+                        lambda payload: '```json\n{"lessons": [{"evidence": "\x08"}]}\n```')
+    with pytest.raises(PR.ApplyError, match="机读块非严格可解析"):
+        PR.write_proposal(p, tmp_path / "pending")
 
 
 def test_finalize_review_corrupt_block_clean_error(tmp_path):
@@ -449,6 +520,19 @@ def test_move_proposal_adds_fm(tmp_path):
     assert len(PR.load_proposal(dest).lessons) == 1
 
 
+def test_move_proposal_no_frontmatter(tmp_path):
+    """无 frontmatter 的裸提案：move 时补全 frontmatter（else 分支）。"""
+    src = tmp_path / "pending" / "raw.md"
+    src.parent.mkdir()
+    src.write_text("# 裸提案\n\n正文\n", encoding="utf-8")
+    dest = PR.move_proposal(src, tmp_path / "applied", {"status": "applied"})
+    assert dest.exists() and dest.parent.name == "applied"
+    content = dest.read_text(encoding="utf-8")
+    assert content.startswith("---\n")
+    assert "status: applied" in content
+    assert "# 裸提案" in content
+
+
 # ── 结构化 verdict（借鉴 harness-anything verdict 语义）──────────────────────
 
 def test_validate_codes():
@@ -693,3 +777,131 @@ class TestAttributionWarnings:
                         change=PR.Change(action="append_end",
                                          new_text="流水线造成主仓损坏"))])
         assert any("归因" in w for w in p.warnings())
+
+
+# ── 净化层存量迁移（issue #81 闭环：生成侧防 + 存量治）────────────────────
+
+def _broken_proposal(tmp_path, name="20260825-000001-cc-mig0001.md", bad="\x08"):
+    """构造含裸控制字符的损坏提案（模拟外部破坏转义序列）。"""
+    p = PR.write_proposal(make_proposal(tmp_path, pid="20260825-000001-cc-mig0001"),
+                          tmp_path / "pending")
+    content = p.read_text(encoding="utf-8")
+    assert "bad" not in content
+    fixed = content.replace('"reason": "补充条款"', f'"reason": "补充条款{bad}"')
+    p.write_text(fixed, encoding="utf-8")
+    return p
+
+
+def test_migrate_repairs_broken_machine_block(tmp_path):
+    """存量损坏 .md：migrate fix 转义裸控制字符，strict 可解析且 roundtrip 保真。"""
+    p = _broken_proposal(tmp_path)
+    assert PR.load_proposal(p).parse_errors   # 修复前：坏块诊断上浮（Tripwire）
+    rep = PR.migrate_proposals(tmp_path / "pending", fix=True)
+    assert len(rep["repaired"]) == 1 and not rep["unrecoverable"]
+    repaired_content = p.read_text(encoding="utf-8")
+    assert "\x08" not in repaired_content          # 裸控制字符已被转义
+    # 修复后 strict 可解析 + 语义保真（转义序列解码回原值）
+    re_p = PR.load_proposal(p)
+    assert re_p.lessons[0].reason == "补充条款\b"
+
+
+def test_migrate_check_only_reports(tmp_path):
+    """--check 语义（fix=False）：只报告候选，文件零改动。"""
+    p = _broken_proposal(tmp_path)
+    before = p.read_text(encoding="utf-8")
+    rep = PR.migrate_proposals(tmp_path / "pending", fix=False)
+    assert len(rep["repaired"]) == 1
+    assert p.read_text(encoding="utf-8") == before
+
+
+def test_migrate_unrecoverable_reported(tmp_path):
+    """结构损坏（无法自动修复）：列入 unrecoverable，不写回。"""
+    p = _broken_proposal(tmp_path)
+    content = p.read_text(encoding="utf-8")
+    content = content.replace('"confidence": "Medium"', '"confidence": "Mediu')  # 截断
+    p.write_text(content, encoding="utf-8")
+    before = p.read_text(encoding="utf-8")
+    rep = PR.migrate_proposals(tmp_path / "pending", fix=True)
+    assert len(rep["unrecoverable"]) == 1 and not rep["repaired"]
+    assert p.read_text(encoding="utf-8") == before
+
+
+def test_migrate_skips_ok_and_non_proposal(tmp_path):
+    """未损坏文件 ok 零改动；非提案名（无时间戳前缀）跳过。"""
+    p = PR.write_proposal(make_proposal(tmp_path), tmp_path / "pending")
+    ok_before = p.read_text(encoding="utf-8")
+    other = tmp_path / "pending" / "README.md"
+    other.write_text("# 说明\n\n非提案文件\n", encoding="utf-8")
+    rep = PR.migrate_proposals(tmp_path / "pending", fix=True)
+    assert str(p) in rep["ok"]
+    assert p.read_text(encoding="utf-8") == ok_before
+    assert len(rep["unchanged"]) == 1 and "README.md" in rep["unchanged"][0]
+
+
+def test_migrate_cli_end_to_end(tmp_path):
+    """CLI 端到端：migrate --fix 修复损坏归档并输出统计（rc=0 无 unrecoverable）。"""
+    p = _broken_proposal(tmp_path)
+    import subprocess, sys
+    r = subprocess.run([sys.executable, "evo_proposal.py", "migrate", "--fix",
+                        str(tmp_path / "pending")],
+                       cwd=str(Path(__file__).parent.parent),
+                       capture_output=True, text=True)
+    assert r.returncode == 0
+    assert "repaired=1" in r.stdout and "unrecoverable=0" in r.stdout
+    assert not PR.load_proposal(p).parse_errors   # 修复后读路径干净
+
+
+def test_main_without_migrate_exits_zero(monkeypatch):
+    """__main__ 薄壳：无 migrate 子命令直接退出（else 分支）。"""
+    import sys as _sys
+    monkeypatch.setattr(_sys, "argv", ["evo_proposal.py"])
+    with pytest.raises(SystemExit) as ei:
+        exec(compile(Path(PR.__file__).read_text(encoding="utf-8"),
+                     str(PR.__file__), "exec"), {"__name__": "__main__"})
+    assert ei.value.code == 0
+
+
+def test_main_with_migrate_runs_cli(tmp_path, monkeypatch, capsys):
+    """__main__ 薄壳：migrate 子命令转交 _migrate_cli。"""
+    import sys as _sys
+    monkeypatch.setattr(_sys, "argv", ["evo_proposal.py", "migrate", str(tmp_path)])
+    with pytest.raises(SystemExit) as ei:
+        exec(compile(Path(PR.__file__).read_text(encoding="utf-8"),
+                     str(PR.__file__), "exec"), {"__name__": "__main__"})
+    assert ei.value.code == 0
+    assert "ok=0" in capsys.readouterr().out
+
+
+def test_migrate_cli_unrecoverable_returns_1(tmp_path):
+    """_migrate_cli：存在 unrecoverable 时返回 rc=1。"""
+    p = _broken_proposal(tmp_path)
+    content = p.read_text(encoding="utf-8")
+    content = content.replace('"confidence": "Medium"', '"confidence": "Mediu')
+    p.write_text(content, encoding="utf-8")
+    assert PR._migrate_cli([str(tmp_path / "pending")]) == 1
+
+
+def test_migrate_cli_repaired_prints(tmp_path, capsys):
+    """_migrate_cli：repaired 场景输出统计（rc=0，fix 写回）。"""
+    p = _broken_proposal(tmp_path)
+    assert PR._migrate_cli([str(tmp_path / "pending"), "--fix"]) == 0
+    out = capsys.readouterr().out
+    assert "repaired=1" in out and "unrecoverable=0" in out
+    assert not PR.load_proposal(p).parse_errors
+
+
+def test_migrate_unreadable_file_reported(tmp_path):
+    """读异常（目录伪装提案名）：列入 unrecoverable，不中断扫描。"""
+    d = tmp_path / "pending" / "20260825-000001-cc-dir0001.md"
+    d.mkdir(parents=True)                        # 目录名匹配提案 glob → read_text 抛 OSError
+    rep = PR.migrate_proposals(tmp_path / "pending", fix=True)
+    assert len(rep["unrecoverable"]) == 1 and "cc-dir0001" in rep["unrecoverable"][0]
+
+
+def test_migrate_block_missing_reported(tmp_path):
+    """提案名但机读块完全缺失：列入 unrecoverable（不当作普通文件跳过）。"""
+    p = tmp_path / "pending" / "20260825-000001-cc-noblock0001.md"
+    p.parent.mkdir(parents=True)
+    p.write_text("# 提案\n\n无机读块\n", encoding="utf-8")
+    rep = PR.migrate_proposals(tmp_path / "pending", fix=True)
+    assert len(rep["unrecoverable"]) == 1 and "cc-noblock0001" in rep["unrecoverable"][0]
