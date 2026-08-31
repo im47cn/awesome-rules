@@ -888,3 +888,20 @@ def test_migrate_cli_repaired_prints(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "repaired=1" in out and "unrecoverable=0" in out
     assert not PR.load_proposal(p).parse_errors
+
+
+def test_migrate_unreadable_file_reported(tmp_path):
+    """读异常（目录伪装提案名）：列入 unrecoverable，不中断扫描。"""
+    d = tmp_path / "pending" / "20260825-000001-cc-dir0001.md"
+    d.mkdir(parents=True)                        # 目录名匹配提案 glob → read_text 抛 OSError
+    rep = PR.migrate_proposals(tmp_path / "pending", fix=True)
+    assert len(rep["unrecoverable"]) == 1 and "cc-dir0001" in rep["unrecoverable"][0]
+
+
+def test_migrate_block_missing_reported(tmp_path):
+    """提案名但机读块完全缺失：列入 unrecoverable（不当作普通文件跳过）。"""
+    p = tmp_path / "pending" / "20260825-000001-cc-noblock0001.md"
+    p.parent.mkdir(parents=True)
+    p.write_text("# 提案\n\n无机读块\n", encoding="utf-8")
+    rep = PR.migrate_proposals(tmp_path / "pending", fix=True)
+    assert len(rep["unrecoverable"]) == 1 and "cc-noblock0001" in rep["unrecoverable"][0]

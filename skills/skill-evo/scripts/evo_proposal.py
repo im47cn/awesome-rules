@@ -7,6 +7,7 @@ round-trip 只依赖 JSON 块，正文渲染仅供人工审核阅读。
 不做改写删除 —— 天然不会削弱 steering 的【强制】条款。
 """
 from __future__ import annotations
+import sys
 
 import difflib
 import hashlib
@@ -193,7 +194,6 @@ def migrate_proposals(root: Path, *, fix: bool = False) -> dict:
 
 
 def write_proposal(p: Proposal, pending_dir: Path) -> Path:
-
 
     pending_dir.mkdir(parents=True, exist_ok=True)
     path = pending_dir / f"{p.id}.md"
@@ -819,7 +819,6 @@ def archive_orig(path: Path, dest_dir: Path) -> Optional[Path]:
     return dest
 
 
-
 def _migrate_cli(argv: List[str]) -> int:
     """存量迁移 CLI：python3 evo_proposal.py migrate [--fix] [root]。"""
     import argparse
@@ -842,7 +841,5 @@ def _migrate_cli(argv: List[str]) -> int:
 
 
 if __name__ == "__main__":
-    import sys
-    if len(sys.argv) > 1 and sys.argv[1] == "migrate":
-        sys.exit(_migrate_cli(sys.argv[2:]))
-    sys.exit(0)
+    sys.exit(_migrate_cli(sys.argv[2:])
+             if len(sys.argv) > 1 and sys.argv[1] == "migrate" else 0)
