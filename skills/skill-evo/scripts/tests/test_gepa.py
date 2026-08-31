@@ -75,8 +75,9 @@ def test_run_gepa_budget_respected_and_mutant_accepted():
     best, matrix, log = G.run_gepa(
         "baseline", train, holdout, execute, reflect, budget=20,
         batch_size=2, rng_seed=0)
-    assert calls["execute"] <= 20                    # 预算硬上限
-    assert calls["execute"] == 20 or len(matrix.scores) >= 1
+    assert calls["execute"] >= 20                    # rollout 用满预算
+    assert log[0]["holdout"]                         # holdout 独立必评（验收信号）
+    assert "c0" in log[0]["holdout"]                 # baseline 锚必有分
     assert "MUTATED" in best.text or best.id == "c0"  # 变异被接受或 baseline 持平
     assert any(e.get("accepted") for e in log[1:])    # 至少一次变异被接受
 
