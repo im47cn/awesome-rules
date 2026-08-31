@@ -101,7 +101,43 @@ def _render_lesson(i: int, ls: Lesson) -> str:
             f"- **变更**：{where}{body}")
 
 
+_CTRL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _machine_block(payload: dict) -> str:
+    """机读 JSON 块：strict 可解析是生成器不变量（issue #81 净化层）。
+
+    CPython json.dumps 对全部 <0x20 控制字符转义（\\n→字面序列、\\x08→\\b），
+    正常产物必然合法；但 LLM 输出可夹带裸控制字符，若序列化路径改动或环境
+    差异导致未转义，此处防御性转义并用 strict loads 自检——写盘前 fail-fast，
+    坏件永不静默产出。
+    """
+    raw = json.dumps(payload, ensure_ascii=False, indent=1)
+    safe = _CTRL_CHARS_RE.sub(lambda m: f"\\u{ord(m.group()):04x}", raw)
+    try:
+        json.loads(safe)
+    except json.JSONDecodeError as e:
+        raise ApplyError(f"机读块序列化自检失败（line {e.lineno} col {e.colno}）："
+                         f"payload 含 {e.msg}——请修正生成数据") from e
+    return "```json\n" + safe + "\n```"
+
+
+def _verify_machine_block(path: Path) -> None:
+    """生成器落盘自检：机读块必须 strict 可解析（净化层闸门）。"""
+    m = _JSON_BLOCK_RE.search(path.read_text(encoding="utf-8"))
+    if not m:
+        raise ApplyError(f"{path.name}: 机读 JSON 块缺失（生成器自检失败）")
+    try:
+        json.loads(m.group(1))
+    except json.JSONDecodeError as e:
+        raise ApplyError(f"{path.name}: 机读块非严格可解析（line {e.lineno} "
+                         f"col {e.colno}）；生成器自检拦截，请连同 .orig 上报") from e
+
+
+
 def write_proposal(p: Proposal, pending_dir: Path) -> Path:
+
+
     pending_dir.mkdir(parents=True, exist_ok=True)
     path = pending_dir / f"{p.id}.md"
     fm = (f"---\nid: {p.id}\nstatus: {p.status}\nsource_agent: {p.source_agent}\n"
@@ -118,13 +154,16 @@ def write_proposal(p: Proposal, pending_dir: Path) -> Path:
         "change": {"action": ls.change.action, "heading": ls.change.heading,
                    "new_text": ls.change.new_text} if ls.change else None,
     } for ls in p.lessons]}
-    machine = "```json\n" + json.dumps(payload, ensure_ascii=False, indent=1) + "\n```"
+    machine = _machine_block(payload)
     body = (f"{fm}\n# 进化提案 {p.id}\n\n> 来源：{p.source_agent} 会话 `{p.source_session}`"
             f"（{p.source_path}）\n\n{rendered}\n\n## 机读数据（apply 依据，勿手改）\n\n{machine}\n")
     path.write_text(body, encoding="utf-8")
+    _verify_machine_block(path)
     # 原始快照（无 .md 后缀：绕开 list/守卫/md_link_check 的 *.md glob）——
     # review 编辑只改正式文件，apply/reject 时 diff 快照推导结构化 verdict
-    (pending_dir / f"{p.id}.orig").write_text(body, encoding="utf-8")
+    orig = pending_dir / f"{p.id}.orig"
+    orig.write_text(body, encoding="utf-8")
+    _verify_machine_block(orig)
     return path
 
 
@@ -463,7 +502,6 @@ def _default_pending_md(p: Proposal) -> Path:
 
 
 def _render_pending_body(p: Proposal) -> str:
-    import json as _json
     fm = (f"---\nid: {p.id}\nstatus: {p.status}\nsource_agent: {p.source_agent}\n"
           f"source_session: {p.source_session}\nsource_path: {p.source_path}\n"
           f"created: {p.created}\nlessons: {len(p.lessons)}\n---\n")
@@ -476,7 +514,7 @@ def _render_pending_body(p: Proposal) -> str:
         "change": {"action": ls.change.action, "heading": ls.change.heading,
                    "new_text": ls.change.new_text} if ls.change else None,
     } for ls in p.lessons]}
-    machine = "```json\n" + _json.dumps(payload, ensure_ascii=False, indent=1) + "\n```"
+    machine = _machine_block(payload)
     return (f"{fm}\n# 进化提案 {p.id}\n\n> 来源：{p.source_agent} 会话 `{p.source_session}`"
             f"（{p.source_path}）\n\n{rendered}\n\n## 机读数据（apply 依据，勿手改）\n\n{machine}\n")
 

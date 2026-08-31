@@ -91,7 +91,35 @@ def test_load_proposal_flags_corrupt_block(tmp_path):
     assert any("解析失败" in e and "line" in e for e in p.parse_errors)
     with pytest.raises(PR.ApplyError, match="解析失败"):   # 真因直指坏块，非裸『提案无 lesson』
         PR.apply_proposal(p, make_repo(tmp_path))
-    PR.list_proposals(tmp_path / "pending")               # 宽松语义保持：list 不抛
+
+def test_write_proposal_sanitizes_raw_ctrl_chars(tmp_path):
+    """净化层（issue #81 根修）：夹带裸控制字符的 lesson，落盘后机读块 strict 可解析。
+
+    LLM 输出可夹带 \x08/\x0b/\x00 等裸控制字符；无论序列化路径如何漂移，
+    生成器最终产物必须 strict 可解析，且 roundtrip 逐字符保真（\\uXXXX 转义
+    复原为原值）。
+    """
+    ls = make_lesson(evidence="a\x08b\x0bc", reason="r\x00尾")
+    path = PR.write_proposal(make_proposal(tmp_path, lessons=[ls]), tmp_path / "pending")
+    for f in (path, path.parent / f"{path.stem}.orig"):
+        m = PR._JSON_BLOCK_RE.search(f.read_text(encoding="utf-8"))
+        assert m, f"{f.name}: 机读 JSON 块缺失"
+        loaded = json.loads(m.group(1))                  # strict 默认：裸 <0x20 即抛
+        assert loaded["lessons"][0]["evidence"] == "a\x08b\x0bc"
+        assert loaded["lessons"][0]["reason"] == "r\x00尾"
+
+
+def test_write_proposal_gate_rejects_corrupt_block(tmp_path, monkeypatch):
+    """净化层闸门（issue #81 根修）：序列化产物非 strict 可解析 → 落盘前 fail-fast。
+
+    负控制：_machine_block 被替换为含裸控制字符的坏块时，write_proposal 必须
+    在写出前抛 ApplyError——坏件永不静默进入 pending/归档。
+    """
+    p = make_proposal(tmp_path, lessons=[_multiline_lesson()])
+    monkeypatch.setattr(PR, "_machine_block",
+                        lambda payload: '```json\n{"lessons": [{"evidence": "\x08"}]}\n```')
+    with pytest.raises(PR.ApplyError, match="机读块非严格可解析"):
+        PR.write_proposal(p, tmp_path / "pending")
 
 
 def test_finalize_review_corrupt_block_clean_error(tmp_path):
