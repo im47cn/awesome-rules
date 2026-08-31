@@ -438,7 +438,7 @@ class TestDistManifest:
     def test_local_reason_values_not_emitted(self, tmp_path):
         # local 是 {路径: 理由}——清单行只含路径键，理由不进消费循环
         up, sha = self._mk_upstream(tmp_path, with_manifest=True)
-        assert not any("理由" in l for l in dist_manifest_lines(str(up), sha))
+        assert all("理由" not in l for l in dist_manifest_lines(str(up), sha))
 
 
 class TestDocstringGateCmd:

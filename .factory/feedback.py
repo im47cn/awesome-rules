@@ -33,7 +33,7 @@ def _load_port_point():
     try:
         cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
-        raise RuntimeError("factory-local.json 不可读: %s" % e)
+        raise RuntimeError(f"factory-local.json 不可读: {e}") from e
     pp = cfg.get("port_point")
     if not isinstance(pp, str) or not pp.strip():
         raise RuntimeError(

@@ -1,0 +1,33 @@
+# Sourcery 规则保留清单（显式化"评论清零"的边界）。
+# 2026-08-31 评审确认：no-loop-in-tests / no-conditionals-in-tests
+#   ——测试内循环/条件断言是惯用法，保留。
+# 2026-09-01 评审确认：low-code-quality —— 长 main 顺序流程的聚合标签
+#   （mutations/run.py 无可操作子建议，拆分收益边际），保留。
+# 其余规则全开；新增触发点由 CI gate（sourcery-review-gate.yml）拦截。
+version: '1'
+
+ignore:
+- .git
+- env
+- .env
+- .tox
+- node_modules
+- vendor
+- venv
+- .venv
+- dist
+- target
+- coverage
+- StrykerOutput
+
+rule_settings:
+  enable:
+  - default
+  disable:
+  - no-loop-in-tests
+  - no-conditionals-in-tests
+  - low-code-quality
+  rule_types:
+  - refactoring
+  - suggestion
+  - comment
