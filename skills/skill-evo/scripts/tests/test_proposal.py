@@ -4,6 +4,7 @@ import json
 import pytest
 
 import evo_proposal as PR
+from pathlib import Path
 
 
 def make_lesson(**kw):
@@ -776,3 +777,114 @@ class TestAttributionWarnings:
                         change=PR.Change(action="append_end",
                                          new_text="流水线造成主仓损坏"))])
         assert any("归因" in w for w in p.warnings())
+
+
+# ── 净化层存量迁移（issue #81 闭环：生成侧防 + 存量治）────────────────────
+
+def _broken_proposal(tmp_path, name="20260825-000001-cc-mig0001.md", bad="\x08"):
+    """构造含裸控制字符的损坏提案（模拟外部破坏转义序列）。"""
+    p = PR.write_proposal(make_proposal(tmp_path, pid="20260825-000001-cc-mig0001"),
+                          tmp_path / "pending")
+    content = p.read_text(encoding="utf-8")
+    assert "bad" not in content
+    fixed = content.replace('"reason": "补充条款"', f'"reason": "补充条款{bad}"')
+    p.write_text(fixed, encoding="utf-8")
+    return p
+
+
+def test_migrate_repairs_broken_machine_block(tmp_path):
+    """存量损坏 .md：migrate fix 转义裸控制字符，strict 可解析且 roundtrip 保真。"""
+    p = _broken_proposal(tmp_path)
+    assert PR.load_proposal(p).parse_errors   # 修复前：坏块诊断上浮（Tripwire）
+    rep = PR.migrate_proposals(tmp_path / "pending", fix=True)
+    assert len(rep["repaired"]) == 1 and not rep["unrecoverable"]
+    repaired_content = p.read_text(encoding="utf-8")
+    assert "\x08" not in repaired_content          # 裸控制字符已被转义
+    # 修复后 strict 可解析 + 语义保真（转义序列解码回原值）
+    re_p = PR.load_proposal(p)
+    assert re_p.lessons[0].reason == "补充条款\b"
+
+
+def test_migrate_check_only_reports(tmp_path):
+    """--check 语义（fix=False）：只报告候选，文件零改动。"""
+    p = _broken_proposal(tmp_path)
+    before = p.read_text(encoding="utf-8")
+    rep = PR.migrate_proposals(tmp_path / "pending", fix=False)
+    assert len(rep["repaired"]) == 1
+    assert p.read_text(encoding="utf-8") == before
+
+
+def test_migrate_unrecoverable_reported(tmp_path):
+    """结构损坏（无法自动修复）：列入 unrecoverable，不写回。"""
+    p = _broken_proposal(tmp_path)
+    content = p.read_text(encoding="utf-8")
+    content = content.replace('"confidence": "Medium"', '"confidence": "Mediu')  # 截断
+    p.write_text(content, encoding="utf-8")
+    before = p.read_text(encoding="utf-8")
+    rep = PR.migrate_proposals(tmp_path / "pending", fix=True)
+    assert len(rep["unrecoverable"]) == 1 and not rep["repaired"]
+    assert p.read_text(encoding="utf-8") == before
+
+
+def test_migrate_skips_ok_and_non_proposal(tmp_path):
+    """未损坏文件 ok 零改动；非提案名（无时间戳前缀）跳过。"""
+    p = PR.write_proposal(make_proposal(tmp_path), tmp_path / "pending")
+    ok_before = p.read_text(encoding="utf-8")
+    other = tmp_path / "pending" / "README.md"
+    other.write_text("# 说明\n\n非提案文件\n", encoding="utf-8")
+    rep = PR.migrate_proposals(tmp_path / "pending", fix=True)
+    assert str(p) in rep["ok"]
+    assert p.read_text(encoding="utf-8") == ok_before
+    assert len(rep["unchanged"]) == 1 and "README.md" in rep["unchanged"][0]
+
+
+def test_migrate_cli_end_to_end(tmp_path):
+    """CLI 端到端：migrate --fix 修复损坏归档并输出统计（rc=0 无 unrecoverable）。"""
+    p = _broken_proposal(tmp_path)
+    import subprocess, sys
+    r = subprocess.run([sys.executable, "evo_proposal.py", "migrate", "--fix",
+                        str(tmp_path / "pending")],
+                       cwd=str(Path(__file__).parent.parent),
+                       capture_output=True, text=True)
+    assert r.returncode == 0
+    assert "repaired=1" in r.stdout and "unrecoverable=0" in r.stdout
+    assert not PR.load_proposal(p).parse_errors   # 修复后读路径干净
+
+
+def test_main_without_migrate_exits_zero(monkeypatch):
+    """__main__ 薄壳：无 migrate 子命令直接退出（else 分支）。"""
+    import sys as _sys
+    monkeypatch.setattr(_sys, "argv", ["evo_proposal.py"])
+    with pytest.raises(SystemExit) as ei:
+        exec(compile(Path(PR.__file__).read_text(encoding="utf-8"),
+                     str(PR.__file__), "exec"), {"__name__": "__main__"})
+    assert ei.value.code == 0
+
+
+def test_main_with_migrate_runs_cli(tmp_path, monkeypatch, capsys):
+    """__main__ 薄壳：migrate 子命令转交 _migrate_cli。"""
+    import sys as _sys
+    monkeypatch.setattr(_sys, "argv", ["evo_proposal.py", "migrate", str(tmp_path)])
+    with pytest.raises(SystemExit) as ei:
+        exec(compile(Path(PR.__file__).read_text(encoding="utf-8"),
+                     str(PR.__file__), "exec"), {"__name__": "__main__"})
+    assert ei.value.code == 0
+    assert "ok=0" in capsys.readouterr().out
+
+
+def test_migrate_cli_unrecoverable_returns_1(tmp_path):
+    """_migrate_cli：存在 unrecoverable 时返回 rc=1。"""
+    p = _broken_proposal(tmp_path)
+    content = p.read_text(encoding="utf-8")
+    content = content.replace('"confidence": "Medium"', '"confidence": "Mediu')
+    p.write_text(content, encoding="utf-8")
+    assert PR._migrate_cli([str(tmp_path / "pending")]) == 1
+
+
+def test_migrate_cli_repaired_prints(tmp_path, capsys):
+    """_migrate_cli：repaired 场景输出统计（rc=0，fix 写回）。"""
+    p = _broken_proposal(tmp_path)
+    assert PR._migrate_cli([str(tmp_path / "pending"), "--fix"]) == 0
+    out = capsys.readouterr().out
+    assert "repaired=1" in out and "unrecoverable=0" in out
+    assert not PR.load_proposal(p).parse_errors

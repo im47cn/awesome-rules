@@ -138,6 +138,59 @@ def _verify_machine_block(path: Path) -> None:
                          f"col {e.colno}）；生成器自检拦截，请连同 .orig 上报") from e
 
 
+_PROPOSAL_NAME_RE = re.compile(r"^\d{8}-\d{6}-.*\.(md|orig)$")
+
+
+def _repair_machine_block(content: str) -> str:
+    """机读块内裸控制字符转义修复（与生成侧 _machine_block 同一正则/规则）。
+
+    仅替换 ```json 块内文本；正文 markdown（裸 tab 合法）不动。
+    """
+    def _fix(m: "re.Match") -> str:
+        return "```json\n" + _CTRL_CHARS_RE.sub(
+            lambda c: f"\\u{ord(c.group()):04x}", m.group(1)) + "\n```"
+    return _JSON_BLOCK_RE.sub(_fix, content)
+
+
+def migrate_proposals(root: Path, *, fix: bool = False) -> dict:
+    """净化层存量迁移：扫描归档下提案 .md/.orig，机读块无法 strict 解析
+    （裸控制字符等外部破坏）的 → 转义修复（仅原不可解析且修复后可解析
+    才写回，当前可解析文件零改动；无法修复的仅报告）。
+
+    fix=False 仅报告（repaired 为可修复候选）；fix=True 写回并复检。
+    返回 {ok, repaired, unrecoverable, unchanged}（Path 列表）。
+    """
+    report = {"ok": [], "repaired": [], "unrecoverable": [], "unchanged": []}
+    for f in sorted(list(root.rglob("*.md")) + list(root.rglob("*.orig"))):
+        if not _PROPOSAL_NAME_RE.match(f.name):
+            report["unchanged"].append(str(f))   # 非提案文件（README 等），跳过
+            continue
+        try:
+            content = f.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            report["unrecoverable"].append(str(f))
+            continue
+        m = _JSON_BLOCK_RE.search(content)
+        if not m:
+            report["unrecoverable"].append(str(f))   # 提案文件块缺失（被完全破坏）
+            continue
+        try:
+            json.loads(m.group(1))
+            report["ok"].append(str(f))
+            continue
+        except json.JSONDecodeError:
+            pass
+        repaired = _repair_machine_block(content)
+        try:
+            json.loads(_JSON_BLOCK_RE.search(repaired).group(1))
+        except (json.JSONDecodeError, AttributeError):
+            report["unrecoverable"].append(str(f))   # 结构损坏，无法自动修复
+            continue
+        if fix:
+            f.write_text(repaired, encoding="utf-8")
+        report["repaired"].append(str(f))
+    return report
+
 
 def write_proposal(p: Proposal, pending_dir: Path) -> Path:
 
@@ -764,3 +817,32 @@ def archive_orig(path: Path, dest_dir: Path) -> Optional[Path]:
     dest = dest_dir / orig.name
     shutil.move(str(orig), dest)
     return dest
+
+
+
+def _migrate_cli(argv: List[str]) -> int:
+    """存量迁移 CLI：python3 evo_proposal.py migrate [--fix] [root]。"""
+    import argparse
+    parser = argparse.ArgumentParser(prog="evo_proposal migrate",
+                                     description="净化层存量迁移：扫描并修复归档中无法 strict 解析的提案")
+    parser.add_argument("--fix", action="store_true",
+                        help="修复写回（默认仅报告候选）")
+    parser.add_argument("root", nargs="?", default=str(
+        Path.home() / ".config/ar/skill-evo/proposals"),
+        help="归档根目录（默认 ~/.config/ar/skill-evo/proposals）")
+    args = parser.parse_args(argv)
+    report = migrate_proposals(Path(args.root), fix=args.fix)
+    print(f"ok={len(report['ok'])} repaired={len(report['repaired'])} "
+          f"unrecoverable={len(report['unrecoverable'])} unchanged={len(report['unchanged'])}")
+    for f in report["repaired"]:
+        print(f"  repaired: {f}")
+    for f in report["unrecoverable"]:
+        print(f"  unrecoverable: {f}")
+    return 1 if report["unrecoverable"] else 0
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "migrate":
+        sys.exit(_migrate_cli(sys.argv[2:]))
+    sys.exit(0)
