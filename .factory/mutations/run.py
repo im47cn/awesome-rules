@@ -245,8 +245,7 @@ def run_gate(gate: str, target: str) -> int | None:
         print(f"    门超时（>{timeout}s）：已杀进程组，无效运行")
         return None
     elapsed = time.monotonic() - start
-    tail = (out + err).strip().splitlines()
-    if tail:
+    if tail := (out + err).strip().splitlines():
         print(f"    gate 输出末行: {tail[-1][:120]}")
     return proc.returncode
 
@@ -278,59 +277,60 @@ def apply_defect(target: Path, defect: Defect) -> str:
     return original
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--only", help="逗号分隔的缺陷 id 过滤")
-    parser.add_argument("--defects", default=str(Path(__file__).parent / "defects.json"))
-    args = parser.parse_args()
-
-    defects = load_defects(Path(args.defects))
+def _load_and_filter(defects_path: str, only: str | None) -> list[Defect]:
+    """加载缺陷清单 → 宣告 stamp 漂移 → --only id 过滤。"""
+    defects = load_defects(Path(defects_path))
     stamp_stale_banner()
-    if args.only:
-        wanted = {x.strip() for x in args.only.split(",") if x.strip()}
+    if only:
+        wanted = {x.strip() for x in only.split(",") if x.strip()}
         defects = [d for d in defects if d.id in wanted]
+    return defects
 
-    outcomes: list[Outcome] = []
-    originals: dict[Path, str] = {}
 
-    for d in defects:
-        print(f"[{d.id}] {d.description}（gate={d.gate}）")
-        target = REPO_ROOT / d.target
-        if not target.is_file():
-            outcomes.append(Outcome(d, "FAIL-config", f"target 不存在: {d.target}"))
-            print("    FAIL-config: target 不存在")
-            continue
-        if tracked_and_dirty(d.target):
-            outcomes.append(Outcome(d, "SKIP", "target 含人工未提交修改"))
-            print("    SKIP: target 含人工未提交修改，避免交叠")
-            continue
+def _process_defect(d: Defect, outcomes: list[Outcome], originals: dict[Path, str]) -> None:
+    """单条缺陷全流程：前置检查 → 注入 → 跑门 → 判定 → finally 原文本写回。"""
+    print(f"[{d.id}] {d.description}（gate={d.gate}）")
+    target = REPO_ROOT / d.target
+    if not target.is_file():
+        outcomes.append(Outcome(d, "FAIL-config", f"target 不存在: {d.target}"))
+        print("    FAIL-config: target 不存在")
+        return
+    if tracked_and_dirty(d.target):
+        outcomes.append(Outcome(d, "SKIP", "target 含人工未提交修改"))
+        print("    SKIP: target 含人工未提交修改，避免交叠")
+        return
 
-        original: str | None = None
-        try:
-            original = apply_defect(target, d)
-            originals[target] = original
-            rc = run_gate(d.gate, d.target)
-            verdict, detail = judge(d, rc)
-            outcomes.append(Outcome(d, verdict, detail))
-            print(f"    {verdict}: {detail}")
-        except ValueError as exc:
-            outcomes.append(Outcome(d, "FAIL-config", str(exc)))
-            print(f"    FAIL-config: {exc}")
-        finally:
-            if original is not None:
-                target.write_text(original, encoding="utf-8")
+    original: str | None = None
+    try:
+        original = apply_defect(target, d)
+        originals[target] = original
+        rc = run_gate(d.gate, d.target)
+        verdict, detail = judge(d, rc)
+        outcomes.append(Outcome(d, verdict, detail))
+        print(f"    {verdict}: {detail}")
+    except ValueError as exc:
+        outcomes.append(Outcome(d, "FAIL-config", str(exc)))
+        print(f"    FAIL-config: {exc}")
+    finally:
+        if original is not None:
+            target.write_text(original, encoding="utf-8")
 
-    # 还原完整性校验：凡注入过的文件，当前字节必须与备份一致
-    residual = []
-    for target, original in originals.items():
-        if target.read_text(encoding="utf-8") != original:
-            residual.append(str(target.relative_to(REPO_ROOT)))
-    if residual:
+
+def _check_restored(originals: dict[Path, str]) -> int | None:
+    """还原后逐文件校验字节一致；残留 → FATAL（stderr）并返回退出码 3。"""
+    if residual := [
+        str(target.relative_to(REPO_ROOT))
+        for target, original in originals.items()
+        if target.read_text(encoding="utf-8") != original
+    ]:
         print(f"\nFATAL: 以下文件还原失败（请人工核对该文件是否已恢复原状）: {residual}",
               file=sys.stderr)
         return 3
+    return None
 
-    # 汇总（正向按门分组：篡改类 guard / 行为破坏类 tests，负例整体计）
+
+def _summarize(outcomes: list[Outcome]) -> None:
+    """汇总（正向按门分组：篡改类 guard / 行为破坏类 tests，负例整体计）。"""
     negative = [o for o in outcomes if not o.defect.expect_block]
     passed_neg = [o for o in negative if o.status == "PASS"]
 
@@ -351,6 +351,9 @@ def main() -> int:
     print(f"  正向缺陷拦截（kill rate）: {total_killed}/{total_positive} = {kill_rate:.0%}")
     print(f"  负例放行: {len(passed_neg)}/{len(negative)}")
 
+
+def _final_verdict(outcomes: list[Outcome]) -> int:
+    """结论与退出码：有 FAIL → 1；无 FAIL 有 SKIP → 4；全绿绑定周界指纹 → 0。"""
     skipped = [o for o in outcomes if o.status == "SKIP"]
     if any(o.status.startswith("FAIL") for o in outcomes):
         print("  结论: 门灵敏度未达标，禁止开启 auto-merge（铁律 5）")
@@ -360,10 +363,28 @@ def main() -> int:
         print(f"  结论: 覆盖不完整（SKIP: {ids}），本次通过不构成 auto-merge 依据（铁律 5）")
         return 4
     print("  结论: 门灵敏度冒烟通过（auto-merge 的必要非充分条件）")
-    blob = write_stamp()
-    if blob:
+    if blob := write_stamp():
         print(f"  周界指纹已绑定: {blob[:12]}（evidence-stamp.json）")
     return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--only", help="逗号分隔的缺陷 id 过滤")
+    parser.add_argument("--defects", default=str(Path(__file__).parent / "defects.json"))
+    args = parser.parse_args()
+
+    defects = _load_and_filter(args.defects, args.only)
+    outcomes: list[Outcome] = []
+    originals: dict[Path, str] = {}
+    for d in defects:
+        _process_defect(d, outcomes, originals)
+
+    if (rc := _check_restored(originals)) is not None:
+        return rc
+
+    _summarize(outcomes)
+    return _final_verdict(outcomes)
 
 
 if __name__ == "__main__":

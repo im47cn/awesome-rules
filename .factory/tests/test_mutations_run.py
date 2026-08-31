@@ -20,9 +20,18 @@ import run as mut  # noqa: E402
 
 
 def _defect(**kw) -> mut.Defect:
-    base = dict(id="X-01", description="d", target="t", find="f", replace="r",
-                gate="guard", expect_block=True)
-    base.update(kw)
+    base = (
+        dict(
+            id="X-01",
+            description="d",
+            target="t",
+            find="f",
+            replace="r",
+            gate="guard",
+            expect_block=True,
+        )
+        | kw
+    )
     return mut.Defect(**base)
 
 

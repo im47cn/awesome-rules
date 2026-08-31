@@ -167,13 +167,15 @@ def test_stored_patch_id_survives_object_loss(tmp_path, monkeypatch):
 
 def test_classify_drift_sides_and_excludes():
     up = "/tmp/up/.factory"
-    out = "\n".join([
-        "Only in %s: cron-dispatch.sh" % up,
-        "Only in /tmp/etf/.factory: triage-batch.sh",
-        "Only in %s/artifacts: issue-2" % up,        # 运行时目录 → 排除
-        "Files %s/state.py and /tmp/etf/.factory/state.py differ" % up,
-        "Files %s/locks/x and /tmp/etf/.factory/locks/x differ" % up,  # 排除
-    ])
+    out = "\n".join(
+        [
+            f"Only in {up}: cron-dispatch.sh",
+            "Only in /tmp/etf/.factory: triage-batch.sh",
+            f"Only in {up}/artifacts: issue-2",
+            f"Files {up}/state.py and /tmp/etf/.factory/state.py differ",
+            f"Files {up}/locks/x and /tmp/etf/.factory/locks/x differ",
+        ]
+    )
     drift = feedback.classify_drift(out, up)
     assert len(drift["upstream_only"]) == 1
     assert len(drift["local_only"]) == 1
@@ -287,10 +289,18 @@ def test_adapt_manifest_clean_and_conflicted_split():
     items = feedback.adapt_manifest(
         "%s\tfix(factory): 并发修复\n%s\tfix: 冲突候选" % (a, b), {b})
     assert items == [
-        {"sha": a, "subject": "fix(factory): 并发修复", "status": "clean",
-         "patch": "patches/%s.patch" % a[:9]},
-        {"sha": b, "subject": "fix: 冲突候选", "status": "conflicted",
-         "patch": "patches/%s.patch" % b[:9]},
+        {
+            "sha": a,
+            "subject": "fix(factory): 并发修复",
+            "status": "clean",
+            "patch": f"patches/{a[:9]}.patch",
+        },
+        {
+            "sha": b,
+            "subject": "fix: 冲突候选",
+            "status": "conflicted",
+            "patch": f"patches/{b[:9]}.patch",
+        },
     ]
 
 
