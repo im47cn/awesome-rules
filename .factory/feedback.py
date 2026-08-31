@@ -23,8 +23,26 @@ import re
 import subprocess
 import sys
 
-# 移植点：2026-08-21 自上游仓移植工厂（该提交本身是本仓特化，永不反哺）
-PORT_POINT = "f6835d15"
+# 移植点（每仓不同）：首次移植 .factory 的本仓提交——反哺扫描下界，
+# 该提交本身是本仓特化永不反哺。数据化到 factory-local.json（ADR-009
+# 同构：full 分发文件零本地化，仓特定数据不入代码）；fail-closed：
+# 缺键即崩，禁止静默回退默认值——硬编码默认正是 f6835d15 跨仓失效
+# 事故根源（下游 git log 128）。
+def _load_port_point():
+    cfg_path = pathlib.Path(__file__).resolve().parent / "factory-local.json"
+    try:
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise RuntimeError("factory-local.json 不可读: %s" % e)
+    pp = cfg.get("port_point")
+    if not isinstance(pp, str) or not pp.strip():
+        raise RuntimeError(
+            "factory-local.json 缺 port_point 键（本仓移植 .factory 的首提"
+            "SHA，反哺扫描下界）；fail-closed，禁止默认值")
+    return pp
+
+
+PORT_POINT = _load_port_point()
 
 # trailer 机制诞生前的可泛化提交（人工判定补录；反哺入账后由账本排除）
 BOOTSTRAP_CANDIDATES = {
