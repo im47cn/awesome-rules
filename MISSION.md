@@ -15,10 +15,18 @@ awesome-rules 是研发规范与 AI 审查技能的唯一真相源（见 [README
 在人类宪法（本文件 + `steering/` + 仓库既有约定）约束下，自动化本仓库的维护循环：
 
 ```
-issue → triage → 实现 → 确定性门 → PR → 独立验证（holdout）→ auto-merge
+issue → triage → 实现 → 确定性门 → 独立验证（holdout，前置）→ PR → 合并（A5 门控）
 ```
 
-人类只保留两件事：**写 issue、晋升 release**。
+> 流程线为落地形态（对齐 `.factory/fix-issue.sh` / `.factory/validate-pr.sh` / `.factory/factory_lib.py`）：
+> **双重独立验证**——① 链内 holdout 前置（S1：未验证内容不挂 PR，holdout FAIL 即停）；
+> ② S3 独立门（`validate-pr.sh`：guard → tests → AI 评审 → holdout），人类 merge 前
+> 的最后一组独立门。merge 以**人工审查**为准（A5 门控：`factory:approved` 后人工
+> 合并）；auto-merge 是**受双锁门控的演进能力而非现状**：需 `FACTORY_AUTO_MERGE=1`
+> 且 `.factory/metrics/auto-merge-unlocked` 存在（解锁文件无自动生产者；kill-rate ≥80% 前
+> 不得开启——铁律 5，门禁自认 kill-rate 100% 亦仅为「必要非充分条件」）。
+
+人类保留三件事：**写 issue、批准合并（人工审查 PR）、晋升 release**。
 
 ## Triage 判据
 
