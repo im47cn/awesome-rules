@@ -7,12 +7,21 @@ import evo_proposal as PR
 
 
 def make_lesson(**kw):
-    base = dict(type="correction", evidence="用户说'不要用 select *'",
-                target_file="steering/demo-spec.md", confidence="Medium",
-                reason="补充条款", change=PR.Change(
-                    action="append_under", heading="## 强制条款",
-                    new_text="- 禁止 `select *`，明确列名"))
-    base.update(kw)
+    base = (
+        dict(
+            type="correction",
+            evidence="用户说'不要用 select *'",
+            target_file="steering/demo-spec.md",
+            confidence="Medium",
+            reason="补充条款",
+            change=PR.Change(
+                action="append_under",
+                heading="## 强制条款",
+                new_text="- 禁止 `select *`，明确列名",
+            ),
+        )
+        | kw
+    )
     return PR.Lesson(**base)
 
 
@@ -508,6 +517,19 @@ def test_move_proposal_adds_fm(tmp_path):
     assert "applied_at: T" in content
     # 归档后仍可加载（frontmatter 注入未破坏 JSON 块）
     assert len(PR.load_proposal(dest).lessons) == 1
+
+
+def test_move_proposal_no_frontmatter(tmp_path):
+    """无 frontmatter 的裸提案：move 时补全 frontmatter（else 分支）。"""
+    src = tmp_path / "pending" / "raw.md"
+    src.parent.mkdir()
+    src.write_text("# 裸提案\n\n正文\n", encoding="utf-8")
+    dest = PR.move_proposal(src, tmp_path / "applied", {"status": "applied"})
+    assert dest.exists() and dest.parent.name == "applied"
+    content = dest.read_text(encoding="utf-8")
+    assert content.startswith("---\n")
+    assert "status: applied" in content
+    assert "# 裸提案" in content
 
 
 # ── 结构化 verdict（借鉴 harness-anything verdict 语义）──────────────────────

@@ -436,7 +436,7 @@ def validate_target(target_file: str, repo_root: Path) -> Path:
 def _apply_change(content: str, ch: Change, target_file: str) -> str:
     if ch.action == "append_end":
         sep = "" if content.endswith("\n") else "\n"
-        return content + f"{sep}{ch.new_text}\n"
+        return f"{content}{sep}{ch.new_text}\n"
     if ch.action == "append_under":
         if not ch.heading:
             raise ApplyError(f"{target_file}: append_under 缺少 heading")
@@ -488,7 +488,7 @@ def normalize_headings(p: Proposal, repo_root: Path, md_path: Optional[Path] = N
         except ApplyError:
             continue  # 目标非法留给 apply 原路径报错
         lines = target.read_text(encoding="utf-8").splitlines()
-        cand = "## " + ch.heading.strip()
+        cand = f"## {ch.heading.strip()}"
         hits = [ln for ln in lines if ln.strip() == cand and ln.lstrip().startswith("#")]
         if len(hits) == 1:
             log.append(f"lesson {i}: heading `{ch.heading}` 无 # 前缀，规范化为 `{cand}`（verdict=edited）")
@@ -585,8 +585,9 @@ def apply_proposal(p: Proposal, repo_root: Path, *, dry_run: bool = False,
         if ls.change.new_text.strip() in content:
             guard.append(f"lesson {i}: new_text 已逐字存在于 {ls.target_file}"
                          "（疑似重复追加，--force 可越过）")
-        dup = check_idempotent(ls.change.new_text, content, idempotent_threshold)
-        if dup:
+        if dup := check_idempotent(
+            ls.change.new_text, content, idempotent_threshold
+        ):
             seg_no, ratio = dup
             guard.append(f"lesson {i}: 与 {ls.target_file} 既有段落 {seg_no} 语义重复"
                          f"（相似度 {ratio:.2f} >= 阈值 {idempotent_threshold}；"
@@ -615,10 +616,10 @@ def move_proposal(proposal_path: Path, dest_dir: Path, extra_fm: dict) -> Path:
         if end != -1:
             content = content[:end + 1] + extra + content[end + 1:]
     else:
-        content = f"---\n{extra}---\n" + content
+        content = f"---\n{extra}---\n{content}"
     dest = dest_dir / proposal_path.name
-    final = dest if not dest.exists() else dest.with_name(
-        f"{dest.stem}-{stamp.replace(':', '').replace('+', '-')}{dest.suffix}")
+    final = dest.with_name(
+                    f"{dest.stem}-{stamp.replace(':', '').replace('+', '-')}{dest.suffix}") if dest.exists() else dest
     final.write_text(content, encoding="utf-8")
     if proposal_path.is_dir():  # 防御：提案应为文件
         shutil.rmtree(proposal_path, ignore_errors=True)
@@ -659,7 +660,7 @@ def _parse_codes(raw: List[str]) -> Tuple[dict, List[str]]:
 
 
 def _orig_path(path: Path) -> Path:
-    return path.parent / (path.stem + ".orig")
+    return path.parent / f"{path.stem}.orig"
 
 
 def _derive_verdicts(cur: List[Lesson], orig: Optional[List[Lesson]]) -> List[str]:
