@@ -302,3 +302,49 @@ class TestPR105ReviewRegressions:
         after = (set(glob.glob("/tmp/.factory-stage.*"))
                  | set(glob.glob("/tmp/.factory-dist.*")))
         assert after - before == set(), "中途退出不得泄漏 /tmp 暂存文件（评论 3）"
+
+class TestSelfOverwriteSafety:
+    """issue #103：apply 覆盖 $dst 为运行中脚本自身时的原子替换契约。
+
+    直写 `> "$dst"` 截断同 inode，bash 惰性逐段读的旧位移落在新内容中途
+    → syntax error exit 2、锚点未写的半同步态（2026-09-01 复现）；
+    tmp+mv 同目录 rename 换新 inode，旧 inode 由运行中 bash 保活至跑完。"""
+
+    def test_apply_replaces_running_script_atomically(self, tmp_path):
+        up = tmp_path / "up"
+        dn = tmp_path / "dn"
+        (up / ".factory").mkdir(parents=True)
+        # 上游 v2 = 本仓现行脚本（含 tmp+mv 修复）尾部追加标记注释；
+        # 下游持 v1（现行脚本原文）——漂移覆盖恰命中运行中脚本自身
+        script_v1 = (FACTORY / "sync-from-upstream.sh").read_text(encoding="utf-8")
+        script_v2 = script_v1 + "\n# self-overwrite v2 marker\n"
+        (up / ".factory/sync-from-upstream.sh").write_text(script_v2, encoding="utf-8")
+        (up / ".factory/DISTRIBUTION.json").write_text(json.dumps({
+            "full": ["sync-from-upstream.sh"], "local": {}, "skip": [],
+        }), encoding="utf-8")
+        _git(up, "init", "-q", "-b", "main")
+        _git(up, "add", "-A")
+        _git(up, "commit", "-qm", "upstream v2")
+
+        dn.mkdir()
+        (dn / ".factory").mkdir()
+        for name in ("sync-from-upstream.sh", "factory_lib.py", "hosting.py",
+                     "factory-local.json"):
+            (dn / ".factory" / name).write_text(
+                (FACTORY / name).read_text(encoding="utf-8"), encoding="utf-8")
+        _git(dn, "init", "-q", "-b", "main")
+        _git(dn, "add", "-A")
+        _git(dn, "commit", "-qm", "downstream v1")
+
+        proc = subprocess.run(
+            ["bash", str(dn / ".factory/sync-from-upstream.sh"),
+             str(up), "--apply", "--anchor", "main"],
+            cwd=dn, env=_run_env(), capture_output=True, text=True,
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "syntax error" not in proc.stderr, "自覆盖不得打断运行中脚本"
+        assert (dn / ".factory/sync-from-upstream.sh").read_text(encoding="utf-8") \
+            == script_v2, "脚本自身完整替换为上游 v2"
+        lock = json.loads((dn / ".factory/upstream-lock.json").read_text(encoding="utf-8"))
+        assert lock["anchor"], "锚点照常写入（半同步态防线）"
+        assert not list((dn / ".factory").glob("*.factory-new.*")), "无 tmp 中转残留"

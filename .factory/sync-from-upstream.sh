@@ -96,8 +96,10 @@ echo "上游: ${UP} @ ${ANCHOR} (${HEAD_SHA:0:9})"
 DIST_FILE="/tmp/.factory-dist.$$"
 STAGE_FILE="/tmp/.factory-stage.$$"; : > "$STAGE_FILE"
 # EXIT trap 兜底清理：Sourcery 拒绝、git 失败等 set -e 中途退出不泄漏
-# /tmp 暂存文件（PR #105 评论 3）——正常退出同样兜底，显式 rm 不再需要
-trap 'rm -f "$DIST_FILE" "$STAGE_FILE"' EXIT
+# /tmp 暂存文件（PR #105 评论 3）——正常退出同样兜底，显式 rm 不再需要。
+# tmp = apply 循环 tmp+mv 的中转文件（#103）：中断即清；未入循环时未定义，
+# set -u 下 :- 防 unbound（rm -f 空串为无害 no-op）
+trap 'rm -f "$DIST_FILE" "$STAGE_FILE" "${tmp:-}"' EXIT
 python3 "$SCRIPT_DIR/factory_lib.py" dist-manifest "$UP" "$HEAD_SHA" > "$DIST_FILE"
 
 # Sourcery 回归闸（2026-08-31 事故锚：追平所取上游快照早于下游已修复版，
@@ -151,7 +153,12 @@ while IFS=$'\t' read -r kind rel; do
     [ "$kind" = full ] && DRIFT=1
     if [ "$MODE" = apply ] && [ "$kind" = full ]; then
       mkdir -p "$(dirname "$dst")" # 缺失父目录先建（wop-skills：tests/ 整缺，重定向即崩）
-      git -C "$UP" cat-file blob "$up_blob" > "$dst"
+      # tmp+mv 原子替换（#103）：$dst 可能是运行中脚本自身——bash 惰性逐段
+      # 读源文件，`> "$dst"` 直写截断同 inode，旧读位移落在新内容中途即
+      # syntax error 半同步态；同目录 rename 换 inode，旧 inode 保活至跑完
+      tmp="$dst.factory-new.$$"
+      git -C "$UP" cat-file blob "$up_blob" > "$tmp" && mv -f "$tmp" "$dst" \
+        || { echo "  [$kind] $rel: 上游 blob 拉取失败" >&2; exit 2; }
       chmod "${up_mode: -3}" "$dst" 2>/dev/null || chmod +x "$dst"
       echo "    → 已补齐"; APPLIED=$((APPLIED+1)); echo "$dst" >> "$STAGE_FILE"
     fi
@@ -165,7 +172,10 @@ while IFS=$'\t' read -r kind rel; do
     echo "  [full] $rel: 漂移（本地未反哺的热修，或落后于上游）"
     DRIFT=1
     if [ "$MODE" = apply ]; then
-      git -C "$UP" cat-file blob "$up_blob" > "$dst"
+      # 同 fill-in：tmp+mv 原子替换（#103）——漂移覆盖恰是自覆盖的主形态
+      tmp="$dst.factory-new.$$"
+      git -C "$UP" cat-file blob "$up_blob" > "$tmp" && mv -f "$tmp" "$dst" \
+        || { echo "  [full] $rel: 上游 blob 拉取失败" >&2; exit 2; }
       chmod "${up_mode: -3}" "$dst" 2>/dev/null || chmod +x "$dst"
       echo "    → 已覆盖（本地差异若有价值，请先走 feedback-upstream 反哺）"
       APPLIED=$((APPLIED+1)); echo "$dst" >> "$STAGE_FILE"
