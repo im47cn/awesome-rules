@@ -518,8 +518,28 @@ def test_extract_rules_rules_string_rejected():
     assert ok and rules == []
 
 
-def test_script_baseline_f1_nonzero_exit_recorded(monkeypatch, tmp_path):
-    """检查器非零退出且输出可解析 JSON → 记 error，不得当作空结果计入基线。"""
+def test_script_baseline_f1_exit_1_is_badcase_parsed(monkeypatch, tmp_path):
+    """rc=1 = 有强制问题（badcase 正常态）：解析 stdout 记规则，不记为 error。"""
+    import json
+    case = _case(cid="c1", expected=["禁用类型"], files={"a.sql": "x"})
+    case = G.Case(id="c1", inputs={"input_dir": str(tmp_path), "files": {"a.sql": "x"}},
+                  reference={"expected_rules": ["禁用类型"], "manual_rules": [],
+                             "expected_empty": False})
+    calls = []
+    out = json.dumps([{"issues": [{"rule": "禁用类型"}]}])
+
+    def fake_run(cmd, capture_output=True, text=True, timeout=None):
+        calls.append(cmd)
+        return types.SimpleNamespace(stdout=out, returncode=1)
+
+    monkeypatch.setattr(R.subprocess, "run", fake_run)
+    avg, details = R.script_baseline_f1({}, "ddl-guard", [case])
+    assert len(calls) == 2 and details[0]["score"] == 1.0  # 命中 → F1 1
+    assert not any("error" in d for d in details)
+
+
+def test_script_baseline_f1_exit_2_recorded(monkeypatch, tmp_path):
+    """rc=2 = 运行错误：记 error，不得当作空结果计入基线。"""
     import types
     case = _case(cid="c1", expected=["禁用类型"], files={"a.sql": "x"})
     case = G.Case(id="c1", inputs={"input_dir": str(tmp_path), "files": {"a.sql": "x"}},
@@ -529,11 +549,11 @@ def test_script_baseline_f1_nonzero_exit_recorded(monkeypatch, tmp_path):
 
     def fake_run(cmd, capture_output=True, text=True, timeout=None):
         calls.append(cmd)
-        return types.SimpleNamespace(stdout="[]", returncode=1)
+        return types.SimpleNamespace(stdout="[]", returncode=2)
 
     monkeypatch.setattr(R.subprocess, "run", fake_run)
     avg, details = R.script_baseline_f1({}, "ddl-guard", [case])
-    assert len(calls) == 2 and "exit 1" in details[0]["error"]
+    assert len(calls) == 2 and "exit 2" in details[0]["error"]
     assert avg == 0.0
 
 

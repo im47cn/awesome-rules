@@ -397,7 +397,9 @@ def script_baseline_f1(cfg, skill_name: str, cases: List[G.Case]) -> Tuple[float
                 r = subprocess.run(
                     ["python3", str(script), str(input_dir), "--format", "json"],
                     capture_output=True, text=True, timeout=30)
-                if r.returncode != 0:
+                # 检查器文档化退出码：0=通过、1=有强制问题（badcase 正常态，
+                # 解析 stdout 记规则）、2=运行错误。仅 2 及以上记为评分器错误。
+                if r.returncode not in (0, 1):
                     details.append({"case": case.id,
                                     "error": f"{script.name}: exit {r.returncode}"})
                     continue
