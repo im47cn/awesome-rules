@@ -93,7 +93,12 @@ echo "上游: ${UP} @ ${ANCHOR} (${HEAD_SHA:0:9})"
 # 清单是上游主权，锚点即版本）。无清单=上游版本旧，全部按 local。
 # 展开逻辑在 factory_lib.py dist-manifest（2026-08-28 自此处 heredoc 下沉，
 # 铁律 4：git 子进程编排归 Python；无清单=空输出，警告走 stderr）
-python3 "$SCRIPT_DIR/factory_lib.py" dist-manifest "$UP" "$HEAD_SHA" > /tmp/.factory-dist.$$
+DIST_FILE="/tmp/.factory-dist.$$"
+STAGE_FILE="/tmp/.factory-stage.$$"; : > "$STAGE_FILE"
+# EXIT trap 兜底清理：Sourcery 拒绝、git 失败等 set -e 中途退出不泄漏
+# /tmp 暂存文件（PR #105 评论 3）——正常退出同样兜底，显式 rm 不再需要
+trap 'rm -f "$DIST_FILE" "$STAGE_FILE"' EXIT
+python3 "$SCRIPT_DIR/factory_lib.py" dist-manifest "$UP" "$HEAD_SHA" > "$DIST_FILE"
 
 # Sourcery 回归闸（2026-08-31 事故锚：追平所取上游快照早于下游已修复版，
 # 100 个已清零 issue 整体回退，PR gate 才拦截——闸前移到追平时点）。
@@ -127,7 +132,6 @@ fi
 up_tree() { git -C "$UP" ls-tree "$HEAD_SHA" -- ".factory/$1"; }
 
 DRIFT=0; APPLIED=0; LOCAL_DIFF=0
-STAGE_FILE=/tmp/.factory-stage.$$; : > "$STAGE_FILE"
 while IFS=$'\t' read -r kind rel; do
   [ -n "$rel" ] || continue
   dst="$FACTORY/$rel"
@@ -172,8 +176,7 @@ while IFS=$'\t' read -r kind rel; do
     echo "  [local] $rel: 与上游差 ${n} 行（含仓特定区，人工合并；正道=反哺后追平）"
     LOCAL_DIFF=$((LOCAL_DIFF+1))
   fi
-done < /tmp/.factory-dist.$$
-rm -f /tmp/.factory-dist.$$
+done < "$DIST_FILE"
 
 if [ "$MODE" = apply ]; then
   # 追平后 Sourcery 回归闸：.factory 必须仍清零（不写锁点，下次重跑）
@@ -213,25 +216,31 @@ PY
     # 「上一个触碰 upstream-lock.json 的提交」（即上次追平），下轮补记本次。
     # 追加仅在确有实质提交时做——否则无漂移重跑会链式生成空转噪音提交
     IGNORE="$REPO/.git-blame-ignore-revs"
+    # 文件始终确保存在（config 指向不存在文件会令 blame 直接失败），但
+    # 首建仅含注释头、不入 staged 面——已同步仓库首跑不得凭空制造一条
+    # 仅初始化 ignore 的空提交（PR #105 评论 1）；首建留在工作树，随
+    # 下一次真追平的 add 一并入库
     [ -f "$IGNORE" ] || printf '# factory: 追平提交忽略清单（git blame --ignore-revs 消噪）\n' > "$IGNORE"
-    git -C "$REPO" add -- "$LOCKFILE" "$IGNORE"
+    git -C "$REPO" add -- "$LOCKFILE"
     while IFS= read -r f; do
       [ -n "$f" ] && git -C "$REPO" add -- "$f"
     done < "$STAGE_FILE"
     if git -C "$REPO" diff --cached --quiet; then
       echo "无变更可提交（full 面与锚点均未前进）"
     else
+      git -C "$REPO" add -- "$IGNORE"
       PREV_SYNC="$(git -C "$REPO" log -1 --format=%H -- "$LOCKFILE" 2>/dev/null || true)"
       if [ -n "$PREV_SYNC" ] && ! grep -q "^${PREV_SYNC}$" "$IGNORE" 2>/dev/null; then
         printf '# factory: 上游同步追平（%s）\n%s\n' "${HEAD_SHA:0:9}" "$PREV_SYNC" >> "$IGNORE"
         git -C "$REPO" add -- "$IGNORE"
       fi
       git -C "$REPO" commit -q -m "factory: 上游同步追平（${HEAD_SHA:0:9}）"
-      git -C "$REPO" config blame.ignoreRevsFile "$IGNORE"
       echo "已提交: $(git -C "$REPO" rev-parse --short HEAD)（当前分支，不推送）"
     fi
+    # 无条件设置（幂等，绝对路径）：无变更分支此前直接跳过，文件在而
+    # blame 不消噪（PR #105 评论 2）
+    git -C "$REPO" config blame.ignoreRevsFile "$IGNORE"
   fi
-  rm -f "$STAGE_FILE"
   exit 0
 fi
 
@@ -242,4 +251,3 @@ else
   echo "full 面有漂移：追平（--apply）或反哺（feedback-upstream.sh）二选一" >&2
   exit 1
 fi
-rm -f "$STAGE_FILE"

@@ -63,7 +63,7 @@ trap 'rm -f "$LOCK" "$OUT_FILE"' EXIT INT TERM
 resolve_path() {
   local p="$1"
   case "$p" in
-    "~/"*) p="$HOME${p#\~/}" ;;
+    \~/*) p="$HOME${p#\~/}" ;;  # SC2088：模式匹配字面 ~ 用转义，不进引号
   esac
   case "$p" in
     /*) ;;

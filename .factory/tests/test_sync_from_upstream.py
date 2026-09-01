@@ -13,6 +13,7 @@
   不提交——防无漂移重跑链式生成噪音提交）→ TestApplyCommit
 """
 
+import glob
 import json
 import re
 import subprocess
@@ -238,3 +239,66 @@ class TestApplyCommit:
         proc = self._run(dn, str(up), "--check", "--commit")
         assert proc.returncode == 2
         assert "--commit 仅与 --apply 组合" in proc.stderr
+
+
+class TestPR105ReviewRegressions:
+    """PR #105 审查评论回归：ignore 首建不造空提交 / config 无条件设置 / trap 清理。"""
+
+    def _run(self, dn, *args, env=None):
+        return subprocess.run(
+            ["bash", str(dn / ".factory/sync-from-upstream.sh"), *args],
+            cwd=dn, env=env or _run_env(), capture_output=True, text=True,
+        )
+
+    def test_synced_repo_bootstrap_makes_no_commit_but_sets_config(self, repos):
+        """评论 1+2：已同步仓库首跑 --commit——不产生仅初始化 ignore 的提交，
+        blame.ignoreRevsFile 仍无条件设置（文件存在即生效）。"""
+        up, dn, _ = repos
+        # 先 --apply（不 --commit）追平后人工入库——构造「已同步且已提交、
+        # 但 .git-blame-ignore-revs 缺失」的评论场景
+        assert self._run(dn, str(up), "--apply", "--anchor", "main").returncode == 0
+        _git(dn, "add", "-A")
+        _git(dn, "commit", "-qm", "manual catch-up")
+        proc = self._run(dn, str(up), "--apply", "--commit", "--anchor", "main")
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "无变更可提交" in proc.stdout
+        assert _head_count(dn) == 2, "已同步首跑不得凭空制造初始化提交（评论 1）"
+        ignore = dn / ".git-blame-ignore-revs"
+        lines = ignore.read_text(encoding="utf-8").splitlines()
+        assert lines and lines[0].startswith("#")
+        assert not [l for l in lines if re.fullmatch(r"[0-9a-f]{40}", l)]
+        cfg = subprocess.run(
+            ["git", "-C", str(dn), "config", "blame.ignoreRevsFile"],
+            env=git_env(), check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        assert cfg == str(ignore), "无变更分支也要设置 ignoreRevsFile（评论 2）"
+        status = subprocess.run(
+            ["git", "-C", str(dn), "status", "--porcelain"],
+            env=git_env(), check=True, capture_output=True, text=True,
+        ).stdout
+        assert status.strip() == "?? .git-blame-ignore-revs", \
+            "首建 ignore 留工作树（untracked），随下次真追平入库"
+
+    def test_sourcery_rejection_leaves_no_temp_files(self, repos, tmp_path):
+        """评论 3：Sourcery 拒绝（set -e 中途退出）后 /tmp 无暂存文件泄漏。"""
+        up, dn, _ = repos
+        fake = tmp_path / "bin"
+        fake.mkdir()
+        # 计数 fake：首次（基线闸）放行，第二次（追平后闸）拒绝——精确命中
+        # 「追平后 Sourcery 拒绝」的中途退出路径
+        (fake / "sourcery").write_text(
+            "#!/bin/sh\n"
+            'n=$(($(cat "$0.calls" 2>/dev/null || echo 0) + 1)); echo "$n" > "$0.calls"\n'
+            '[ "$n" -lt 2 ] && exit 0\n'
+            "exit 1\n", encoding="utf-8")
+        (fake / "sourcery").chmod(0o755)
+        env = _run_env()
+        env["PATH"] = f"{fake}:{env['PATH']}"
+        before = (set(glob.glob("/tmp/.factory-stage.*"))
+                  | set(glob.glob("/tmp/.factory-dist.*")))
+        proc = self._run(dn, str(up), "--apply", "--anchor", "main", env=env)
+        assert proc.returncode == 1, "追平后闸返回 1 → 拦截退出"
+        assert "Sourcery 回归闸拦截" in proc.stderr
+        after = (set(glob.glob("/tmp/.factory-stage.*"))
+                 | set(glob.glob("/tmp/.factory-dist.*")))
+        assert after - before == set(), "中途退出不得泄漏 /tmp 暂存文件（评论 3）"
