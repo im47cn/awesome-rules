@@ -343,7 +343,7 @@ def test_find_mybatis_files_dir_filters_non_mapper(tmp_path):
     (tmp_path / "plain.xml").write_text('<root/>')
     found = sql_check.find_mybatis_files(str(tmp_path))
     assert any("m.xml" in p for p in found)
-    assert not any("plain.xml" in p for p in found)
+    assert all("plain.xml" not in p for p in found)
 
 
 # ── strip_dynamic_tags 各动态标签分支 ──────────────────────────────────────
@@ -513,7 +513,7 @@ def test_check_po_required_fields_extends_base_skipped():
     """继承基类 → 跳过必含字段检查。"""
     issues = []
     sql_check.check_po_required_fields(_po(extends_base=True), issues)
-    assert issues == []
+    assert not issues
 
 
 # ── find_po_files / check_po_file 异常 ─────────────────────────────────────
@@ -529,7 +529,7 @@ def test_find_po_files_dir(tmp_path):
     (tmp_path / "B.java").write_text('class B {}')  # 非 PO
     found = sql_check.find_po_files(str(tmp_path))
     assert any("A.java" in p for p in found)
-    assert not any("B.java" in p for p in found)
+    assert all("B.java" not in p for p in found)
 
 
 def test_find_po_files_nonexistent_path():
@@ -603,3 +603,15 @@ def test_main_clean_po_dir_exit0(tmp_path, monkeypatch, capsys):
         '    @TableId("id")\n    private Long id;\n}')
     monkeypatch.setattr(sys, "argv", ["sql_check.py", str(tmp_path)])
     assert sql_check.main() == 0
+
+
+def test_bad_alias_backtick_table():
+    """反引号包裹表名的别名检查可达（`t-order` 表名不阻断别名规则）。"""
+    issues = run_statement("SELECT * FROM `t-order` t1 WHERE id = 1")
+    assert any(i.rule == "别名含义清晰" for i in issues)
+
+
+def test_insert_columns_backtick_table():
+    """反引号包裹表名的 INSERT 缺字段列表仍检出。"""
+    issues = run_statement("INSERT INTO `t-order` VALUES (1, 2)", stmt_type="insert")
+    assert any(i.rule == "INSERT列字段" for i in issues)
