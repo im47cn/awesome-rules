@@ -563,7 +563,7 @@ def test_script_baseline_f1_exit_1_is_badcase_parsed(monkeypatch, tmp_path):
     monkeypatch.setattr(R.subprocess, "run", fake_run)
     avg, details = R.script_baseline_f1({}, "ddl-guard", [case])
     assert len(calls) == 2 and details[0]["score"] == 1.0  # 命中 → F1 1
-    assert not any("error" in d for d in details)
+    assert all("error" not in d for d in details)
 
 
 def test_script_baseline_f1_exit_2_recorded(monkeypatch, tmp_path):

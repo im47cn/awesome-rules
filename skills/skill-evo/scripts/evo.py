@@ -232,10 +232,14 @@ def cmd_patrol(args) -> int:
 
 def _find_pending(cfg: dict, pid: str) -> Path:
     pending = C.base_paths(cfg)["pending"]
-    hits = [p for p in pending.glob("*.md") if p.stem == pid or p.stem.startswith(pid)]
-    if not hits:
+    if hits := [
+        p
+        for p in pending.glob("*.md")
+        if p.stem == pid or p.stem.startswith(pid)
+    ]:
+        return hits[0]
+    else:
         raise SystemExit(f"未找到提案：{pid}（pending 目录 {pending}）")
-    return hits[0]
 
 
 def _session_corpus(p: PR.Proposal) -> str:
@@ -260,8 +264,7 @@ def cmd_list(args) -> int:
     cfg = C.load_config()
     paths = C.base_paths(cfg)
     # 巡检告警置顶展示：哑故障优先于提案进入视野
-    alerts = PT.load_alerts(cfg)
-    if alerts:
+    if alerts := PT.load_alerts(cfg):
         print(f"⚠️ 插件哑故障 {len(alerts)} 个（evo patrol 复查，台账 patrol.json）：")
         for f in alerts:
             print(f"  {f['id']} 首见 {f.get('first_seen', '?')}")
@@ -289,7 +292,7 @@ def cmd_apply(args) -> int:
     path = _find_pending(cfg, args.id)
     proposal = PR.load_proposal(path)
     for line in PR.normalize_headings(proposal, C.repo_root(), path):
-        print("ℹ " + line)
+        print(f"ℹ {line}")
     checks = PR.verify_evidence(proposal, _session_corpus(proposal))
     for i, status in checks:
         if status == "no_corpus":
@@ -367,7 +370,7 @@ def cmd_evolve(args) -> int:
         eval_dirs = []
         if args.eval:
             for p in args.eval.split(","):
-                d = (repo / p.strip()) if not Path(p.strip()).is_absolute() else Path(p.strip())
+                d = Path(p.strip()) if Path(p.strip()).is_absolute() else repo / p.strip()
                 if d.is_dir():
                     eval_dirs.append(d)
                 else:

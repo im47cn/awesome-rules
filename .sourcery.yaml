@@ -27,6 +27,9 @@ rule_settings:
   - no-loop-in-tests
   - no-conditionals-in-tests
   - low-code-quality
+  # test_session 共享 fixture 模块是本仓库测试组织约定（test_gepa/test_evo_cli
+  # 共 4 处 import），dont-import-test-modules 规则不适用，迁 conftest 属独立重构。
+  - dont-import-test-modules
   rule_types:
   - refactoring
   - suggestion

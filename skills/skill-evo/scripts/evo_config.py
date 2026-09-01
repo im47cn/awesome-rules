@@ -60,7 +60,7 @@ def _parse_scalar(raw: str):
         return s[1:-1]
     if s.startswith("[") and s.endswith("]"):
         return [_parse_scalar(x) for x in s[1:-1].split(",") if x.strip()]
-    if s in ("true", "false"):
+    if s in {"true", "false"}:
         return s == "true"
     for cast in (int, float):
         try:

@@ -106,7 +106,7 @@ def parse_expected(expected_path: Path) -> Tuple[str, List[str], List[str]]:
     check_script = None
     m = re.search(r"(?:check|脚本)\s*[:：]\s*(\S+\.py)", text)
     if m:
-        check_script = m.group(1).strip()
+        check_script = m[1].strip()
     expected_rules, manual_rules = [], []
 
     def _split_rules(payload: str):
@@ -114,11 +114,11 @@ def parse_expected(expected_path: Path) -> Tuple[str, List[str], List[str]]:
 
     section = re.search(r"##\s*预期检查输出\s*\n(.*?)(?=\n##\s|$)", text, re.DOTALL)
     if section:
-        for line in section.group(1).split("\n"):
+        for line in section[1].split("\n"):
             m = re.match(r"^[-*]\s+(.+)", line.strip())
             if not m:
                 continue
-            item = m.group(1).strip()
+            item = m[1].strip()
             if item.startswith("脚本自动检出"):
                 expected_rules.extend(_split_rules(re.split(r"[:：]", item, maxsplit=1)[-1]))
             elif item.startswith("人工补充规则"):
@@ -134,7 +134,7 @@ def parse_expected(expected_path: Path) -> Tuple[str, List[str], List[str]]:
         for line in head.split("\n"):
             m = re.match(r"^[-*]\s+(.+)", line.strip())
             if m:
-                rule = m.group(1).strip()
+                rule = m[1].strip()
                 if rule and not rule.startswith("#"):
                     expected_rules.append(rule)
     return check_script, expected_rules, manual_rules
@@ -241,10 +241,11 @@ def load_eval_set(skill: str, eval_dir: Path, cfg: dict,
         _, expected_rules, manual_rules = parse_expected(case_dir / "expected.md")
         if include_manual:
             expected_rules = list(dict.fromkeys([*expected_rules, *manual_rules]))
-        files = {}
-        for f in sorted(input_dir.iterdir()):
-            if f.is_file():
-                files[f.name] = f.read_text(encoding="utf-8")
+        files = {
+            f.name: f.read_text(encoding="utf-8")
+            for f in sorted(input_dir.iterdir())
+            if f.is_file()
+        }
         cases.append(G.Case(
             id=f"{skill}:{case_dir.name}",
             inputs={"input_dir": str(input_dir), "files": files},
@@ -327,9 +328,7 @@ def validate_candidate(baseline_len: int):
     def check(text: str) -> bool:
         if not text.startswith("---\n") or "name:" not in text or "description:" not in text:
             return False
-        if "## " not in text:
-            return False
-        return len(text) <= baseline_len * 1.5
+        return False if "## " not in text else len(text) <= baseline_len * 1.5
 
     return check
 

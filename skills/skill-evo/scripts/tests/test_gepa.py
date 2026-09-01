@@ -65,7 +65,7 @@ def make_env_for_run(n_train=3, n_holdout=1):
 
     def reflect(current, results, desc):
         calls["reflect"] += 1
-        return current + " MUTATED"
+        return f"{current} MUTATED"
 
     return train, holdout, execute, reflect, calls
 
@@ -89,7 +89,7 @@ def test_run_gepa_discards_invalid_mutation():
         return "FORBIDDEN" not in text
 
     def bad_reflect(current, results, desc):
-        return current + " FORBIDDEN"
+        return f"{current} FORBIDDEN"
 
     best, matrix, log = G.run_gepa(
         "baseline", train, holdout, execute, bad_reflect, budget=8,
