@@ -30,6 +30,10 @@ rule_settings:
   # test_session 共享 fixture 模块是本仓库测试组织约定（test_gepa/test_evo_cli
   # 共 4 处 import），dont-import-test-modules 规则不适用，迁 conftest 属独立重构。
   - dont-import-test-modules
+  # rule_types 枚举仅 refactoring/suggestion/comment/hover（sourcery 1.45
+  # 实测：填 security 配置加载失败）。云端 bot 的 security 检查面（#93
+  # dangerous-subprocess）本地 CLI 无法复刻——对齐路径是分支保护把
+  # Sourcery review check 配成 required，而非本地规则面扩展。
   rule_types:
   - refactoring
   - suggestion

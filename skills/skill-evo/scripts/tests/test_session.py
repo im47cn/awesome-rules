@@ -30,10 +30,17 @@ def cc_fixture(path: Path, cwd="/home/u/sources/demo", extra_users=0, sid="s-111
         {"type": "user", "isMeta": True, "message": {"role": "user", "content": [
             {"type": "text", "text": "<command-name>/init</command-name>"}]}},
     ]
-    for i in range(extra_users):  # 越过 min_messages 门槛用的填充消息
-        lines.append({"type": "user", "cwd": cwd,
-                      "message": {"role": "user", "content": [
-                          {"type": "text", "text": f"补充问题 {i}"}]}})
+    lines.extend(
+        {
+            "type": "user",
+            "cwd": cwd,
+            "message": {
+                "role": "user",
+                "content": [{"type": "text", "text": f"补充问题 {i}"}],
+            },
+        }
+        for i in range(extra_users)
+    )
     write_cc(path, lines)
 
 
@@ -41,18 +48,45 @@ def omp_fixture(path: Path, cwd="/home/u/sources/demo", sid="0aaaa-bbbb", extra_
     lines = [
         {"type": "title", "v": 1, "title": "t"},
         {"type": "session", "version": 3, "id": sid, "cwd": cwd},
-        {"type": "message", "message": {"role": "user", "content": [
-            {"type": "text", "text": "omp 里跑一下测试"}]}},
-        {"type": "message", "message": {"role": "assistant", "content": [
-            {"type": "thinking"}, {"type": "text", "text": "好的"}],
-            "role": "assistant"}},
-        {"type": "message", "message": {"role": "toolResult", "isError": True, "content": [
-            {"type": "text", "text": "bash: pytest: command not found"}]}},
+        {
+            "type": "message",
+            "message": {
+                "role": "user",
+                "content": [{"type": "text", "text": "omp 里跑一下测试"}],
+            },
+        },
+        {
+            "type": "message",
+            "message": {
+                "content": [
+                    {"type": "thinking"},
+                    {"type": "text", "text": "好的"},
+                ],
+                "role": "assistant",
+            },
+        },
+        {
+            "type": "message",
+            "message": {
+                "role": "toolResult",
+                "isError": True,
+                "content": [
+                    {"type": "text", "text": "bash: pytest: command not found"}
+                ],
+            },
+        },
         "not-a-json-line",
     ]
-    for i in range(extra_users):
-        lines.append({"type": "message", "message": {"role": "user", "content": [
-            {"type": "text", "text": f"补充问题 {i}"}]}})
+    lines.extend(
+        {
+            "type": "message",
+            "message": {
+                "role": "user",
+                "content": [{"type": "text", "text": f"补充问题 {i}"}],
+            },
+        }
+        for i in range(extra_users)
+    )
     path.write_text("\n".join(
         json.dumps(x, ensure_ascii=False) if isinstance(x, dict) else x for x in lines) + "\n",
         encoding="utf-8")

@@ -59,8 +59,8 @@ def test_validate_candidate_protects_subsection_contract():
     check = V.validate_candidate(baseline_len=2000)
     good = ('"no_signal"' in '') or 'x "no_signal" "lessons" append_under append_end '
     base = 'k: "no_signal" "lessons" append_under append_end evidence "knowledge_type"'
-    assert check(base + " heading: ##/### 逐字选取") is True
-    assert check(base + " heading: ## 级标题") is False        # 丢子节契约 → 拒绝
+    assert check(f"{base} heading: ##/### 逐字选取") is True
+    assert check(f"{base} heading: ## 级标题") is False
     assert check('k: "no_signal" "lessons" append_under append_end "knowledge_type" '
                  "evidence heading: ## 级标题") is False       # 丢 knowledge_type 契约 → 拒绝（顺序无关）
 

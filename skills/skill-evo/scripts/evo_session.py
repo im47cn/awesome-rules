@@ -47,7 +47,7 @@ class Session:
         return f"{self.agent}:{self.session_id}"
 
     def user_message_count(self) -> int:
-        return sum(1 for m in self.messages if m.role == "user")
+        return sum(m.role == "user" for m in self.messages)
 
 
 def _load_jsonl(path: Path) -> Iterator[dict]:
@@ -73,9 +73,11 @@ def _block_text(content) -> str:
         return content
     parts = []
     if isinstance(content, list):
-        for b in content:
-            if isinstance(b, dict) and b.get("type") == "text":
-                parts.append(str(b.get("text", "")))
+        parts.extend(
+            str(b.get("text", ""))
+            for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
     return "\n".join(p for p in parts if p)
 
 
@@ -91,8 +93,7 @@ def parse_cc_session(path: Path) -> Session:
         if not sess.cwd and obj.get("cwd"):
             sess.cwd = obj["cwd"]
         if not sess.session_id or sess.session_id == path.stem:
-            sid = obj.get("sessionId")
-            if sid:
+            if sid := obj.get("sessionId"):
                 sess.session_id = sid
         if obj.get("isMeta"):
             continue

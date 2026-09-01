@@ -36,7 +36,11 @@ def sanitize(text: str) -> str:
 
 
 def _clip(text: str, limit: int) -> str:
-    return text if len(text) <= limit else text[:limit] + f"…(+{len(text) - limit} chars)"
+    return (
+        text
+        if len(text) <= limit
+        else f"{text[:limit]}…(+{len(text) - limit} chars)"
+    )
 
 
 def build_transcript_view(sess: Session, cfg: dict) -> str:
@@ -59,7 +63,7 @@ def build_transcript_view(sess: Session, cfg: dict) -> str:
     view = "\n".join(lines)
     cap = int(cfg["max_transcript_chars"])
     if len(view) > cap:
-        view = view[:cap] + f"\n…(截断，共 {len(view)} chars)"
+        view = f"{view[:cap]}\n…(截断，共 {len(view)} chars)"
     return view
 
 
@@ -70,12 +74,11 @@ def _frontmatter_title(content: str, fallback: str) -> str:
     if content.startswith("---"):
         end = content.find("\n---", 3)
         if end != -1:
-            m = re.search(r"^title:\s*(.+)$", content[3:end], re.M)
-            if m:
-                title = m.group(1).strip()
+            if m := re.search(r"^title:\s*(.+)$", content[3:end], re.M):
+                title = m[1].strip()
     if not title:
         m = re.search(r"^#\s+(.+)$", content, re.M)
-        title = m.group(1).strip() if m else fallback
+        title = m[1].strip() if m else fallback
     return title
 
 
