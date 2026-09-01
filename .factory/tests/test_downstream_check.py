@@ -3,6 +3,7 @@
 缺陷→测试映射:
 - 退出码契约（头注释：0=全干净 1=漂移/单仓失败 2=清单缺失/损坏/用法）
   → TestPatrolExitCodes：漂移 rc1+汇总 / 缺清单 rc2 / 坏 JSON rc2 /
+    坏条目（空串/非字符串 path——静默漏检防线，PR #106 评论 3）rc2 /
     --apply-commit 追平后复查 rc0
 - 空转链回归（追平落库后重跑巡检不得再产生新提交——与
   test_sync_from_upstream.TestApplyCommit 同源缺陷的舰队级复测）
@@ -129,6 +130,24 @@ class TestPatrolExitCodes:
     def test_corrupt_manifest_exits_2(self, fleet):
         center, _, _, _ = fleet
         (center / ".factory/downstream.json").write_text("{bad json", encoding="utf-8")
+        proc = _patrol(center)
+        assert proc.returncode == 2
+        assert "下游清单损坏" in proc.stderr
+
+    def test_manifest_empty_path_entry_exits_2(self, fleet):
+        center, _, _, _ = fleet
+        (center / ".factory/downstream.json").write_text(json.dumps({"repos": [
+            {"path": "../dn-clean"}, {"path": ""},
+        ]}, ensure_ascii=False, indent=2), encoding="utf-8")
+        proc = _patrol(center)
+        assert proc.returncode == 2
+        assert "下游清单损坏" in proc.stderr
+
+    def test_manifest_non_string_path_entry_exits_2(self, fleet):
+        center, _, _, _ = fleet
+        (center / ".factory/downstream.json").write_text(json.dumps({"repos": [
+            {"path": "../dn-clean"}, {"path": 123},
+        ]}, ensure_ascii=False, indent=2), encoding="utf-8")
         proc = _patrol(center)
         assert proc.returncode == 2
         assert "下游清单损坏" in proc.stderr

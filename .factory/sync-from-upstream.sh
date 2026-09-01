@@ -48,9 +48,10 @@ done
 
 if [ -n "$REPO_ARG" ]; then
   [ -d "$REPO_ARG" ] || { echo "目标仓目录不存在: $REPO_ARG" >&2; exit 2; }
-  REPO="$(cd "$REPO_ARG" && pwd)"
-  git -C "$REPO" rev-parse --show-toplevel >/dev/null 2>&1 \
-    || { echo "目标仓不是 git 仓库: $REPO" >&2; exit 2; }
+  # 规范化到仓根（PR #106 评论 2）：toplevel 校验与捕获一步完成——
+  # 子目录入参不得令 FACTORY/锁/分发目标错位到 <subdir>/.factory
+  REPO="$(git -C "$REPO_ARG" rev-parse --show-toplevel)" \
+    || { echo "目标仓不是 git 仓库: $REPO_ARG" >&2; exit 2; }
 else
   REPO="$(git rev-parse --show-toplevel)"
 fi
@@ -188,6 +189,14 @@ while IFS=$'\t' read -r kind rel; do
   fi
 done < "$DIST_FILE"
 
+# 读 upstream-lock 字段；缺文件/坏 JSON/缺键一律空串（无输出 rc 0）
+_lock_field() {
+  python3 -c '
+import json, sys
+try: print(json.loads(open(sys.argv[2], encoding="utf-8").read())[sys.argv[1]])
+except Exception: pass' "$1" "$LOCKFILE" 2>/dev/null || true
+}
+
 if [ "$MODE" = apply ]; then
   # 追平后 Sourcery 回归闸：.factory 必须仍清零（不写锁点，下次重跑）
   if [ "$SR_GATE_ON" = 1 ]; then
@@ -202,13 +211,13 @@ if [ "$MODE" = apply ]; then
     esac
   fi
 
-  # 锁点仅在内容前进时重写（APPLIED>0 或锚点变更）——空追平不制造
-  # synced_at 噪音提交；落库补 upstream 字段（skip 态本地路径，M2 契约）
-  old_anchor="$(python3 -c '
-import json, sys
-try: print(json.loads(open(sys.argv[1], encoding="utf-8").read())["anchor"])
-except Exception: pass' "$LOCKFILE" 2>/dev/null || true)"
-  if [ "$APPLIED" -gt 0 ] || [ "$old_anchor" != "$HEAD_SHA" ]; then
+  # 锁点仅在内容前进时重写（APPLIED>0 或锚点/upstream 变更）——空追平
+  # 不制造 synced_at 噪音提交；落库补 upstream 字段（skip 态本地路径，
+  # M2 契约）。upstream 缺失/变更也触发回填（PR #106 评论 4）：旧锁
+  # anchor 未变而无 upstream 时，upstream-sync-check.sh 永缺上游凭据
+  old_anchor="$(_lock_field anchor)"
+  old_upstream="$(_lock_field upstream)"
+  if [ "$APPLIED" -gt 0 ] || [ "$old_anchor" != "$HEAD_SHA" ] || [ "$old_upstream" != "$UP" ]; then
     python3 - "$LOCKFILE" "$HEAD_SHA" "$UP" <<'PY'
 import json, sys, pathlib, datetime
 p = pathlib.Path(sys.argv[1])
