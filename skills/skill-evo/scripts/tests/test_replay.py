@@ -159,6 +159,34 @@ def test_reconcile_missing_shows_canonical_name():
     assert tp2 == 1 and missing2 == []
 
 
+def test_reconcile_unexpected_respects_alias():
+    """unexpected 方向与 matched 对称：actual 命中任一 expected 别名行即非 unexpected。
+
+    回归：参数顺序曾颠倒为 _rule_matches(a, expected_rules)——别名 token
+    （「核心主体」等非首 token）对 actual 的匹配在反参数下失配，别名命中项被
+    误判 unexpected → precision 双罚（005 冒烟 0.635 → 修复后 0.833）。
+    """
+    tp, missing, unexpected = R.reconcile(
+        ["表名主体|核心主体"], ["表名未围绕核心主体"])
+    assert tp == 1 and missing == [] and unexpected == []
+    # 完全无关的 actual 仍进 unexpected
+    tp2, missing2, unexpected2 = R.reconcile(
+        ["表名主体|核心主体"], ["表注释缺失"])
+    assert tp2 == 0 and missing2 == ["表名主体"] and unexpected2 == ["表注释缺失"]
+
+
+def test_reconcile_merged_hit_not_unexpected():
+    """合并检出（一条 actual 命中两条别名 expected）不产生 unexpected。
+
+    006 冒烟实证：「逻辑删除字段不规范」同时命中「逻辑删除字段名」「逻辑删除
+    字段注释」→ tp=2 但该 actual 非 unexpected（precision 不涨、recall 如实涨）。
+    """
+    tp, missing, unexpected = R.reconcile(
+        ["逻辑删除字段名|逻辑删除字段不规范", "逻辑删除字段注释|逻辑删除字段不规范"],
+        ["逻辑删除字段不规范"])
+    assert tp == 2 and missing == [] and unexpected == []
+
+
 def test_f1_score_merged_hit_bounded():
     """一条 actual 命中多条 expected（合并检出）→ precision 用命中 actual 数，F1 ≤ 1。
 

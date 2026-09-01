@@ -92,7 +92,10 @@ def parse_expected(expected_path: Path):
     expected_rules, manual_rules = [], []
 
     def _split_rules(payload: str):
-        return [p.strip() for p in re.split(r"[、,，;；]", payload) if p.strip()]
+        # 别名串（「规范名|别名1|别名2」）只取首 token 规范名：脚本侧比对按规范名，
+        # 别名（对齐 LLM 报告措辞）是 GEPA 评估集（evo_replay.parse_expected）的
+        # 概念，badcase_runner 保持纯脚本回归语义（strict 精确等值不受影响）。
+        return [p.strip().split("|")[0] for p in re.split(r"[、,，;；]", payload) if p.strip()]
 
     section = re.search(r"##\s*预期检查输出\s*\n(.*?)(?=\n##\s|$)", text, re.DOTALL)
     if section:

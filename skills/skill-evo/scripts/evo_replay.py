@@ -175,7 +175,9 @@ def extract_rules_from_report(report: str) -> Tuple[List[str], bool]:
         return [], False
     try:
         data = json.loads(block.group(0))
-        if not isinstance(data.get("rules"), list):
+        # 纵深防御（正则 _JSON_BLOCK 已硬编码 "rules": [...] 数组字面量，合法解析
+        # 后必为 list；此分支不可达，防未来正则形态变更）
+        if not isinstance(data.get("rules"), list):  # pragma: no cover
             return [], False
         rules = [r for r in data.get("rules", []) if isinstance(r, str) and r.strip()]
         return rules, True
@@ -193,7 +195,12 @@ def reconcile(expected_rules: List[str], actual_rules: List[str]) -> Tuple[int, 
     matched = [e for e in expected_rules if _rule_matches(e, actual_rules)]
     tp = len(matched)
     missing = [e.split("|")[0] for e in expected_rules if e not in matched]
-    unexpected = [a for a in actual_rules if not _rule_matches(a, expected_rules)]
+    # unexpected 方向按「任一 expected 别名行命中该 actual」判定：别名对（别名
+    # token 双向子串）与 matched 方向对称——actual 命中任一条 expected 的任一
+    # 别名即非 unexpected；参数顺序必须 (expected_row, [actual])，反了会把别名
+    # 命中项误判为 unexpected（precision 双罚）。
+    unexpected = [a for a in actual_rules
+                  if not any(_rule_matches(e, [a]) for e in expected_rules)]
     return tp, missing, unexpected
 
 
