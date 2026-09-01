@@ -1062,3 +1062,9 @@ def test_annotate_pending_block_truncated_fm_inserts_header(tmp_path):
     PR.annotate_pending_block(p, "拦截原因")
     text = p.read_text(encoding="utf-8")
     assert text.startswith("apply_blocked: 拦截原因\n---\nid: x\n")
+
+
+def test_check_idempotent_skips_blank_paragraph():
+    """首空行产出的空段：跳过但占原序号（docstring 明示设计行为）。"""
+    hit = PR.check_idempotent("目标内容", "\n\n段一\n\n目标内容", 0.8)
+    assert hit is not None and hit[0] == 3
