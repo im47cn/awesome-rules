@@ -175,6 +175,8 @@ def extract_rules_from_report(report: str) -> Tuple[List[str], bool]:
         return [], False
     try:
         data = json.loads(block.group(0))
+        if not isinstance(data.get("rules"), list):
+            return [], False
         rules = [r for r in data.get("rules", []) if isinstance(r, str) and r.strip()]
         return rules, True
     except Exception:
@@ -379,14 +381,26 @@ def script_baseline_f1(cfg, skill_name: str, cases: List[G.Case]) -> Tuple[float
         raise SystemExit(f"评估集打分器未注册：{skill_name}（注册表见 evo_replay.SCORER_REGISTRY）")
     details = []
     total_f1 = 0.0
+    available = reg[skill_name]["scripts"]
     for case in cases:
         input_dir = Path(case.inputs["input_dir"])
+        # expected.md 的 check: 声明决定跑哪个注册脚本；未声明 → 全跑（兼容旧评估集）
+        check_name = parse_expected(input_dir / "expected.md")[0]
+        scripts = [s for s in available if check_name is None or s.name == check_name]
+        if not scripts:
+            details.append({"case": case.id,
+                            "error": f"check 脚本未注册或不可用: {check_name}"})
+            continue
         actual_rules = []
-        for script in reg[skill_name]["scripts"]:
+        for script in scripts:
             try:
                 r = subprocess.run(
                     ["python3", str(script), str(input_dir), "--format", "json"],
                     capture_output=True, text=True, timeout=30)
+                if r.returncode != 0:
+                    details.append({"case": case.id,
+                                    "error": f"{script.name}: exit {r.returncode}"})
+                    continue
                 data = json.loads(r.stdout or "[]")
                 for f in data:
                     actual_rules.extend(i.get("rule", "") for i in f.get("issues", []))

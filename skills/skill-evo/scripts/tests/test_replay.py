@@ -508,3 +508,63 @@ def _fake_run(cmd, capture_output=True, text=True, timeout=None):
     return types.SimpleNamespace(stdout=json.dumps(
         [{"file": "x", "summary": {"total": 0, "mandatory": 0, "recommended": 0},
           "issues": []}]))
+
+
+def test_extract_rules_rules_string_rejected():
+    """rules 为字符串（非 list）→ 不可解析：正则层挡非 list 语法，isinstance 纵深防御。"""
+    assert R.extract_rules_from_report('{"rules": "字符串"}') == ([], False)
+    # 数字列表仍为 list → 放行后过滤为空（契约：结构合法即 ok=True）
+    rules, ok = R.extract_rules_from_report('{"rules": [1, 2]}')
+    assert ok and rules == []
+
+
+def test_script_baseline_f1_nonzero_exit_recorded(monkeypatch, tmp_path):
+    """检查器非零退出且输出可解析 JSON → 记 error，不得当作空结果计入基线。"""
+    import types
+    case = _case(cid="c1", expected=["禁用类型"], files={"a.sql": "x"})
+    case = G.Case(id="c1", inputs={"input_dir": str(tmp_path), "files": {"a.sql": "x"}},
+                  reference={"expected_rules": ["禁用类型"], "manual_rules": [],
+                             "expected_empty": False})
+    calls = []
+
+    def fake_run(cmd, capture_output=True, text=True, timeout=None):
+        calls.append(cmd)
+        return types.SimpleNamespace(stdout="[]", returncode=1)
+
+    monkeypatch.setattr(R.subprocess, "run", fake_run)
+    avg, details = R.script_baseline_f1({}, "ddl-guard", [case])
+    assert len(calls) == 2 and "exit 1" in details[0]["error"]
+    assert avg == 0.0
+
+
+def test_script_baseline_f1_check_script_selects_matching(monkeypatch, tmp_path):
+    """expected.md 声明 check: → 只跑匹配的注册脚本，无关检查器不混入。"""
+    import types
+    (tmp_path / "expected.md").write_text(
+        "## 预期检查输出\n- check: sql_check.py\n- 脚本自动检出：禁用类型\n",
+        encoding="utf-8")
+    case = G.Case(id="c1", inputs={"input_dir": str(tmp_path), "files": {"a.sql": "x"}},
+                  reference={"expected_rules": ["禁用类型"], "manual_rules": [],
+                             "expected_empty": False})
+    calls = []
+
+    def fake_run(cmd, capture_output=True, text=True, timeout=None):
+        calls.append(cmd)
+        return types.SimpleNamespace(stdout="[]", returncode=0)
+
+    monkeypatch.setattr(R.subprocess, "run", fake_run)
+    avg, details = R.script_baseline_f1({}, "ddl-guard", [case])
+    assert len(calls) == 1 and calls[0][1].endswith("sql_check.py")
+    assert details[0]["score"] == 0.0  # 0 actual vs 1 expected → recall 0
+
+
+def test_script_baseline_f1_check_script_unregistered_fails_closed(monkeypatch, tmp_path):
+    """expected.md 声明未注册脚本 → fail-closed 记 error，不静默空跑。"""
+    (tmp_path / "expected.md").write_text(
+        "## 预期检查输出\n- check: ghost.py\n- 脚本自动检出：禁用类型\n",
+        encoding="utf-8")
+    case = G.Case(id="c1", inputs={"input_dir": str(tmp_path), "files": {"a.sql": "x"}},
+                  reference={"expected_rules": ["禁用类型"], "manual_rules": [],
+                             "expected_empty": False})
+    avg, details = R.script_baseline_f1({}, "ddl-guard", [case])
+    assert "未注册" in details[0]["error"] and avg == 0.0
