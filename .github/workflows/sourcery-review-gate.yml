@@ -4,19 +4,12 @@
 # 语义：对 PR 改动中的语言文件跑 `sourcery review --check --config .sourcery.yaml`。
 # 注意：与本地 pre-push 的 push_files 语义不同——本地在 merge 型 PR 上会扫描
 # merge 双父 diff 的并集（更宽），CI 只扫 PR 自身的 base...HEAD diff。
+# 无语言文件改动时早退 exit 0（保持 required check 兼容：paths 过滤会让
+# 不匹配的 PR 永远停在 Expected，故不设 paths，改在步内判断）。
 name: sourcery-review-gate
 
 on:
   pull_request:
-    paths:
-      - '**.py'
-      - '**.go'
-      - '**.java'
-      - '**.cs'
-      - '**.php'
-      - '**.ts'
-      - '**.js'
-      - '.sourcery.yaml'
 
 permissions:
   contents: read
@@ -35,21 +28,17 @@ jobs:
       # 升级规则集时同步更新本地 pip 与本 pin，避免"本地绿、CI 红"。
       - name: Install sourcery CLI
         run: pip install sourcery==1.45.0
-      - name: Collect changed language files
-        id: files
+      # 单步内收集文件并直接调用：多行文件列表不能经 GITHUB_OUTPUT 跨步传递
+      # （key=value 形式只解析第一行），跨步拆分会导致 gate 只扫第一个文件。
+      - name: Run sourcery review on changed language files
         run: |
           BASE_SHA="${{ github.event.pull_request.base.sha }}"
           FILES=$(git diff --name-only "${BASE_SHA}"...HEAD -- '*.py' '*.go' '*.java' '*.cs' '*.php' '*.ts' '*.js')
           if [ -z "$FILES" ]; then
-            echo "no language files changed"
-            echo "changed=" >> "$GITHUB_OUTPUT"
-          else
-            printf 'changed=%s\n' "$FILES" >> "$GITHUB_OUTPUT"
+            echo "no language files changed, skipping"
+            exit 0
           fi
-      - name: Run sourcery review
-        if: steps.files.outputs.changed != ''
-        env:
-          FILES: ${{ steps.files.outputs.changed }}
-        run: |
+          echo "changed files:"
+          echo "$FILES"
           # shellcheck disable=SC2086
           sourcery review --check --config .sourcery.yaml $FILES
