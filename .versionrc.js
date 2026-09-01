@@ -30,6 +30,32 @@ module.exports = {
   ],
   // 版本标签前缀
   tagPrefix: 'v',
+  // 发布联动：6 份插件清单随 package.json 同步 bump。v0.6.0 曾漏 6 清单
+  // （靠 22bc788 手工补齐），显式 bumpFiles 防再漏（覆盖默认，须自含
+  // package.json/package-lock.json）。catv 按文件名白名单解析 updater，
+  // plugin.json 不在内 → 显式 type: 'json'（保缩进/换行）；marketplace
+  // 版本在嵌套 metadata.version，json updater 只认顶层 version，故自定义。
+  // 注意条目键是 filename（catv 源码读 updater.filename，file 键会被无视）。
+  bumpFiles: [
+    'package.json',
+    'package-lock.json',
+    { filename: '.claude-plugin/plugin.json', type: 'json' },
+    { filename: '.codex-plugin/plugin.json', type: 'json' },
+    { filename: '.cursor-plugin/plugin.json', type: 'json' },
+    { filename: '.grok-plugin/plugin.json', type: 'json' },
+    { filename: '.kimi-plugin/plugin.json', type: 'json' },
+    {
+      filename: '.cursor-plugin/marketplace.json',
+      updater: {
+        readVersion: (src) => JSON.parse(src).metadata.version,
+        writeVersion: (src, version) => {
+          const json = JSON.parse(src);
+          json.metadata.version = version;
+          return JSON.stringify(json, null, 2) + '\n';
+        },
+      },
+    },
+  ],
   // commit / compare URL 从 git remote 自动推断 host（GitHub / 阿里云 codeup / GitLab 均适配）
   // 如需固定 host，在此覆写 commitUrlFormat / compareUrlFormat
 };
