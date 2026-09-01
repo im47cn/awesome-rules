@@ -1,5 +1,5 @@
 {
-  "description": ".factory 工具链分发清单。awesome-rules 是唯一上游真相源；下游仓库（etf-radar 等）用 sync-from-upstream.sh 按本清单拉取，替代手工拷贝（README 移植的持续维护部分）。分类语义——full: 零本地化，blob 可直接覆盖（漂移=门禁失败）；local: 含仓特定区（同步只报告不覆盖，漂移经 feedback-upstream 反哺管线收敛）；skip: 仓特定或运行时产物，永不跨仓。ADR-009（拆分前置）后 local 面归零：周界/判据措辞/门命令/仓库参数/上游指针全部数据化到 factory-local.json（skip 分发，每仓一份），full 面脚本与 prompts 零宿主专名（gauntlet factory-portability 门机械化盯防）。清单修正（2026-08-26）：sync-from-upstream.sh 由 skip 移 full——它零本地化（锚点优先级修复无法经 sync 自身到达下游，gtsp-wop-gateway 迁移实测鸡生蛋）。",
+  "description": ".factory 工具链分发清单。awesome-rules 是唯一上游真相源；下游仓库（etf-radar 等）用 sync-from-upstream.sh 按本清单拉取，替代手工拷贝（README 移植的持续维护部分）。分类语义——full: 零本地化，blob 可直接覆盖（漂移=门禁失败）；local: 含仓特定区（同步只报告不覆盖，漂移经 feedback-upstream 反哺管线收敛）；skip: 仓特定或运行时产物，永不跨仓。ADR-009（拆分前置）后 local 面归零：周界/判据措辞/门命令/仓库参数/上游指针全部数据化到 factory-local.json（skip 分发，每仓一份），full 面脚本与 prompts 零宿主专名（gauntlet factory-portability 门机械化盯防）。清单修正（2026-08-26）：sync-from-upstream.sh 由 skip 移 full——它零本地化（锚点优先级修复无法经 sync 自身到达下游，gtsp-wop-gateway 迁移实测鸡生蛋）。增补（2026-09-01）：downstream-check.sh（full）+ downstream.json（skip，中心仓专属清单）——中心仓对 N 个下游仓集中巡检（--repo 驱动中心版 sync，以中心 main 为锚），--apply-commit 追平单提交落库不推送。",
   "full": [
     "cron-dispatch.sh",
     "dispatch.sh",
@@ -21,7 +21,8 @@
     "db/schema.sql",
     "tests/",
     "prompts/",
-    "sync-from-upstream.sh"
+    "sync-from-upstream.sh",
+    "downstream-check.sh"
   ],
   "local": {},
   "skip": [
@@ -34,7 +35,8 @@
     "worktrees/",
     "feedback-log.jsonl",
     "upstream-lock.json",
-    "DISTRIBUTION.json"
+    "DISTRIBUTION.json",
+    "downstream.json"
   ],
   "anchor_policy": "下游 .factory/upstream-lock.json 记录上次同步的上游 commit（M2 起含 upstream 路径字段）；--check 对比该锚点与上游 HEAD 的 full 文件 blob，漂移即提醒（追平或反哺二选一），对齐 scripts/plugin-lock.json 的 blob 锁定模式"
 }
