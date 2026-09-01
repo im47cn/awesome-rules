@@ -905,3 +905,166 @@ def test_migrate_block_missing_reported(tmp_path):
     p.write_text("# 提案\n\n无机读块\n", encoding="utf-8")
     rep = PR.migrate_proposals(tmp_path / "pending", fix=True)
     assert len(rep["unrecoverable"]) == 1 and "cc-noblock0001" in rep["unrecoverable"][0]
+
+
+# ── 既有代码历史分支补测（独立 PR：28 Miss 清零，L361 死分支豁免）────────────
+
+def test_machine_block_serialization_failure_raises(monkeypatch):
+    """防御分支：dumps 产物 strict 自检失败 → fail-fast，坏件不产出。"""
+    monkeypatch.setattr(PR.json, "dumps", lambda *a, **k: "{bad json")
+    with pytest.raises(PR.ApplyError, match="机读块序列化自检失败"):
+        PR._machine_block({"lessons": []})
+
+
+def test_verify_machine_block_bad_json_raises(tmp_path):
+    """防御分支：落盘块非 strict 可解析 → 生成器自检拦截。"""
+    p = tmp_path / "x.md"
+    p.write_text("```json\n{bad\n```\n", encoding="utf-8")
+    with pytest.raises(PR.ApplyError, match="非严格可解析"):
+        PR._verify_machine_block(p)
+
+
+def test_load_proposal_lesson_construction_failure_tolerated(monkeypatch, tmp_path):
+    """容错分支：lessons 构造抛 JSONDecodeError → 跳过该批，不抛。"""
+    def boom(*a, **k):
+        raise json.JSONDecodeError("boom", "doc", 0)
+    monkeypatch.setattr(PR, "Lesson", boom)
+    p = tmp_path / "x.md"
+    p.write_text("```json\n{\"lessons\": [{}]}\n```\n", encoding="utf-8")
+    loaded = PR.load_proposal(p)
+    assert loaded.lessons == []
+
+
+def test_read_fm_oserror_returns_empty(tmp_path):
+    """容错分支：读异常（目录伪装）→ 空 fm。"""
+    assert PR._read_fm(tmp_path) == {}
+
+
+def test_check_idempotent_blank_new_text_returns_none():
+    """边界：new_text 归一后为空（纯空白）→ None。"""
+    assert PR.check_idempotent("   ", "## 标题\n\n正文内容", 0.8) is None
+
+
+def test_apply_change_append_under_missing_heading_raises():
+    """append_under 缺 heading → 硬错（不静默落到文件末尾）。"""
+    with pytest.raises(PR.ApplyError, match="append_under 缺少 heading"):
+        PR._apply_change("# t\n\n内容", PR.Change(action="append_under", heading="", new_text="- x"), "f.md")
+
+
+def test_apply_change_unknown_action_raises():
+    """未知 action → 硬错（fail-closed，不猜测落盘语义）。"""
+    with pytest.raises(PR.ApplyError, match="未知 action"):
+        PR._apply_change("# t", PR.Change(action="bogus", heading="h", new_text="- x"), "f.md")
+
+
+def test_normalize_headings_skips_hashed_heading(tmp_path):
+    """已带 # 前缀的 heading 跳过（不重复加前缀）。"""
+    repo = make_repo(tmp_path)
+    p = make_proposal(tmp_path, lessons=[make_lesson(change=PR.Change(
+        action="append_under", heading="# 已带前缀", new_text="- x"))])
+    assert PR.normalize_headings(p, repo) == []
+
+
+def test_normalize_headings_skips_invalid_target(tmp_path):
+    """目标越界（路径逃逸）→ 跳过，留给 apply 原路径报错。"""
+    repo = make_repo(tmp_path)
+    p = make_proposal(tmp_path, lessons=[make_lesson(
+        target_file="../escape.md",
+        change=PR.Change(action="append_under", heading="裸标题", new_text="- x"))])
+    assert PR.normalize_headings(p, repo) == []
+
+
+def test_default_pending_md_path():
+    """默认 pending 路径：~/.config/ar/skill-evo/proposals/pending/<id>.md。"""
+    p = make_proposal(None, pid="20260818-000000-cc-abcd1234")
+    assert PR._default_pending_md(p) == (
+        Path.home() / ".config/ar/skill-evo/proposals/pending" / "20260818-000000-cc-abcd1234.md")
+
+
+def test_annotate_pending_block_no_fm_inserts_header(tmp_path):
+    """无 frontmatter 的 .md：头部直插空 fm + apply_blocked 单行（msg 换行压平）。"""
+    p = tmp_path / "x.md"
+    p.write_text("# 内容\n", encoding="utf-8")
+    PR.annotate_pending_block(p, "第一行\n第二行")
+    text = p.read_text(encoding="utf-8")
+    assert text.startswith("---\n---\napply_blocked: 第一行 第二行\n")
+    assert "# 内容" in text
+
+
+def test_apply_proposal_lesson_without_change_raises(tmp_path):
+    """lesson 无 change 内容 → 硬错（不盲写空操作）。"""
+    repo = make_repo(tmp_path)
+    p = make_proposal(tmp_path, lessons=[make_lesson(change=None)])
+    with pytest.raises(PR.ApplyError, match="lesson 1: 无变更内容"):
+        PR.apply_proposal(p, repo)
+
+
+def test_move_proposal_file_unlinked_after_move(tmp_path):
+    """正常文件流转：写目标 + 原文件 unlink（非目录防御分支）。"""
+    src = tmp_path / "pending" / "20260818-000000-cc-abcd1234.md"
+    src.parent.mkdir(parents=True)
+    src.write_text("---\nid: x\n---\n# t\n", encoding="utf-8")
+    dest = PR.move_proposal(src, tmp_path / "applied", {"verdict": "applied"})
+    assert dest.is_file() and not src.exists()
+    assert "verdict: applied" in dest.read_text(encoding="utf-8")
+
+
+def test_parse_codes_lesson_level_split():
+    """'L-<id>:<code>' 拆入 per_lesson，裸码归提案级，空 item 跳过。"""
+    per_lesson, proposal_level = PR._parse_codes([" ", "L-001:dup_superset", "off_target"])
+    assert per_lesson == {"L-001": ["dup_superset"]}
+    assert proposal_level == ["off_target"]
+
+
+def test_derive_verdicts_no_orig_all_applied():
+    """无原版快照 → 全部 applied（声明性退化）。"""
+    assert PR._derive_verdicts([make_lesson()], None) == ["applied"]
+
+
+def test_derive_verdicts_second_pass_trim_pair():
+    """第二遍裁剪配对：id 变化但 target/type 同且文本包含 → trimmed。"""
+    cur = [make_lesson(lesson_id="NEW-1", change=PR.Change(
+        action="append_under", heading="## H", new_text="- 短内容"))]
+    orig = [make_lesson(lesson_id="OLD-1", change=PR.Change(
+        action="append_under", heading="## H", new_text="- 短内容扩展部分"))]
+    assert PR._derive_verdicts(cur, orig) == ["trimmed"]
+
+
+def test_text_related_substring():
+    """包含关系判定：短文本 ⊂ 长文本（双向），无关文本 False。"""
+    a = make_lesson(change=PR.Change(action="append_under", heading="h", new_text="- 短内容"))
+    b = make_lesson(change=PR.Change(action="append_under", heading="h", new_text="- 短内容扩展"))
+    assert PR._text_related(a, b) and PR._text_related(b, a)
+    c = make_lesson(change=PR.Change(action="append_under", heading="h", new_text="- 完全无关内容"))
+    assert not PR._text_related(a, c)
+
+
+def test_finalize_review_missing_machine_block_raises(tmp_path):
+    """机读块缺失 → 硬错（不静默写无块文件）。"""
+    p = tmp_path / "x.md"
+    p.write_text("---\nid: x\n---\n# t\n", encoding="utf-8")
+    with pytest.raises(PR.ApplyError, match="找不到机读 JSON 块"):
+        PR.finalize_review(p, [], rejected=False)
+
+
+def test_verify_machine_block_missing_block_raises(tmp_path):
+    """防御分支：落盘文件无机读块 → 生成器自检拦截（块缺失）。"""
+    p = tmp_path / "x.md"
+    p.write_text("---\nid: x\n---\n# t\n", encoding="utf-8")
+    with pytest.raises(PR.ApplyError, match="机读 JSON 块缺失"):
+        PR._verify_machine_block(p)
+
+
+def test_annotate_pending_block_truncated_fm_inserts_header(tmp_path):
+    """fm 有开头无收尾 ---（残缺）：头部直插 apply_blocked 行。"""
+    p = tmp_path / "x.md"
+    p.write_text("---\nid: x\n", encoding="utf-8")
+    PR.annotate_pending_block(p, "拦截原因")
+    text = p.read_text(encoding="utf-8")
+    assert text.startswith("apply_blocked: 拦截原因\n---\nid: x\n")
+
+
+def test_check_idempotent_skips_blank_paragraph():
+    """首空行产出的空段：跳过但占原序号（docstring 明示设计行为）。"""
+    hit = PR.check_idempotent("目标内容", "\n\n段一\n\n目标内容", 0.8)
+    assert hit is not None and hit[0] == 3
