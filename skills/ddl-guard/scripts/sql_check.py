@@ -63,13 +63,13 @@ def strip_dynamic_tags(elem: ET.Element) -> str:
                 parts.append(f" {inner} ")
         elif tag == "where":
             inner = strip_dynamic_tags(child).strip()
-            inner = re.sub(r"^(AND|OR)\s+", "", inner, flags=re.IGNORECASE).strip()
-            if inner:
+            if inner := re.sub(
+                r"^(AND|OR)\s+", "", inner, flags=re.IGNORECASE
+            ).strip():
                 parts.append(f" WHERE {inner} ")
         elif tag == "set":
             inner = strip_dynamic_tags(child).strip()
-            inner = re.sub(r",\s*$", "", inner).strip()
-            if inner:
+            if inner := re.sub(r",\s*$", "", inner).strip():
                 parts.append(f" SET {inner} ")
         elif tag == "foreach":
             inner = strip_dynamic_tags(child).strip()
@@ -88,9 +88,7 @@ def strip_dynamic_tags(elem: ET.Element) -> str:
             pass  # refid 已在外部解析
         elif tag == "bind":
             pass
-        elif tag == "sql":
-            pass
-        else:
+        elif tag != "sql":
             parts.append(f" {strip_dynamic_tags(child)} ")
 
         if child.tail:
@@ -196,9 +194,7 @@ def extract_sql_from_element(elem: ET.Element, root: ET.Element) -> str:
         stripped = re.sub(r"(?<!['\"])--.*$", "", line)
         cleaned.append(stripped)
     raw = "\n".join(cleaned)
-    # 合并多行、压缩空白
-    raw = re.sub(r"\s+", " ", raw).strip()
-    return raw
+    return re.sub(r"\s+", " ", raw).strip()
 
 
 def normalize_sql(sql: str) -> str:
@@ -234,14 +230,14 @@ def check_count_field(sql: str, issues: list, ctx: dict):
 
 def check_where_required(sql: str, issues: list, ctx: dict, stmt_type: str):
     """SELECT/UPDATE/DELETE 必须带 WHERE。"""
-    if stmt_type in ("select",):
+    if stmt_type in {"select"}:
         # 子查询的 select 也要有 where 吗? 只检查最外层
         if not re.search(r"(?i)\bwhere\b", sql) and re.search(r"(?i)\bfrom\b", sql):
             # 排除 SELECT ... INTO 或纯常量查询
             issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="必须带WHERE",
                 description="SELECT 语句缺少 WHERE 条件",
                 suggestion="SQL 必须带有 WHERE 条件"))
-    elif stmt_type in ("update", "delete"):
+    elif stmt_type in {"update", "delete"}:
         if not re.search(r"(?i)\bwhere\b", sql):
             issues.append(Issue(**ctx, severity=Severity.RECOMMENDED, rule="缺少WHERE",
                 description=f"{stmt_type.upper()} 语句缺少 WHERE 条件",
@@ -250,10 +246,10 @@ def check_where_required(sql: str, issues: list, ctx: dict, stmt_type: str):
 
 def check_invalid_where(sql: str, issues: list, ctx: dict):
     """WHERE 不得为 1=1 等无效条件（仅作为唯一条件时报出）。"""
-    # 检查 WHERE 后只有 1=1
-    m = re.search(r"(?i)\bwhere\s+(.+?)(\border\b|\bgroup\b|\blimit\b|$)", sql)
-    if m:
-        condition = m.group(1).strip()
+    if m := re.search(
+        r"(?i)\bwhere\s+(.+?)(\border\b|\bgroup\b|\blimit\b|$)", sql
+    ):
+        condition = m[1].strip()
         if re.fullmatch(r"(?i)\s*1\s*=\s*1\s*", condition):
             issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="无效WHERE条件",
                 description="WHERE 条件为 1=1 等无效形式",
@@ -271,7 +267,7 @@ def check_table_alias_prefix(sql: str, issues: list, ctx: dict):
     m = re.search(r"(?i)\bselect\s+(distinct\s+)?(.*?)\s+from\b", sql)
     if not m:
         return
-    fields_str = m.group(2)
+    fields_str = m[2]
 
     # 如果是 *，跳过（已由 check_select_star 报出）
     if fields_str.strip() == "*":
@@ -353,7 +349,7 @@ def check_bad_alias(sql: str, issues: list, ctx: dict):
     m1 = re.findall(r"(?i)(?:from|join)\s+(?:`[^`]+`|[\w.]+)\s+as\s+(\w+)", sql)
     # 模式2: table alias（两个词，第二个是别名）
     m2 = re.findall(r"(?i)(?:from|join)\s+((?:`[^`]+`|[\w.]+))\s+(?!where|on|inner|left|right|join|order|group|limit|set|values|using)(\w+)", sql)
-    aliases = list(m1) + [a for a in m2]
+    aliases = list(m1) + list(m2)
     bad_patterns = re.compile(r"^(t\d+|[a-z])$")
     for alias in aliases:
         if isinstance(alias, tuple):
@@ -369,9 +365,15 @@ def check_left_like(sql: str, issues: list, ctx: dict):
     matches = re.findall(r"(?i)like\s+'(%[^']*?)'", sql)
     for pattern in matches:
         if pattern.startswith("%"):
-            issues.append(Issue(**ctx, severity=Severity.RECOMMENDED, rule="避免左模糊",
-                description=f"使用了左模糊匹配 LIKE '%...'",
-                suggestion="左模糊匹配无法利用索引，应避免"))
+            issues.append(
+                Issue(
+                    **ctx,
+                    severity=Severity.RECOMMENDED,
+                    rule="避免左模糊",
+                    description="使用了左模糊匹配 LIKE '%...'",
+                    suggestion="左模糊匹配无法利用索引，应避免"
+                )
+            )
 
 
 def check_where_function(sql: str, issues: list, ctx: dict):
@@ -391,7 +393,7 @@ def check_where_function(sql: str, issues: list, ctx: dict):
     m = re.search(r"(?i)\bwhere\b\s+(.+?)(\border\s+by|\bgroup\s+by|\blimit\b|$)", sql)
     if not m:
         return
-    where_clause = m.group(1)
+    where_clause = m[1]
 
     # 检测字段上包了函数: func(field_name) op value
     # 扩展函数列表，覆盖更多常见字符串/日期/数值函数
@@ -426,11 +428,10 @@ def check_insert_columns(sql: str, issues: list, ctx: dict):
 
 def check_ddl_in_app(sql: str, issues: list, ctx: dict):
     """应用程序中禁止 DDL 操作。"""
-    ddl_keywords = re.search(
+    if ddl_keywords := re.search(
         r"(?i)\b(alter\s+table|create\s+table|drop\s+table|truncate\s+table|rename\s+table)\b",
         sql,
-    )
-    if ddl_keywords:
+    ):
         issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="禁止DDL操作",
             description=f"mapper 中包含 DDL 语句: {ddl_keywords.group()}",
             suggestion="应用程序中禁止任何 DDL 操作"))
@@ -516,11 +517,7 @@ def is_mapper(path: str) -> bool:
     try:
         tree = ET.parse(path)
         root = tree.getroot()
-        for tag in STATEMENT_TAGS:
-            # 使用 iter() 搜索所有后代元素（修复 find() 仅搜索直接子元素的问题）
-            if list(root.iter(tag)):
-                return True
-        return False
+        return any(list(root.iter(tag)) for tag in STATEMENT_TAGS)
     except Exception:
         return False
 
@@ -586,13 +583,14 @@ def parse_po_class(content: str, file_path: str):
 
     # 提取表名
     table_name = None
-    m = re.search(r'@TableName\s*\(\s*(?:"([^"]+)"|value\s*=\s*"([^"]+)")', content)
-    if m:
-        table_name = m.group(1) or m.group(2)
+    if m := re.search(
+        r'@TableName\s*\(\s*(?:"([^"]+)"|value\s*=\s*"([^"]+)")', content
+    ):
+        table_name = m[1] or m[2]
     elif re.search(r"@TableName\s*\(\s*\)", content):
         class_m = re.search(r"class\s+(\w+)", content)
         if class_m:
-            cn = class_m.group(1)
+            cn = class_m[1]
             for suffix in ("PO", "DO", "Entity", "BO", "DTO"):
                 if cn.endswith(suffix) and len(cn) > len(suffix):
                     cn = cn[: -len(suffix)]
@@ -603,12 +601,12 @@ def parse_po_class(content: str, file_path: str):
         return None
 
     class_m = re.search(r"class\s+(\w+)", content)
-    class_name = class_m.group(1) if class_m else ""
+    class_name = class_m[1] if class_m else ""
 
-    extends_base = False
     ext_m = re.search(r"class\s+\w+\s+extends\s+(\w+)", content)
-    if ext_m and re.search(r"(Base|Entity|Model|Abstract)", ext_m.group(1)):
-        extends_base = True
+    extends_base = bool(
+        ext_m and re.search(r"(Base|Entity|Model|Abstract)", ext_m[1])
+    )
 
     brace_start = content.find("{")
     body = content[brace_start:] if brace_start != -1 else content
@@ -623,10 +621,10 @@ def parse_po_class(content: str, file_path: str):
 
     fields = []
     for fm in field_pattern.finditer(body):
-        annotations_str = fm.group(1)
-        modifiers = fm.group(2)
-        java_type = fm.group(3)
-        java_name = fm.group(4)
+        annotations_str = fm[1]
+        modifiers = fm[2]
+        java_type = fm[3]
+        java_name = fm[4]
 
         if "static" in modifiers:
             continue
@@ -636,29 +634,23 @@ def parse_po_class(content: str, file_path: str):
         exist = True
 
         for ann_m in re.finditer(r"@([\w.]+)(?:\(([^)]*)\))?", annotations_str):
-            ann_name = ann_m.group(1).split(".")[-1]
-            ann_args = ann_m.group(2) or ""
+            ann_name = ann_m[1].split(".")[-1]
+            ann_args = ann_m[2] or ""
 
             if ann_name == "TableId":
                 is_id = True
-                vm = re.search(r'value\s*=\s*"([^"]+)"', ann_args)
-                if vm:
-                    column_name = vm.group(1)
-                else:
-                    pm = re.match(r'\s*"([^"]+)"', ann_args)
-                    if pm:
-                        column_name = pm.group(1)
+                if vm := re.search(r'value\s*=\s*"([^"]+)"', ann_args):
+                    column_name = vm[1]
+                elif pm := re.match(r'\s*"([^"]+)"', ann_args):
+                    column_name = pm[1]
             elif ann_name == "TableField":
                 if re.search(r"exist\s*=\s*false", ann_args, re.IGNORECASE):
                     exist = False
                     continue
-                vm = re.search(r'value\s*=\s*"([^"]+)"', ann_args)
-                if vm:
-                    column_name = vm.group(1)
-                else:
-                    pm = re.match(r'\s*"([^"]+)"', ann_args)
-                    if pm:
-                        column_name = pm.group(1)
+                if vm := re.search(r'value\s*=\s*"([^"]+)"', ann_args):
+                    column_name = vm[1]
+                elif pm := re.match(r'\s*"([^"]+)"', ann_args):
+                    column_name = pm[1]
 
         if not exist:
             continue
@@ -839,9 +831,13 @@ def format_report_text(file_path: str, issues: list) -> str:
     ]
 
     for issue in issues:
-        lines.append(f"  [{issue.severity.value}] {issue.rule}")
-        lines.append(f"    语句: {issue.statement_type} ({issue.statement_id})")
-        lines.append(f"    问题: {issue.description}")
+        lines.extend(
+            (
+                f"  [{issue.severity.value}] {issue.rule}",
+                f"    语句: {issue.statement_type} ({issue.statement_id})",
+                f"    问题: {issue.description}",
+            )
+        )
         if issue.suggestion:
             lines.append(f"    建议: {issue.suggestion}")
         lines.append("")
@@ -854,8 +850,10 @@ def format_report_json(file_path: str, issues: list) -> str:
         "file": file_path,
         "summary": {
             "total": len(issues),
-            "mandatory": sum(1 for i in issues if i.severity == Severity.MANDATORY),
-            "recommended": sum(1 for i in issues if i.severity == Severity.RECOMMENDED),
+            "mandatory": sum(i.severity == Severity.MANDATORY
+                         for i in issues),
+            "recommended": sum(i.severity == Severity.RECOMMENDED
+                           for i in issues),
         },
         "issues": [
             {

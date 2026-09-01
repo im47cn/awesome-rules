@@ -134,17 +134,19 @@ class TestGenerateReject:
     def test_real_write_rejects_and_cleans(self, monkeypatch, tmp_path):
         def fake_check(d):
             return ["意外规则"]
+
         monkeypatch.setattr(gc, "run_ddl_check", fake_check)
         gc.generate(tmp_path, dry_run=False, verbose=False)
         # 全部拒绝 → 无 case 目录残留
-        assert list(tmp_path.iterdir()) == []
+        assert not list(tmp_path.iterdir())
 
     def test_real_write_succeeds(self, tmp_path):
         """非 dry-run 真实落盘：编号递增、四层全落。"""
         generated, rejected, detail = gc.generate(tmp_path, dry_run=False, verbose=False)
         assert rejected == 0
         assert generated == len(gc.TEMPLATES) + len(gc.CLEAN_TEMPLATES) + len(
-            gc.COMBO_TEMPLATES) + sum(1 for _r, _c, _t, _v, b in gc.TEMPLATES if b)
+            gc.COMBO_TEMPLATES) + sum(bool(b)
+                                  for _r, _c, _t, _v, b in gc.TEMPLATES)
         dirs = sorted(p.name for p in tmp_path.iterdir())
         assert dirs[0].startswith("010-")
         assert dirs[-1] != dirs[0]

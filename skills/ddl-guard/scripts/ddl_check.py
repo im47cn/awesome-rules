@@ -216,14 +216,12 @@ def extract_tables(raw_text: str) -> list:
     i = 0
     while i < len(lines):
         line = lines[i].strip()
-        # Match CREATE TABLE
-        m = re.match(
+        if m := re.match(
             r"(?i)create\s+(?:temporary\s+)?\s*table\s+(?:if\s+not\s+exists\s+)?"
             r"(?:`?([^`\s()]+)`?\.)?`?([^`\s()]+)`?",
             line,
-        )
-        if m:
-            table_name = m.group(2) or m.group(1)
+        ):
+            table_name = m[2] or m[1]
             table = TableInfo(
                 name=table_name,
                 raw_name=table_name,
@@ -266,10 +264,6 @@ def extract_tables(raw_text: str) -> list:
             table_comment_match = re.search(
                 r"(?i)\)\s*.*?comment\s*=?\s*'([^']*)'", full_text
             )
-            if not table_comment_match:
-                # Try inline comment on CREATE TABLE line
-                pass
-
             # Parse fields and indexes from within parens
             _parse_table_body(table, full_lines)
 
@@ -309,33 +303,28 @@ def _parse_table_body(table: TableInfo, body_lines: list):
 
         # Check if this is a constraint/index definition
         if re.match(r"(?i)^(primary\s+key|unique\s+key|unique\s+index|unique\s+constraint)\s*", line):
-            # Unique index or primary key
-            idx_info = _parse_index_line(line, line_no)
-            if idx_info:
+            if idx_info := _parse_index_line(line, line_no):
                 table.indexes.append(idx_info)
             continue
 
         if re.match(r"(?i)^(key|index)\s+", line):
-            idx_info = _parse_index_line(line, line_no)
-            if idx_info:
+            if idx_info := _parse_index_line(line, line_no):
                 table.indexes.append(idx_info)
             continue
 
         if re.match(r"(?i)^(constraint|foreign\s+key|check|fulltext|spatial)\s+", line):
             continue
 
-        # Regular field definition
-        field_info = _parse_field_line(line, line_no)
-        if field_info:
+        if field_info := _parse_field_line(line, line_no):
             table.fields.append(field_info)
 
 
 def _parse_index_line(line: str, line_no: int) -> Optional[IndexInfo]:
     """Parse an index definition line."""
-    # Primary key
-    pk_match = re.match(r"(?i)primary\s+key\s*(?:\(\s*([^)]+)\s*\))?", line)
-    if pk_match:
-        cols_str = pk_match.group(1) or ""
+    if pk_match := re.match(
+        r"(?i)primary\s+key\s*(?:\(\s*([^)]+)\s*\))?", line
+    ):
+        cols_str = pk_match[1] or ""
         cols = [c.strip().strip("`") for c in cols_str.split(",") if c.strip()]
         return IndexInfo(
             name="PRIMARY",
@@ -345,11 +334,12 @@ def _parse_index_line(line: str, line_no: int) -> Optional[IndexInfo]:
             is_unique=False,
         )
 
-    # Unique key
-    uk_match = re.match(r"(?i)unique\s+(?:key|index)\s+`?([^`\s()]+)`?\s*\(\s*([^)]+)\s*\)", line)
-    if uk_match:
-        name = uk_match.group(1)
-        cols_str = uk_match.group(2)
+    if uk_match := re.match(
+        r"(?i)unique\s+(?:key|index)\s+`?([^`\s()]+)`?\s*\(\s*([^)]+)\s*\)",
+        line,
+    ):
+        name = uk_match[1]
+        cols_str = uk_match[2]
         cols = [c.strip().strip("`") for c in cols_str.split(",") if c.strip()]
         return IndexInfo(
             name=name,
@@ -359,11 +349,11 @@ def _parse_index_line(line: str, line_no: int) -> Optional[IndexInfo]:
             is_unique=True,
         )
 
-    # Unique constraint
-    uc_match = re.match(r"(?i)unique\s+constraint\s+`?([^`\s()]+)`?\s*\(\s*([^)]+)\s*\)", line)
-    if uc_match:
-        name = uc_match.group(1)
-        cols_str = uc_match.group(2)
+    if uc_match := re.match(
+        r"(?i)unique\s+constraint\s+`?([^`\s()]+)`?\s*\(\s*([^)]+)\s*\)", line
+    ):
+        name = uc_match[1]
+        cols_str = uc_match[2]
         cols = [c.strip().strip("`") for c in cols_str.split(",") if c.strip()]
         return IndexInfo(
             name=name,
@@ -373,11 +363,11 @@ def _parse_index_line(line: str, line_no: int) -> Optional[IndexInfo]:
             is_unique=True,
         )
 
-    # Regular key/index
-    k_match = re.match(r"(?i)(?:key|index)\s+`?([^`\s()]+)`?\s*\(\s*([^)]+)\s*\)", line)
-    if k_match:
-        name = k_match.group(1)
-        cols_str = k_match.group(2)
+    if k_match := re.match(
+        r"(?i)(?:key|index)\s+`?([^`\s()]+)`?\s*\(\s*([^)]+)\s*\)", line
+    ):
+        name = k_match[1]
+        cols_str = k_match[2]
         cols = [c.strip().strip("`") for c in cols_str.split(",") if c.strip()]
         return IndexInfo(
             name=name,
@@ -397,8 +387,8 @@ def _parse_field_line(line: str, line_no: int) -> Optional[FieldInfo]:
     if not m:
         return None
 
-    name = m.group(1)
-    rest = m.group(2)
+    name = m[1]
+    rest = m[2]
 
     # Extract type (first word + optional length/precision)
     type_match = re.match(
@@ -410,11 +400,15 @@ def _parse_field_line(line: str, line_no: int) -> Optional[FieldInfo]:
         re.IGNORECASE,
     )
 
-    field_type = type_match.group(0).strip() if type_match else rest.split()[0] if rest.split() else ""
+    field_type = (
+        type_match[0].strip()
+        if type_match
+        else rest.split()[0] if rest.split() else ""
+    )
 
     # Extract comment
     comment_match = re.search(r"comment\s+'((?:[^'\\]|\\.)*)'", rest, re.IGNORECASE)
-    comment = comment_match.group(1) if comment_match else None
+    comment = comment_match[1] if comment_match else None
 
     # Check if primary key
     is_pk = bool(re.search(r"(?i)primary\s+key", rest))
@@ -437,9 +431,10 @@ def extract_table_comment(full_text: str) -> Optional[str]:
     if last_paren == -1:
         return None
     suffix = full_text[last_paren:]
-    m = re.search(r"comment\s*=?\s*'((?:[^'\\]|\\.)*)'", suffix, re.IGNORECASE)
-    if m:
-        return m.group(1)
+    if m := re.search(
+        r"comment\s*=?\s*'((?:[^'\\]|\\.)*)'", suffix, re.IGNORECASE
+    ):
+        return m[1]
     return None
 
 
@@ -631,8 +626,7 @@ def check_table_comment(table: TableInfo, issues: list):
             r"\(\)\[\]\u3001\u3002\uff0c\uff1b\uff1a\uff01\uff1f"
             r"\u201c\u201d\u2018\u2019\-_/.,:;!?@+#&]+"
         )
-        stripped = _allowed.sub("", comment).strip()
-        if stripped:
+        if stripped := _allowed.sub("", comment).strip():
             issues.append(Issue(
                 table=table.name, severity=Severity.MANDATORY, rule="表注释特殊字符",
                 location=f"表:{table.name}", description=f"表注释含特殊字符: {comment}",
@@ -741,9 +735,7 @@ def check_field_comment(field: FieldInfo, table_name: str, issues: list):
             suggestion="字段注释长度不超过 128",
         ))
 
-    # Full-width characters
-    fw_matches = FULLWIDTH_RE.findall(comment)
-    if fw_matches:
+    if fw_matches := FULLWIDTH_RE.findall(comment):
         issues.append(Issue(
             table=table_name, severity=Severity.MANDATORY, rule="全角字符",
             location=f"表:{table_name} 字段:{field.name}",
@@ -769,7 +761,7 @@ def check_field_type(field: FieldInfo, table_name: str, issues: list):
     base_type_match = re.match(r"(\w+)", type_lower)
     if not base_type_match:
         return
-    base_type = base_type_match.group(1)
+    base_type = base_type_match[1]
 
     if base_type in FORBIDDEN_TYPES:
         issues.append(Issue(
@@ -787,7 +779,7 @@ def check_varchar_length(field: FieldInfo, table_name: str, issues: list):
     cm = re.match(r"char\s*\(\s*(\d+)\s*\)", type_lower)
 
     if vm:
-        length = int(vm.group(1))
+        length = int(vm[1])
         if length > 500:
             issues.append(Issue(
                 table=table_name, severity=Severity.RECOMMENDED, rule="varchar长度",
@@ -796,7 +788,7 @@ def check_varchar_length(field: FieldInfo, table_name: str, issues: list):
                 suggestion="varchar 长度不宜超过 500",
             ))
     elif cm:
-        length = int(cm.group(1))
+        length = int(cm[1])
         if length > 20:
             issues.append(Issue(
                 table=table_name, severity=Severity.RECOMMENDED, rule="char长度",
@@ -886,13 +878,17 @@ def check_index_on_id(table: TableInfo, issues: list):
         if "id" in [c.lower() for c in idx.columns]:
             id_indexes.append(idx)
 
-    for idx in id_indexes:
-        issues.append(Issue(
-            table=table.name, severity=Severity.MANDATORY, rule="id重复索引",
-            location=f"表:{table.name} 索引:{idx.name}", 
+    issues.extend(
+        Issue(
+            table=table.name,
+            severity=Severity.MANDATORY,
+            rule="id重复索引",
+            location=f"表:{table.name} 索引:{idx.name}",
             description=f"id 字段已有主键索引，索引 '{idx.name}' 中包含 id",
             suggestion="id 字段已有主键索引，不再建普通索引或参与联合索引",
-        ))
+        )
+        for idx in id_indexes
+    )
 
 
 def check_index_count(table: TableInfo, issues: list):
@@ -906,14 +902,18 @@ def check_index_count(table: TableInfo, issues: list):
             suggestion="单表索引个数建议最多 5 个",
         ))
 
-    for idx in non_pk_indexes:
-        if len(idx.columns) > 5:
-            issues.append(Issue(
-                table=table.name, severity=Severity.RECOMMENDED, rule="联合索引字段数",
-                location=f"表:{table.name} 索引:{idx.name}", 
-                description=f"联合索引 '{idx.name}' 包含 {len(idx.columns)} 个字段，超过 5",
-                suggestion="索引中包含的字段个数建议最多 5 个",
-            ))
+    issues.extend(
+        Issue(
+            table=table.name,
+            severity=Severity.RECOMMENDED,
+            rule="联合索引字段数",
+            location=f"表:{table.name} 索引:{idx.name}",
+            description=f"联合索引 '{idx.name}' 包含 {len(idx.columns)} 个字段，超过 5",
+            suggestion="索引中包含的字段个数建议最多 5 个",
+        )
+        for idx in non_pk_indexes
+        if len(idx.columns) > 5
+    )
 
 
 def check_foreign_key(table: TableInfo, issues: list):
@@ -998,26 +998,27 @@ def format_report_text(file_path: str, issues: list) -> str:
     mandatory = [i for i in issues if i.severity == Severity.MANDATORY]
     recommended = [i for i in issues if i.severity == Severity.RECOMMENDED]
 
-    lines = []
-    lines.append(f"{'='*60}")
-    lines.append(f"DDL 审查报告: {file_path}")
-    lines.append(f"{'='*60}")
-    lines.append(f"  【强制】问题: {len(mandatory)} 项")
-    lines.append(f"  【推荐】问题: {len(recommended)} 项")
-    lines.append("")
+    lines = [
+        f"{'=' * 60}",
+        f"DDL 审查报告: {file_path}",
+        f"{'=' * 60}",
+        f"  【强制】问题: {len(mandatory)} 项",
+        f"  【推荐】问题: {len(recommended)} 项",
+        "",
+    ]
 
     # Group by table
-    tables = sorted(set(i.table for i in issues))
+    tables = sorted({i.table for i in issues})
     for table_name in tables:
         table_issues = [i for i in issues if i.table == table_name]
         lines.append(f"  ── {table_name} ──")
         for idx, issue in enumerate(table_issues, 1):
             severity_tag = f"[{issue.severity.value}]"
-            lines.append(
-                f"    {idx}. {severity_tag} {issue.rule}"
-            )
-            lines.append(f"       位置: {issue.location}")
-            lines.append(f"       问题: {issue.description}")
+            lines.extend([
+                f"    {idx}. {severity_tag} {issue.rule}",
+                f"       位置: {issue.location}",
+                f"       问题: {issue.description}",
+            ])
             if issue.suggestion:
                 lines.append(f"       建议: {issue.suggestion}")
         lines.append("")
@@ -1031,8 +1032,10 @@ def format_report_json(file_path: str, issues: list) -> str:
         "file": file_path,
         "summary": {
             "total": len(issues),
-            "mandatory": sum(1 for i in issues if i.severity == Severity.MANDATORY),
-            "recommended": sum(1 for i in issues if i.severity == Severity.RECOMMENDED),
+            "mandatory": sum(i.severity == Severity.MANDATORY
+                         for i in issues),
+            "recommended": sum(i.severity == Severity.RECOMMENDED
+                           for i in issues),
         },
         "issues": [
             {

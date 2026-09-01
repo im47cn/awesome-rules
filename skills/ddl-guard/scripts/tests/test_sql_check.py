@@ -343,7 +343,7 @@ def test_find_mybatis_files_dir_filters_non_mapper(tmp_path):
     (tmp_path / "plain.xml").write_text('<root/>')
     found = sql_check.find_mybatis_files(str(tmp_path))
     assert any("m.xml" in p for p in found)
-    assert not any("plain.xml" in p for p in found)
+    assert all("plain.xml" not in p for p in found)
 
 
 # ── strip_dynamic_tags 各动态标签分支 ──────────────────────────────────────
@@ -513,7 +513,7 @@ def test_check_po_required_fields_extends_base_skipped():
     """继承基类 → 跳过必含字段检查。"""
     issues = []
     sql_check.check_po_required_fields(_po(extends_base=True), issues)
-    assert issues == []
+    assert not issues
 
 
 # ── find_po_files / check_po_file 异常 ─────────────────────────────────────
@@ -529,7 +529,7 @@ def test_find_po_files_dir(tmp_path):
     (tmp_path / "B.java").write_text('class B {}')  # 非 PO
     found = sql_check.find_po_files(str(tmp_path))
     assert any("A.java" in p for p in found)
-    assert not any("B.java" in p for p in found)
+    assert all("B.java" not in p for p in found)
 
 
 def test_find_po_files_nonexistent_path():

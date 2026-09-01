@@ -330,9 +330,8 @@ def next_case_number(out_dir: Path, start: int = 10) -> int:
     nums = []
     for p in out_dir.iterdir():
         if p.is_dir():
-            m = re.match(r"^(\d{3})-", p.name)
-            if m:
-                nums.append(int(m.group(1)))
+            if m := re.match(r"^(\d{3})-", p.name):
+                nums.append(int(m[1]))
     return max([start - 1] + nums) + 1
 
 
@@ -357,7 +356,7 @@ def generate(out_dir: Path, dry_run: bool, verbose: bool) -> tuple:
         for _d in out_dir.iterdir():
             _mm = re.match(r"^(\d{3})-(.+)$", _d.name)
             if _mm and _d.is_dir():
-                existing[_mm.group(2)] = int(_mm.group(1))
+                existing[_mm[2]] = int(_mm[1])
     number = max(existing.values(), default=9) + 1
 
 
