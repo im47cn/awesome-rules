@@ -60,9 +60,15 @@ if [ "$HAS_PY" = 1 ]; then
   for d in . backend; do
     [ -f "$d/pyproject.toml" ] || continue
     if [ "$MODE" = "light" ]; then
-      [ -f "$d/coverage.xml" ] || continue
+      [ -f "$d/coverage.xml" ] || { echo "[cov] $d 无 coverage.xml, 跳过轻检 (跑一次 pytest --cov 生成; 红线在 pre-push full)"; continue; }
       echo "[cov] pre-commit $d python staged 变更覆盖检查 (≥${FAIL_UNDER}%)"
-      (cd "$d" && dc coverage.xml --compare-branch=HEAD --ignore-unstaged --fail-under="$FAIL_UNDER") || fail=1
+      out=$(cd "$d" && dc coverage.xml --compare-branch=HEAD --ignore-unstaged --fail-under="$FAIL_UNDER")
+      rc=$?
+      printf '%s\n' "$out"
+      if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -q 'No lines with coverage information'; then
+        echo "[cov] ⚠ 轻检放行语义: 变更行均未命中覆盖产物, 本次未实际检查任何行, 红线强制在 pre-push full"
+      fi
+      if [ "$rc" -ne 0 ]; then fail=1; fi
     else
       (
         cd "$d" || exit 1
@@ -103,9 +109,15 @@ if [ "$HAS_JAVA" = 1 ]; then
       (
         cd "$d" || exit 0
         xmls=$(ls target/site/jacoco/jacoco.xml */target/site/jacoco/jacoco.xml 2>/dev/null || true)
-        [ -n "$xmls" ] || { echo "[cov] 无 jacoco 产物, 跳过 (跑一次 mvn test 生成)"; exit 0; }
+        [ -n "$xmls" ] || { echo "[cov] 无 jacoco 产物, 跳过轻检 (跑一次 mvn test 生成; 红线在 pre-push full)"; exit 0; }
         echo "[cov] pre-commit $d java staged 变更覆盖检查 (≥${FAIL_UNDER}%)"
-        dc $xmls --compare-branch=HEAD --ignore-unstaged --fail-under="$FAIL_UNDER"
+        out=$(dc $xmls --compare-branch=HEAD --ignore-unstaged --fail-under="$FAIL_UNDER")
+        rc=$?
+        printf '%s\n' "$out"
+        if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -q 'No lines with coverage information'; then
+          echo "[cov] ⚠ 轻检放行语义: 变更行均未命中覆盖产物, 本次未实际检查任何行, 红线强制在 pre-push full"
+        fi
+        exit "$rc"
       ) || fail=1
     else
       (
