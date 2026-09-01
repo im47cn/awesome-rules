@@ -200,6 +200,8 @@ def strip_sql_comments(text: str) -> str:
                     i += 1
                 elif ch == "-" and i + 1 < len(line) and line[i + 1] == "-":
                     break  # rest is comment
+                elif ch == "#":
+                    break  # MySQL 行注释（# 起至行尾）同样剥除
                 else:
                     result.append(ch)
                     i += 1
@@ -217,7 +219,7 @@ def extract_tables(raw_text: str) -> list:
         # Match CREATE TABLE
         m = re.match(
             r"(?i)create\s+(?:temporary\s+)?\s*table\s+(?:if\s+not\s+exists\s+)?"
-            r"(?:`?(\w+)`?\.)?`?(\w+)`?\s*\(",
+            r"(?:`?([^`\s()]+)`?\.)?`?([^`\s()]+)`?",
             line,
         )
         if m:
@@ -229,16 +231,32 @@ def extract_tables(raw_text: str) -> list:
                 full_text="",
                 is_create_table=True,
             )
-            # Extract table comment from same line or subsequent lines
-            # Look for COMMENT='...' or COMMENT '...' after the closing paren
-            # First, gather the full table definition
-            paren_depth = line.count("(") - line.count(")")
-            full_lines = [line]
-            j = i + 1
-            while j < len(lines) and paren_depth > 0:
-                full_lines.append(lines[j])
-                paren_depth += lines[j].count("(") - lines[j].count(")")
+            # 表体起点：表名后可能跨行才出现 '('（CREATE TABLE t\n(...)）。
+            # 从该行向后扫到首个含 '(' 的行，括号平衡从起点累计。
+            start = None
+            scan = i
+            while scan < len(lines):
+                if "(" in lines[scan]:
+                    start = scan
+                    break
+                scan += 1
+            if start is None:
+                i += 1  # 无表体 '('（异常语句），跳过
+                continue
+            paren_depth = 0
+            opened = False
+            full_lines = []
+            j = start
+            while j < len(lines):
+                seg = lines[j]
+                full_lines.append(seg)
+                if "(" in seg:
+                    opened = True
+                paren_depth += seg.count("(") - seg.count(")")
                 j += 1
+                if opened and paren_depth <= 0:
+                    break  # 表体 '(' 已闭合（含首行即闭合的单行建表）
+
 
             full_text = "\n".join(full_lines)
             table.full_text = full_text
@@ -284,6 +302,11 @@ def _parse_table_body(table: TableInfo, body_lines: list):
         if not line:
             continue
 
+        # 字段续行（跨行字段定义的属性行）：NOT NULL / NULL / DEFAULT /
+        # AUTO_INCREMENT / COMMENT 开头均非新字段，跳过避免垃圾字段
+        if re.match(r"(?i)^(not\s+null|null|auto_increment|comment)\b", line):
+            continue
+
         # Check if this is a constraint/index definition
         if re.match(r"(?i)^(primary\s+key|unique\s+key|unique\s+index|unique\s+constraint)\s*", line):
             # Unique index or primary key
@@ -323,7 +346,7 @@ def _parse_index_line(line: str, line_no: int) -> Optional[IndexInfo]:
         )
 
     # Unique key
-    uk_match = re.match(r"(?i)unique\s+(?:key|index)\s+`?(\w+)`?\s*\(\s*([^)]+)\s*\)", line)
+    uk_match = re.match(r"(?i)unique\s+(?:key|index)\s+`?([^`\s()]+)`?\s*\(\s*([^)]+)\s*\)", line)
     if uk_match:
         name = uk_match.group(1)
         cols_str = uk_match.group(2)
@@ -337,7 +360,7 @@ def _parse_index_line(line: str, line_no: int) -> Optional[IndexInfo]:
         )
 
     # Unique constraint
-    uc_match = re.match(r"(?i)unique\s+constraint\s+`?(\w+)`?\s*\(\s*([^)]+)\s*\)", line)
+    uc_match = re.match(r"(?i)unique\s+constraint\s+`?([^`\s()]+)`?\s*\(\s*([^)]+)\s*\)", line)
     if uc_match:
         name = uc_match.group(1)
         cols_str = uc_match.group(2)
@@ -351,7 +374,7 @@ def _parse_index_line(line: str, line_no: int) -> Optional[IndexInfo]:
         )
 
     # Regular key/index
-    k_match = re.match(r"(?i)(?:key|index)\s+`?(\w+)`?\s*\(\s*([^)]+)\s*\)", line)
+    k_match = re.match(r"(?i)(?:key|index)\s+`?([^`\s()]+)`?\s*\(\s*([^)]+)\s*\)", line)
     if k_match:
         name = k_match.group(1)
         cols_str = k_match.group(2)
@@ -370,7 +393,7 @@ def _parse_index_line(line: str, line_no: int) -> Optional[IndexInfo]:
 def _parse_field_line(line: str, line_no: int) -> Optional[FieldInfo]:
     """Parse a field definition line."""
     # Match: `field_name` type(...) ...
-    m = re.match(r"`?(\w+)`?\s+(.+)", line)
+    m = re.match(r"`?([^`\s()]+)`?\s+(.+)", line)
     if not m:
         return None
 

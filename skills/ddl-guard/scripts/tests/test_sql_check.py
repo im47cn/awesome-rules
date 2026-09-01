@@ -603,3 +603,15 @@ def test_main_clean_po_dir_exit0(tmp_path, monkeypatch, capsys):
         '    @TableId("id")\n    private Long id;\n}')
     monkeypatch.setattr(sys, "argv", ["sql_check.py", str(tmp_path)])
     assert sql_check.main() == 0
+
+
+def test_bad_alias_backtick_table():
+    """反引号包裹表名的别名检查可达（`t-order` 表名不阻断别名规则）。"""
+    issues = run_statement("SELECT * FROM `t-order` t1 WHERE id = 1")
+    assert any(i.rule == "别名含义清晰" for i in issues)
+
+
+def test_insert_columns_backtick_table():
+    """反引号包裹表名的 INSERT 缺字段列表仍检出。"""
+    issues = run_statement("INSERT INTO `t-order` VALUES (1, 2)", stmt_type="insert")
+    assert any(i.rule == "INSERT列字段" for i in issues)

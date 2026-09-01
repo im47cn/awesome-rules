@@ -101,7 +101,8 @@ TEMPLATES = [
     ("表名长度", "table-name-length", "表名长度",
      [("t_order_info", "t_order_info_abcdefghijklmnopqrst")],
      [("t_order_info", "t_order_info_abcdefghijklmno")]),
-    # 注：「表名字符」不可达——CREATE 正则 \w+ 拒绝非法字符表名（解析层丢弃）
+    ("表名字符", "table-name-chars", "表名字符",
+     [("t_order_info", "t-order-info")], None),
     ("表名开头", "table-name-start", "表名开头",
      [("t_order_info", "9order_info")], None),
     ("连续下划线", "table-name-double-underscore", "表名连续下划线",
@@ -136,6 +137,8 @@ TEMPLATES = [
      [(") COMMENT = '订单信息表';",
        "    CONSTRAINT fk_order_buyer FOREIGN KEY (buyer_id) REFERENCES t_user (id)\n) COMMENT = '订单信息表';")], None),
     # ── 字段命名 ──────────────────────────────────────────────────────
+    ("字段名字符", "field-name-chars", "字段名字符",
+     [("    order_status    varchar(10)", "    order-status    varchar(10)")], None),
     ("字段名长度", "field-name-length", "字段名长度",
      [("order_status", "order_status_" + "a" * 18),  # 31 字符
       ("COMMENT '订单状态'", "COMMENT '订单状态字段'")],
@@ -348,7 +351,15 @@ def generate(out_dir: Path, dry_run: bool, verbose: bool) -> tuple:
     """生成四层 case。返回 (generated, rejected, rejected_detail)。"""
     generated = rejected = 0
     rejected_detail = []
-    number = next_case_number(out_dir)
+    # 幂等：已存在的 case 按 cid 复用编号（覆盖重写），新 cid 分配新编号
+    existing = {}
+    if out_dir.is_dir():
+        for _d in out_dir.iterdir():
+            _mm = re.match(r"^(\d{3})-(.+)$", _d.name)
+            if _mm and _d.is_dir():
+                existing[_mm.group(2)] = int(_mm.group(1))
+    number = max(existing.values(), default=9) + 1
+
 
     def _emit(cid, title, sql, want_rules, kind, src):
         nonlocal generated, rejected, number
@@ -362,9 +373,13 @@ def generate(out_dir: Path, dry_run: bool, verbose: bool) -> tuple:
             ok = set(actual) == set(want_rules)
         else:
             # 直接写入目标目录再验证（验证通过保留，失败则删除）
-            case_dir = write_case(out_dir, number, cid, title, sql, want_rules,
+            # cid 已存在 → 复用原编号（幂等覆盖）；新 cid → 递增分配
+            n = existing.get(cid, number)
+            case_dir = write_case(out_dir, n, cid, title, sql, want_rules,
                                   kind, src)
-            number += 1
+            if cid not in existing:
+                number += 1
+                existing[cid] = n
             actual = run_ddl_check(case_dir / "input")
             ok = set(actual) == set(want_rules)
             if not ok:
