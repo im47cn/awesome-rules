@@ -144,6 +144,13 @@ Refs #321
 - 工作开始时先切到 `main` 并 `git pull --ff-only` 同步基线（同步对象是 `main` 而非当前 feature 分支——后者只拉自身 upstream，`main` 基线仍可能过时；无 upstream 的新分支上该命令直接失败，需同步工作分支时须显式指定其 upstream）：长期不 pull 会在下次同步时积累大体积 diff（自动提交的数据文件尤甚），且整个工作过程基于过时状态
 - 分叉分支（本地与远端各有新提交）上 `--ff-only` 必然失败并保持旧状态：改走显式 `git pull --rebase`（或 fetch 后 rebase）同步，不得因失败而跳过同步带着过时基线开工
 
+### 门禁脚本双向流：本地先实践，成熟后反哺
+
+- `.lefthook/*` 允许本地直接修改并立即生效（fast path）：上游合并节奏不受本地阻塞，实验性改动先在真实项目验证
+- 本地改动验证成熟后**必须回流** awesome-rules（走分发链四件套），回流 commit 与本地先行 commit 互相引用哈希
+- awesome-rules 是规范权威：同步方向上的冲突以上游为准；本地未回流的差异属于「实验中」，不算漂移，但回流前不得再次从上游覆盖式同步同名文件（否则实验丢失）
+- 漂移防线靠**差异可见**而非禁止直改：覆盖式同步（install.sh 重跑）前先 `diff` 本地 `.lefthook/` 与上游 `tools/git/lefthook/`，差异非空时人工确认是「本地实验未回流」还是「上游演进未同步」；`.factory` 工具链自身的同步与漂移检查走 `.factory/sync-from-upstream.sh`（三态清单 + feedback-upstream 反哺闭环，见 .factory/README.md「上游同步」）
+
 ## Pull Request
 
 - AI 创建 PR 后即停，合并决定权归人工：不得在创建后自行 `gh pr merge`——即使推送被分支保护拒绝转走 PR 流，也不延伸为自动合并（2026-08-24 PR #50/#51 教训：创建后 15 秒自行合并，人工审查窗口被绕过）

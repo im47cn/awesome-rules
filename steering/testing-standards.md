@@ -121,6 +121,13 @@ inclusion: always
 - 新增代码覆盖率 ≥ 70%，核心业务 ≥ 80%
 - 测试总耗时不超过最近 main 分支全量运行的 120%
 
+## 变异测试纪律
+
+- 变异数字本身不是证据：击杀率达标后须抽样手动复放（注入变异 → 测试红 → 还原 → md5 校验闭环）确认击杀真实；`mvn -q` 下 Maven 增量编译可能不重编改动的 main 类，变异 class 未生效会产出「测试全绿」假象——复放前必须 touch 源文件并确认 `Compiling … source files` 日志行，否则击杀证据无效（2026-09-01 实证：unbindApi BooleanTrueReturn 补杀一度被误判存活）
+- 存活变异体逐条归因：补杀、或附等价论证入白名单（论证随白名单入库）；不为「全灭」数字编写断言非行为的测试
+- flaky 变异体不追杀：静态状态/ThreadLocal/测试顺序敏感类单次运行存活属并行调度波动，复跑 2~3 次确认波动后由 mutationThreshold 吸收（阈值取最低观测分 −1.5pt）
+- BooleanTrueReturn 类变异唯一杀法：stub 领域方法返回 false 并用 `assertFalse` 断言；`assertTrue` 对 return true 变异无判别力，补测前先核对断言极性
+
 ## 自建关卡脚本的反作弊要求
 - mutations 注入运行期间不得并发执行其他门禁/检查：变异体临时落盘会污染并发进程读到的工作区视图（2026-08-28 实证：gauntlet 并发跑出 ddl_check.py 假红），须等 mutations 结束且确认变异全部恢复后串行重验
 
