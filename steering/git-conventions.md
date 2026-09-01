@@ -149,7 +149,7 @@ Refs #321
 - `.lefthook/*` 允许本地直接修改并立即生效（fast path）：上游合并节奏不受本地阻塞，实验性改动先在真实项目验证
 - 本地改动验证成熟后**必须回流** awesome-rules（走分发链四件套），回流 commit 与本地先行 commit 互相引用哈希
 - awesome-rules 是规范权威：同步方向上的冲突以上游为准；本地未回流的差异属于「实验中」，不算漂移，但回流前不得再次从上游覆盖式同步同名文件（否则实验丢失）
-- 漂移防线靠**差异可见**而非禁止直改：覆盖式同步前先 `diff` 本地与上游版本，差异非空时人工确认是「本地实验未回流」还是「上游演进未同步」（工具：`tools/git/lefthook/sync-from-upstream.sh`）
+- 漂移防线靠**差异可见**而非禁止直改：覆盖式同步（install.sh 重跑）前先 `diff` 本地 `.lefthook/` 与上游 `tools/git/lefthook/`，差异非空时人工确认是「本地实验未回流」还是「上游演进未同步」；`.factory` 工具链自身的同步与漂移检查走 `.factory/sync-from-upstream.sh`（三态清单 + feedback-upstream 反哺闭环，见 .factory/README.md「上游同步」）
 
 ## Pull Request
 
