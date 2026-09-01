@@ -283,8 +283,7 @@ def run_gate(gate: str, target: str) -> int | None:
         print(f"    门超时（>{timeout}s）：已杀进程组，无效运行")
         return None
     elapsed = time.monotonic() - start
-    tail = (out + err).strip().splitlines()
-    if tail:
+    if tail := (out + err).strip().splitlines():
         print(f"    gate 输出末行: {tail[-1][:120]}")
     return proc.returncode
 
@@ -362,12 +361,11 @@ def main() -> int:
             if original is not None:
                 target.write_text(original, encoding="utf-8")
 
-    # 还原完整性校验：凡注入过的文件，当前字节必须与备份一致
-    residual = []
-    for target, original in originals.items():
-        if target.read_text(encoding="utf-8") != original:
-            residual.append(str(target.relative_to(REPO_ROOT)))
-    if residual:
+    if residual := [
+        str(target.relative_to(REPO_ROOT))
+        for target, original in originals.items()
+        if target.read_text(encoding="utf-8") != original
+    ]:
         print(f"\nFATAL: 以下文件还原失败（请人工核对该文件是否已恢复原状）: {residual}",
               file=sys.stderr)
         return 3
@@ -403,8 +401,7 @@ def main() -> int:
         print(f"  结论: 覆盖不完整（SKIP: {ids}），本次通过不构成 auto-merge 依据（铁律 5）")
         return 4
     print("  结论: 门灵敏度冒烟通过（auto-merge 的必要非充分条件）")
-    blob = write_stamp()
-    if blob:
+    if blob := write_stamp():
         print(f"  周界指纹已绑定: {blob[:12]}（evidence-stamp.json）")
     return 0
 

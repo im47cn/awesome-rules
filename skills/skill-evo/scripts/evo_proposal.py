@@ -7,6 +7,7 @@ round-trip 只依赖 JSON 块，正文渲染仅供人工审核阅读。
 不做改写删除 —— 天然不会削弱 steering 的【强制】条款。
 """
 from __future__ import annotations
+import sys
 
 import difflib
 import hashlib
@@ -101,7 +102,99 @@ def _render_lesson(i: int, ls: Lesson) -> str:
             f"- **变更**：{where}{body}")
 
 
+_CTRL_CHARS_RE = re.compile(r"[\x00-\x09\x0b\x0c\x0e-\x1f]")
+
+
+def _machine_block(payload: dict) -> str:
+    """机读 JSON 块：strict 可解析是生成器不变量（issue #81 净化层）。
+
+    CPython json.dumps 对字符串内全部 <0x20 控制字符转义（\\n→字面序列、
+    \\x08→\\b），正常产物必然合法；但 LLM 输出可夹带裸控制字符，若序列化
+    路径改动或环境差异导致未转义，此处防御性转义并用 strict loads 自检——
+    写盘前 fail-fast，坏件永不静默产出。
+
+    正则覆盖除 LF(\\x0a)/CR(\\x0d) 外的全部 <0x20：二者是 JSON 合法结构空白
+    （indent 产物含真实换行），与"字符串内被破坏的裸 CR/LF"不可区分，统一
+    交由 strict loads 自检兜底（合法空白通过，字符串内破坏则 fail-fast）。
+    """
+    raw = json.dumps(payload, ensure_ascii=False, indent=1)
+    safe = _CTRL_CHARS_RE.sub(lambda m: f"\\u{ord(m.group()):04x}", raw)
+    try:
+        json.loads(safe)
+    except json.JSONDecodeError as e:
+        raise ApplyError(f"机读块序列化自检失败（line {e.lineno} col {e.colno}）："
+                         f"payload 含 {e.msg}——请修正生成数据") from e
+    return "```json\n" + safe + "\n```"
+
+
+def _verify_machine_block(path: Path) -> None:
+    """生成器落盘自检：机读块必须 strict 可解析（净化层闸门）。"""
+    m = _JSON_BLOCK_RE.search(path.read_text(encoding="utf-8"))
+    if not m:
+        raise ApplyError(f"{path.name}: 机读 JSON 块缺失（生成器自检失败）")
+    try:
+        json.loads(m.group(1))
+    except json.JSONDecodeError as e:
+        raise ApplyError(f"{path.name}: 机读块非严格可解析（line {e.lineno} "
+                         f"col {e.colno}）；生成器自检拦截，请连同 .orig 上报") from e
+
+
+_PROPOSAL_NAME_RE = re.compile(r"^\d{8}-\d{6}-.*\.(md|orig)$")
+
+
+def _repair_machine_block(content: str) -> str:
+    """机读块内裸控制字符转义修复（与生成侧 _machine_block 同一正则/规则）。
+
+    仅替换 ```json 块内文本；正文 markdown（裸 tab 合法）不动。
+    """
+    def _fix(m: "re.Match") -> str:
+        return "```json\n" + _CTRL_CHARS_RE.sub(
+            lambda c: f"\\u{ord(c.group()):04x}", m.group(1)) + "\n```"
+    return _JSON_BLOCK_RE.sub(_fix, content)
+
+
+def migrate_proposals(root: Path, *, fix: bool = False) -> dict:
+    """净化层存量迁移：扫描归档下提案 .md/.orig，机读块无法 strict 解析
+    （裸控制字符等外部破坏）的 → 转义修复（仅原不可解析且修复后可解析
+    才写回，当前可解析文件零改动；无法修复的仅报告）。
+
+    fix=False 仅报告（repaired 为可修复候选）；fix=True 写回并复检。
+    返回 {ok, repaired, unrecoverable, unchanged}（Path 列表）。
+    """
+    report = {"ok": [], "repaired": [], "unrecoverable": [], "unchanged": []}
+    for f in sorted(list(root.rglob("*.md")) + list(root.rglob("*.orig"))):
+        if not _PROPOSAL_NAME_RE.match(f.name):
+            report["unchanged"].append(str(f))   # 非提案文件（README 等），跳过
+            continue
+        try:
+            content = f.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            report["unrecoverable"].append(str(f))
+            continue
+        m = _JSON_BLOCK_RE.search(content)
+        if not m:
+            report["unrecoverable"].append(str(f))   # 提案文件块缺失（被完全破坏）
+            continue
+        try:
+            json.loads(m.group(1))
+            report["ok"].append(str(f))
+            continue
+        except json.JSONDecodeError:
+            pass
+        repaired = _repair_machine_block(content)
+        try:
+            json.loads(_JSON_BLOCK_RE.search(repaired).group(1))
+        except (json.JSONDecodeError, AttributeError):
+            report["unrecoverable"].append(str(f))   # 结构损坏，无法自动修复
+            continue
+        if fix:
+            f.write_text(repaired, encoding="utf-8")
+        report["repaired"].append(str(f))
+    return report
+
+
 def write_proposal(p: Proposal, pending_dir: Path) -> Path:
+
     pending_dir.mkdir(parents=True, exist_ok=True)
     path = pending_dir / f"{p.id}.md"
     fm = (f"---\nid: {p.id}\nstatus: {p.status}\nsource_agent: {p.source_agent}\n"
@@ -118,13 +211,16 @@ def write_proposal(p: Proposal, pending_dir: Path) -> Path:
         "change": {"action": ls.change.action, "heading": ls.change.heading,
                    "new_text": ls.change.new_text} if ls.change else None,
     } for ls in p.lessons]}
-    machine = "```json\n" + json.dumps(payload, ensure_ascii=False, indent=1) + "\n```"
+    machine = _machine_block(payload)
     body = (f"{fm}\n# 进化提案 {p.id}\n\n> 来源：{p.source_agent} 会话 `{p.source_session}`"
             f"（{p.source_path}）\n\n{rendered}\n\n## 机读数据（apply 依据，勿手改）\n\n{machine}\n")
     path.write_text(body, encoding="utf-8")
+    _verify_machine_block(path)
     # 原始快照（无 .md 后缀：绕开 list/守卫/md_link_check 的 *.md glob）——
     # review 编辑只改正式文件，apply/reject 时 diff 快照推导结构化 verdict
-    (pending_dir / f"{p.id}.orig").write_text(body, encoding="utf-8")
+    orig = pending_dir / f"{p.id}.orig"
+    orig.write_text(body, encoding="utf-8")
+    _verify_machine_block(orig)
     return path
 
 
@@ -393,7 +489,7 @@ def validate_target(target_file: str, repo_root: Path) -> Path:
 def _apply_change(content: str, ch: Change, target_file: str) -> str:
     if ch.action == "append_end":
         sep = "" if content.endswith("\n") else "\n"
-        return content + f"{sep}{ch.new_text}\n"
+        return f"{content}{sep}{ch.new_text}\n"
     if ch.action == "append_under":
         if not ch.heading:
             raise ApplyError(f"{target_file}: append_under 缺少 heading")
@@ -445,7 +541,7 @@ def normalize_headings(p: Proposal, repo_root: Path, md_path: Optional[Path] = N
         except ApplyError:
             continue  # 目标非法留给 apply 原路径报错
         lines = target.read_text(encoding="utf-8").splitlines()
-        cand = "## " + ch.heading.strip()
+        cand = f"## {ch.heading.strip()}"
         hits = [ln for ln in lines if ln.strip() == cand and ln.lstrip().startswith("#")]
         if len(hits) == 1:
             log.append(f"lesson {i}: heading `{ch.heading}` 无 # 前缀，规范化为 `{cand}`（verdict=edited）")
@@ -463,7 +559,6 @@ def _default_pending_md(p: Proposal) -> Path:
 
 
 def _render_pending_body(p: Proposal) -> str:
-    import json as _json
     fm = (f"---\nid: {p.id}\nstatus: {p.status}\nsource_agent: {p.source_agent}\n"
           f"source_session: {p.source_session}\nsource_path: {p.source_path}\n"
           f"created: {p.created}\nlessons: {len(p.lessons)}\n---\n")
@@ -476,7 +571,7 @@ def _render_pending_body(p: Proposal) -> str:
         "change": {"action": ls.change.action, "heading": ls.change.heading,
                    "new_text": ls.change.new_text} if ls.change else None,
     } for ls in p.lessons]}
-    machine = "```json\n" + _json.dumps(payload, ensure_ascii=False, indent=1) + "\n```"
+    machine = _machine_block(payload)
     return (f"{fm}\n# 进化提案 {p.id}\n\n> 来源：{p.source_agent} 会话 `{p.source_session}`"
             f"（{p.source_path}）\n\n{rendered}\n\n## 机读数据（apply 依据，勿手改）\n\n{machine}\n")
 
@@ -543,8 +638,9 @@ def apply_proposal(p: Proposal, repo_root: Path, *, dry_run: bool = False,
         if ls.change.new_text.strip() in content:
             guard.append(f"lesson {i}: new_text 已逐字存在于 {ls.target_file}"
                          "（疑似重复追加，--force 可越过）")
-        dup = check_idempotent(ls.change.new_text, content, idempotent_threshold)
-        if dup:
+        if dup := check_idempotent(
+            ls.change.new_text, content, idempotent_threshold
+        ):
             seg_no, ratio = dup
             guard.append(f"lesson {i}: 与 {ls.target_file} 既有段落 {seg_no} 语义重复"
                          f"（相似度 {ratio:.2f} >= 阈值 {idempotent_threshold}；"
@@ -573,10 +669,10 @@ def move_proposal(proposal_path: Path, dest_dir: Path, extra_fm: dict) -> Path:
         if end != -1:
             content = content[:end + 1] + extra + content[end + 1:]
     else:
-        content = f"---\n{extra}---\n" + content
+        content = f"---\n{extra}---\n{content}"
     dest = dest_dir / proposal_path.name
-    final = dest if not dest.exists() else dest.with_name(
-        f"{dest.stem}-{stamp.replace(':', '').replace('+', '-')}{dest.suffix}")
+    final = dest.with_name(
+                    f"{dest.stem}-{stamp.replace(':', '').replace('+', '-')}{dest.suffix}") if dest.exists() else dest
     final.write_text(content, encoding="utf-8")
     if proposal_path.is_dir():  # 防御：提案应为文件
         shutil.rmtree(proposal_path, ignore_errors=True)
@@ -617,7 +713,7 @@ def _parse_codes(raw: List[str]) -> Tuple[dict, List[str]]:
 
 
 def _orig_path(path: Path) -> Path:
-    return path.parent / (path.stem + ".orig")
+    return path.parent / f"{path.stem}.orig"
 
 
 def _derive_verdicts(cur: List[Lesson], orig: Optional[List[Lesson]]) -> List[str]:
@@ -721,3 +817,29 @@ def archive_orig(path: Path, dest_dir: Path) -> Optional[Path]:
     dest = dest_dir / orig.name
     shutil.move(str(orig), dest)
     return dest
+
+
+def _migrate_cli(argv: List[str]) -> int:
+    """存量迁移 CLI：python3 evo_proposal.py migrate [--fix] [root]。"""
+    import argparse
+    parser = argparse.ArgumentParser(prog="evo_proposal migrate",
+                                     description="净化层存量迁移：扫描并修复归档中无法 strict 解析的提案")
+    parser.add_argument("--fix", action="store_true",
+                        help="修复写回（默认仅报告候选）")
+    parser.add_argument("root", nargs="?", default=str(
+        Path.home() / ".config/ar/skill-evo/proposals"),
+        help="归档根目录（默认 ~/.config/ar/skill-evo/proposals）")
+    args = parser.parse_args(argv)
+    report = migrate_proposals(Path(args.root), fix=args.fix)
+    print(f"ok={len(report['ok'])} repaired={len(report['repaired'])} "
+          f"unrecoverable={len(report['unrecoverable'])} unchanged={len(report['unchanged'])}")
+    for f in report["repaired"]:
+        print(f"  repaired: {f}")
+    for f in report["unrecoverable"]:
+        print(f"  unrecoverable: {f}")
+    return 1 if report["unrecoverable"] else 0
+
+
+if __name__ == "__main__":
+    sys.exit(_migrate_cli(sys.argv[2:])
+             if len(sys.argv) > 1 and sys.argv[1] == "migrate" else 0)

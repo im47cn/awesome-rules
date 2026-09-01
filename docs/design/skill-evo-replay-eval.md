@@ -64,6 +64,8 @@ run_gepa（引擎零改动）
 holdout 单评选优 → 产物 = pending 提案（走 evo.py apply 人工采纳，护栏不变）
 ```
 
+## 3. 评估集模型
+
 ### 3.1 case 三型
 
 | 类型 | 来源 | expected 语义 | 防护 |
