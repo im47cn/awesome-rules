@@ -781,3 +781,23 @@ def test_create_table_no_body_skipped():
     """CREATE TABLE 后无表体 '('（孤立语句）→ 跳过该行，仍报「无建表语句」。"""
     issues = _issues_for("CREATE TABLE t_a;\n")
     assert "无建表语句" in {i.rule for i in issues}
+
+
+def test_create_table_no_body_does_not_swallow_next_table():
+    """无表体 CREATE TABLE t_a; 后跟合法建表 → t_a 丢弃，t_b 表体归属自身（PR #98 评论 1）。"""
+    tables = ddl_check.extract_tables(
+        "CREATE TABLE t_a;\n"
+        "CREATE TABLE t_b (\n"
+        "  id bigint(20) NOT NULL COMMENT '主键id'\n"
+        ") COMMENT = 'x';\n"
+    )
+    assert [t.name for t in tables] == ["t_b"]
+
+
+def test_create_table_no_body_not_swallowing_paren_statement():
+    """无表体 CREATE TABLE 后跟含括号非建表语句 → 不产生幽灵表（PR #98 评论 1）。"""
+    issues = _issues_for(
+        "CREATE TABLE t_a;\n"
+        "INSERT INTO t_x (a, b) VALUES (1, 2);\n"
+    )
+    assert "无建表语句" in {i.rule for i in issues}

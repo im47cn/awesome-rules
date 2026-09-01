@@ -11,6 +11,6 @@ CREATE TABLE t_order_info (
     buyer_id        bigint(20)     NOT NULL COMMENT '买家id',
     PRIMARY KEY (id),
     UNIQUE KEY uk_order_no (order_no),
-    KEY ix_order_status (order_status)
+    KEY ix_order_status (order_status),
     CONSTRAINT fk_order_buyer FOREIGN KEY (buyer_id) REFERENCES t_user (id)
 ) COMMENT = '订单信息表';

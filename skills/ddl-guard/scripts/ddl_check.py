@@ -142,7 +142,9 @@ FULLWIDTH_RE = re.compile(r"[\uff00-\uffef\u3000-\u303f\u2018-\u201f\u2026\u00b7
 
 
 def strip_sql_comments(text: str) -> str:
-    """Remove -- comments and /* */ comments but keep line structure for line number tracking."""
+    """Remove `--` and `#` line comments and `/* */` block comments (quote-aware:
+    comment markers inside quoted strings are preserved), keeping line structure
+    for line number tracking."""
     # 先剥 /* */ 块注释（引号外），内容替换为空格、保留换行，维持行号不变
     out = []
     i = 0
@@ -209,6 +211,12 @@ def strip_sql_comments(text: str) -> str:
     return "\n".join(cleaned)
 
 
+_CREATE_TABLE_RE = re.compile(
+    r"(?i)create\s+(?:temporary\s+)?\s*table\s+(?:if\s+not\s+exists\s+)?"
+    r"(?:`?([^`\s()]+)`?\.)?`?([^`\s()]+)`?"
+)
+
+
 def extract_tables(raw_text: str) -> list:
     """Parse CREATE TABLE statements from SQL text."""
     lines = raw_text.split("\n")
@@ -216,11 +224,7 @@ def extract_tables(raw_text: str) -> list:
     i = 0
     while i < len(lines):
         line = lines[i].strip()
-        if m := re.match(
-            r"(?i)create\s+(?:temporary\s+)?\s*table\s+(?:if\s+not\s+exists\s+)?"
-            r"(?:`?([^`\s()]+)`?\.)?`?([^`\s()]+)`?",
-            line,
-        ):
+        if m := _CREATE_TABLE_RE.match(line):
             table_name = m[2] or m[1]
             table = TableInfo(
                 name=table_name,
@@ -230,13 +234,18 @@ def extract_tables(raw_text: str) -> list:
                 is_create_table=True,
             )
             # 表体起点：表名后可能跨行才出现 '('（CREATE TABLE t\n(...)）。
-            # 从该行向后扫到首个含 '(' 的行，括号平衡从起点累计。
+            # 有界扫描：'(' 须在下一条语句终止符 ';' 或下一条 CREATE TABLE
+            # 之前出现，否则按无表体的不完整语句丢弃（如 CREATE TABLE t;），
+            # 避免向后吞并后续语句的括号内容。
             start = None
             scan = i
             while scan < len(lines):
-                if "(" in lines[scan]:
+                seg = lines[scan]
+                if "(" in seg:
                     start = scan
                     break
+                if ";" in seg or (scan > i and _CREATE_TABLE_RE.match(seg.strip())):
+                    break  # 先遇语句边界：该 CREATE TABLE 无表体，丢弃
                 scan += 1
             if start is None:
                 i += 1  # 无表体 '('（异常语句），跳过

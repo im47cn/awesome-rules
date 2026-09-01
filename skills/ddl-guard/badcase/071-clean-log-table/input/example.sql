@@ -8,6 +8,6 @@ CREATE TABLE t_operate_log (
     operate_result  varchar(20)    NOT NULL COMMENT '操作结果',
     operator_id     bigint(20)     NOT NULL COMMENT '操作人id',
     PRIMARY KEY (id),
-    UNIQUE KEY uk_order_no (order_no),
-    KEY ix_order_status (order_status)
+    UNIQUE KEY uk_creator_id (creator_id),
+    KEY ix_operate_result (operate_result)
 ) COMMENT = '操作日志表';
