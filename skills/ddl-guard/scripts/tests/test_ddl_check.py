@@ -61,8 +61,7 @@ def test_composite_index_column_limit():
         return (f"CREATE TABLE t_ix (\n  id BIGINT COMMENT '主键',\n"
                 f"{fields}\n  KEY ix_cols ({cols})\n) COMMENT='测试';\n")
 
-    assert not any(i.rule == "联合索引字段数"
-                   for i in _issues_for(ddl_for(5)))
+    assert all(i.rule != "联合索引字段数" for i in _issues_for(ddl_for(5)))
     hit = [i for i in _issues_for(ddl_for(6)) if i.rule == "联合索引字段数"]
     assert len(hit) == 1 and "6" in hit[0].description
 
@@ -105,7 +104,7 @@ def test_check_file_returns_list_for_minimal_ddl():
         issues = ddl_check.check_file(path)
         assert isinstance(issues, list)
         # 表名/注释合规时应无"表注释缺失"
-        assert not any(i.rule == "表注释缺失" for i in issues)
+        assert all(i.rule != "表注释缺失" for i in issues)
     finally:
         os.unlink(path)
 
@@ -171,7 +170,7 @@ def test_comment_style_separator_not_flagged():
         ") COMMENT='ok';\n"
     )
     issues = _issues_for(ddl)
-    assert not any(i.rule == "注释格式" for i in issues)
+    assert all(i.rule != "注释格式" for i in issues)
 
 
 def test_comment_style_no_space_still_flagged():
@@ -209,7 +208,7 @@ def test_comment_style_dash_in_string_not_flagged():
         ") COMMENT='ok';\n"
     )
     issues = _issues_for(ddl)
-    assert not any(i.rule == "注释格式" for i in issues)
+    assert all(i.rule != "注释格式" for i in issues)
 
 
 # ── COL032 注释补充信息格式 ────────────────────────────────────────────────
@@ -223,7 +222,7 @@ def test_field_comment_paren_comma_flagged():
 def test_field_comment_paren_ok():
     """补充信息全在圆括号内 → 不报。"""
     issues = _issues_for(_ddl_with_field("parent_id bigint COMMENT '父参数id(0=根,支持嵌套)'"))
-    assert not any(i.rule == "注释补充信息格式" for i in issues)
+    assert all(i.rule != "注释补充信息格式" for i in issues)
 
 
 # ── COL018 泛化字段名 ──────────────────────────────────────────────────────
@@ -237,7 +236,7 @@ def test_generic_field_name_flagged():
 def test_generic_field_name_prefixed_ok():
     """加主体前缀（merchant_remark）→ 不报。"""
     issues = _issues_for(_ddl_with_field("merchant_remark varchar(200) COMMENT '备注'"))
-    assert not any(i.rule == "泛化字段名" for i in issues)
+    assert all(i.rule != "泛化字段名" for i in issues)
 
 
 # ── NAM002 缩写字典 ────────────────────────────────────────────────────────
@@ -257,7 +256,7 @@ def test_abbreviation_table_flagged():
 def test_abbreviation_std_ok():
     """已用标准缩写（dir）→ 不报。"""
     issues = _issues_for(_ddl_with_field("dir tinyint COMMENT '方向'"))
-    assert not any(i.rule == "缩写未规范化" for i in issues)
+    assert all(i.rule != "缩写未规范化" for i in issues)
 
 
 # ── 日志/流水表必含字段豁免 ─────────────────────────────────────────────────
@@ -272,7 +271,7 @@ def test_log_table_exempt_updater_fields():
         ") COMMENT='日志表';\n"
     )
     issues = _issues_for(ddl)
-    assert not any(i.rule == "必含字段缺失" for i in issues)
+    assert all(i.rule != "必含字段缺失" for i in issues)
 
 
 def test_log_table_still_requires_create_time():
@@ -334,7 +333,7 @@ def test_unique_hint_silent_when_unique_index_exists():
         ") COMMENT='能力表';\n"
     )
     issues = _issues_for(ddl)
-    assert not any(i.rule == "建议唯一索引" for i in issues)
+    assert all(i.rule != "建议唯一索引" for i in issues)
 
 
 # ── 解析器与工具函数 ──────────────────────────────────────────────────────
@@ -377,7 +376,7 @@ def test_parse_skips_constraint_and_fk_lines():
     )
     tbl = ddl_check.extract_tables(ddl)[0]
     assert len(tbl.fields) == 2
-    assert not any("CONSTRAINT" in i.raw_definition.upper() for i in tbl.indexes)
+    assert all("CONSTRAINT" not in i.raw_definition.upper() for i in tbl.indexes)
 
 
 def test_parse_field_line_unparseable():
@@ -530,7 +529,7 @@ def test_field_type_empty_string_no_crash():
     f = ddl_check.FieldInfo(name="x", raw_definition="x", line=1, type="")
     issues = []
     ddl_check.check_field_type(f, "t", issues)
-    assert issues == []
+    assert not issues
 
 
 # ── 主键 / 外键 / 无建表 ─────────────────────────────────────────────────
@@ -758,7 +757,7 @@ def test_hash_comment_stripped():
     rules = {i.rule for i in issues}
     assert "注释符号" in rules              # # 注释本身仍报违规
     assert "无建表语句" not in rules        # # 注释行未干扰 CREATE 解析
-    assert not any(i.rule == "字段数量" for i in issues)  # # 注释行未变伪字段
+    assert all(i.rule != "字段数量" for i in issues)
 
 
 def test_index_name_with_dash_parsed():

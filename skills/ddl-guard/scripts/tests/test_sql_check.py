@@ -343,7 +343,7 @@ def test_find_mybatis_files_dir_filters_non_mapper(tmp_path):
     (tmp_path / "plain.xml").write_text('<root/>')
     found = sql_check.find_mybatis_files(str(tmp_path))
     assert any("m.xml" in p for p in found)
-    assert not any("plain.xml" in p for p in found)
+    assert all("plain.xml" not in p for p in found)
 
 
 # ── strip_dynamic_tags 各动态标签分支 ──────────────────────────────────────
@@ -513,7 +513,7 @@ def test_check_po_required_fields_extends_base_skipped():
     """继承基类 → 跳过必含字段检查。"""
     issues = []
     sql_check.check_po_required_fields(_po(extends_base=True), issues)
-    assert issues == []
+    assert not issues
 
 
 # ── find_po_files / check_po_file 异常 ─────────────────────────────────────
@@ -529,7 +529,7 @@ def test_find_po_files_dir(tmp_path):
     (tmp_path / "B.java").write_text('class B {}')  # 非 PO
     found = sql_check.find_po_files(str(tmp_path))
     assert any("A.java" in p for p in found)
-    assert not any("B.java" in p for p in found)
+    assert all("B.java" not in p for p in found)
 
 
 def test_find_po_files_nonexistent_path():
@@ -615,3 +615,27 @@ def test_insert_columns_backtick_table():
     """反引号包裹表名的 INSERT 缺字段列表仍检出。"""
     issues = run_statement("INSERT INTO `t-order` VALUES (1, 2)", stmt_type="insert")
     assert any(i.rule == "INSERT列字段" for i in issues)
+
+def test_where_1_equals_1_mandatory():
+    """WHERE 唯一条件为 1=1 → 无效WHERE条件强制。"""
+    issues = run_statement("SELECT id FROM t_user WHERE 1 = 1")
+    assert any(i.rule == "无效WHERE条件" and i.severity == Severity.MANDATORY
+               for i in issues)
+
+
+def test_join_field_without_prefix_mandatory():
+    """多表 JOIN 时 SELECT 字段未带表名/别名前缀 → 强制问题。"""
+    issues = run_statement("SELECT id FROM t_order a JOIN t_user b ON a.uid = b.id")
+    assert any(i.rule == "多表关联字段前缀" and i.severity == Severity.MANDATORY
+               for i in issues)
+
+
+def test_parse_po_class_empty_annotation_entity_suffix():
+    """@TableName() 空参 + Entity 后缀类名 → 从类名推断表名。"""
+    java = '''@TableName()
+public class OrderEntity {
+    private Long id;
+}'''
+    po = sql_check.parse_po_class(java, "x.java")
+    assert po is not None
+    assert po.table_name == "order"
