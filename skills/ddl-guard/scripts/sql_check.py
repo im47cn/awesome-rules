@@ -350,9 +350,9 @@ def check_bad_alias(sql: str, issues: list, ctx: dict):
     # 匹配 FROM table [AS] alias 和 JOIN table [AS] alias
     # 匹配 FROM/JOIN 后的 表名 [AS] 别名（不含 AS 时别名紧跟表名）
     # 模式1: table AS alias
-    m1 = re.findall(r"(?i)(?:from|join)\s+[\w.]+\s+as\s+(\w+)", sql)
+    m1 = re.findall(r"(?i)(?:from|join)\s+(?:`[^`]+`|[\w.]+)\s+as\s+(\w+)", sql)
     # 模式2: table alias（两个词，第二个是别名）
-    m2 = re.findall(r"(?i)(?:from|join)\s+([\w.]+)\s+(?!where|on|inner|left|right|join|order|group|limit|set|values|using)(\w+)", sql)
+    m2 = re.findall(r"(?i)(?:from|join)\s+((?:`[^`]+`|[\w.]+))\s+(?!where|on|inner|left|right|join|order|group|limit|set|values|using)(\w+)", sql)
     aliases = list(m1) + [a for a in m2]
     bad_patterns = re.compile(r"^(t\d+|[a-z])$")
     for alias in aliases:
@@ -418,7 +418,7 @@ def check_where_function(sql: str, issues: list, ctx: dict):
 def check_insert_columns(sql: str, issues: list, ctx: dict):
     """INSERT 必须列出字段列表。"""
     # 匹配 INSERT INTO table VALUES (不带字段列表)
-    if re.search(r"(?i)\binsert\s+into\s+\w+(\s*,\s*\w+)*\s+values\s*\(", sql):
+    if re.search(r"(?i)\binsert\s+into\s+(?:`[^`]+`|\w+)(\s*,\s*(?:`[^`]+`|\w+))*\s+values\s*\(", sql):
         issues.append(Issue(**ctx, severity=Severity.MANDATORY, rule="INSERT列字段",
             description="INSERT 语句未列出字段列表",
             suggestion="INSERT 必须列举出被插入字段的列表"))

@@ -633,3 +633,152 @@ def test_main_no_sql_files(monkeypatch, capsys):
         rc = ddl_check.main()
         assert "未找到" in capsys.readouterr().err
         assert rc == 2
+
+
+# ── 解析层放宽（表名/字段名非法字符可达 + 跨行/注释异常）────────────────────
+
+def test_table_name_chars_reachable():
+    """表名含非法字符 '-' → 「表名字符」检出；表本身仍被解析。"""
+    issues = _issues_for(
+        "CREATE TABLE t-order-info (\n"
+        "  id bigint(20) NOT NULL COMMENT '主键id',\n"
+        "  creator_id varchar(36) NOT NULL COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL COMMENT '最后更新时间',\n"
+        "  del_flag tinyint(4) NOT NULL DEFAULT 0 COMMENT '删除标志'\n"
+        ") COMMENT = 'x';\n"
+    )
+    rules = {i.rule for i in issues}
+    assert "表名字符" in rules
+    assert "无建表语句" not in rules
+
+
+def test_table_name_chars_schema_qualified():
+    """schema 限定的非法表名 db.t-order 同样可达。"""
+    issues = _issues_for(
+        "CREATE TABLE db.t-order (\n"
+        "  id bigint(20) NOT NULL COMMENT '主键id',\n"
+        "  creator_id varchar(36) NOT NULL COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL COMMENT '最后更新时间',\n"
+        "  del_flag tinyint(4) NOT NULL DEFAULT 0 COMMENT '删除标志'\n"
+        ") COMMENT = 'x';\n"
+    )
+    assert "表名字符" in {i.rule for i in issues}
+
+
+def test_field_name_chars_reachable():
+    """字段名含非法字符 '-' → 「字段名字符」检出。"""
+    issues = _issues_for(_ddl_with_field("order-status varchar(10) COMMENT '订单状态'"))
+    assert "字段名字符" in {i.rule for i in issues}
+
+
+def test_backtick_bad_chars_reachable():
+    """反引号包裹的非法字符表名/字段名同样可达（非反引号名不受影响）。"""
+    ddl = (
+        "CREATE TABLE `t-order` (\n"
+        "  id bigint(20) NOT NULL COMMENT '主键id',\n"
+        "  `user-name` varchar(20) NOT NULL COMMENT '用户名',\n"
+        "  creator_id varchar(36) NOT NULL COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL COMMENT '最后更新时间',\n"
+        "  del_flag tinyint(4) NOT NULL DEFAULT 0 COMMENT '删除标志'\n"
+        ") COMMENT = 'x';\n"
+    )
+    rules = {i.rule for i in _issues_for(ddl)}
+    assert "表名字符" in rules and "字段名字符" in rules
+
+
+def test_create_table_paren_next_line_parsed():
+    """CREATE TABLE t\\n( 跨行：表体起点扫描不吞并后续语句。"""
+    tables = ddl_check.extract_tables(
+        "CREATE TABLE t_a\n(\n"
+        "  id bigint(20) NOT NULL COMMENT '主键id',\n"
+        "  creator_id varchar(36) NOT NULL COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL COMMENT '创建时间'\n"
+        ") COMMENT = 'x';\n"
+    )
+    assert len(tables) == 1 and tables[0].name == "t_a"
+    assert any(f.name == "creator_id" for f in tables[0].fields)
+
+
+def test_multiple_tables_not_merged():
+    """多建表语句：前一表体闭合后不得吞并后续 CREATE TABLE。"""
+    tables = ddl_check.extract_tables(
+        "CREATE TABLE t_one (\n"
+        "  id bigint(20) NOT NULL COMMENT '主键id'\n"
+        ");\n"
+        "CREATE TABLE t_two (\n"
+        "  id bigint(20) NOT NULL COMMENT '主键id',\n"
+        "  name varchar(20) NOT NULL COMMENT '名称'\n"
+        ") COMMENT = 'x';\n"
+    )
+    assert len(tables) == 2
+    one = next(t for t in tables if t.name == "t_one")
+    two = next(t for t in tables if t.name == "t_two")
+    assert len(one.fields) == 1
+    assert len(two.fields) == 2  # t_two 字段未被 t_one 吞掉
+
+
+def test_field_continuation_no_bogus_field():
+    """字段跨行定义（NOT NULL 续行）不产生垃圾字段。"""
+    issues = _issues_for(
+        "CREATE TABLE t_a (\n"
+        "  id bigint(20)\n"
+        "  NOT NULL COMMENT '主键id',\n"
+        "  creator_id varchar(36) NOT NULL COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL COMMENT '最后更新时间',\n"
+        "  del_flag tinyint(4) NOT NULL DEFAULT 0 COMMENT '删除标志'\n"
+        ") COMMENT = 'x';\n"
+    )
+    rules = {i.rule for i in issues}
+    assert "字段数量" not in rules          # 续行行未变成伪字段
+    assert "字段名开头" not in rules        # NOT NULL 未被当字段名
+
+
+def test_hash_comment_stripped():
+    """# 行注释剥除：# 行内容不污染解析；「注释符号」仍独立检出。"""
+    issues = _issues_for(
+        "# 用户表\n"
+        "CREATE TABLE t_a (\n"
+        "  id bigint(20) NOT NULL COMMENT '主键id',\n"
+        "  # 这是字段级 # 注释\n"
+        "  creator_id varchar(36) NOT NULL COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL COMMENT '最后更新时间',\n"
+        "  del_flag tinyint(4) NOT NULL DEFAULT 0 COMMENT '删除标志'\n"
+        ") COMMENT = 'x';\n"
+    )
+    rules = {i.rule for i in issues}
+    assert "注释符号" in rules              # # 注释本身仍报违规
+    assert "无建表语句" not in rules        # # 注释行未干扰 CREATE 解析
+    assert not any(i.rule == "字段数量" for i in issues)  # # 注释行未变伪字段
+
+
+def test_index_name_with_dash_parsed():
+    """索引名含非法字符 '-' 仍被解析（命名规则可达）。"""
+    issues = _issues_for(
+        "CREATE TABLE t_a (\n"
+        "  id bigint(20) NOT NULL COMMENT '主键id',\n"
+        "  order_no varchar(36) NOT NULL COMMENT '订单编号',\n"
+        "  creator_id varchar(36) NOT NULL COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL COMMENT '最后更新时间',\n"
+        "  del_flag tinyint(4) NOT NULL DEFAULT 0 COMMENT '删除标志',\n"
+        "  UNIQUE KEY uk-order-no (order_no)\n"
+        ") COMMENT = 'x';\n"
+    )
+    assert "唯一索引命名" in {i.rule for i in issues}
+
+
+def test_create_table_no_body_skipped():
+    """CREATE TABLE 后无表体 '('（孤立语句）→ 跳过该行，仍报「无建表语句」。"""
+    issues = _issues_for("CREATE TABLE t_a;\n")
+    assert "无建表语句" in {i.rule for i in issues}

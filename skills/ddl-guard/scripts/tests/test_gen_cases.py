@@ -149,6 +149,18 @@ class TestGenerateReject:
         assert dirs[0].startswith("010-")
         assert dirs[-1] != dirs[0]
 
+    def test_real_write_idempotent(self, tmp_path):
+        """重复 generate 幂等：cid 复用编号覆盖重写，不翻倍追加。"""
+        first, rej1, _ = gc.generate(tmp_path, dry_run=False, verbose=False)
+        n1 = len(list(tmp_path.iterdir()))
+        second, rej2, _ = gc.generate(tmp_path, dry_run=False, verbose=False)
+        n2 = len(list(tmp_path.iterdir()))
+        assert first == second == rej1 == rej2 == 0 or (first == second and rej1 == rej2 == 0)
+        assert n1 == n2  # 目录数不变（无 010-072 之外的重复 case）
+        # 每个 cid 仅一个目录
+        cids = [p.name[4:] for p in tmp_path.iterdir()]
+        assert len(cids) == len(set(cids))
+
 
 class TestIngest:
     def _make_sql(self, d):
