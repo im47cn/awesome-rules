@@ -188,9 +188,7 @@ def validate_candidate(baseline_len: int):
                 return False
         # 子节锚点契约是人工基线的一部分（2026-08-24 调整）：reflector 重写掉
         ### 指引会使新提案全部堆回二级标题，属退化候选，直接拒绝
-        if "###" not in text:
-            return False
-        return len(text) <= baseline_len * 1.5
+        return False if "###" not in text else len(text) <= baseline_len * 1.5
 
     return check
 

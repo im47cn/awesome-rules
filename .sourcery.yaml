@@ -30,7 +30,12 @@ rule_settings:
   # test_session 共享 fixture 模块是本仓库测试组织约定（test_gepa/test_evo_cli
   # 共 4 处 import），dont-import-test-modules 规则不适用，迁 conftest 属独立重构。
   - dont-import-test-modules
+  # rule_types.security：对齐云端 bot 规则面（#93 dangerous-subprocess 教训）。
+  # 本地 CLI 1.45 未实现 security 规则（实测空转）；CLI 升级后自动生效。
+  # 届时 evo_replay.py:403 subprocess（已评审论证无注入面）若被拦，用行内
+  # `# sourcery skip: <rule>` 豁免（行级 ignore 无效，勿再用）。
   rule_types:
   - refactoring
   - suggestion
   - comment
+  - security

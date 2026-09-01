@@ -324,7 +324,10 @@ def test_session_corpus_tolerates_parse_failure(tmp_path, monkeypatch):
     p = PR.Proposal(id="x", source_agent="omp", source_session="s",
                     source_path=str(src), created="T", lessons=[])
     assert evo._session_corpus(p) == ""            # 合法但无消息 → 空语料
-    monkeypatch.setattr(evo.S, "parse_session", lambda *a: (_ for _ in ()).throw(ValueError("bad")))
+    def _bad_parse(*a):
+        raise ValueError("bad")
+
+    monkeypatch.setattr(evo.S, "parse_session", _bad_parse)
     assert evo._session_corpus(p) == ""            # 解析异常 → 空语料兜底
     p.source_path = str(tmp_path / "absent.jsonl")
     assert evo._session_corpus(p) == ""            # 文件缺失 → 空语料

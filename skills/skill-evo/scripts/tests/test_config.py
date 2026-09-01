@@ -73,7 +73,6 @@ def test_config_example_keys_match_defaults():
     example = Path(C.__file__).resolve().parents[1] / "config.example.toml"
     keys = set()
     for ln in example.read_text(encoding="utf-8").splitlines():
-        m = re.match(r"^([A-Za-z_]\w*)\s*=", ln.split("#", 1)[0])
-        if m:
-            keys.add(m.group(1))
+        if m := re.match(r"^([A-Za-z_]\w*)\s*=", ln.split("#", 1)[0]):
+            keys.add(m[1])
     assert keys == set(C.DEFAULTS)
