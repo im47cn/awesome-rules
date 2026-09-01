@@ -1,0 +1,14 @@
+{
+  "repos": [
+    {"path": "../open-platform/gtsp-wop-service"},
+    {"path": "../open-platform/gtsp-wop-gateway"},
+    {"path": "../open-platform/wop-python-sdk"},
+    {"path": "../open-platform/wop-java-sdk"},
+    {"path": "../open-platform/wop-typescript-sdk"},
+    {"path": "../open-platform/wop-php-sdk"},
+    {"path": "../open-platform/wop-dotnet-sdk"},
+    {"path": "../open-platform/wop-skills"},
+    {"path": "../open-platform/wop-web-tools"},
+    {"path": "../open-platform/wop-go-sdk"}
+  ]
+}

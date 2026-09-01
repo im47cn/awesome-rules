@@ -26,8 +26,9 @@
 | `factory-lib.sh` + `factory_lib.py` | 链副作用共享库（issue 评论唯一出口/拒绝单一动作/租约围栏钩位）+ python 工具箱（timeout 分级预算/breaker/回执解析 + dispatch 进程编排：并发槽/收割/硬锁，ADR-005）。`omp_node()` 是 omp CLI 唯一执行点（ADR-009 引擎收口）——换引擎只改此函数 |
 | `factory-local.json` | 工厂本地化配置（M4 + ADR-009）：perimeter/reject_guidance（guard 判据）+ repo_identity/reading_scopes/review_basis/final_gate_cmd/docstring_gate_cmd（可选门，缺省不启用）/pr_review_skills（prompt 仓库参数与门命令）+ upstream_repo/upstream_path/feedback_branch_prefix（反哺上游指针）——链脚本与 prompts 零本地化的全部数据载体；改后须重跑 mutations 重证 |
 | `upstream-sync-check.sh` | M2 上游同步检查（dispatch 轮末）：full 漂移→确定性 PR 流；local 漂移→needs-human issue；无凭据降级仅报告 |
-| `sync-from-upstream.sh` + `DISTRIBUTION.json` | M1 上游同步：三态分发清单（full/local/skip）+ 下游拉取（--check 门禁/--apply 追平+锚点） |
-| `decisions.md` | 工厂决策记录（ADR-001~008：租约仲裁/A3 记账/单写者降级/周回归/dispatch 下沉/触发器计数口径/forge 平台适配/托管平台抽象层）；进程管理类缺陷须在此记账（ADR-002，合并前自愈不计数，ADR-006） |
+| `sync-from-upstream.sh` + `DISTRIBUTION.json` | M1 上游同步：三态分发清单（full/local/skip）+ 下游拉取（--check 门禁/--apply 追平+锚点）；B1（ADR-011）`--repo` 中心驱动 + `--commit` 单提交落库 + blame-ignore 滞后一条 |
+| `downstream-check.sh` + `downstream.json` | B2 中心集中巡检（ADR-011）：10 仓清单（skip 分发，中心专属）；`--check` 逐仓漂移检查 + `--apply-commit` 漂移仓单提交追平；一律 `--anchor main` 跑中心版脚本；漂移 osascript 通知（`FACTORY_NO_NOTIFY=1` 关断） |
+| `decisions.md` | 工厂决策记录（ADR-001~011：租约仲裁/A3 记账/单写者降级/周回归/dispatch 下沉/触发器计数口径/forge 平台适配/托管平台抽象层/本地化数据化/测试 git 密封/下游追平巡检）；进程管理类缺陷须在此记账（ADR-002，合并前自愈不计数，ADR-006） |
 
 ## 前置条件
 - `omp` CLI（AI 节点引擎；每节点独立进程 = 物理级 fresh context）
@@ -298,6 +299,10 @@ prompts 零宿主专名（gauntlet `factory-portability` 门机械化盯防）�
 
 # 追平：full 文件直接覆盖 + 锚点写 upstream-lock.json；local 只给 diff 摘要
 .factory/sync-from-upstream.sh <upstream-path> --apply
+
+# 中心驱动（B1，ADR-011）：任意 cwd 操作目标仓；--commit 追平+锚点+blame-ignore
+# 以单提交落库（不推送）；目标仓 .factory 脏则拒绝
+.factory/sync-from-upstream.sh <upstream-path> --repo <repo-path> --apply --commit
 ```
 
 三态语义：**full**（零本地化，blob 直接覆盖，漂移=门禁失败；ADR-009 后
@@ -326,6 +331,32 @@ L4 无关）：
   措辞/门命令/仓库参数/上游指针全成数据），guard.py/factory_lib.py/
   feedback-upstream.sh/tests/ 从 local → full，**local 面归零**；PERIMETER
   blob 指纹绑定 EVIDENCE——改配置未重证 kill rate 即非绿。
+
+### 集中巡检与 blame-ignore（B 阶段，ADR-011）
+
+追平提交是机械动作，但 `git blame` 眼里与人工改动无异；且逐仓手工
+`--apply` 发现漂移滞后。B 阶段两件套：
+
+- **B1 `--repo` + `--commit`**（`sync-from-upstream.sh`）：中心驱动、
+  任意 cwd 操作目标仓；追平产物+锚点+blame-ignore 以单提交落库
+  （`factory: 上游同步追平（<sha9>）`），落当前分支**不推送**。
+  目标仓 `.factory` 有未提交 tracked 改动时拒绝（fail-closed，
+  热修不被自动提交淹没）。blame-ignore **滞后一条**：提交无法含
+  自身 SHA，本轮记上一轮追平提交；并 `git config blame.ignoreRevsFile`
+  指绝对路径（相对路径在子目录 blame 下 rc128）。存量历史追平提交
+  一次性回填（一行一个 40-hex 全 SHA，`#` 开头为注释）：
+  ```bash
+  git log --grep='追平' --format=%H | sort -u >> .git-blame-ignore-revs
+  ```
+- **B2 `downstream-check.sh` + `downstream.json`**：中心仓单点巡检
+  全舰队（清单 skip 分发——中心专属状态，下游不携带、缺失
+  fail-closed 即正确边界）；`--apply-commit` 对漂移仓跑中心版 sync
+  单提交追平。巡检一律 `--anchor main`（中心发布线）且执行**中心版**
+  脚本——下游副本可能滞后，鸡生蛋。漂移即 osascript 通知
+  （`FACTORY_NO_NOTIFY=1` 关断）；shlock 互斥；单仓失败记 `[错误]`
+  继续不中断。
+
+C 阶段（中心经 worktree 直接操作下游仓 + CI composite action）另案推进。
 
 ### 下游采纳 M2/M4 checklist（顺序不可倒）
 
