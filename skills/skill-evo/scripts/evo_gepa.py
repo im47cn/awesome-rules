@@ -184,15 +184,14 @@ def run_gepa(baseline: str, train: List[Case], holdout: List[Case],
             entry["reason"] = "minibatch 均分未改善"
         log.append(entry)
 
-    # 3) holdout 选优（每候选每 case 只评一次）
+    # 3) holdout 选优（验收信号，独立于 rollout 预算：每候选每 case 只评一次）
+    #    c0（baseline）必评作改善锚；其余按 train 均分降序评（预算外不截断）
     holdout_matrix = ScoreMatrix()
     ranked = sorted(pool, key=lambda c: matrix.mean(c), reverse=True)
+    ranked = ["c0"] + [c for c in ranked if c != "c0"]
     for cid in ranked:
         for case in holdout:
-            if used >= budget:
-                break
             score, _ = execute(pool[cid].text, case)
-            used += 1
             holdout_matrix.set(cid, case.id, score)
     best = max(pool, key=lambda c: (holdout_matrix.mean(c) if holdout_matrix.cases_of(c)
                                     else float("-inf")))

@@ -38,6 +38,8 @@ DEFAULTS = {
     "gepa_holdout_ratio": 0.2,
     # 标注样本（applied/rejected 提案）低于此数拒绝进化（冷启动保护）
     "gepa_min_cases": 10,
+    # replay 评估集（拦截/放行/混合型 case 总数）低于此数拒绝进化（冷启动保护）
+    "replay_min_cases": 8,
     # ── 插件哑故障巡检（evo_patrol）──
     # 两次巡检最小间隔（小时）；run 搭车执行，patrol 子命令 --force 可越过
     "patrol_interval_hours": 6,
@@ -58,7 +60,7 @@ def _parse_scalar(raw: str):
         return s[1:-1]
     if s.startswith("[") and s.endswith("]"):
         return [_parse_scalar(x) for x in s[1:-1].split(",") if x.strip()]
-    if s in ("true", "false"):
+    if s in {"true", "false"}:
         return s == "true"
     for cast in (int, float):
         try:

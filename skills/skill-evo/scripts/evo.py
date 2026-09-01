@@ -60,10 +60,11 @@ def call_claude_raw(prompt: str, cfg: dict) -> str:
     env = dict(os.environ)
     env.pop("CLAUDECODE", None)          # 去 CC 注入面
     env["AR_SKILL_EVO_CHILD"] = "1"      # 二次保险：即使 hooks 未禁，hook 脚本自会退出
+    # prompt 经 stdin 传入：SKILL.md 等长文本含换行/`---`，走 argv 会被 CLI 当选项解析
     proc = subprocess.run(
-        [str(cfg["claude_bin"]), "-p", prompt,
+        [str(cfg["claude_bin"]), "-p",
          "--settings", '{"hooks":{}}', "--max-turns", "1", "--output-format", "text"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, input=prompt,
         timeout=int(cfg["claude_timeout"]), env=env)
     return proc.stdout or ""
 
@@ -231,10 +232,14 @@ def cmd_patrol(args) -> int:
 
 def _find_pending(cfg: dict, pid: str) -> Path:
     pending = C.base_paths(cfg)["pending"]
-    hits = [p for p in pending.glob("*.md") if p.stem == pid or p.stem.startswith(pid)]
-    if not hits:
+    if hits := [
+        p
+        for p in pending.glob("*.md")
+        if p.stem == pid or p.stem.startswith(pid)
+    ]:
+        return hits[0]
+    else:
         raise SystemExit(f"未找到提案：{pid}（pending 目录 {pending}）")
-    return hits[0]
 
 
 def _session_corpus(p: PR.Proposal) -> str:
@@ -259,8 +264,7 @@ def cmd_list(args) -> int:
     cfg = C.load_config()
     paths = C.base_paths(cfg)
     # 巡检告警置顶展示：哑故障优先于提案进入视野
-    alerts = PT.load_alerts(cfg)
-    if alerts:
+    if alerts := PT.load_alerts(cfg):
         print(f"⚠️ 插件哑故障 {len(alerts)} 个（evo patrol 复查，台账 patrol.json）：")
         for f in alerts:
             print(f"  {f['id']} 首见 {f.get('first_seen', '?')}")
@@ -288,7 +292,7 @@ def cmd_apply(args) -> int:
     path = _find_pending(cfg, args.id)
     proposal = PR.load_proposal(path)
     for line in PR.normalize_headings(proposal, C.repo_root(), path):
-        print("ℹ " + line)
+        print(f"ℹ {line}")
     checks = PR.verify_evidence(proposal, _session_corpus(proposal))
     for i, status in checks:
         if status == "no_corpus":
@@ -351,11 +355,88 @@ def cmd_reject(args) -> int:
 
 
 def cmd_evolve(args) -> int:
-    """GEPA 进化（手动低频命令）：v2 唯一 target = skill-evo 自身 SYSTEM_PROMPT。"""
-    import evo_evolve as V
     cfg = C.load_config()
     if args.budget:
         cfg["gepa_budget"] = args.budget
+    # replay 链路：进化 skills/<skill>/SKILL.md，打分 = 确定性评估集对账（零 LLM 打分器）
+    if args.skill:
+        import evo_replay as R
+        from evo_config import repo_root
+        repo = repo_root()
+        skill_dir = repo / "skills" / args.skill
+        if not (skill_dir / "SKILL.md").is_file():
+            print(f"技能不存在或无 SKILL.md：{skill_dir}")
+            return 1
+        eval_dirs = []
+        if args.eval:
+            for p in args.eval.split(","):
+                d = Path(p.strip()) if Path(p.strip()).is_absolute() else repo / p.strip()
+                if d.is_dir():
+                    eval_dirs.append(d)
+                else:
+                    print(f"评估集目录不存在：{d}")
+                    return 1
+        else:
+            # 默认评估集 = badcase/（拦截型）+ eval/（放行/混合型）
+            for sub in ("badcase", "eval"):
+                d = skill_dir / sub
+                if d.is_dir():
+                    eval_dirs.append(d)
+        cases = []
+        for d in eval_dirs:
+            # include_manual=True：人工补充规则（拼音/语义类）纳入 expected，
+            # execute 的 LLM 按 SKILL 第 3 步可检出——评估集对齐完整 SKILL 工作流。
+            cases += R.load_eval_set(args.skill, d, cfg, include_manual=True)
+        if len(cases) < int(cfg["replay_min_cases"]):
+            print(f"评估集不足：{len(cases)} cases（需 ≥{cfg['replay_min_cases']}，"
+                  f"含拦截/放行/混合型；持续补充后重试，可 --dry-run 查看构成）")
+            return 1
+        train, holdout = R.split_eval(cases, cfg)
+        print(f"评估集：{len(cases)} cases（{len(train)} train / {len(holdout)} holdout）")
+        for c in cases:
+            kind = "放行" if c.reference["expected_empty"] else "拦截" if c.reference["expected_rules"] else "?"
+            print(f"  {c.id} [{kind}] expected={c.reference['expected_rules']}")
+        base_f1, details = R.script_baseline_f1(cfg, args.skill, cases)
+        print(f"脚本基线（完美执行参照）F1 = {base_f1:.3f}")
+        if args.dry_run:
+            return 0
+        gate = R.control_gate(holdout)
+        if gate >= base_f1:
+            print(f"门禁失败：全盘拒绝控制候选 F1={gate:.3f} ≥ baseline {base_f1:.3f}，"
+                  f"打分器存在 gaming 洞，拒绝进入 GEPA（见设计文档护栏 4）")
+            return 1
+        print(f"门禁通过：全盘拒绝控制候选 F1={gate:.3f} < baseline {base_f1:.3f}")
+        baseline_text = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+        best, matrix, log = G.run_gepa(
+            baseline=baseline_text, train=train, holdout=holdout,
+            execute=R.make_execute(cfg, call_claude_raw, args.skill),
+            reflect=R.make_reflect(call_claude_raw, cfg),
+            budget=int(cfg["gepa_budget"]), batch_size=int(cfg["gepa_batch_size"]),
+            rng_seed=args.seed, validate=R.validate_candidate(len(baseline_text)),
+            asset_desc=f"{args.skill} SKILL.md replay 进化")
+        base_score = log[0]["holdout"].get("c0", float("-inf"))
+        best_score = log[0]["holdout"].get(best.id, base_score)
+        print(f"baseline(c0) holdout={base_score:.3f}  best({best.id}) holdout={best_score:.3f}")
+        from datetime import datetime, timezone
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        report_dir = C.base_paths(cfg)["base"] / "evolve" / stamp
+        report_dir.mkdir(parents=True, exist_ok=True)
+        (report_dir / "report.json").write_text(json.dumps(
+            {"best": {"id": best.id, "parent": best.parent, "gen": best.gen},
+             "holdout": log[0]["holdout"], "iterations": log[1:]},
+            ensure_ascii=False, indent=1), encoding="utf-8")
+        (report_dir / "evolved_skill.md").write_text(best.text, encoding="utf-8")
+        print(f"迭代日志与候选 SKILL.md：{report_dir}")
+        if best.id != "c0" and best_score - base_score > 0.2:
+            path = R.write_skill_proposal(cfg, args.skill, baseline_text, best,
+                                          base_score, best_score, log)
+            print(f"✅ holdout 改善 {best_score - base_score:.3f} > 0.2，已产出进化提案：{path}")
+            print("   采纳方式见提案正文（人工替换 skills/<skill>/SKILL.md 全文）")
+        else:
+            print("未达提案阈值（holdout 改善 ≤ 0.2 或 baseline 仍最优），仅存报告")
+        return 0
+    # v2 默认链路：进化 skill-evo 自身 SYSTEM_PROMPT（标注源 = applied/rejected 提案）
+    import evo_evolve as V
     train, holdout = V.build_dataset(cfg)
     n_sessions = len({c.id for c in train + holdout})
     print(f"dataset：{len(train)} train / {len(holdout)} holdout cases"
@@ -435,12 +516,16 @@ def main() -> int:
                        help="语义码（GEPA 标注），同 apply --codes")
     p_rej.set_defaults(func=cmd_reject)
 
-    p_ev = sub.add_parser("evolve", help="GEPA 进化 SYSTEM_PROMPT（手动低频，有 LLM 成本）")
+    p_ev = sub.add_parser("evolve", help="GEPA 进化 SYSTEM_PROMPT / skills/<skill>/SKILL.md（手动低频，有 LLM 成本）")
     p_ev.add_argument("--target", default="prompt", choices=["prompt"],
                       help="进化对象（v2 仅 prompt）")
     p_ev.add_argument("--budget", type=int, default=None, help="rollout 预算（默认 config）")
     p_ev.add_argument("--seed", type=int, default=0, help="随机种子（可复现）")
     p_ev.add_argument("--dry-run", action="store_true", help="只打印 dataset 统计不调 LLM")
+    p_ev.add_argument("--skill", default="",
+                      help="进化 skills/<skill>/SKILL.md（replay 评估集链路；默认评估集=badcase/+eval/）")
+    p_ev.add_argument("--eval", default="",
+                      help="评估集目录（仓库相对或绝对，逗号分隔多个；默认 badcase/ + eval/）")
     p_ev.set_defaults(func=cmd_evolve)
 
     args = ap.parse_args()

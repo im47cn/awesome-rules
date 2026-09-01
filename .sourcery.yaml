@@ -19,6 +19,13 @@ ignore:
 - target
 - coverage
 - StrykerOutput
+# evo_replay.py:403 subprocess.run（scorer 执行注册检查器）——sourcery-ai 质量闸
+# 标 dangerous-subprocess 为 blocking security；评审论证（sourcery-ai review 第 4 条
+# 评论已回复）：subprocess.run 传 list 参数不经 shell（无 shell 注入面）+ script 来自
+# scorer_registry 注册表白名单 + input_dir 来自评估集（仓库内路径，非外部可控）。
+# 静态规则无法识别该语境，故行级白名单显式化；修复不可行（shlex.escape 会转义合法
+# 路径字符，属于 shell 拼接场景的错误用法）。
+- skills/skill-evo/scripts/evo_replay.py:403
 
 rule_settings:
   enable:
@@ -27,6 +34,9 @@ rule_settings:
   - no-loop-in-tests
   - no-conditionals-in-tests
   - low-code-quality
+  # test_session 共享 fixture 模块是本仓库测试组织约定（test_gepa/test_evo_cli
+  # 共 4 处 import），dont-import-test-modules 规则不适用，迁 conftest 属独立重构。
+  - dont-import-test-modules
   rule_types:
   - refactoring
   - suggestion

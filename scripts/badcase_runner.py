@@ -68,9 +68,7 @@ def find_project_root() -> Path:
 def find_check_scripts(skill_dir: Path):
     """查找技能 scripts/ 目录下所有 *_check.py 脚本。"""
     scripts_dir = skill_dir / "scripts"
-    if not scripts_dir.is_dir():
-        return []
-    return sorted(scripts_dir.glob("*_check.py"))
+    return sorted(scripts_dir.glob("*_check.py")) if scripts_dir.is_dir() else []
 
 
 def parse_expected(expected_path: Path):
@@ -87,21 +85,24 @@ def parse_expected(expected_path: Path):
     check_script = None
     m = re.search(r"(?:check|脚本)\s*[:：]\s*(\S+\.py)", text)
     if m:
-        check_script = m.group(1).strip()
+        check_script = m[1].strip()
 
     expected_rules, manual_rules = [], []
 
     def _split_rules(payload: str):
-        return [p.strip() for p in re.split(r"[、,，;；]", payload) if p.strip()]
+        # 别名串（「规范名|别名1|别名2」）只取首 token 规范名：脚本侧比对按规范名，
+        # 别名（对齐 LLM 报告措辞）是 GEPA 评估集（evo_replay.parse_expected）的
+        # 概念，badcase_runner 保持纯脚本回归语义（strict 精确等值不受影响）。
+        return [p.strip().split("|")[0] for p in re.split(r"[、,，;；]", payload) if p.strip()]
 
     section = re.search(r"##\s*预期检查输出\s*\n(.*?)(?=\n##\s|$)", text, re.DOTALL)
     if section:
         # 新式：只认「预期检查输出」小节的 bullet
-        for line in section.group(1).split("\n"):
+        for line in section[1].split("\n"):
             m = re.match(r"^[-*]\s+(.+)", line.strip())
             if not m:
                 continue
-            item = m.group(1).strip()
+            item = m[1].strip()
             if item.startswith("脚本自动检出"):
                 expected_rules.extend(_split_rules(
                     re.split(r"[:：]", item, 1)[-1]))
@@ -116,7 +117,7 @@ def parse_expected(expected_path: Path):
         for line in head.split("\n"):
             m = re.match(r"^[-*]\s+(.+)", line.strip())
             if m:
-                rule = m.group(1).strip()
+                rule = m[1].strip()
                 if rule and not rule.startswith("#"):
                     expected_rules.append(rule)
 
@@ -132,27 +133,25 @@ def parse_prompts(prompts_path: Path):
 
     # 提取"已知问题"section
     known_section = ""
-    km = re.search(r"##\s*已知问题\s*\n(.*?)(?=\n##\s|$)", text, re.DOTALL)
-    if km:
-        known_section = km.group(1).strip()
+    if km := re.search(
+        r"##\s*已知问题\s*\n(.*?)(?=\n##\s|$)", text, re.DOTALL
+    ):
+        known_section = km[1].strip()
         # 从 text 中移除已知问题部分，避免解析到 prompts
         text = text[: km.start()] + text[km.end():]
 
     prompts = []
     for line in text.split("\n"):
         line = line.strip()
-        m = re.match(r"^[-*]\s+(.+)", line)
-        if m:
-            prompt = m.group(1).strip()
-            if prompt:
+        if m := re.match(r"^[-*]\s+(.+)", line):
+            if prompt := m[1].strip():
                 prompts.append(prompt)
 
     known_issues = []
     for line in known_section.split("\n"):
         line = line.strip()
-        m = re.match(r"^[-*]\s+(.+)", line)
-        if m:
-            known_issues.append(m.group(1).strip())
+        if m := re.match(r"^[-*]\s+(.+)", line):
+            known_issues.append(m[1].strip())
 
     return prompts, known_issues
 
@@ -283,7 +282,7 @@ def run_badcase(skill_name, case_name, case_dir: Path, project_root: Path,
     elif expected_rules:
         missing = [r for r in expected_rules if not rule_matches(r, actual_rules)]
         result.missing_rules = missing
-        result.passed = len(missing) == 0
+        result.passed = not missing
     else:
         result.passed = True
 
@@ -315,14 +314,14 @@ def print_result(result: BadcaseResult, verbose=False):
     if result.prompts:
         print(f"  提示词 ({len(result.prompts)} 条):")
         for p in result.prompts:
-            preview = p if len(p) <= 55 else p[:52] + "..."
+            preview = p if len(p) <= 55 else f"{p[:52]}..."
             print(f"    {c('•', dim)} {preview}")
 
     # 已知问题
     if result.known_issues:
         print(f"  {c('已知问题', dim)}:")
         for issue in result.known_issues:
-            preview = issue if len(issue) <= 65 else issue[:62] + "..."
+            preview = issue if len(issue) <= 65 else f"{issue[:62]}..."
             print(f"    {c('!', dim)} {preview}")
 
     # 期望规则
@@ -347,11 +346,10 @@ def print_result(result: BadcaseResult, verbose=False):
             print(f"    {c('•', dim)} {rule}")
 
     # 实际检出
-    if verbose or not result.passed:
-        if result.actual_rules:
-            print(f"  实际检出 {len(result.actual_rules)} 条规则:")
-            for rule in result.actual_rules:
-                print(f"    {c('→', dim)} {rule}")
+    if (verbose or not result.passed) and result.actual_rules:
+        print(f"  实际检出 {len(result.actual_rules)} 条规则:")
+        for rule in result.actual_rules:
+            print(f"    {c('→', dim)} {rule}")
 
 
 def discover_badcases(project_root: Path, skill_filter=None):
@@ -402,7 +400,7 @@ def main():
         return 0
 
     print(f"{'='*55}")
-    print(f"  Badcase 回归测试")
+    print("  Badcase 回归测试")
     print(f"  共 {len(badcases)} 个 badcase")
     print(f"{'='*55}")
 
@@ -413,13 +411,13 @@ def main():
         results.append(result)
         print_result(result, args.verbose)
 
-    passed = sum(1 for r in results if r.passed)
-    failed = sum(1 for r in results if not r.passed)
+    passed = sum(r.passed for r in results)
+    failed = sum(not r.passed for r in results)
 
     green, red, reset = "\033[32m", "\033[31m", "\033[0m"
     use_color = sys.stdout.isatty()
 
-    print(f"\n{'='*55}")
+    print("\n" + "=" * 55)
     summary = f"总计: {len(results)} 个 badcase, {passed} 通过, {failed} 失败"
     color = green if failed == 0 else red
     print(f"  {color}{summary}{reset}" if use_color else f"  {summary}")
