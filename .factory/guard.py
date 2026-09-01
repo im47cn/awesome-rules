@@ -79,12 +79,11 @@ def self_check() -> None:
         ["git", "-C", str(REPO_ROOT), "rev-parse", "--path-format=absolute", "--git-common-dir"],
         capture_output=True, text=True,
     ).stdout.strip().removesuffix("/.git")
-    absent = [
+    if absent := [
         p
         for p in sorted(guard_paths)
         if not (REPO_ROOT / p).exists() and not (Path(main_root) / p).exists()
-    ]
-    if absent:
+    ]:
         # check-ignore 批量豁免（rc 0=有命中 1=全否）；git 失败 fail-closed
         ci = subprocess.run(
             ["git", "-C", str(REPO_ROOT), "check-ignore", "--stdin"],
