@@ -285,7 +285,8 @@ CLEAN_TEMPLATES = [
 
 def run_ddl_check(input_dir: Path) -> list:
     """跑 ddl_check.py 返回 rule 列表（有序去重）。"""
-    proc = subprocess.run(
+    # input_dir 为用户 CLI 自供路径，args 为 list 形式不经 shell，无命令注入面
+    proc = subprocess.run(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit
         [sys.executable, str(_DDL_CHECK), str(input_dir), "--format", "json"],
         capture_output=True, text=True, timeout=60)
     if proc.returncode not in (0, 1):
