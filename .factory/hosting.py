@@ -885,8 +885,7 @@ class CodeupAdapter:
         for name in add:
             # 幂等（对齐 remove 分支）：已有同名未 resolved 标记则跳过
             # ——重试/双写场景重复 POST 会堆未 resolved 重复标记（php#17）
-            hits = self._label_markers(p, name)
-            if hits:
+            if hits := self._label_markers(p, name):
                 print(f"[hosting] add {name}: 已有未 resolved 标记（幂等跳过）",
                       file=sys.stderr)
                 continue
