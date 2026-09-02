@@ -13,6 +13,9 @@
   不提交——防无漂移重跑链式生成噪音提交）→ TestApplyCommit
 - PR #106 审查回归（--repo 子目录规范化到仓根，防 FACTORY/锁/分发错位；
   旧锁缺 upstream 字段的空追平须回填）→ TestPR106ReviewRegressions
+- 字节码密闭（issue #107：apply 子进程 import hosting 在下游仓留未跟踪
+  __pycache__，污染「落库后工作树干净」断言）→ TestApplyCommit
+  .test_apply_leaves_no_pycache_in_downstream（显式零字节码契约）
 """
 
 import glob
@@ -197,6 +200,14 @@ class TestApplyCommit:
             env=git_env(), check=True, capture_output=True, text=True,
         ).stdout
         assert status.strip() == "", "落库后工作树干净"
+
+    def test_apply_leaves_no_pycache_in_downstream(self, repos):
+        """issue #107：apply 链的 factory_lib 子进程不得在下游仓留字节码。"""
+        up, dn, _ = repos
+        proc = self._run(dn, str(up), "--apply", "--commit", "--anchor", "main")
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        caches = list(dn.glob("**/__pycache__"))
+        assert not caches, f"sync 后下游仓残留字节码: {caches}"
 
     def test_second_sync_records_previous_sync_sha(self, repos):
         up, dn, _ = repos

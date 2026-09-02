@@ -32,7 +32,19 @@ import sys
 import time
 from pathlib import Path
 
-import hosting  # 托管平台抽象层（ADR-008）：中立 schema，gh/云效差异在其内
+# 字节码密闭（issue #107）：本文件常以 `python3 factory_lib.py` 子进程方式被
+# sync/dispatch 等脚本调用，import hosting 会在调用方仓的 .factory/ 留下
+# 未跟踪 __pycache__——污染下游仓「落库后工作树干净」断言与巡检。hosting
+# 是本仓唯一仓内 import，只需在其导入期间禁写字节码（pyc 写入发生在被导入
+# 模块执行前），随后恢复原值——避免本模块被 pytest 等长生命周期进程 import
+# 时永久改变宿主进程的全局缓存行为（__main__ 自身不缓存；本模块在 pytest
+# 进程中的自身缓存由根 .gitignore 兜底）。
+_previous_dont_write_bytecode = sys.dont_write_bytecode
+sys.dont_write_bytecode = True
+try:
+    import hosting  # 托管平台抽象层（ADR-008）：中立 schema，gh/云效差异在其内
+finally:
+    sys.dont_write_bytecode = _previous_dont_write_bytecode
 
 
 class CircuitOpen(RuntimeError):
