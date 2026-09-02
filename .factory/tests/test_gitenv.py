@@ -24,8 +24,7 @@ def test_path_whitelisted_to_anchor_dirs():
     # 白名单 ⊆ 锚定目录 ∪ POSIX 标准目录（宿主私有目录整体剥除）
     allowed = {"/usr/bin", "/bin"}
     for tool in ("python3", "git", "bash"):
-        where = shutil.which(tool)
-        if where:
+        if where := shutil.which(tool):
             allowed.add(os.path.dirname(where))
     assert set(dirs) <= allowed
     # 锚定工具在密闭 PATH 下仍可解析（测试链不断链）
