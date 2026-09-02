@@ -6,24 +6,68 @@ lefthook pre-push 在 git 钩子环境运行测试门禁：GIT_DIR 等仓库发�
 （推送实测：worktree HEAD 出现树仅含 2 个夹具文件的陌生提交，随后
 plugin_lock 因 HEAD 树缺文件连锁失败）。
 
-调用：剥除仓库发现类变量，保留用户显式设置的其余变量。
+issue #109 补密闭两缺口（根因同源：os.environ 逐字渗漏进子进程）：
+- PATH 白名单：只留测试链真正依赖的目录（python3/git/bash 所在目录
+  ∪ /usr/bin:/bin）。宿主 PATH 可见 sourcery（pip user bin）时，
+  夹具内 sync-from-upstream.sh 的 `command -v sourcery` 探测通过 →
+  发真网络请求 → 套件挂起/超时（本机 300s 超时实证）。
+- GIT_CONFIG_GLOBAL/SYSTEM=/dev/null：宿主全局 gitconfig 的
+  commit.gpgsign=true 使夹具 commit rc=128（gpg 签名失败）。命令行
+  -c 与 GIT_AUTHOR_* 等环境变量注入优先级高于文件配置，不受影响
+  （测试显式身份注入原样工作）。
+
+调用：剥除仓库发现类变量 + 上述密闭注入，保留其余变量。
 """
 from __future__ import annotations
 
 import os
+import shutil
 
-# 仓库发现/定位类变量（泄漏即改写 -C/子目录发现结果）。GIT_CONFIG_*
-# 属配置注入，各测试自行决定（breaker 沙箱显式置 /dev/null）。
+# 仓库发现/定位类变量（泄漏即改写 -C/子目录发现结果）。
 _STALE = (
     "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
     "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_GRAFT_FILE",
     "GIT_INDEX_VERSION", "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES",
 )
 
+# 测试子进程链锚定工具（所在目录进 PATH 白名单：python3 → bash → git）
+_ANCHOR_TOOLS = ("python3", "git", "bash")
+# POSIX 标准目录兜底（sed/grep/sh 等 coreutils 所在）
+_FALLBACK_DIRS = ("/usr/bin", "/bin")
+
+
+def _sealed_path() -> str:
+    """PATH 白名单：锚定工具所在目录 ∪ POSIX 标准目录。
+
+    目录级白名单（非工具级）：够跑 python3→bash→git 测试链即可，
+    宿主私有目录（pip user bin 等）整体剥除——sourcery 不可见 →
+    夹具闸 command -v 探测跳过 → 零出网（issue #109 陷阱①）。
+    """
+    dirs: list[str] = []
+    for tool in _ANCHOR_TOOLS:
+        where = shutil.which(tool)
+        d = os.path.dirname(where) if where else None
+        if d and d not in dirs:
+            dirs.append(d)
+    for d in _FALLBACK_DIRS:
+        if d not in dirs:
+            dirs.append(d)
+    return os.pathsep.join(dirs)
+
 
 def git_env(base: dict | None = None) -> dict:
-    """拷贝环境并剥除 git 仓库发现类变量（默认基于 os.environ）。"""
+    """拷贝环境并密闭 git 子进程面（默认基于 os.environ）。
+
+    - 剥除仓库发现类变量（PR #71）
+    - PATH 白名单化 + GIT_CONFIG_GLOBAL/SYSTEM=/dev/null（issue #109）
+
+    base 显式传入的 PATH/GIT_CONFIG_* 会被密闭值覆盖——密闭面不可
+    被调用方松开（breaker 沙箱的显式 /dev/null 注入自此冗余但同值）。
+    """
     env = dict(base if base is not None else os.environ)
     for k in _STALE:
         env.pop(k, None)
+    env["PATH"] = _sealed_path()
+    env["GIT_CONFIG_GLOBAL"] = "/dev/null"
+    env["GIT_CONFIG_SYSTEM"] = "/dev/null"
     return env
