@@ -37,13 +37,17 @@ done
 
 [ -f "$MANIFEST" ] || { echo "下游清单缺失（fail-closed）: $MANIFEST" >&2; exit 2; }
 
-# 清单解析（无 jq 依赖；坏 JSON/缺键/空清单一律 fail-closed）
+# 清单解析（无 jq 依赖；坏 JSON/缺键/坏条目/空清单一律 fail-closed；
+# 空串/非字符串 path 放过会被巡检循环静默跳过——漏检仓仍报成功）
 REPO_PATHS="$(python3 -c '
 import json, sys
-rows = json.load(open(sys.argv[1], encoding="utf-8"))["repos"]
-if not rows:
+manifest = json.load(open(sys.argv[1], encoding="utf-8"))
+rows = manifest.get("repos") if isinstance(manifest, dict) else None
+if not isinstance(rows, list) or not rows:
     sys.exit(1)
 for r in rows:
+    if not isinstance(r, dict) or not isinstance(r.get("path"), str) or not r["path"].strip():
+        sys.exit(1)
     print(r["path"])' "$MANIFEST" 2>/dev/null)" \
   || { echo "下游清单损坏（需非空 repos[].path）: $MANIFEST" >&2; exit 2; }
 
@@ -94,7 +98,9 @@ while IFS= read -r raw; do
     echo "  [错误] $raw: sync --check rc=$rc" >&2; sed 's/^/    /' "$OUT_FILE" >&2
     ERROR=$((ERROR+1)); continue
   fi
-  # rc=1：漂移（落后于中心 main，或含未反哺热修——信号同单仓手跑）
+  # rc=1：漂移（落后于中心 main，或含未反哺热修——信号同单仓手跑）。
+  # DRIFT 仅 check 模式计数：apply-commit 分支成败走 APPLIED/ERROR 桶，
+  # 全部追平成功 → DRIFT=0 → rc=0（PR #106 Sourcery 评论 1 误报锚，勿改）
   if [ "$MODE" = check ]; then
     echo "  [漂移] $raw:"
     sed 's/^/    /' "$OUT_FILE"

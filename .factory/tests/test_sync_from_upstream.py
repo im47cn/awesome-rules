@@ -11,6 +11,8 @@
   → TestRepoMode：产物落目标仓 + lock 含 upstream 字段 + 非 git/缺路径 rc=2
 - --commit 契约（单提交落库 + blame-ignore 滞后一条 + 脏守卫 + 空追平
   不提交——防无漂移重跑链式生成噪音提交）→ TestApplyCommit
+- PR #106 审查回归（--repo 子目录规范化到仓根，防 FACTORY/锁/分发错位；
+  旧锁缺 upstream 字段的空追平须回填）→ TestPR106ReviewRegressions
 """
 
 import glob
@@ -348,3 +350,47 @@ class TestSelfOverwriteSafety:
         lock = json.loads((dn / ".factory/upstream-lock.json").read_text(encoding="utf-8"))
         assert lock["anchor"], "锚点照常写入（半同步态防线）"
         assert not list((dn / ".factory").glob("*.factory-new.*")), "无 tmp 中转残留"
+
+class TestPR106ReviewRegressions:
+    """PR #106 审查评论回归：--repo 子目录规范化到仓根 / 旧锁 upstream 回填。"""
+
+    def test_repo_arg_subdir_resolves_to_toplevel(self, repos):
+        """评论 2：子目录入参须落仓根 .factory，不得错位到 <subdir>/.factory。"""
+        up, dn, anchor = repos
+        sub = dn / "nested" / "deep"
+        sub.mkdir(parents=True)
+        proc = subprocess.run(
+            ["bash", str(dn / ".factory/sync-from-upstream.sh"),
+             str(up), "--repo", str(sub), "--apply", "--anchor", "main"],
+            cwd=sub, env=_run_env(), capture_output=True, text=True,
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        lock = json.loads((dn / ".factory/upstream-lock.json").read_text(encoding="utf-8"))
+        assert lock["anchor"] == anchor
+        assert lock["upstream"] == str(up)
+        assert not (sub / ".factory").exists(), "锁/分发不得错位到子目录（评论 2）"
+
+    def test_apply_backfills_missing_upstream_field(self, repos):
+        """评论 4：旧锁 anchor 未变但缺 upstream 字段时，空追平也须回填。"""
+        up, dn, anchor = repos
+        lock = dn / ".factory/upstream-lock.json"
+        first = subprocess.run(
+            ["bash", str(dn / ".factory/sync-from-upstream.sh"),
+             str(up), "--apply", "--anchor", "main"],
+            cwd=dn, env=_run_env(), capture_output=True, text=True,
+        )
+        assert first.returncode == 0, first.stdout + first.stderr
+        data = json.loads(lock.read_text(encoding="utf-8"))
+        assert data["upstream"] == str(up)
+        del data["upstream"]  # 模拟 M2 前旧锁：anchor 未变、缺来源字段
+        lock.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+                        encoding="utf-8")
+        second = subprocess.run(
+            ["bash", str(dn / ".factory/sync-from-upstream.sh"),
+             str(up), "--apply", "--anchor", "main"],
+            cwd=dn, env=_run_env(), capture_output=True, text=True,
+        )
+        assert second.returncode == 0, second.stdout + second.stderr
+        data = json.loads(lock.read_text(encoding="utf-8"))
+        assert data["upstream"] == str(up), "旧锁缺 upstream 须回填（评论 4）"
+        assert data["anchor"] == anchor
