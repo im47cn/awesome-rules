@@ -76,6 +76,9 @@ replay-eval 链路（详见 `docs/design/skill-evo-replay-eval.md`）：以 `ski
   指向代码或 ADR
 - `prompt_evolution` 型提案不走 apply，人工编辑 `evo_prompt.py` 的 `SYSTEM_PROMPT` 采纳
 
+- evidence 未命中来源会话（`✗` 可疑编造）或经作者改写（`✎` 与 .orig 快照不一致，
+  机器核验不背书）——两者均须人工必审后 `--force`
+
 ## 插件哑故障巡检（evo_patrol）
 
 CC 插件 `failed to load` 不弹通知，hook 静默失效无感知（曾发生：awesome-rules

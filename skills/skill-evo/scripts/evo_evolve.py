@@ -37,8 +37,9 @@ JUDGE_PROMPT = """你是「经验提炼质量」评审。给定：候选 prompt 
   语义匹配时应优先最具体的子节锚点；候选落点比参考更粗（堆在二级标题）计 precision 扣分，
   落到语义不符的锚点按 off_target 处理。
 - evidence_check：来源会话核验状态。hit=逐字命中 / paraphrase=转述拼接（片段命中，
-  可接受）/ miss=可疑编造 / no_corpus=无法核验。候选复现 miss 级 evidence 内容时
-  precision 必须低分；paraphrase 与 hit 同为有效证据形态，不因非逐字扣分。
+  可接受）/ miss=可疑编造 / no_corpus=无法核验 / edited=作者改写件（与 .orig 快照不一致，
+  机器核验不背书——与上方 verdict 的 edited 不同维度，勿混淆）。候选复现 miss 级 evidence
+  内容时 precision 必须低分；paraphrase 与 hit 同为有效证据形态，不因非逐字扣分。
 
 negative_avoidance 按 verdict_codes 精确评估：候选复现被标注 dup_superset /
 content_overlap / low_value / off_target 等模式的内容则低分；trimmed 的教训

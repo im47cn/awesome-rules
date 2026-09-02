@@ -253,6 +253,63 @@ def test_apply_evidence_miss_requires_force(tmp_path, monkeypatch, capsys):
     assert "- 证据核验测试条款" in (repo / "steering" / "demo-spec.md").read_text(encoding="utf-8")
 
 
+def test_apply_evidence_edited_requires_force(tmp_path, monkeypatch, capsys):
+    """issue #113 验收 2（CLI 层）：作者改写 evidence → list 标 ✎、apply 阻断须人工，--force 越过。
+
+    evidence 初值取语料逐字子串——证明 edited 支配 hit：不靠编造也拦。
+    """
+    cfg, base, repo = make_env(tmp_path, monkeypatch)
+    src = tmp_path / "s-evedit.jsonl"
+    cc_fixture(src, cwd=str(tmp_path / "demo-repo"), extra_users=2, sid=src.stem)
+    p = PR.Proposal(id="20260902-140000-cc-xxxx9999", source_agent="cc",
+                    source_session="s", source_path=str(src), created="T",
+                    lessons=[PR.Lesson(
+                        type="correction", evidence="帮我审查这个 DDL",
+                        target_file="steering/demo-spec.md",
+                        confidence="High", reason="r", change=PR.Change(
+                            action="append_end", new_text="- 改写检测测试条款"))])
+    PR.write_proposal(p, base / "proposals" / "pending")
+    md = base / "proposals" / "pending" / f"{p.id}.md"
+    md.write_text(md.read_text(encoding="utf-8").replace(
+        "帮我审查这个 DDL", "帮我审查这个 DDL（改写）"), encoding="utf-8")
+
+    assert evo.cmd_list(SimpleNamespace()) == 0
+    assert "✎" in capsys.readouterr().out
+
+    assert evo.cmd_apply(SimpleNamespace(id="20260902-14", dry_run=False, force=False)) == 1
+    out = capsys.readouterr().out
+    assert "人工" in out and "改写" in out          # 阻断原因明示人工必审
+    assert "- 改写检测测试条款" not in (repo / "steering" / "demo-spec.md").read_text(encoding="utf-8")
+    assert evo.cmd_apply(SimpleNamespace(id="20260902-14", dry_run=False, force=True)) == 0
+    assert "- 改写检测测试条款" in (repo / "steering" / "demo-spec.md").read_text(encoding="utf-8")
+
+
+def test_orig_corrupt_diagnostics_visible_in_list_apply(tmp_path, monkeypatch, capsys):
+    """review F1：损坏 .orig 的 Tripwire 诊断须在 list/apply 输出可见，不静默。"""
+    cfg, base, repo = make_env(tmp_path, monkeypatch)
+    p = PR.Proposal(id="20260902-150000-cc-orig0001", source_agent="cc",
+                    source_session="s", source_path="/tmp/absent.jsonl", created="T",
+                    lessons=[PR.Lesson(
+                        type="correction", evidence="用户说'不要 select *'",
+                        target_file="steering/demo-spec.md",
+                        confidence="High", reason="r", change=PR.Change(
+                            action="append_under", heading="## 强制条款",
+                            new_text="- 禁止 `select *`"))])
+    PR.write_proposal(p, base / "proposals" / "pending")
+    orig = base / "proposals" / "pending" / f"{p.id}.orig"
+    content = orig.read_text(encoding="utf-8")
+    m = PR._JSON_BLOCK_RE.search(content)
+    orig.write_text(content[:m.start()] + "```json\n{\"lessons\": [\n```"
+                    + content[m.end():], encoding="utf-8")
+
+    assert evo.cmd_list(SimpleNamespace()) == 0
+    assert ".orig" in capsys.readouterr().out      # list 可见坏快照诊断
+
+    assert evo.cmd_apply(SimpleNamespace(id="20260902-15", dry_run=True,
+                                         force=False)) == 0
+    assert ".orig" in capsys.readouterr().out      # apply 前同样可见
+
+
 def test_apply_semantic_dup_exitcode(tmp_path, monkeypatch, capsys):
     """验收 1（CLI 层）：语义重复 apply exit 1 + 拦截原因落 pending .md；--force 越过。"""
     cfg, base, repo = make_env(tmp_path, monkeypatch)

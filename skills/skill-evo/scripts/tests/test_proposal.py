@@ -551,6 +551,7 @@ def test_supersedes_validation(tmp_path):
 # ── evidence 核验 ───────────────────────────────────────────────────────────
 
 def test_verify_evidence(tmp_path):
+    """五态核验（issue #113 需求 2 增 edited 态：支配 hit、优先于 no_corpus）。"""
     p = make_proposal(tmp_path, lessons=[
         make_lesson(),                                # evidence 含于语料
         make_lesson(evidence="会话里根本没有这句话"),   # 不含
@@ -567,6 +568,12 @@ def test_verify_evidence(tmp_path):
                         change=PR.Change(action="append_end", new_text="- q"))
     p2 = make_proposal(tmp_path, lessons=[curly])
     assert PR.verify_evidence(p2, '把“恰一次”松绑为可兑现语义') == [(1, "hit")]
+    # issue #113 需求 2：改写件 edited 态——语料含其 evidence 仍 edited（支配 hit），
+    # 空语料不借 no_corpus 蒙混（优先级锁定：edited 源于 .orig 对比，独立于语料）
+    rewritten = make_lesson(evidence_edited=True)
+    p3 = make_proposal(tmp_path, lessons=[rewritten])
+    assert PR.verify_evidence(p3, corpus) == [(1, "edited")]
+    assert PR.verify_evidence(p3, "") == [(1, "edited")]
 
 
 # ── 状态流转 ────────────────────────────────────────────────────────────────
@@ -701,6 +708,192 @@ def test_archive_orig_moves_snapshot(tmp_path):
     assert dest.is_file() and not orig.exists()
     assert PR.archive_orig(tmp_path / "pending" / "absent.md",
                            tmp_path / "applied") is None       # 无快照容错
+
+# ── evidence 改写检测（issue #113：作者改写 evidence 的运行态标记）───────────
+
+def test_load_proposal_detects_evidence_edited(tmp_path):
+    """issue #113 验收 1：作者改写 evidence（人读节+机读块同改）→ evidence_edited。"""
+    p1 = make_proposal(tmp_path, pid="20260902-000001-cc-evid01", lessons=[
+        make_lesson(),
+        make_lesson(evidence="会话原文第二课",
+                    change=PR.Change(action="append_end", new_text="- 另一条")),
+    ])
+    path = PR.write_proposal(p1, tmp_path / "pending")
+    # 模拟作者改写 lesson1 evidence：全文替换（人读节与机读块同改）
+    content = path.read_text(encoding="utf-8")
+    path.write_text(content.replace("用户说'不要用 select *'",
+                                    "用户明确要求禁用全列查询"), encoding="utf-8")
+    loaded = PR.load_proposal(path)
+    assert loaded.lessons[0].evidence_edited is True       # 被改写
+    assert loaded.lessons[1].evidence_edited is False      # 未改写
+
+    # 负向（边界条款）：仅裁剪 new_text、evidence 不变 → 不降级
+    # （手改机读块省略 lesson_id → load 按新内容重派生 id，走②遍配对）
+    p2 = make_proposal(tmp_path, pid="20260902-000002-cc-evid02")
+    path2 = PR.write_proposal(p2, tmp_path / "pending")
+    payload = {"lessons": [{
+        "type": ls.type, "evidence": ls.evidence, "target_file": ls.target_file,
+        "confidence": ls.confidence, "reason": ls.reason,
+        "change": {"action": ls.change.action, "heading": ls.change.heading,
+                   "new_text": "- 禁止 `select *`"}} for ls in p2.lessons]}
+    content2 = path2.read_text(encoding="utf-8")
+    m = PR._JSON_BLOCK_RE.search(content2)
+    path2.write_text(content2[:m.start()] + "```json\n" + json.dumps(
+        payload, ensure_ascii=False, indent=1) + "\n```" + content2[m.end():],
+        encoding="utf-8")
+    after = PR.load_proposal(path2)
+    assert after.lessons[0].lesson_id != p2.lessons[0].lesson_id  # id 确随内容变化
+    assert after.lessons[0].evidence_edited is False             # new_text 编辑不降级
+
+
+def test_load_proposal_detects_evidence_edited_second_pass(tmp_path):
+    """issue #113 验收 1（二遍正向，review F3）：new_text 裁剪致 lesson_id 变化
+    + evidence 改写 → 混合编辑兜底仍置位（正向分支此前零测试，重构破坏无红灯）。"""
+    p = make_proposal(tmp_path, pid="20260902-000009-cc-evid09")
+    path = PR.write_proposal(p, tmp_path / "pending")
+    payload = {"lessons": [{
+        "type": ls.type, "evidence": "用户事后改写的另一句引文",
+        "target_file": ls.target_file,
+        "confidence": ls.confidence, "reason": ls.reason,
+        "change": {"action": ls.change.action, "heading": ls.change.heading,
+                   "new_text": "- 禁止 `select *`"}} for ls in p.lessons]}
+    content = path.read_text(encoding="utf-8")
+    m = PR._JSON_BLOCK_RE.search(content)
+    path.write_text(content[:m.start()] + "```json\n" + json.dumps(
+        payload, ensure_ascii=False, indent=1) + "\n```" + content[m.end():],
+        encoding="utf-8")
+    after = PR.load_proposal(path)
+    assert after.lessons[0].lesson_id != p.lessons[0].lesson_id  # id 随内容变化→二遍
+    assert after.lessons[0].evidence_edited is True              # 混合编辑兜底置位
+
+
+def test_load_proposal_evidence_unchanged_and_no_orig_false(tmp_path):
+    """issue #113 验收 1 负道：未改写全 False；快照缺失时手改也不标（旧行为）。"""
+    path = PR.write_proposal(
+        make_proposal(tmp_path, pid="20260902-000003-cc-evid03"),
+        tmp_path / "pending")
+    loaded = PR.load_proposal(path)
+    assert all(ls.evidence_edited is False for ls in loaded.lessons)   # 未改写
+    # 删 .orig 后手改 evidence：快照缺失=视为未改（issue 接受的游戏边界）
+    PR._orig_path(path).unlink()
+    content = path.read_text(encoding="utf-8")
+    path.write_text(content.replace("用户说'不要用 select *'",
+                                    "作者事后虚构的引文"), encoding="utf-8")
+    reloaded = PR.load_proposal(path)
+    assert reloaded.lessons[0].evidence == "作者事后虚构的引文"
+    assert reloaded.lessons[0].evidence_edited is False                # 快照缺失→不派生
+
+
+def test_load_proposal_orig_corrupt_surfaces(tmp_path):
+    """issue #113：.orig 机读块损坏 → 诊断上浮主件 parse_errors（Tripwire 不静默）。"""
+    path = PR.write_proposal(
+        make_proposal(tmp_path, pid="20260902-000004-cc-evid04"),
+        tmp_path / "pending")
+    orig = PR._orig_path(path)
+    content = orig.read_text(encoding="utf-8")
+    m = PR._JSON_BLOCK_RE.search(content)
+    orig.write_text(content[:m.start()] + "```json\n{\"lessons\": [\n```"
+                    + content[m.end():], encoding="utf-8")
+    p = PR.load_proposal(path)                            # 不抛异常
+    assert any(".orig" in e for e in p.parse_errors)      # 坏快照诊断上浮
+
+
+def test_load_proposal_orig_partial_corrupt_keeps_stored(tmp_path):
+    """PR #114 Sourcery：.orig 部分损坏（坏块+可解析块并存）→ 不清存储标记、
+    不按不完整快照派生——存储的 evidence_edited=True 保留 + 部分损坏警告上浮。"""
+    path = PR.write_proposal(
+        make_proposal(tmp_path, pid="20260902-000010-cc-evid10"),
+        tmp_path / "pending")
+    content = path.read_text(encoding="utf-8")           # 存储通道写入 True（上轮已检出改写）
+    path.write_text(content.replace('"evidence_edited": false',
+                                    '"evidence_edited": true'), encoding="utf-8")
+    orig = PR._orig_path(path)                           # 快照头部插 malformed json 块：
+    oc = orig.read_text(encoding="utf-8")                # 坏块诊断 + 原机读块照常胜出
+    orig.write_text('```json\n{"lessons": [\n```\n' + oc, encoding="utf-8")
+    p = PR.load_proposal(path)
+    assert p.lessons[0].evidence_edited is True          # 不被不完整快照清洗（原 False）
+    assert any("部分损坏" in e for e in p.parse_errors)  # 部分损坏 Tripwire 上浮
+
+
+def test_load_proposal_orig_self_load_no_recursion(tmp_path):
+    """issue #113：直接 load(.orig) 正常返回——_orig_path 对 .orig 求值=自身，
+    load 侧派生必须有 .md 后缀守卫，否则无限自递归（90 份归档全崩）。"""
+    path = PR.write_proposal(
+        make_proposal(tmp_path, pid="20260902-000005-cc-evid05"),
+        tmp_path / "pending")
+    orig = PR._orig_path(path)
+    p = PR.load_proposal(orig)
+    assert len(p.lessons) == 1
+
+
+def test_write_load_roundtrip_evidence_edited_stored(tmp_path):
+    """issue #113 需求 4 存储通道：无 .orig 时读机读块存储值（加性兼容）。"""
+    path = PR.write_proposal(
+        make_proposal(tmp_path, pid="20260902-000006-cc-evid06"),
+        tmp_path / "pending")
+    PR._orig_path(path).unlink()                   # 模拟无快照环境（存量归档态）
+    content = path.read_text(encoding="utf-8")
+    assert '"evidence_edited": false' in content   # write 恒写 False（生成器不变量）
+    path.write_text(content.replace('"evidence_edited": false',
+                                    '"evidence_edited": true'), encoding="utf-8")
+    assert PR.load_proposal(path).lessons[0].evidence_edited is True
+
+
+def test_rewrite_pending_md_preserves_evidence_edited_stored(tmp_path):
+    """issue #113 需求 4 第三序列化路径（review F2）：heading 规范化回写
+    不得洗掉机读块存储的 evidence_edited（无 .orig 时存储值是唯一通道）。"""
+    path = PR.write_proposal(
+        make_proposal(tmp_path, pid="20260902-000010-cc-evid10"),
+        tmp_path / "pending")
+    PR._orig_path(path).unlink()                   # 窄路径：无快照，存储值是唯一来源
+    content = path.read_text(encoding="utf-8")
+    path.write_text(content.replace('"evidence_edited": false',
+                                    '"evidence_edited": true'), encoding="utf-8")
+    p = PR.load_proposal(path)
+    assert p.lessons[0].evidence_edited is True
+    PR._rewrite_pending_md(p, path)                # normalize_headings 的回写通道
+    reloaded = PR.load_proposal(path)
+    assert reloaded.lessons[0].evidence_edited is True   # 回写不洗字段
+
+
+def test_finalize_review_preserves_evidence_edited(tmp_path):
+    """issue #113 需求 4 归档双通道：finalize 落盘派生真值到机读块与 fm 投影。"""
+    path = PR.write_proposal(
+        make_proposal(tmp_path, pid="20260902-000007-cc-evid07"),
+        tmp_path / "pending")
+    content = path.read_text(encoding="utf-8")
+    path.write_text(content.replace("用户说'不要用 select *'",
+                                    "作者改写后的引文"), encoding="utf-8")
+    PR.finalize_review(path, [], rejected=False)
+    text = path.read_text(encoding="utf-8")
+    assert '"evidence_edited": true' in text       # 机读块落盘留痕
+    assert "\nevidence_edited: 1" in text          # fm 投影（行首格式区分机读块键）
+    # 未改写件：N=0 不投影——fm 无 evidence_edited 行（否定式条款）
+    path2 = PR.write_proposal(
+        make_proposal(tmp_path, pid="20260902-000008-cc-evid08"),
+        tmp_path / "pending")
+    PR.finalize_review(path2, [], rejected=False)
+    text2 = path2.read_text(encoding="utf-8")
+    assert "\nevidence_edited: " not in text2
+    assert PR.load_proposal(path2).lessons[0].evidence_edited is False
+
+def test_load_proposal_derived_clears_stale_stored_true(tmp_path):
+    """review 自审 F-R1：快照在且 evidence 与 .orig 一致 → 派生权威清残留存储 True。
+
+    残留可达：改写 evidence → apply/normalize 回写持久化 true（F2 修复后回写保真）
+    → 作者回退改写——当前文本==快照即「未改」，按验收 1 应为 False。"""
+    path = PR.write_proposal(
+        make_proposal(tmp_path, pid="20260902-000011-cc-evid11"),
+        tmp_path / "pending")
+    content = path.read_text(encoding="utf-8")
+    # 仅机读块残留 true（evidence 未动，== .orig）→ 派生基准清残留
+    path.write_text(content.replace('"evidence_edited": false',
+                                    '"evidence_edited": true'), encoding="utf-8")
+    assert PR.load_proposal(path).lessons[0].evidence_edited is False
+    # 对照正向：evidence 真改写（存储 false）→ 派生仍置位，修复不误伤
+    path.write_text(content.replace("用户说'不要用 select *'", "作者回退后再改写"),
+                    encoding="utf-8")
+    assert PR.load_proposal(path).lessons[0].evidence_edited is True
 
 
 def test_verify_evidence_paraphrase(tmp_path):
