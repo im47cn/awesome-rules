@@ -465,10 +465,11 @@ class TestDocstringGateCmd:
         with pytest.raises(RuntimeError, match="docstring_gate_cmd"):
             factory_lib.docstring_gate_cmd()
 
-    @pytest.mark.parametrize("bad_val", ['sh -c "x"', "a\\ b", "a'b"])
-    def test_quote_or_backslash_fails_closed(self, monkeypatch, bad_val):
-        """引号/反斜杠与 final_gate_cmd 同禁（read -r -a 与 shlex 拆词
-        一致性 + ADR-010 漂移锁）。"""
+    @pytest.mark.parametrize("bad_val", ['sh -c "x"', "a\\ b", "a'b",
+                                         "a\nb", "a\rb"])
+    def test_quote_backslash_newline_fails_closed(self, monkeypatch, bad_val):
+        """引号/反斜杠/换行与 final_gate_cmd 同禁（read -r -a 与 shlex 拆词
+        一致性 + ADR-010 漂移锁 + ts#19 换行 argv 分歧收口）。"""
         monkeypatch.setattr(factory_lib, "_LOCAL_CFG",
                             {"docstring_gate_cmd": bad_val})
         with pytest.raises(RuntimeError, match="docstring_gate_cmd"):
@@ -486,6 +487,21 @@ class TestDocstringGateCmd:
                             {"docstring_gate_cmd": "scripts/docstring_gate.py"})
         assert factory_lib.main(["factory_lib.py", "docstring-gate"]) == 0
         assert capsys.readouterr().out == "scripts/docstring_gate.py\n"
+
+
+class TestFinalGateCmdGuards:
+    """final_gate_cmd 校验面锚定：TestDocstringGateCmd 声明「与
+    final_gate_cmd 同规校验」，同规源头在此锚定——防两门校验面漂移分叉。"""
+
+    @pytest.mark.parametrize("bad_val", ['sh -c "x"', "a\\ b", "a'b",
+                                         "a\nb", "a\rb"])
+    def test_quote_backslash_newline_fails_closed(self, monkeypatch, bad_val):
+        """禁引号/反斜杠/换行（ts#19 审查收口：read -r -a 只取 here-string
+        首行，shlex 多行拆词——含换行配置两侧 argv 分歧）。"""
+        monkeypatch.setattr(factory_lib, "_LOCAL_CFG",
+                            {"final_gate_cmd": bad_val})
+        with pytest.raises(RuntimeError, match="final_gate_cmd"):
+            factory_lib.final_gate_cmd()
 
 
 class TestFinalGateSubcommand:

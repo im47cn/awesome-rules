@@ -214,6 +214,17 @@ class TestFinalGateWords:
             json.dumps({"final_gate_cmd": "uv run pytest -q"}), encoding="utf-8")
         assert mut._final_gate_words(cfg) == ["uv", "run", "pytest", "-q"]
 
+    @pytest.mark.parametrize("bad_val", ["a\nb", "a\rb", "a\n"])
+    def test_newline_fails_closed(self, tmp_path, bad_val):
+        """禁含换行（PR #110 Sourcery 追评收口）：read -r -a 只取
+        here-string 首行、shlex 多行拆词——含换行配置两侧 argv 分歧，
+        与 factory_lib 侧同禁。首尾换行负例锁校验位于 strip 前
+        （任何位置换行即拒，与 _local_str 返回原值不 strip 镜像）。"""
+        cfg = tmp_path / "factory-local.json"
+        cfg.write_text(json.dumps({"final_gate_cmd": bad_val}), encoding="utf-8")
+        with pytest.raises(RuntimeError, match="final_gate_cmd"):
+            mut._final_gate_words(cfg)
+
 
 def test_run_gate_executes_final_gate_without_bash_prefix(monkeypatch):
     """tests 门直执 FINAL_GATE（PR #71 Sourcery #1）：bash 前缀会把
@@ -246,8 +257,9 @@ class TestFinalGateDriftLock:
     read -r -a 拆词）与 python 侧（mutations：_final_gate_words +
     shlex.split）是两套实现、两个拆词器——PR #71 Sourcery S1 的 bash
     前缀漂移即双实现产物。保留 python 实现的决策下，一致性必须机械化。
-    拆词器分叉点闭集：引号（shlex 剥除 / read 字面）与反斜杠（shlex
-    转义 / read -r 字面）——双侧校验同禁后，纯空白分隔下两拆词器逐词
+    拆词器分叉点闭集：引号（shlex 剥除 / read 字面）、反斜杠（shlex
+    转义 / read -r 字面）与换行（read -r -a 只取首行 / shlex 多行拆
+    词）——双侧校验同禁后，纯空白分隔下两拆词器逐词
     相等；活配置单一事实源断言锁住「两侧永远消费同一字符串」。
     """
 
@@ -308,10 +320,29 @@ class TestFinalGateDriftLock:
         finally:
             factory_lib._LOCAL_CFG = orig
 
+    @pytest.mark.parametrize("bad", ["a\nb", "a\rb", "a\n"])
+    def test_rejects_newline_divergence(self, tmp_path, bad):
+        """换行分叉锁（PR #110 Sourcery 追评收口）：read -r -a 只取
+        here-string 首行、shlex 多行拆词——词数即不同，且旧校验（禁
+        引号+反斜杠）双侧都放行。双侧同禁后「过校验 ⇒ 两侧拆词逐词
+        一致」不变量对换行同样闭环。"""
+        cfg = tmp_path / "factory-local.json"
+        cfg.write_text(json.dumps({"final_gate_cmd": bad}), encoding="utf-8")
+        with pytest.raises(RuntimeError):
+            mut._final_gate_words(cfg)          # python 侧拒绝
+        import factory_lib
+        orig = factory_lib._LOCAL_CFG
+        try:
+            factory_lib._LOCAL_CFG = {"final_gate_cmd": bad}
+            with pytest.raises(RuntimeError):
+                factory_lib.final_gate_cmd()    # shell 供词侧同拒
+        finally:
+            factory_lib._LOCAL_CFG = orig
+
 
 class TestDocstringGateWords:
     """docstring_gate_cmd 加载（2026-08-31 可选门）：键缺失 → None；
-    键存在 → 与 final_gate_cmd 同规（非空字符串 + 禁引号/反斜杠）。"""
+    键存在 → 与 final_gate_cmd 同规（非空字符串 + 禁引号/反斜杠/换行）。"""
 
     def test_missing_key_returns_none(self, tmp_path):
         cfg = tmp_path / "factory-local.json"
@@ -335,6 +366,15 @@ class TestDocstringGateWords:
         cfg = tmp_path / "factory-local.json"
         cfg.write_text(json.dumps({"docstring_gate_cmd": 'sh -c "x"'}),
                        encoding="utf-8")
+        with pytest.raises(RuntimeError, match="docstring_gate_cmd"):
+            mut._docstring_gate_words(cfg)
+
+    @pytest.mark.parametrize("bad_val", ["a\nb", "a\rb", "a\n"])
+    def test_newline_fails_closed(self, tmp_path, bad_val):
+        """禁含换行（与 _final_gate_words/factory_lib 侧同禁，PR #110
+        Sourcery 追评收口）。"""
+        cfg = tmp_path / "factory-local.json"
+        cfg.write_text(json.dumps({"docstring_gate_cmd": bad_val}), encoding="utf-8")
         with pytest.raises(RuntimeError, match="docstring_gate_cmd"):
             mut._docstring_gate_words(cfg)
 

@@ -837,8 +837,12 @@ class CodeupAdapter:
         # 【live 2026-08-26】LinkMergeRequestLabel body 键是 labelIdList
         # （labelIds/labels/labelId 均被拒："Invalid param value [null]"）
         if ids:
-            self._req("POST", f"{self._base()}/changeRequests/{p}/labels",
-                      body={"labelIdList": ids})
+            try:
+                self._req("POST", f"{self._base()}/changeRequests/{p}/labels",
+                          body={"labelIdList": ids})
+            except HostingError as e:
+                print(f"[hosting] 类标 Link 降级（标记评论已承载）: {e}",
+                      file=sys.stderr)
         return True
 
     def _label_id(self, name):

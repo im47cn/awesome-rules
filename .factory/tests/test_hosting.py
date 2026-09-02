@@ -163,6 +163,17 @@ class TestCodeupShapes:
         assert n["labels"] == ["factory:needs-fix"]
         assert n["head"] == "s" and n["base"] == "t"
 
+    def test_pr_set_labels_link_post_degrades(self, monkeypatch, capsys):
+        """类标 Link POST 失败 → 降级告警不冒泡（skills#12 审查收口：标记
+        评论已承载状态机语义，Link 仅平台原生补充——对齐 _label_id 降级）。"""
+        ad = self._ad({
+            ("POST", "/changeRequests/3/comments"): {"result": {"id": "c1"}},
+            ("GET", "/labels"): [{"name": "factory:needs-review", "id": 7}],
+            # 故意不路由 POST .../labels → fake_req 抛 HostingError → 降级
+        }, monkeypatch)
+        assert ad.pr_set_labels(3, add=["factory:needs-review"]) is True
+        assert "类标 Link 降级" in capsys.readouterr().err
+
         ad2 = self._ad({("GET", "/changeRequests/4"): {
             "result": {"localId": 4, "newVersionState": "MERGED",
                        "reviewers": [{"reviewOpinionStatus": "PASS"},

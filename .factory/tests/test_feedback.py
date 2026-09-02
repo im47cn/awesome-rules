@@ -322,12 +322,13 @@ def test_gather_commits_merges_files(monkeypatch):
     """_files_by_sha 结果必须挂回 commits（feedable/pending 判定的 files 来源）。"""
     commits = [{"sha": "a" * 40, "subject": "s", "feedable": True},
                {"sha": "b" * 40, "subject": "t", "feedable": False}]
-    fbs = {"a" * 40: {"factory_lib.py"}, "b" * 40: {"hosting.py"}}
+    # b 不提供映射：.get(sha, set()) 空集回退必须被测到（python#26 审查
+    # 收口——夹具若给全映射，回归为直接索引 fbs[sha] 后 KeyError 不可见）
+    fbs = {"a" * 40: {"factory_lib.py"}}
     monkeypatch.setattr(feedback, "_git_log_commits", lambda: commits)
     monkeypatch.setattr(feedback, "_files_by_sha", lambda: fbs)
     out = feedback._gather_commits()
     assert out[0]["files"] == {"factory_lib.py"}
-    assert out[1]["files"] == {"hosting.py"}
     # 未触碰资产的提交 → 空集（feedable_assets/collect_pending 的 .get 契约）
-    assert out[0]["files"] == fbs["a" * 40]
+    assert out[1]["files"] == set()
     assert out[1]["feedable"] is False
