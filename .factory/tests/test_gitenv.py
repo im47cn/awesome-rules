@@ -7,6 +7,11 @@
   → test_git_config_sealed_to_dev_null
 - 密闭面不可被 base 松开（毒化 PATH/GIT_CONFIG_* 被覆盖）
   → test_sealed_overrides_base_poison
+- PR #111 Sourcery 评论①（宿主 PATH 参与白名单推导：锚定工具与
+  sourcery 同目录共存时白名单泄漏该目录）→ test_host_path_excluded
+- PR #111 Sourcery 评论②（GIT_CONFIG 环境注入族优先级高于文件
+  密封值，未剥除则 gpgsign 仍可注入）
+  → test_git_config_injection_family_stripped
 - PR #71 原契约不回归（仓库发现变量剥除）
   → test_stale_repo_discovery_stripped
 - base 拷贝语义（不原地改写调用方 dict）
@@ -15,7 +20,7 @@
 import os
 import shutil
 
-from gitenv import _sealed_path, git_env
+from gitenv import _FALLBACK_DIRS, _sealed_path, git_env
 
 
 def test_path_whitelisted_to_anchor_dirs():
@@ -35,6 +40,41 @@ def test_path_whitelisted_to_anchor_dirs():
     sr_host = shutil.which("sourcery")
     if sr_host and os.path.dirname(sr_host) not in allowed:
         assert shutil.which("sourcery", path=env["PATH"]) is None
+
+
+def test_host_path_excluded(tmp_path, monkeypatch):
+    # PR #111 Sourcery 评论①：宿主 PATH 永不参与白名单推导——
+    # 锚定工具与 sourcery 同目录共存的宿主形态不可再泄漏该目录
+    fake = tmp_path / "hostbin"
+    fake.mkdir()
+    for name in ("python3", "git", "bash", "sourcery"):
+        exe = fake / name
+        exe.write_text("#!/bin/sh\n")
+        exe.chmod(0o755)
+    monkeypatch.setenv("PATH", str(fake))
+    sealed = _sealed_path()
+    assert str(fake) not in sealed.split(os.pathsep)
+    # POSIX 标准目录兜底不因宿主 PATH 形态而丢失（测试链不断链）
+    for d in _FALLBACK_DIRS:
+        assert d in sealed.split(os.pathsep)
+
+
+def test_git_config_injection_family_stripped():
+    # PR #111 Sourcery 评论②：GIT_CONFIG_COUNT/KEY_n/VALUE_n/
+    # PARAMETERS 环境注入优先级高于 GLOBAL/SYSTEM 密封值——
+    # 泄漏则 gpgsign 等仍可注入
+    base = {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "commit.gpgsign",
+        "GIT_CONFIG_VALUE_0": "true",
+        "GIT_CONFIG_PARAMETERS": "'commit.gpgsign=true'",
+    }
+    env = git_env(base)
+    for k in base:
+        assert k not in env
+    # 剥除断面只限注入族：文件密封值照常注入
+    assert env["GIT_CONFIG_GLOBAL"] == "/dev/null"
+    assert env["GIT_CONFIG_SYSTEM"] == "/dev/null"
 
 
 def test_git_config_sealed_to_dev_null():
