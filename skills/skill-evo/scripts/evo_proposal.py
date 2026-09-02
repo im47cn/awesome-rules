@@ -67,6 +67,18 @@ class Proposal:
     status: str = "pending"
     lessons: List[Lesson] = field(default_factory=list)
     parse_errors: List[str] = field(default_factory=list)   # 坏机读块诊断（issue #81）
+    # 跨会话来源全集（含 source_path 首源）：复盘型提案的 evidence 常分布于
+    # 多个会话段（发现/误处置/纠正/修复各在一处），单源核验会误报"可疑编造"。
+    # source_path 保留为首源（向后兼容），source_paths 为核验用的全量列表。
+    source_paths: List[str] = field(default_factory=list)
+
+    def all_source_paths(self) -> List[str]:
+        """核验语料路径全集：source_path 在前 + source_paths 去重追加。"""
+        out = [self.source_path] if self.source_path else []
+        for s in self.source_paths:
+            if s and s not in out:
+                out.append(s)
+        return out
 
     def warnings(self) -> List[str]:
         """应用前的护栏检查（不阻断，apply 时要求确认/--force）。"""
@@ -193,27 +205,40 @@ def migrate_proposals(root: Path, *, fix: bool = False) -> dict:
     return report
 
 
+def _fm_source_paths(p: Proposal) -> str:
+    """frontmatter 多源块：首源之外的附加源（YAML 列表）；空则空串。"""
+    extra = [s for s in p.source_paths if s and s != p.source_path]
+    if not extra:
+        return ""
+    return "source_paths:\n" + "".join(f"  - {s}\n" for s in extra)
+
+
 def write_proposal(p: Proposal, pending_dir: Path) -> Path:
 
     pending_dir.mkdir(parents=True, exist_ok=True)
     path = pending_dir / f"{p.id}.md"
     fm = (f"---\nid: {p.id}\nstatus: {p.status}\nsource_agent: {p.source_agent}\n"
           f"source_session: {p.source_session}\nsource_path: {p.source_path}\n"
-          f"created: {p.created}\nlessons: {len(p.lessons)}\n---\n")
+          + _fm_source_paths(p)
+          + f"created: {p.created}\nlessons: {len(p.lessons)}\n---\n")
     for ls in p.lessons:
         ls.lesson_id = ls.lesson_id or derive_lesson_id(ls)
     rendered = "\n".join(_render_lesson(i, ls) for i, ls in enumerate(p.lessons, 1))
-    payload = {"lessons": [{
+    payload = {"source_paths": p.all_source_paths()} if p.source_paths else {}
+    payload["lessons"] = [{
         "type": ls.type, "evidence": ls.evidence, "target_file": ls.target_file,
         "confidence": ls.confidence, "reason": ls.reason,
         "knowledge_type": ls.knowledge_type,
         "lesson_id": ls.lesson_id, "supersedes": ls.supersedes,
         "change": {"action": ls.change.action, "heading": ls.change.heading,
                    "new_text": ls.change.new_text} if ls.change else None,
-    } for ls in p.lessons]}
+    } for ls in p.lessons]
     machine = _machine_block(payload)
+    src_note = (f"（{p.source_path}）" if len(p.all_source_paths()) <= 1
+                else f"（跨 {len(p.all_source_paths())} 会话源："
+                     + "、".join(Path(s).name for s in p.all_source_paths()) + "）")
     body = (f"{fm}\n# 进化提案 {p.id}\n\n> 来源：{p.source_agent} 会话 `{p.source_session}`"
-            f"（{p.source_path}）\n\n{rendered}\n\n## 机读数据（apply 依据，勿手改）\n\n{machine}\n")
+            f"{src_note}\n\n{rendered}\n\n## 机读数据（apply 依据，勿手改）\n\n{machine}\n")
     path.write_text(body, encoding="utf-8")
     _verify_machine_block(path)
     # 原始快照（无 .md 后缀：绕开 list/守卫/md_link_check 的 *.md glob）——
@@ -224,15 +249,39 @@ def write_proposal(p: Proposal, pending_dir: Path) -> Path:
     return path
 
 
+def _parse_fm_source_paths(fm_lines: List[str]) -> List[str]:
+    """frontmatter 多源列表解析：`source_paths:` 后的缩进 `- path` 行序列。"""
+    out: List[str] = []
+    in_block = False
+    for line in fm_lines:
+        if line.startswith("source_paths:"):
+            in_block = True
+            continue
+        if in_block:
+            stripped = line.strip()
+            if stripped.startswith("- "):
+                out.append(stripped[2:].strip())
+            elif stripped == "":
+                continue
+            else:
+                in_block = False   # 列表结束，回到键值区
+    return out
+
+
 def load_proposal(path: Path) -> Proposal:
     content = path.read_text(encoding="utf-8")
     fm = {}
+    fm_lines: List[str] = []
     if content.startswith("---"):
         end = content.find("\n---", 3)
         if end != -1:
-            for line in content[3:end].strip().splitlines():
+            fm_lines = content[3:end].strip().splitlines()
+            for line in fm_lines:
                 key, _, val = line.partition(":")
+                if key.strip() == "source_paths" or (line.startswith("  ") and val == ""):
+                    continue   # 多源列表行：由 _parse_fm_source_paths 专门解析
                 fm[key.strip()] = val.strip()
+    source_paths = _parse_fm_source_paths(fm_lines)
     lessons: List[Lesson] = []
     errors: List[str] = []
     payload = None
@@ -266,13 +315,16 @@ def load_proposal(path: Path) -> Proposal:
                     verdict_codes=[str(c) for c in ls.get("verdict_codes") or []]))
         except json.JSONDecodeError:
             pass
+        # fm 列表丢失时以机读块 source_paths 兜底（fm 被外设工具剥离的场景）
+        if not source_paths and isinstance(payload.get("source_paths"), list):
+            source_paths = [str(s) for s in payload["source_paths"]]
     for ls in lessons:
         ls.lesson_id = ls.lesson_id or derive_lesson_id(ls)   # 旧提案兼容：按内容补派生
     return Proposal(
         id=fm.get("id", path.stem), source_agent=fm.get("source_agent", "?"),
         source_session=fm.get("source_session", "?"), source_path=fm.get("source_path", "?"),
         created=fm.get("created", "?"), status=fm.get("status", "pending"), lessons=lessons,
-        parse_errors=errors)
+        parse_errors=errors, source_paths=source_paths)
 
 
 def list_proposals(status_dir: Path) -> List[Proposal]:
@@ -561,19 +613,23 @@ def _default_pending_md(p: Proposal) -> Path:
 def _render_pending_body(p: Proposal) -> str:
     fm = (f"---\nid: {p.id}\nstatus: {p.status}\nsource_agent: {p.source_agent}\n"
           f"source_session: {p.source_session}\nsource_path: {p.source_path}\n"
-          f"created: {p.created}\nlessons: {len(p.lessons)}\n---\n")
+          + _fm_source_paths(p)
+          + f"created: {p.created}\nlessons: {len(p.lessons)}\n---\n")
     rendered = "\n".join(_render_lesson(i, ls) for i, ls in enumerate(p.lessons, 1))
-    payload = {"lessons": [{
+    payload = {"source_paths": p.all_source_paths()} if p.source_paths else {}
+    payload["lessons"] = [{
         "type": ls.type, "evidence": ls.evidence, "target_file": ls.target_file,
         "confidence": ls.confidence, "reason": ls.reason,
         "knowledge_type": ls.knowledge_type,
         "lesson_id": ls.lesson_id, "supersedes": ls.supersedes,
         "change": {"action": ls.change.action, "heading": ls.change.heading,
                    "new_text": ls.change.new_text} if ls.change else None,
-    } for ls in p.lessons]}
+    } for ls in p.lessons]
     machine = _machine_block(payload)
+    src_note = (f"（{p.source_path}）" if len(p.all_source_paths()) <= 1
+                else f"（跨 {len(p.all_source_paths())} 会话源）")
     return (f"{fm}\n# 进化提案 {p.id}\n\n> 来源：{p.source_agent} 会话 `{p.source_session}`"
-            f"（{p.source_path}）\n\n{rendered}\n\n## 机读数据（apply 依据，勿手改）\n\n{machine}\n")
+            f"{src_note}\n\n{rendered}\n\n## 机读数据（apply 依据，勿手改）\n\n{machine}\n")
 
 def _rewrite_pending_md(p: Proposal, md_path: Path) -> None:
     """按当前内存态重写 pending .md（.orig 快照不动——verdict 推导依据）。"""
