@@ -82,6 +82,69 @@ def test_write_multiline_lesson_strict_roundtrip(tmp_path):
     assert p.lessons[0].change.new_text == ls.change.new_text
 
 
+def make_multi_source_proposal(tmp_path, extra_paths=None):
+    p = make_proposal(tmp_path)
+    p.source_paths = extra_paths or ["/tmp/s-1.jsonl", "/tmp/s-2.jsonl", "/tmp/s-3.jsonl"]
+    return p
+
+
+class TestMultiSourcePaths:
+    """跨会话多源（source_paths）：复盘型提案 evidence 分布于多个会话段。"""
+
+    def test_roundtrip_fm_list_and_machine_block(self, tmp_path):
+        """write→load：fm 多行列表与机读块数组双通道回读一致；严格 JSON 可解析。"""
+        p = make_multi_source_proposal(tmp_path)
+        path = PR.write_proposal(p, tmp_path / "pending")
+        text = path.read_text(encoding="utf-8")
+        assert "source_paths:\n  - /tmp/s-2.jsonl\n  - /tmp/s-3.jsonl\n" in text
+        m = PR._JSON_BLOCK_RE.search(text)
+        payload = json.loads(m.group(1))              # strict
+        assert payload["source_paths"] == p.all_source_paths()
+        loaded = PR.load_proposal(path)
+        assert loaded.all_source_paths() == p.all_source_paths()
+
+    def test_single_source_unchanged(self, tmp_path):
+        """单源（source_paths 空）：fm 无 source_paths 行，机读块无 source_paths 键——
+        与旧格式逐字节兼容（load 侧 source_paths == []）。"""
+        p = make_proposal(tmp_path)
+        path = PR.write_proposal(p, tmp_path / "pending")
+        text = path.read_text(encoding="utf-8")
+        assert "\nsource_paths:" not in text
+        m = PR._JSON_BLOCK_RE.search(text)
+        assert "source_paths" not in json.loads(m.group(1))
+        assert PR.load_proposal(path).source_paths == []
+
+    def test_all_source_paths_dedup_keeps_first(self):
+        """全集去重：source_path 恒为首位，重复附加源剔除。"""
+        q = PR.Proposal(id="x", source_agent="a", source_session="s",
+                        source_path="/a.jsonl", created="t",
+                        source_paths=["/b.jsonl", "/a.jsonl", "/b.jsonl"])
+        assert q.all_source_paths() == ["/a.jsonl", "/b.jsonl"]
+        assert PR.Proposal(id="y", source_agent="a", source_session="s",
+                           source_path="", created="t").all_source_paths() == []
+
+    def test_verify_evidence_cross_source_hit(self, tmp_path):
+        """跨源核验：lesson1 evidence 只在源 A、lesson2 只在源 B——合并语料双 hit；
+        单源语料（旧行为）下 lesson2 必 miss。"""
+        ls_a = make_lesson(evidence="甲源独有证据 alpha-bravo-charlie")
+        ls_b = make_lesson(evidence="乙源独有证据 delta-echo-foxtrot")
+        p = make_proposal(tmp_path, lessons=[ls_a, ls_b])
+        corpus_merged = "甲源独有证据 alpha-bravo-charlie\n\n unrelated\n\n乙源独有证据 delta-echo-foxtrot"
+        assert dict(PR.verify_evidence(p, corpus_merged)) == {1: "hit", 2: "hit"}
+        corpus_single = "甲源独有证据 alpha-bravo-charlie only"
+        assert dict(PR.verify_evidence(p, corpus_single)) == {1: "hit", 2: "miss"}
+
+    def test_load_fm_block_fallback_to_machine(self, tmp_path):
+        """fm 列表被剥离（外设工具清洗）：机读块 source_paths 数组兜底。"""
+        p = make_multi_source_proposal(tmp_path)
+        path = PR.write_proposal(p, tmp_path / "pending")
+        text = path.read_text(encoding="utf-8")
+        stripped = text.replace("source_paths:\n  - /tmp/s-2.jsonl\n  - /tmp/s-3.jsonl\n", "")
+        path.write_text(stripped, encoding="utf-8")
+        loaded = PR.load_proposal(path)
+        assert loaded.all_source_paths() == p.all_source_paths()
+
+
 def _corrupt_machine_block(path):
     """块内首个转义换行 \\n → 裸换行（重现 issue #81 坏件：非法控制字符）。"""
     text = path.read_text(encoding="utf-8")

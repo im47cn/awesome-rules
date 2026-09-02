@@ -243,15 +243,21 @@ def _find_pending(cfg: dict, pid: str) -> Path:
 
 
 def _session_corpus(p: PR.Proposal) -> str:
-    """证据核验语料：来源会话的原始消息文本（脱敏后拼接）。缺失/解析失败返回空。"""
-    src = Path(p.source_path)
-    if not src.is_file():
-        return ""
-    try:
-        sess = S.parse_session(S.sniff_agent(src), src)
-        return "\n".join(P.sanitize(m.text) for m in sess.messages)
-    except Exception:
-        return ""
+    """证据核验语料：全部来源会话（source_path 首源 + source_paths 附加源）的
+    原始消息文本（脱敏后拼接）。跨会话复盘型提案的 evidence 分布于多个会话段，
+    单源语料会误报"可疑编造"。单个源缺失/解析失败跳过（不拖垮其余源），
+    全部不可用返回空（verify 转为 no_corpus，不误判 miss）。"""
+    parts: list = []
+    for src_str in p.all_source_paths():
+        src = Path(src_str)
+        if not src.is_file():
+            continue
+        try:
+            sess = S.parse_session(S.sniff_agent(src), src)
+            parts.append("\n".join(P.sanitize(m.text) for m in sess.messages))
+        except Exception:
+            continue
+    return "\n\n".join(parts)
 
 
 def _evidence_warnings(checks: list) -> list:
@@ -296,7 +302,9 @@ def cmd_apply(args) -> int:
     checks = PR.verify_evidence(proposal, _session_corpus(proposal))
     for i, status in checks:
         if status == "no_corpus":
-            print(f"ℹ lesson {i}: 来源会话缺失（{proposal.source_path}），evidence 无法核验")
+            srcs = proposal.all_source_paths()
+            note = srcs[0] if len(srcs) == 1 else f"{len(srcs)} 个来源会话均缺失/不可解析"
+            print(f"ℹ lesson {i}: 来源会话缺失（{note}），evidence 无法核验")
         elif status == "paraphrase":
             print(f"ℹ lesson {i}: evidence 为转述拼接（最长连续命中 ≥{PR.PARAPHRASE_MIN_CHARS} 字），"
                   "非逐字引用但不拦应用，人工抽查可关注")

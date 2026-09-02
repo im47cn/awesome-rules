@@ -221,6 +221,22 @@ class TestDispatchParsers:
             ["ssh://git@ssh.github.com:443/im47cn/awesome-rules.git"]
         ) == "im47cn/awesome-rules"
         assert extract_slug(["ssh://ssh.github.com/o/r.git"]) == "o/r"
+    def test_extract_slug_github_wop_bot_alias(self):
+        """~/.ssh/config 的 github-wop-bot Host 别名（wop-platform 托管
+        机器事实配置）：host 锚定须认别名——无 remote 重命名兜底（新
+        checkout 即用）。2026-09-01：origin 别名 URL 曾被拒 → dispatch
+        exit 2 停摆（与 ssh.github.com 同族回归）。"""
+        assert extract_slug(
+            ["git@github-wop-bot:wop-platform/wop-go-sdk.git"]
+        ) == "wop-platform/wop-go-sdk"
+        assert extract_slug(["git@github-wop-bot.com:o/r.git"]) == ""
+
+    def test_extract_slug_codeup_rejected(self):
+        """Codeup（阿里云效）URL 不匹配 GitHub 锚定：未接入仓 fail-closed
+        空串，不得误解析为 GitHub slug（ADR-008 平台隔离）。"""
+        assert extract_slug(
+            ["git@codeup.aliyun.com:610b3c9d86508f8da8b08436/gtsp/x.git"]
+        ) == ""
 
     def test_extract_slug_spoof_hosts_rejected(self):
         """伪装主机负控制：权威主机锚定后以 [/:] 定界，子串/后缀伪装全拒。"""
@@ -229,6 +245,45 @@ class TestDispatchParsers:
         assert extract_slug(["ssh://git@ssh.github.com.evil.com:443/o/r.git"]) == ""
         assert extract_slug(["https://ssh.github.com.evil.com/o/r"]) == ""
         assert extract_slug(["git@notssh.github.com:o/r.git"]) == ""
+
+    def test_codeup_remote_derivation(self, monkeypatch):
+        """CodeupAdapter._remote 双形态推导（PR #112 Sourcery 评论②）：
+        https:// 与 SSH/scp 等价解析 org/ns/repo；解析失败 (None, None)。"""
+        from types import SimpleNamespace
+
+        a = hosting_mod.CodeupAdapter(repo=".")
+        cases = [
+            ("https://codeup.aliyun.com/6ab/gtsp/x.git", ("6ab", "gtsp/x")),
+            ("https://codeup.aliyun.com/6ab/gtsp/x", ("6ab", "gtsp/x")),
+            ("ssh://git@codeup.aliyun.com:22/6ab/gtsp/x.git", ("6ab", "gtsp/x")),
+            ("git@codeup.aliyun.com:6ab/gtsp/x.git", ("6ab", "gtsp/x")),
+            ("https://codeup.aliyun.com/only-org", (None, None)),
+        ]
+        for url, want in cases:
+            monkeypatch.setattr(
+                hosting_mod.subprocess, "run",
+                lambda *args, **kw: SimpleNamespace(stdout=url + "\n", returncode=0))
+            assert a._remote() == want, url
+
+    def test_detect_hosting_host_anchor(self, monkeypatch):
+        """codeup 域名精确锚定（CodeQL：子串匹配可被 URL 任意位置伪造）：
+        后缀伪装/路径含域名形态全拒。"""
+        from types import SimpleNamespace
+
+        monkeypatch.delenv("FACTORY_HOSTING", raising=False)
+
+        def detect(url):
+            monkeypatch.setattr(
+                hosting_mod.subprocess, "run",
+                lambda *args, **kw: SimpleNamespace(stdout=url + "\n", returncode=0))
+            return hosting_mod._detect_hosting(".")
+
+        assert detect("https://codeup.aliyun.com/6ab/gtsp/x.git") == "codeup"
+        assert detect("git@codeup.aliyun.com:6ab/gtsp/x.git") == "codeup"
+        assert detect("https://codeup.aliyun.com.evil.com/6ab/x.git") == "github"
+        assert detect("https://evil.com/codeup.aliyun.com/6ab/x.git") == "github"
+        assert detect("https://github.com/o/r.git") == "github"
+        assert detect("") == "github"
 
 class TestDispatchConfig:
     """MAX_PARALLEL 配置错误必须 fail-fast（PR #53 审查②）：0/负/非整数
