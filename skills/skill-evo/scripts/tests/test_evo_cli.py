@@ -269,7 +269,7 @@ def test_apply_evidence_edited_requires_force(tmp_path, monkeypatch, capsys):
                         confidence="High", reason="r", change=PR.Change(
                             action="append_end", new_text="- 改写检测测试条款"))])
     PR.write_proposal(p, base / "proposals" / "pending")
-    md = base / "proposals" / "pending" / (p.id + ".md")
+    md = base / "proposals" / "pending" / f"{p.id}.md"
     md.write_text(md.read_text(encoding="utf-8").replace(
         "帮我审查这个 DDL", "帮我审查这个 DDL（改写）"), encoding="utf-8")
 
@@ -296,7 +296,7 @@ def test_orig_corrupt_diagnostics_visible_in_list_apply(tmp_path, monkeypatch, c
                             action="append_under", heading="## 强制条款",
                             new_text="- 禁止 `select *`"))])
     PR.write_proposal(p, base / "proposals" / "pending")
-    orig = base / "proposals" / "pending" / (p.id + ".orig")
+    orig = base / "proposals" / "pending" / f"{p.id}.orig"
     content = orig.read_text(encoding="utf-8")
     m = PR._JSON_BLOCK_RE.search(content)
     orig.write_text(content[:m.start()] + "```json\n{\"lessons\": [\n```"

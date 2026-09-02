@@ -290,10 +290,16 @@ def load_proposal(path: Path) -> Proposal:
                 if lessons and not orig_p.lessons:
                     errors.append(f"{orig_file.name}: 快照无可解析 lessons，"
                                   "evidence 改写检测失效（请连同 .orig 上报）")
-                elif orig_p.lessons:
-                    for ls in lessons:    # 快照可解析→派生权威：先清残留存储值再置位
+                elif orig_p.parse_errors:
+                    # 部分损坏（坏块+可解析块并存）：快照 lessons 不完整，派生会把
+                    # 快照缺失条目误判为未改写——保留存储值，仅上浮诊断（PR #114）
+                    errors.append(f"{orig_file.name}: 快照部分损坏"
+                                  f"（{len(orig_p.parse_errors)} 处解析错误），"
+                                  "evidence 改写检测保留存储值（请连同 .orig 上报）")
+                else:
+                    for ls in lessons:    # 快照完好→派生权威：先清残留存储值再置位
                         ls.evidence_edited = False
-                _derive_evidence_edited(lessons, orig_p.lessons)
+                    _derive_evidence_edited(lessons, orig_p.lessons)
     return Proposal(
         id=fm.get("id", path.stem), source_agent=fm.get("source_agent", "?"),
         source_session=fm.get("source_session", "?"), source_path=fm.get("source_path", "?"),
@@ -865,7 +871,7 @@ def finalize_review(path: Path, raw_codes: List[str], *, rejected: bool) -> Path
     summary = ", ".join(f"{k}={n}" for k, n in counts.items())
     if codes:
         summary += f"；codes={','.join(sorted(set(codes)))}"
-    n_edited = sum(1 for ls in p.lessons if ls.evidence_edited)
+    n_edited = sum(ls.evidence_edited for ls in p.lessons)
     edited_line = f"evidence_edited: {n_edited}\n" if n_edited else ""
     content = content.replace(
         f"lessons: {len(p.lessons)}\n",

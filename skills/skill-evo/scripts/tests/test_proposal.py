@@ -735,6 +735,23 @@ def test_load_proposal_orig_corrupt_surfaces(tmp_path):
     assert any(".orig" in e for e in p.parse_errors)      # 坏快照诊断上浮
 
 
+def test_load_proposal_orig_partial_corrupt_keeps_stored(tmp_path):
+    """PR #114 Sourcery：.orig 部分损坏（坏块+可解析块并存）→ 不清存储标记、
+    不按不完整快照派生——存储的 evidence_edited=True 保留 + 部分损坏警告上浮。"""
+    path = PR.write_proposal(
+        make_proposal(tmp_path, pid="20260902-000010-cc-evid10"),
+        tmp_path / "pending")
+    content = path.read_text(encoding="utf-8")           # 存储通道写入 True（上轮已检出改写）
+    path.write_text(content.replace('"evidence_edited": false',
+                                    '"evidence_edited": true'), encoding="utf-8")
+    orig = PR._orig_path(path)                           # 快照头部插 malformed json 块：
+    oc = orig.read_text(encoding="utf-8")                # 坏块诊断 + 原机读块照常胜出
+    orig.write_text('```json\n{"lessons": [\n```\n' + oc, encoding="utf-8")
+    p = PR.load_proposal(path)
+    assert p.lessons[0].evidence_edited is True          # 不被不完整快照清洗（原 False）
+    assert any("部分损坏" in e for e in p.parse_errors)  # 部分损坏 Tripwire 上浮
+
+
 def test_load_proposal_orig_self_load_no_recursion(tmp_path):
     """issue #113：直接 load(.orig) 正常返回——_orig_path 对 .orig 求值=自身，
     load 侧派生必须有 .md 后缀守卫，否则无限自递归（90 份归档全崩）。"""
