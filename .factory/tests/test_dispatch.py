@@ -221,6 +221,22 @@ class TestDispatchParsers:
             ["ssh://git@ssh.github.com:443/im47cn/awesome-rules.git"]
         ) == "im47cn/awesome-rules"
         assert extract_slug(["ssh://ssh.github.com/o/r.git"]) == "o/r"
+    def test_extract_slug_github_wop_bot_alias(self):
+        """~/.ssh/config 的 github-wop-bot Host 别名（wop-platform 托管
+        机器事实配置）：host 锚定须认别名——无 remote 重命名兜底（新
+        checkout 即用）。2026-09-01：origin 别名 URL 曾被拒 → dispatch
+        exit 2 停摆（与 ssh.github.com 同族回归）。"""
+        assert extract_slug(
+            ["git@github-wop-bot:wop-platform/wop-go-sdk.git"]
+        ) == "wop-platform/wop-go-sdk"
+        assert extract_slug(["git@github-wop-bot.com:o/r.git"]) == ""
+
+    def test_extract_slug_codeup_rejected(self):
+        """Codeup（阿里云效）URL 不匹配 GitHub 锚定：未接入仓 fail-closed
+        空串，不得误解析为 GitHub slug（ADR-008 平台隔离）。"""
+        assert extract_slug(
+            ["git@codeup.aliyun.com:610b3c9d86508f8da8b08436/gtsp/x.git"]
+        ) == ""
 
     def test_extract_slug_spoof_hosts_rejected(self):
         """伪装主机负控制：权威主机锚定后以 [/:] 定界，子串/后缀伪装全拒。"""
