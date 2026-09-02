@@ -32,6 +32,12 @@ import sys
 import time
 from pathlib import Path
 
+# 字节码密闭（issue #107）：本文件常以 `python3 factory_lib.py` 子进程方式被
+# sync/dispatch 等脚本调用，import hosting 会在调用方仓的 .factory/ 留下
+# 未跟踪 __pycache__——污染下游仓「落库后工作树干净」断言与巡检。须在
+# import hosting 之前设置（pyc 缓存写入发生在被导入模块执行前；__main__
+# 自身不缓存，本模块在 pytest 进程中的自身缓存由根 .gitignore 兜底）。
+sys.dont_write_bytecode = True
 import hosting  # 托管平台抽象层（ADR-008）：中立 schema，gh/云效差异在其内
 
 
