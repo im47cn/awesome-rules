@@ -41,6 +41,9 @@ class Lesson:
     knowledge_type: str = "pattern"   # pattern=稳定方法论 | instance=随环境实例变化
     lesson_id: str = ""            # L-XXXXXXXX，write/load 时自动派生
     supersedes: str = ""           # 被修正的旧 lesson_id（人工审核时填写）
+    # evidence_edited: 与 .orig 快照对比推导的运行态标记（快照缺失=未改，保持旧行为）。
+    # 与下方归档态 verdict="edited"（锚点/落点级人工编辑）同名不同义，互不相干。
+    evidence_edited: bool = False
     # 以下仅在归档态存在（review 产物，借鉴 harness-anything verdict 语义）
     verdict: str = ""              # applied | trimmed | edited | rejected
     verdict_codes: List[str] = field(default_factory=list)
@@ -208,6 +211,7 @@ def write_proposal(p: Proposal, pending_dir: Path) -> Path:
         "confidence": ls.confidence, "reason": ls.reason,
         "knowledge_type": ls.knowledge_type,
         "lesson_id": ls.lesson_id, "supersedes": ls.supersedes,
+        "evidence_edited": ls.evidence_edited,
         "change": {"action": ls.change.action, "heading": ls.change.heading,
                    "new_text": ls.change.new_text} if ls.change else None,
     } for ls in p.lessons]}
@@ -262,12 +266,30 @@ def load_proposal(path: Path) -> Proposal:
                     knowledge_type=str(ls.get("knowledge_type", "pattern")),  # 旧提案兼容默认
                     lesson_id=str(ls.get("lesson_id", "")),
                     supersedes=str(ls.get("supersedes", "")),
+                    evidence_edited=bool(ls.get("evidence_edited", False)),
                     verdict=str(ls.get("verdict", "")),
                     verdict_codes=[str(c) for c in ls.get("verdict_codes") or []]))
         except json.JSONDecodeError:
             pass
     for ls in lessons:
         ls.lesson_id = ls.lesson_id or derive_lesson_id(ls)   # 旧提案兼容：按内容补派生
+    # 守卫：_orig_path 对 .orig 自身求值=自身，无此守卫 load(.md)→load(.orig)→
+    # load(.orig)… 无限自递归。.orig 存在→派生值覆盖一切存储值（防篡改基准）；
+    # 缺失→不派生（快照缺失视为未改，保持旧行为）。
+    if path.suffix == ".md":
+        orig_file = _orig_path(path)
+        if orig_file.is_file():
+            try:
+                orig_p = load_proposal(orig_file)
+            except OSError as e:
+                errors.append(f"{orig_file.name}: .orig 快照读取失败: {e}")
+            else:
+                # 坏快照诊断上浮、不静默（Tripwire，与主件坏块同构，issue #81）
+                errors.extend(orig_p.parse_errors)
+                if lessons and not orig_p.lessons:
+                    errors.append(f"{orig_file.name}: 快照无可解析 lessons，"
+                                  "evidence 改写检测失效（请连同 .orig 上报）")
+                _derive_evidence_edited(lessons, orig_p.lessons)
     return Proposal(
         id=fm.get("id", path.stem), source_agent=fm.get("source_agent", "?"),
         source_session=fm.get("source_session", "?"), source_path=fm.get("source_path", "?"),
@@ -442,12 +464,17 @@ def verify_evidence(p: Proposal, corpus: str) -> List[Tuple[int, str]]:
 
     返回 (lesson 序号, 状态)：hit=命中 / paraphrase=未整段命中但最长连续
     命中 ≥ PARAPHRASE_MIN_CHARS（LLM 缝合转述，大概率真实，不拦 apply）/
-    miss=未命中（可疑编造，apply 拦截） / no_corpus=语料缺失无法核验。
+    miss=未命中（可疑编造，apply 拦截） / edited=作者改写件（与 .orig 快照
+    不一致——内容或真但叙述经作者修饰，机器核验不背书，不进 hit/paraphrase
+    判定；与归档态 verdict 的 edited 同名不同义） / no_corpus=语料缺失无法核验。
     把人工抽查 evidence 真实性变成脚本核验。
     """
     norm_corpus = _norm_quote(corpus)
     results: List[Tuple[int, str]] = []
     for i, ls in enumerate(p.lessons, 1):
+        if ls.evidence_edited:   # 改写件独立于语料（源于 .orig 对比），优先于 no_corpus
+            results.append((i, "edited"))
+            continue
         if not norm_corpus:
             results.append((i, "no_corpus"))
             continue
@@ -715,6 +742,36 @@ def _parse_codes(raw: List[str]) -> Tuple[dict, List[str]]:
 def _orig_path(path: Path) -> Path:
     return path.parent / f"{path.stem}.orig"
 
+def _derive_evidence_edited(cur: List[Lesson], orig: List[Lesson]) -> None:
+    """diff .orig 快照推导 evidence 改写标志（就地置位，issue #113 需求 1）。
+
+    两遍配对严格镜像 _derive_verdicts：① 同 lesson_id（derive_lesson_id 哈希
+    不含 evidence，纯 evidence 改写 id 不变必被此遍捕获）；② 残余按
+    (target_file, type) 相等且 new_text 包含关系配对（裁剪 new_text 致 id
+    变化的混合编辑兜底）。仅对比 evidence 字段——new_text/锚点编辑属正常
+    review 流不降级（issue #113 边界条款）。
+    """
+    remaining = set(range(len(cur)))
+    unmatched_orig: List[Lesson] = []
+    for o in orig:
+        hit = next((i for i in sorted(remaining)
+                    if cur[i].lesson_id == o.lesson_id), None)
+        if hit is None:
+            unmatched_orig.append(o)
+            continue
+        if cur[hit].evidence != o.evidence:
+            cur[hit].evidence_edited = True
+        remaining.discard(hit)
+    for o in unmatched_orig:                     # 第二遍：id 随内容变化兜底
+        hit = next((i for i in sorted(remaining)
+                    if cur[i].target_file == o.target_file and cur[i].type == o.type
+                    and _text_related(o, cur[i])), None)
+        if hit is None:
+            continue                             # review 期新增 lesson，无基线
+        if cur[hit].evidence != o.evidence:
+            cur[hit].evidence_edited = True
+        remaining.discard(hit)
+
 
 def _derive_verdicts(cur: List[Lesson], orig: Optional[List[Lesson]]) -> List[str]:
     """diff 原始 vs 当前 lessons 推导结构 verdict（事实由脚本定，语义码由人补）。
@@ -795,6 +852,7 @@ def finalize_review(path: Path, raw_codes: List[str], *, rejected: bool) -> Path
     for ls_json, ls in zip(payload.get("lessons", []), p.lessons):
         ls_json["verdict"] = ls.verdict
         ls_json["verdict_codes"] = ls.verdict_codes
+        ls_json["evidence_edited"] = ls.evidence_edited
     content = content[:m.start()] + "```json\n" + json.dumps(
         payload, ensure_ascii=False, indent=1) + "\n```" + content[m.end():]
     # frontmatter 单行投影（人扫读）
@@ -802,8 +860,11 @@ def finalize_review(path: Path, raw_codes: List[str], *, rejected: bool) -> Path
     summary = ", ".join(f"{k}={n}" for k, n in counts.items())
     if codes:
         summary += f"；codes={','.join(sorted(set(codes)))}"
+    n_edited = sum(1 for ls in p.lessons if ls.evidence_edited)
+    edited_line = f"evidence_edited: {n_edited}\n" if n_edited else ""
     content = content.replace(
-        f"lessons: {len(p.lessons)}\n", f"lessons: {len(p.lessons)}\nreview: {summary}\n", 1)
+        f"lessons: {len(p.lessons)}\n",
+        f"lessons: {len(p.lessons)}\n{edited_line}review: {summary}\n", 1)
     path.write_text(content, encoding="utf-8")
     return path
 

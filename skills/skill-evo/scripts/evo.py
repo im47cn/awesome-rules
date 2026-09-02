@@ -255,9 +255,12 @@ def _session_corpus(p: PR.Proposal) -> str:
 
 
 def _evidence_warnings(checks: list) -> list:
-    """阻断级 evidence 警告：仅 miss（可疑编造）。paraphrase 转述不拦 apply。"""
-    return [f"lesson {i}: evidence 未在来源会话中命中（可疑编造，需人工核实，--force 可越过）"
-            for i, status in checks if status == "miss"]
+    """阻断级 evidence 警告：miss（可疑编造）+ edited（作者改写，机器核验不背书）。"""
+    out = [f"lesson {i}: evidence 未在来源会话中命中（可疑编造，需人工核实，--force 可越过）"
+           for i, status in checks if status == "miss"]
+    out += [f"lesson {i}: evidence 经作者改写，机器核验不背书，须人工必审（--force 可越过）"
+            for i, status in checks if status == "edited"]
+    return out
 
 
 def cmd_list(args) -> int:
@@ -277,7 +280,7 @@ def cmd_list(args) -> int:
         for w in p.warnings():
             print(f"  ⚠ {w}")
         checks = dict(PR.verify_evidence(p, _session_corpus(p)))
-        marks = {"hit": "✓", "paraphrase": "⚠", "miss": "✗", "no_corpus": "?"}
+        marks = {"hit": "✓", "paraphrase": "⚠", "miss": "✗", "no_corpus": "?", "edited": "✎"}
         for i, ls in enumerate(p.lessons, 1):
             mark = marks.get(checks.get(i, "no_corpus"), "?")
             print(f"  - {mark} {ls.lesson_id or PR.derive_lesson_id(ls)} "
