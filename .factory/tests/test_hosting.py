@@ -751,3 +751,53 @@ class TestIssueCreateAcceptanceGate:
                           "--body", self.BODY_104])
         assert e.value.code == 2
         assert "预检未过" in capsys.readouterr().err
+
+
+class TestIssueCreateLabelGate:
+    """issue create 标签合法性预检（第三层：状态机保留标签 create 时拦）。
+
+    语义源 = state.py LOCKS/QUEUE/PR_SIDE + 裁决/接管态（hosting 单一来源
+    引用，不复制状态机）。豁免 needs-human（机器「不可自动」合法落点，
+    upstream-sync 实证）；非 factory 标签（priority:* dispatch 消费面）放行。
+
+    缺陷→测试映射：
+    - needs-human 过（upstream-sync 机器用法）→ test_allows_needs_human
+    - 8 个状态机保留标签拦 → test_blocks_state_machine_labels
+    - 非 factory 标签/空放行 → test_allows_non_factory_and_empty
+    - 禁止集单一来源推导锁（防两处漂移）→ test_forbidden_set_derivation
+    - CLI 端到端：非法标签 exit 2 且先于平台触达 → test_cli_gate_fails_closed
+    """
+
+    def test_allows_needs_human(self):
+        assert hosting._issue_label_error("factory:needs-human") is None
+
+    def test_blocks_state_machine_labels(self):
+        for label in ("factory:triaging", "factory:in-progress",
+                      "factory:accepted", "factory:needs-review",
+                      "factory:needs-fix", "factory:approved",
+                      "factory:rejected", "factory:in-review"):
+            err = hosting._issue_label_error(label)
+            assert err is not None, label
+            assert "状态机保留" in err, label
+
+    def test_allows_non_factory_and_empty(self):
+        assert hosting._issue_label_error("priority:critical") is None
+        assert hosting._issue_label_error("bug") is None
+        assert hosting._issue_label_error(None) is None
+
+    def test_forbidden_set_derivation(self):
+        # 单一来源锁：hosting 侧禁止集恰为 state.py 三集合 + 裁决/接管态
+        # − needs-human 豁免——新增状态机标签时本测试强制同步语义决策
+        import state
+        expect = (state.LOCKS | state.QUEUE | state.PR_SIDE
+                  | {"factory:rejected", "factory:in-review"}
+                  ) - {"factory:needs-human"}
+        assert hosting._CREATE_FORBIDDEN_LABELS == expect
+
+    def test_cli_gate_fails_closed(self, capsys):
+        # 端到端：body 先过第二层（含验收节），第三层拦非法标签 → exit 2
+        with pytest.raises(SystemExit) as e:
+            hosting.main(["issue", "create", "--title", "t", "--body",
+                          "## 验收\n- [ ] x", "--label", "factory:accepted"])
+        assert e.value.code == 2
+        assert "预检未过" in capsys.readouterr().err

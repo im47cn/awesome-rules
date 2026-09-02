@@ -1097,10 +1097,46 @@ def _issue_acceptance_error(body):
             " checkbox 直接过）")
 
 
+# ── issue 创建标签合法性预检（第三层：状态机保留标签不可在 create 时携带）──
+# 状态机标签是链/调度器/sync 的属主写产物（语义源 state.py 的 LOCKS/
+# QUEUE/PR_SIDE + 裁决/接管态）：create 时携带即伪称生命周期事实——
+# accepted 绕过 triage 裁决（regression/README.md 语义），triaging/
+# in-progress 伪装链锁占用，PR 侧/裁决/接管态在无 PR、无裁决的创建时点
+# 语义不存在。唯一豁免 factory:needs-human：机器判定「不可自动、需人工」
+# 的合法落点（breaker_tripped 族命令式落标；upstream-sync-check.sh
+# local 漂移实证机器用法）。非 factory:* 标签（priority:* 等 dispatch
+# 消费面）不受限。
+# 禁止集是 state.py 三集合的镜像：hosting 保持自包含契约（传输层脚本
+# 不 import 核心层模块——hermetic 测试拷贝本文件到隔离目录独立执行）；
+# 两处等价由 test_forbidden_set_derivation 锁死，改状态机标签集时
+# 该测试强制同步语义决策。
+_CREATE_FORBIDDEN_LABELS = frozenset({
+    "factory:triaging", "factory:in-progress",     # LOCKS（链锁占用）
+    "factory:accepted",                            # QUEUE（triage 裁决产物）
+    "factory:needs-review", "factory:needs-fix",   # PR_SIDE（PR 侧状态）
+    "factory:approved",                            # PR_SIDE
+    "factory:rejected",                            # triage 裁决产物
+    "factory:in-review",                           # pr_open 接管态
+})  # 豁免 factory:needs-human（PR_SIDE 中机器「不可自动」的人工落点）
+
+def _issue_label_error(label):
+    """issue create 标签属状态机保留集时返回提示语；合法返回 None。"""
+    if label in _CREATE_FORBIDDEN_LABELS:
+        return (f"标签 {label} 是状态机保留标签（链/调度器/sync 属主写），"
+                "create 时携带即伪称生命周期事实（accepted 绕 triage 裁决、"
+                "triaging/in-progress 伪装锁占用、PR 侧/裁决态在创建时点"
+                "语义不存在）。正道：零标签走 triage 裁决路径；确需人工"
+                "接管用 factory:needs-human；分类用非 factory 标签"
+                "（如 priority:*）")
+    return None
+
+
 def _cmd_issue_create(ad, args):
     body = _body(args)
     # 预检先于任何平台触达（fail-closed；#104/#109 对比）
     if err := _issue_acceptance_error(body):
+        raise HostingError(f"issue create 预检未过：{err}", code=2)
+    if err := _issue_label_error(args.label):
         raise HostingError(f"issue create 预检未过：{err}", code=2)
     _emit(ad.issue_create(args.title, body, label=args.label, repo=args.repo))
 
