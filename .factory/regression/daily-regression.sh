@@ -157,6 +157,11 @@ TITLE="[factory-regression] ${DATE} 日回归失败：${FIRST_FAIL}"
   echo "cd $REPO && bash .factory/regression/daily-regression.sh"
   echo '# 或只预览不开 issue：bash .factory/regression/daily-regression.sh --dry-run'
   echo '```'
+  echo
+  echo "## 验收（可机械判定）"
+  echo
+  echo "- [ ] 复跑 \`bash .factory/regression/daily-regression.sh\` 全绿"
+  echo "- [ ] 首失败层 \`${FIRST_FAIL}.log\` 根因在本仓修复或裁决为环境噪音（评论留痕）"
 } > "$BODY"
 
 if [ "$DRY_RUN" = 1 ]; then

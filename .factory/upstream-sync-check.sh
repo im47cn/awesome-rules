@@ -70,7 +70,11 @@ if echo "$CHECK_OUT" | grep -q '\[local\].*差'; then
 
 正道：对上游修通用缺陷 → feedback-upstream.sh 反哺 PR → 上游合并 → 本仓 --apply 追平。
 
-${LOCAL_SUMMARY}" \
+${LOCAL_SUMMARY}
+
+## 验收（可机械判定）
+
+- [ ] \`bash .factory/sync-from-upstream.sh ${UP} --check\` 不再报 [local] 分叉，或本 issue 下留有人工合并决策评论" \
       && echo "upstream-sync: local 漂移已落 needs-human issue" \
       || echo "upstream-sync: issue 创建失败（继续 full 面处理）" >&2
   else

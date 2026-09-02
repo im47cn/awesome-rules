@@ -1159,9 +1159,41 @@ def _cmd_issue_comment(ad, args):
     ad.issue_comment(args.n, _body(args), marker=args.marker)
 
 
+# ── issue 创建验收明确性预检（#104/#109 triage 对比观察落地）──────────
+# triage 判据 b（客观验收载体）对 issue 写法敏感：#104 正文只有问题
+# 描述与建议、无验收载体，三判据全灭打回；#109 正文带「验收判据」节
+# + 4 条可机械判定 checkbox，判据 b 直接过。创建时拦截（fail-closed）
+# 比 triage 打回省一轮往返。机器开单模板（daily-regression.sh/
+# upstream-sync-check.sh）已同步补「验收（可机械判定）」节。
+_ACCEPTANCE_HEAD_RE = re.compile(
+    r"^#{1,6}[^\n]*(?:验收|acceptance)", re.IGNORECASE | re.MULTILINE)
+_CHECKBOX_RE = re.compile(r"^[\s>*-]*\[[ xX]\]", re.MULTILINE)
+
+
+def _issue_acceptance_error(body):
+    """issue 正文验收标准不明确时返回提示语；明确返回 None。
+
+    明确 = 满足其一：① checkbox（可机械勾选即验收载体）
+    ②「验收/acceptance」标题节。#104 形态（描述+建议、两者皆无）
+    → 不明确。
+    """
+    if not (body or "").strip():
+        return ("正文为空：无验收载体。补『## 验收（可机械判定）』节，"
+                "逐条写完成与否可判定的判据（推荐 checkbox）")
+    if _CHECKBOX_RE.search(body) or _ACCEPTANCE_HEAD_RE.search(body):
+        return None
+    return ("验收标准不明确：正文无 checkbox 亦无『验收/acceptance』节"
+            "——无客观载体，triage 判据 b 必打回（#104 形态）。补"
+            "『## 验收（可机械判定）』节逐条写判据（#109 形态：4 条"
+            " checkbox 直接过）")
+
+
 def _cmd_issue_create(ad, args):
-    _emit(ad.issue_create(args.title, _body(args),
-                          label=args.label, repo=args.repo))
+    body = _body(args)
+    # 预检先于任何平台触达（fail-closed；#104/#109 对比）
+    if err := _issue_acceptance_error(body):
+        raise HostingError(f"issue create 预检未过：{err}", code=2)
+    _emit(ad.issue_create(args.title, body, label=args.label, repo=args.repo))
 
 
 def _cmd_pr(ad, args):

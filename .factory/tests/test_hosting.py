@@ -712,3 +712,53 @@ class TestCli:
             for c in cs[-3:])
         assert "[作者: someone]" in out
         assert "[作者: ?]" in out  # 缺 author 不炸
+
+
+class TestIssueCreateAcceptanceGate:
+    """issue create 验收明确性预检（#104/#109 triage 对比观察落地：
+    创建时拦截无验收载体的正文，比 triage 判据 b 打回省一轮往返）。
+
+    缺陷→测试映射：
+    - #104 形态（描述+建议、无验收载体）拦 → test_rejects_104_style_body
+    - #109 形态（验收判据节+checkbox）过 → test_accepts_109_style_body
+    - 空/空白/None body 拦 → test_rejects_empty_body
+    - 仅「验收/acceptance」节（机器模板形态）过
+      → test_accepts_acceptance_heading
+    - CLI 端到端：预检失败 exit 2 且先于平台触达
+      → test_cli_gate_fails_closed
+    """
+
+    BODY_104 = ("## 问题\nsync 分发缺 CODEOWNERS 三态管理。\n\n"
+                "## 建议方向\n补入 DISTRIBUTION.json。")
+    BODY_109 = ("## 根因\n宿主环境渗漏两陷阱。\n\n## 验收判据\n\n"
+                "- [ ] 完整 PATH 全套件绿\n"
+                "- [ ] 无 homebrew PATH 全套件绿\n"
+                "- [ ] 全程无出网\n"
+                "- [ ] 301 零回归")
+
+    def test_accepts_109_style_body(self):
+        assert hosting._issue_acceptance_error(self.BODY_109) is None
+
+    def test_rejects_104_style_body(self):
+        err = hosting._issue_acceptance_error(self.BODY_104)
+        assert err is not None
+        assert "验收" in err
+
+    def test_rejects_empty_body(self):
+        assert hosting._issue_acceptance_error("") is not None
+        assert hosting._issue_acceptance_error("   ") is not None
+        assert hosting._issue_acceptance_error(None) is not None
+
+    def test_accepts_acceptance_heading(self):
+        # 机器模板形态：验收节存在即可（节内判定语句由模板补全）
+        body = ("## 现象\n上游 local 面漂移。\n\n"
+                "## Acceptance Criteria\n--check 不再报分叉即完成。")
+        assert hosting._issue_acceptance_error(body) is None
+
+    def test_cli_gate_fails_closed(self, capsys):
+        # 端到端：预检失败 → exit 2 + stderr 提示，先于任何平台触达
+        with pytest.raises(SystemExit) as e:
+            hosting.main(["issue", "create", "--title", "t",
+                          "--body", self.BODY_104])
+        assert e.value.code == 2
+        assert "预检未过" in capsys.readouterr().err
