@@ -372,7 +372,8 @@ class CodeupAdapter:
     def _remote(self):
         """git remote origin → (org, path)；无 remote/解析失败 → (None, None)。
         通用能力（ADR-009）：CODEUP_ORG_ID/CODEUP_REPO_PATH 缺省时自动推导，
-        免每仓 hosting.env 定制。"""
+        免每仓 hosting.env 定制。https:// 与 SSH/scp 双形态等价解析
+        （PR #112 Sourcery 评论②：原正则吞不了 :// 形式）。"""
         try:
             out = subprocess.run(
                 ["git", "-C", self.repo, "remote", "get-url", "origin"],
@@ -380,9 +381,17 @@ class CodeupAdapter:
             url = (out.stdout or "").strip()
         except Exception:
             return None, None
-        m = re.match(r"(?:[^@\s]+@)?(?:[^:/]+)[:/]([^/]+)/(.+?)(?:\.git)?/?$", url)
-        if m and m.group(1) and m.group(2):
-            return m.group(1), m.group(2)
+        if "://" in url:
+            # https://host/org/ns/repo(.git) → urlparse 取路径段
+            path = urllib.parse.urlparse(url).path
+        else:
+            # SSH/scp 形式：[user@]host:org/ns/repo(.git)
+            m = re.match(r"(?:[^@\s]+@)?(?:[^:/]+)[:/]([^/]+)/(.+?)(?:\.git)?/?$", url)
+            path = f"{m.group(1)}/{m.group(2)}" if m else ""
+        path = path.strip("/").removesuffix(".git")
+        parts = path.split("/")
+        if len(parts) >= 2 and parts[0] and parts[1]:
+            return parts[0], "/".join(parts[1:])
         return None, None
 
     def _space_id(self, what="issue"):
@@ -976,6 +985,21 @@ class CodeupAdapter:
 ADAPTERS = {"github": GitHubAdapter, "codeup": CodeupAdapter}
 
 
+def _host_of(url: str) -> str:
+    """remote URL → host（小写）。https/ssh 走 urlparse，scp 走
+    [user@]host: 定界（CodeQL：禁止子串猜测——URL 任意位置可伪造）。"""
+    if "://" in url:
+        return (urllib.parse.urlparse(url).hostname or "").lower()
+    m = re.match(r"(?:[^@\s]+@)?([^:/]+)[:/]", url)
+    return (m.group(1) if m else url.split("/")[0]).lower()
+
+
+def _is_codeup_url(url: str) -> bool:
+    """codeup 域名精确锚定：host 等值或子域后缀，非子串包含。"""
+    host = _host_of(url)
+    return host == "codeup.aliyun.com" or host.endswith(".codeup.aliyun.com")
+
+
 def _detect_hosting(repo="."):
     """按 git remote origin 自动检测 hosting：codeup.aliyun.com → codeup；
     github.com/无 remote → github（历史默认）。FACTORY_HOSTING 显式设置优先。"""
@@ -987,7 +1011,7 @@ def _detect_hosting(repo="."):
             capture_output=True, text=True, timeout=10).stdout.strip()
     except Exception:
         url = ""
-    return "codeup" if "codeup.aliyun.com" in url else "github"
+    return "codeup" if _is_codeup_url(url) else "github"
 
 
 def current_adapter(repo="."):

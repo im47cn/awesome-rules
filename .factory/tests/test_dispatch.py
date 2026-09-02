@@ -246,6 +246,45 @@ class TestDispatchParsers:
         assert extract_slug(["https://ssh.github.com.evil.com/o/r"]) == ""
         assert extract_slug(["git@notssh.github.com:o/r.git"]) == ""
 
+    def test_codeup_remote_derivation(self, monkeypatch):
+        """CodeupAdapter._remote 双形态推导（PR #112 Sourcery 评论②）：
+        https:// 与 SSH/scp 等价解析 org/ns/repo；解析失败 (None, None)。"""
+        from types import SimpleNamespace
+
+        a = hosting_mod.CodeupAdapter(repo=".")
+        cases = [
+            ("https://codeup.aliyun.com/6ab/gtsp/x.git", ("6ab", "gtsp/x")),
+            ("https://codeup.aliyun.com/6ab/gtsp/x", ("6ab", "gtsp/x")),
+            ("ssh://git@codeup.aliyun.com:22/6ab/gtsp/x.git", ("6ab", "gtsp/x")),
+            ("git@codeup.aliyun.com:6ab/gtsp/x.git", ("6ab", "gtsp/x")),
+            ("https://codeup.aliyun.com/only-org", (None, None)),
+        ]
+        for url, want in cases:
+            monkeypatch.setattr(
+                hosting_mod.subprocess, "run",
+                lambda *args, **kw: SimpleNamespace(stdout=url + "\n", returncode=0))
+            assert a._remote() == want, url
+
+    def test_detect_hosting_host_anchor(self, monkeypatch):
+        """codeup 域名精确锚定（CodeQL：子串匹配可被 URL 任意位置伪造）：
+        后缀伪装/路径含域名形态全拒。"""
+        from types import SimpleNamespace
+
+        monkeypatch.delenv("FACTORY_HOSTING", raising=False)
+
+        def detect(url):
+            monkeypatch.setattr(
+                hosting_mod.subprocess, "run",
+                lambda *args, **kw: SimpleNamespace(stdout=url + "\n", returncode=0))
+            return hosting_mod._detect_hosting(".")
+
+        assert detect("https://codeup.aliyun.com/6ab/gtsp/x.git") == "codeup"
+        assert detect("git@codeup.aliyun.com:6ab/gtsp/x.git") == "codeup"
+        assert detect("https://codeup.aliyun.com.evil.com/6ab/x.git") == "github"
+        assert detect("https://evil.com/codeup.aliyun.com/6ab/x.git") == "github"
+        assert detect("https://github.com/o/r.git") == "github"
+        assert detect("") == "github"
+
 class TestDispatchConfig:
     """MAX_PARALLEL 配置错误必须 fail-fast（PR #53 审查②）：0/负/非整数
     使 ChainPool 槽满等待永真——挂起而非配置错误。config-error = rc 2。"""

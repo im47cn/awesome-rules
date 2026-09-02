@@ -21,7 +21,7 @@ def cc_fixture(path: Path, cwd="/home/u/sources/demo", extra_users=0, sid="s-111
          "message": {"role": "assistant", "content": [{"type": "text", "text": "meta"}]}},
         {"type": "assistant", "message": {"role": "assistant", "content": [
             {"type": "text", "text": "先读取文件"},
-            {"type": "tool_use", "name": "Read", "input": {}},
+            {"type": "tool_use", "name": "Read", "input": {"file_path": "schema.sql"}},
         ]}},
         {"type": "user", "message": {"role": "user", "content": [
             {"type": "tool_result", "content": "file body", "is_error": False}]}},
@@ -61,6 +61,8 @@ def omp_fixture(path: Path, cwd="/home/u/sources/demo", sid="0aaaa-bbbb", extra_
                 "content": [
                     {"type": "thinking"},
                     {"type": "text", "text": "好的"},
+                    {"type": "toolCall", "name": "Bash",
+                     "arguments": {"command": "pytest -q"}},
                 ],
                 "role": "assistant",
             },
@@ -107,6 +109,7 @@ def test_parse_cc_session(tmp_path):
     assert len(tools) == 2
     assert tools[1].is_error and "no such table" in tools[1].text
     assert any(m.tool_name == "Read" for m in sess.messages)
+    assert any("schema.sql" in (m.text or "") for m in sess.messages)  # input 入语料
 
 
 # ── omp 解析 ────────────────────────────────────────────────────────────────
@@ -123,6 +126,17 @@ def test_parse_omp_session(tmp_path):
     assert errs[0].is_error and "command not found" in errs[0].text
     assert not any("thinking" in (m.text or "") and m.role == "assistant"
                    for m in sess.messages)  # thinking 块不产生消息
+
+
+def test_parse_omp_toolcall_arguments_in_corpus(tmp_path):
+    """PR #112 Sourcery 评论①回归：OMP 转录工具块是 toolCall/arguments
+    （真实样本 1184 块实证，tool_use 零出现）——arguments 必须入语料，
+    否则「执行了 X 命令」类 evidence 在核验语料中全部 miss。"""
+    f = tmp_path / "2026-09-01T00-00-00-000Z_0cccc-dddd.jsonl"
+    omp_fixture(f)
+    sess = S.parse_omp_session(f)
+    bash = [m for m in sess.messages if m.tool_name == "Bash"]
+    assert bash and "pytest -q" in bash[0].text
 
 
 # ── 增量去重 ────────────────────────────────────────────────────────────────

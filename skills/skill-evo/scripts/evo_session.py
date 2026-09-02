@@ -158,11 +158,14 @@ def parse_omp_session(path: Path) -> Session:
             for b in content if isinstance(content, list) else []:
                 if isinstance(b, dict) and b.get("type") == "text" and b.get("text"):
                     sess.messages.append(Msg(role="assistant", text=str(b["text"])))
-                elif isinstance(b, dict) and b.get("type") == "tool_use":
+                elif isinstance(b, dict) and b.get("type") in ("tool_use", "toolCall"):
                     # 输入参数一并入语料（JSON 序列化）：命令/参数是行为证据的
                     # 核心文本——只记工具名会让所有「执行了 X 命令」类 evidence
-                    # 在核验语料中 miss（复盘型提案的主要误报源）。
-                    inp = b.get("input") or {}
+                    # 在核验语料中 miss（复盘型提案的主要误报源）。OMP 转录块
+                    # 类型是 toolCall、参数字段是 arguments（cc 侧是
+                    # tool_use/input，真实样本 1184 块实证）——双侧形态都认
+                    # （PR #112 Sourcery 评论①）。
+                    inp = b.get("input") or b.get("arguments") or {}
                     sess.messages.append(Msg(
                         role="assistant",
                         text=json.dumps(inp, ensure_ascii=False) if inp else "",
