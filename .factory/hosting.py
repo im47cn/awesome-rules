@@ -381,15 +381,11 @@ class CodeupAdapter:
             url = (out.stdout or "").strip()
         except Exception:
             return None, None
-        if "://" in url:
-            # https://host/org/ns/repo(.git) → urlparse 取路径段
-            path = urllib.parse.urlparse(url).path
-        else:
-            # SSH/scp 形式：[user@]host:org/ns/repo(.git)
-            m = re.match(r"(?:[^@\s]+@)?(?:[^:/]+)[:/]([^/]+)/(.+?)(?:\.git)?/?$", url)
-            path = f"{m[1]}/{m[2]}" if m else ""
-        path = path.strip("/").removesuffix(".git")
-        parts = path.split("/")
+        if not url:
+            return None, None
+        _h, rpath = _split_remote(url)
+        rpath = rpath.strip("/").removesuffix(".git")
+        parts = rpath.split("/")
         if len(parts) >= 2 and parts[0] and parts[1]:
             return parts[0], "/".join(parts[1:])
         return None, None
@@ -984,13 +980,22 @@ class CodeupAdapter:
 ADAPTERS = {"github": GitHubAdapter, "codeup": CodeupAdapter}
 
 
-def _host_of(url: str) -> str:
-    """remote URL → host（小写）。https/ssh 走 urlparse，scp 走
-    [user@]host: 定界（CodeQL：禁止子串猜测——URL 任意位置可伪造）。"""
+def _split_remote(url: str) -> tuple:
+    """remote URL → (host, path)：https/ssh:// 走 urlparse（hostname
+    小写），SSH/scp 形态 [user@]host:path 正则兜底。单一解析原语
+    （PR #112 评论②③同根因：_remote 与 _detect_hosting 曾各自
+    解析，一改一漏）。"""
     if "://" in url:
-        return (urllib.parse.urlparse(url).hostname or "").lower()
-    m = re.match(r"(?:[^@\s]+@)?([^:/]+)[:/]", url)
-    return (m[1] if m else url.split("/")[0]).lower()
+        u = urllib.parse.urlparse(url)
+        return (u.hostname or "").lower(), u.path
+    m = re.match(r"(?:[^@\s]+@)?([^:/]+)[:/](.+?)(?:\.git)?/?$", url)
+    return ((m[1] if m else url.split("/")[0]).lower(),
+            m[2] if m else "")
+
+
+def _host_of(url: str) -> str:
+    """remote URL → host（CodeQL：禁止子串猜测——URL 任意位置可伪造）。"""
+    return _split_remote(url)[0]
 
 
 def _is_codeup_url(url: str) -> bool:
