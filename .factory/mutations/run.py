@@ -53,7 +53,7 @@ def _final_gate_words(cfg_path: Path | None = None) -> list[str]:
     （如 "uv run pytest"）都正常解析——与 shell 侧 fix-issue/validate-pr
     的 "${GATE_ARGS[@]}" 直执同构（R2-M4 + PR #71 Sourcery #1：bash
     前缀会把 PATH 型首词当脚本文件名，必失败）。fail-closed：配置
-    缺失/缺键/非字符串/含引号/空 → RuntimeError（启动即炸，不产生
+    缺失/缺键/非字符串/含引号/含换行/空 → RuntimeError（启动即炸，不产生
     无效证据）。类型校验与 factory_lib._local_str 同规（PR #71
     Sourcery #2：str() 静默转换会让数字/列表在 py 侧放行而 shell 侧
     拒绝——两消费方行为必须一致）。
@@ -64,6 +64,8 @@ def _final_gate_words(cfg_path: Path | None = None) -> list[str]:
         raw_val = cfg["final_gate_cmd"]
         if not isinstance(raw_val, str):
             raise ValueError("final_gate_cmd 须为非空字符串")
+        if "\n" in raw_val or "\r" in raw_val:
+            raise ValueError("final_gate_cmd 禁含换行（read -r -a 只取首行，shlex 多行拆词，两侧 argv 分歧）")
         raw = raw_val.strip()
         if "'" in raw or '"' in raw:
             raise ValueError("final_gate_cmd 禁含引号（与 bash 侧 read -r -a 拆词一致性，R2-N8）")
@@ -85,8 +87,8 @@ def _docstring_gate_words(cfg_path: Path | None = None) -> list[str] | None:
 
     与 _final_gate_words 同构但为**可选**门：仅键缺失 → None（未启用，
     链脚本跳过；mutations 中 docstring 缺陷 SKIP——未启用的门无灵敏度
-    可证，不构成全绿）。键存在即校验（非空字符串 + 禁引号 +
-    禁反斜杠；键存在但空 = 非法配置，fail-closed RuntimeError，
+    可证，不构成全绿）。键存在即校验（非空字符串 + 禁引号/反斜杠/
+    换行；键存在但空 = 非法配置，fail-closed RuntimeError，
     禁止静默降级为无门）。阈值（对外 API 100% + 内部 ≥80%）由各仓
     检查器自定，本处只承载命令词。
     """
@@ -98,6 +100,8 @@ def _docstring_gate_words(cfg_path: Path | None = None) -> list[str] | None:
         raw_val = cfg["docstring_gate_cmd"]
         if not isinstance(raw_val, str):
             raise ValueError("docstring_gate_cmd 须为非空字符串")
+        if "\n" in raw_val or "\r" in raw_val:
+            raise ValueError("docstring_gate_cmd 禁含换行（read -r -a 只取首行，shlex 多行拆词，两侧 argv 分歧）")
         raw = raw_val.strip()
         if "'" in raw or '"' in raw:
             raise ValueError("docstring_gate_cmd 禁含引号（与 bash 侧 read -r -a 拆词一致性，R2-N8）")
