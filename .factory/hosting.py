@@ -1188,10 +1188,39 @@ def _issue_acceptance_error(body):
             " checkbox 直接过）")
 
 
+# ── issue 创建标签合法性预检（第三层：factory: 命名空间保留给状态机）──
+# factory:* 是状态机/门控的属主写命名空间（regression/README.md 语义：
+# 「打其他 factory:* 标签会永远不被拾取」——triage-batch 只拾取零
+# factory:* 标签的 open issue）：create 时携带任何 factory:* 即伪称
+# 生命周期事实——accepted 绕过 triage 裁决、triaging/in-progress 伪装
+# 链锁占用、PR 侧/裁决/门控态（needs-review/validated 等）在无 PR、
+# 无裁决的创建时点语义不存在。命名空间拦截 fail-closed：typo
+# （factory:accepetd）与未来新增状态标签自动被拦，不依赖枚举镜像。
+# 唯一豁免 factory:needs-human：机器判定「不可自动、需人工」的合法
+# 落点（breaker_tripped 族命令式落标；upstream-sync-check.sh local
+# 漂移实证机器用法）。非 factory:* 标签（priority:* 等 dispatch
+# 消费面）不受限。
+
+
+def _issue_label_error(label):
+    """issue create 标签占 factory: 命名空间时返回提示语；合法返回 None。"""
+    if label and label.startswith("factory:") and label != "factory:needs-human":
+        return (f"标签 {label} 占用 factory: 命名空间（状态机/门控属主写），"
+                "create 时携带即伪称生命周期事实（accepted 绕 triage 裁决、"
+                "triaging/in-progress 伪装锁占用、PR 侧/门控态在创建时点"
+                "语义不存在；未知 factory:* 多为 typo 且会被 triage 批次"
+                "永久跳过）。正道：零标签走 triage 裁决路径；确需人工"
+                "接管用 factory:needs-human；分类用非 factory 标签"
+                "（如 priority:*）")
+    return None
+
+
 def _cmd_issue_create(ad, args):
     body = _body(args)
     # 预检先于任何平台触达（fail-closed；#104/#109 对比）
     if err := _issue_acceptance_error(body):
+        raise HostingError(f"issue create 预检未过：{err}", code=2)
+    if err := _issue_label_error(args.label):
         raise HostingError(f"issue create 预检未过：{err}", code=2)
     _emit(ad.issue_create(args.title, body, label=args.label, repo=args.repo))
 
