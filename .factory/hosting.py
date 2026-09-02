@@ -69,7 +69,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-FACTORY_HOSTING = os.environ.get("FACTORY_HOSTING", "github")
+FACTORY_HOSTING = os.environ.get("FACTORY_HOSTING")
 
 
 class HostingError(Exception):
@@ -86,7 +86,7 @@ class HostingError(Exception):
 # ---------------------------------------------------------------------------
 
 _SLUG_RE = re.compile(
-    r"^(?:[A-Za-z0-9_.-]+@)?(?:github\.com|ssh\.github\.com)(?::\d+)?[/:]"
+    r"^(?:[A-Za-z0-9_.-]+@)?(?:github\.com|ssh\.github\.com|github-wop-bot)(?::\d+)?[/:]"
     r"(?P<slug>[^/]+/[^/]+?)(?:\.git)?/?$")
 _SLUG_VALID = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 
@@ -369,25 +369,74 @@ class CodeupAdapter:
         self._repo_id = None
         self._endpoint = None
 
-    # -- 配置 --
+    def _remote(self):
+        """git remote origin → (org, path)；无 remote/解析失败 → (None, None)。
+        通用能力（ADR-009）：CODEUP_ORG_ID/CODEUP_REPO_PATH 缺省时自动推导，
+        免每仓 hosting.env 定制。"""
+        try:
+            out = subprocess.run(
+                ["git", "-C", self.repo, "remote", "get-url", "origin"],
+                capture_output=True, text=True, timeout=10)
+            url = (out.stdout or "").strip()
+        except Exception:
+            return None, None
+        m = re.match(r"(?:[^@\s]+@)?(?:[^:/]+)[:/]([^/]+)/(.+?)(?:\.git)?/?$", url)
+        if m and m.group(1) and m.group(2):
+            return m.group(1), m.group(2)
+        return None, None
+
+    def _space_id(self, what="issue"):
+        """Projex 项目 spaceId：CODEUP_SPACE_ID 显式 → 本机薄映射
+        （namespace→spaceId，org 级共享，免每仓定制）。映射文件默认
+        ~/.config/factory/codeup-spaces.conf，FACTORY_SPACES_CONF 可覆盖。"""
+        if space := os.environ.get("CODEUP_SPACE_ID"):
+            return space
+        conf = os.environ.get(
+            "FACTORY_SPACES_CONF",
+            os.path.expanduser("~/.config/factory/codeup-spaces.conf"))
+        ns_map = {}
+        try:
+            with open(conf, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "|" not in line:
+                        continue
+                    k, v = line.split("|", 1)
+                    ns_map[k.strip()] = v.strip()
+        except OSError:
+            pass
+        org, path = self._remote()
+        if org and path and "/" in path and ns_map:
+            ns = path.split("/")[1]
+            if ns in ns_map:
+                return ns_map[ns]
+        raise HostingError(
+            f"codeup {what} 需要 CODEUP_SPACE_ID（项目 id）"
+            "（或本机 codeup-spaces.conf 补 namespace→spaceId 映射）",
+            code=2)
+
     def _cfg(self):
         token = os.environ.get("YUNXIAO_ACCESS_TOKEN")
         if not token:
             raise HostingError("codeup 需要 YUNXIAO_ACCESS_TOKEN（云效个人访问令牌）",
                                code=2)
-        if org := os.environ.get("CODEUP_ORG_ID"):
+        org = os.environ.get("CODEUP_ORG_ID") or self._remote()[0]
+        if org:
             return token, org
-        else:
-            raise HostingError("codeup 需要 CODEUP_ORG_ID（组织管理后台-基本信息）",
-                               code=2)
+        raise HostingError(
+            "codeup 需要 CODEUP_ORG_ID（组织管理后台-基本信息；或 git remote 自动解析）",
+            code=2)
 
     def repo_ref(self):
         if rid := os.environ.get("CODEUP_REPO_ID"):
             return rid
         if path := os.environ.get("CODEUP_REPO_PATH"):
             return urllib.parse.quote(path, safe="")
+        if path := self._remote()[1]:
+            return urllib.parse.quote(path, safe="")
         raise HostingError(
-            "codeup 需要 CODEUP_REPO_ID 或 CODEUP_REPO_PATH（URL 编码全路径）",
+            "codeup 需要 CODEUP_REPO_ID 或 CODEUP_REPO_PATH"
+            "（URL 编码全路径；或 git remote 自动解析）",
             code=2)
 
     # -- HTTP --
@@ -553,11 +602,8 @@ class CodeupAdapter:
         # "工作项类型不能为空"）;分页 perPage/page;摘要有 description——
         # description 载体标签零 N+1。state 过滤客户端做（search 无
         # logicalStatus 参数）;label 过滤"含有"语义对齐 GitHub
-        space = os.environ.get("CODEUP_SPACE_ID")
+        space = self._space_id("issue list")
         category = os.environ.get("CODEUP_WORKITEM_CATEGORY", "Task")
-        if not space:
-            raise HostingError(
-                "codeup issue list 需要 CODEUP_SPACE_ID（项目 id）", code=2)
         _, org = self._cfg()
         out, page = [], 1
         while len(out) < limit:
@@ -650,13 +696,12 @@ class CodeupAdapter:
         # create 本体必填仅 4 项;「计划开始时间」等模板必填是
         # SystemCustomField,须以 customFieldValues {"fieldId":"value"}
         # 平面对象传（数组形态 Invalid format;value 形态见 _default_cfvs）。
-        space = os.environ.get("CODEUP_SPACE_ID")
+        space = self._space_id("issue create")
         wit = os.environ.get("CODEUP_WORKITEM_TYPE_ID")
         assignee = os.environ.get("CODEUP_ASSIGN_USER_ID")
         if missing := [
             k
             for k, v in (
-                ("CODEUP_SPACE_ID", space),
                 ("CODEUP_WORKITEM_TYPE_ID", wit),
                 ("CODEUP_ASSIGN_USER_ID", assignee),
             )
@@ -931,8 +976,22 @@ class CodeupAdapter:
 ADAPTERS = {"github": GitHubAdapter, "codeup": CodeupAdapter}
 
 
+def _detect_hosting(repo="."):
+    """按 git remote origin 自动检测 hosting：codeup.aliyun.com → codeup；
+    github.com/无 remote → github（历史默认）。FACTORY_HOSTING 显式设置优先。"""
+    if explicit := os.environ.get("FACTORY_HOSTING"):
+        return explicit
+    try:
+        url = subprocess.run(
+            ["git", "-C", repo, "remote", "get-url", "origin"],
+            capture_output=True, text=True, timeout=10).stdout.strip()
+    except Exception:
+        url = ""
+    return "codeup" if "codeup.aliyun.com" in url else "github"
+
+
 def current_adapter(repo="."):
-    if cls := ADAPTERS.get(FACTORY_HOSTING):
+    if cls := ADAPTERS.get(FACTORY_HOSTING or _detect_hosting(repo)):
         return cls(repo)
     else:
         raise HostingError(f"未知 FACTORY_HOSTING: {FACTORY_HOSTING}", code=2)
