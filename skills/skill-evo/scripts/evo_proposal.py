@@ -207,10 +207,9 @@ def migrate_proposals(root: Path, *, fix: bool = False) -> dict:
 
 def _fm_source_paths(p: Proposal) -> str:
     """frontmatter 多源块：首源之外的附加源（YAML 列表）；空则空串。"""
-    extra = [s for s in p.source_paths if s and s != p.source_path]
-    if not extra:
-        return ""
-    return "source_paths:\n" + "".join(f"  - {s}\n" for s in extra)
+    if extra := [s for s in p.source_paths if s and s != p.source_path]:
+        return "source_paths:\n" + "".join(f"  - {s}\n" for s in extra)
+    return ""
 
 
 def write_proposal(p: Proposal, pending_dir: Path) -> Path:

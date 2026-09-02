@@ -387,7 +387,7 @@ class CodeupAdapter:
         else:
             # SSH/scp 形式：[user@]host:org/ns/repo(.git)
             m = re.match(r"(?:[^@\s]+@)?(?:[^:/]+)[:/]([^/]+)/(.+?)(?:\.git)?/?$", url)
-            path = f"{m.group(1)}/{m.group(2)}" if m else ""
+            path = f"{m[1]}/{m[2]}" if m else ""
         path = path.strip("/").removesuffix(".git")
         parts = path.split("/")
         if len(parts) >= 2 and parts[0] and parts[1]:
@@ -429,8 +429,7 @@ class CodeupAdapter:
         if not token:
             raise HostingError("codeup 需要 YUNXIAO_ACCESS_TOKEN（云效个人访问令牌）",
                                code=2)
-        org = os.environ.get("CODEUP_ORG_ID") or self._remote()[0]
-        if org:
+        if org := os.environ.get("CODEUP_ORG_ID") or self._remote()[0]:
             return token, org
         raise HostingError(
             "codeup 需要 CODEUP_ORG_ID（组织管理后台-基本信息；或 git remote 自动解析）",
@@ -991,7 +990,7 @@ def _host_of(url: str) -> str:
     if "://" in url:
         return (urllib.parse.urlparse(url).hostname or "").lower()
     m = re.match(r"(?:[^@\s]+@)?([^:/]+)[:/]", url)
-    return (m.group(1) if m else url.split("/")[0]).lower()
+    return (m[1] if m else url.split("/")[0]).lower()
 
 
 def _is_codeup_url(url: str) -> bool:
