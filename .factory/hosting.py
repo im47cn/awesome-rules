@@ -15,7 +15,8 @@
     label_history = [{"op": "add"|"remove", "label": str}]
 - 原子性：issue/pr set-labels 的 add+remove 在支持单请求换标的平台
   （GitHub）合并为一次调用——半途断裂=双标签或裸奔（factory-lib.sh 语义）。
-- 平台选择：FACTORY_HOSTING=github（默认）|codeup。
+- 平台选择：FACTORY_HOSTING 显式设置优先；未设置按 origin remote 检测
+  （codeup.aliyun.com → codeup，github.com/无 remote → github 历史默认）。
 - 退出码：0 成功；1 平台操作失败；2 用法/配置/平台能力缺口（fail-closed，
   绝不静默降级——降级等于状态机半转移）。
 - 层级契约：本模块是**传输层**。issue 评论/标签副作用的唯一出口是
@@ -412,7 +413,9 @@ class CodeupAdapter:
             pass
         org, path = self._remote()
         if org and path and "/" in path and ns_map:
-            ns = path.split("/")[1]
+            # namespace = path 首段（gtsp/open-platform/<repo> → gtsp）；
+            # 旧 [1] 取到中间层 open-platform，映射永不命中（php#17）
+            ns = path.split("/")[0]
             if ns in ns_map:
                 return ns_map[ns]
         raise HostingError(
@@ -870,6 +873,15 @@ class CodeupAdapter:
                           f"{self._base()}/changeRequests/{p}/comments/{m['id']}",
                           body={"resolved": True})
         for name in add:
+            # 幂等（对齐 remove 分支）：已有同名未 resolved 标记则跳过
+            # ——重试/双写场景重复 POST 会堆未 resolved 重复标记（php#17）
+            hits = [m for m in self._marker_comments(p)
+                    if not m["resolved"] and m["content"].startswith(_CU_LABEL_ADD)
+                    and self._marker_label(m["content"]) == name]
+            if hits:
+                print(f"[hosting] add {name}: 已有未 resolved 标记（幂等跳过）",
+                      file=sys.stderr)
+                continue
             self._req("POST", f"{self._base()}/changeRequests/{p}/comments",
                       body={"comment_type": "GLOBAL_COMMENT",
                             "content": f"{_CU_LABEL_ADD}{name}",
@@ -905,10 +917,16 @@ class CodeupAdapter:
 
     def pr_create(self, head, title, body, label=None, base=None, repo=None):
         # 【文档推导】CreateMergeRequest（body 形态经文档核实）
+        if not base:
+            # targetBranch 必填且因仓而异（master/main 均有实仓）——猜默认
+            # 会静默落错基线，fail-closed 拒猜（web-tools#5 Sourcery）
+            raise HostingError(
+                "codeup pr create 需要 --base（目标分支因仓而异，勿猜默认）",
+                code=2)
         rid = self.repo_ref()
         payload = self._req("POST", f"{self._base()}/changeRequests", body={
             "title": title, "description": body,
-            "sourceBranch": head, "targetBranch": base or "master",
+            "sourceBranch": head, "targetBranch": base,
             "sourceProjectId": rid, "targetProjectId": rid})
         result = payload.get("result", payload)
         url = result.get("detailUrl") or result.get("webUrl") or ""
@@ -1278,7 +1296,9 @@ def main(argv):
     """CLI 入口：解析 → 取适配器 → 命令分派。"""
     args = _build_parser().parse_args(argv)
     try:
-        ad = current_adapter()
+        # --repo 目标仓驱动平台检测（java#29 Sourcery：按 cwd 检测在
+        # 跨仓 CLI 调用下会选错适配器）；未注册 --repo 的子命令回退 "."
+        ad = current_adapter(getattr(args, "repo", None) or ".")
 
         if args.cmd == "auth":
             sys.exit(0 if ad.auth_ok() else 1)

@@ -417,9 +417,13 @@ fi
 
 # --- 6. 确定性门：周界 + 测试（tests-output.txt 由脚本生成，不依赖节点自觉） ---
 if [ "${DRY}" = 0 ]; then
-  CHANGED="$(git -C "${WT}" diff --name-only ${BASE_BRANCH}..."${BRANCH}" 2>/dev/null \
-    || git -C "${WT}" diff --name-only HEAD~1)"
-  python3 "${REPO}/.factory/guard.py" --files ${CHANGED}
+  # NUL 分隔读入数组（bash 3.2 无 mapfile，同 trap 段先例）：换行
+  # 分隔 + 未引号展开会把含空格/通配符路径拆碎（web-tools#5 Sourcery）
+  CHANGED=()
+  while IFS= read -r -d '' f; do CHANGED+=("${f}"); done \
+    < <(git -C "${WT}" diff --name-only -z "${BASE_BRANCH}...${BRANCH}" 2>/dev/null \
+    || git -C "${WT}" diff --name-only -z HEAD~1)
+  python3 "${REPO}/.factory/guard.py" --files ${CHANGED[@]+"${CHANGED[@]}"}
   # ADR-009 门命令数据化：final_gate_cmd 来自 factory-local.json（fail-closed：
   # factory_lib 加载失败此处即非零终止）；read -ra 拆词为 argv 数组执行。
   GATE_CMD="$(python3 "${REPO}/.factory/factory_lib.py" final-gate)"
@@ -439,7 +443,7 @@ if [ "${DRY}" = 0 ]; then
   fi
   # 证据段：触及的测试套件以 -v 重跑附于末尾——holdout 不许推测，
   # 需要可引用的测试名/参数化用例名（-q 点号无法建立诉求对应关系）
-  for suite in $(python3 "${REPO}/.factory/factory_lib.py" suites ${CHANGED}); do
+  for suite in $(python3 "${REPO}/.factory/factory_lib.py" suites ${CHANGED[@]+"${CHANGED[@]}"}); do
     [ -d "${WT}/${suite}" ] || continue
     echo "" >> "${DIR}/tests-output.txt"
     echo "── 证据段（verbose）: ${suite}" >> "${DIR}/tests-output.txt"
@@ -481,8 +485,8 @@ if [ "${DRY}" = 0 ]; then
   PR_TITLE="$(git -C "${WT}" log --pretty=%s -1)"
   ${HOST} pr create \
     --head "$BRANCH" --title "$PR_TITLE" \
+    --base "${BASE_BRANCH}" \
     --label "factory:needs-review" \
-    --body-file <(echo "Closes #${ISSUE}"; echo; echo "工厂链产物见 ${DIR}"; echo; echo "链: triage → prime → plan → implement ↔ review（ralph ≤${RALPH_MAX} 轮）→ guard → holdout")
   # PR 落地后 issue 侧转移：accepted → in-review（PR 状态接管 issue，§7）。
   # in-progress 由链属主自清：锁不进 PR 阶段，避免 in-review+in-progress
   # 双标签滞留到 closed（锁单一属主原则，链是 in-progress 生命周期的终点）
