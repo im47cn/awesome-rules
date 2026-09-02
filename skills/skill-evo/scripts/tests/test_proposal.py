@@ -797,6 +797,24 @@ def test_finalize_review_preserves_evidence_edited(tmp_path):
     assert "\nevidence_edited: " not in text2
     assert PR.load_proposal(path2).lessons[0].evidence_edited is False
 
+def test_load_proposal_derived_clears_stale_stored_true(tmp_path):
+    """review 自审 F-R1：快照在且 evidence 与 .orig 一致 → 派生权威清残留存储 True。
+
+    残留可达：改写 evidence → apply/normalize 回写持久化 true（F2 修复后回写保真）
+    → 作者回退改写——当前文本==快照即「未改」，按验收 1 应为 False。"""
+    path = PR.write_proposal(
+        make_proposal(tmp_path, pid="20260902-000011-cc-evid11"),
+        tmp_path / "pending")
+    content = path.read_text(encoding="utf-8")
+    # 仅机读块残留 true（evidence 未动，== .orig）→ 派生基准清残留
+    path.write_text(content.replace('"evidence_edited": false',
+                                    '"evidence_edited": true'), encoding="utf-8")
+    assert PR.load_proposal(path).lessons[0].evidence_edited is False
+    # 对照正向：evidence 真改写（存储 false）→ 派生仍置位，修复不误伤
+    path.write_text(content.replace("用户说'不要用 select *'", "作者回退后再改写"),
+                    encoding="utf-8")
+    assert PR.load_proposal(path).lessons[0].evidence_edited is True
+
 
 def test_verify_evidence_paraphrase(tmp_path):
     """转述拼接：整段未逐字命中，但最长连续命中 ≥ 阈值 → paraphrase（不拦 apply）。"""

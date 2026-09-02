@@ -274,8 +274,9 @@ def load_proposal(path: Path) -> Proposal:
     for ls in lessons:
         ls.lesson_id = ls.lesson_id or derive_lesson_id(ls)   # 旧提案兼容：按内容补派生
     # 守卫：_orig_path 对 .orig 自身求值=自身，无此守卫 load(.md)→load(.orig)→
-    # load(.orig)… 无限自递归。.orig 存在→派生值覆盖一切存储值（防篡改基准）；
-    # 缺失→不派生（快照缺失视为未改，保持旧行为）。
+    # load(.orig)… 无限自递归。.orig 可解析→派生值覆盖一切存储值（防篡改基准，
+    # 先清后置：回退改写不残留历史 true，issue #113 review F-R1）；缺失→不派生
+    # （快照缺失视为未改，保持旧行为）；坏快照→保守保留存储值并上浮诊断。
     if path.suffix == ".md":
         orig_file = _orig_path(path)
         if orig_file.is_file():
@@ -289,6 +290,9 @@ def load_proposal(path: Path) -> Proposal:
                 if lessons and not orig_p.lessons:
                     errors.append(f"{orig_file.name}: 快照无可解析 lessons，"
                                   "evidence 改写检测失效（请连同 .orig 上报）")
+                elif orig_p.lessons:
+                    for ls in lessons:    # 快照可解析→派生权威：先清残留存储值再置位
+                        ls.evidence_edited = False
                 _derive_evidence_edited(lessons, orig_p.lessons)
     return Proposal(
         id=fm.get("id", path.stem), source_agent=fm.get("source_agent", "?"),
