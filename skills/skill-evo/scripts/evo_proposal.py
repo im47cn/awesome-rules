@@ -595,6 +595,7 @@ def _render_pending_body(p: Proposal) -> str:
         "confidence": ls.confidence, "reason": ls.reason,
         "knowledge_type": ls.knowledge_type,
         "lesson_id": ls.lesson_id, "supersedes": ls.supersedes,
+        "evidence_edited": ls.evidence_edited,
         "change": {"action": ls.change.action, "heading": ls.change.heading,
                    "new_text": ls.change.new_text} if ls.change else None,
     } for ls in p.lessons]}

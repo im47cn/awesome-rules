@@ -279,6 +279,8 @@ def cmd_list(args) -> int:
         print(f"{p.id}  [{len(p.lessons)} lessons]")
         for w in p.warnings():
             print(f"  ⚠ {w}")
+        for e in p.parse_errors:            # 坏快照/解析诊断上浮（Tripwire 可见）
+            print(f"  ⚠ {e}")
         checks = dict(PR.verify_evidence(p, _session_corpus(p)))
         marks = {"hit": "✓", "paraphrase": "⚠", "miss": "✗", "no_corpus": "?", "edited": "✎"}
         for i, ls in enumerate(p.lessons, 1):
@@ -296,6 +298,8 @@ def cmd_apply(args) -> int:
     proposal = PR.load_proposal(path)
     for line in PR.normalize_headings(proposal, C.repo_root(), path):
         print(f"ℹ {line}")
+    for e in proposal.parse_errors:         # 坏快照/解析诊断上浮（Tripwire 可见）
+        print(f"⚠ {e}")
     checks = PR.verify_evidence(proposal, _session_corpus(proposal))
     for i, status in checks:
         if status == "no_corpus":

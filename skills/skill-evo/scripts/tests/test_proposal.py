@@ -488,7 +488,7 @@ def test_supersedes_validation(tmp_path):
 # ── evidence 核验 ───────────────────────────────────────────────────────────
 
 def test_verify_evidence(tmp_path):
-    """四态核验（issue #113 需求 2 增 edited 态：支配 hit、优先于 no_corpus）。"""
+    """五态核验（issue #113 需求 2 增 edited 态：支配 hit、优先于 no_corpus）。"""
     p = make_proposal(tmp_path, lessons=[
         make_lesson(),                                # evidence 含于语料
         make_lesson(evidence="会话里根本没有这句话"),   # 不含
@@ -683,6 +683,27 @@ def test_load_proposal_detects_evidence_edited(tmp_path):
     assert after.lessons[0].evidence_edited is False             # new_text 编辑不降级
 
 
+def test_load_proposal_detects_evidence_edited_second_pass(tmp_path):
+    """issue #113 验收 1（二遍正向，review F3）：new_text 裁剪致 lesson_id 变化
+    + evidence 改写 → 混合编辑兜底仍置位（正向分支此前零测试，重构破坏无红灯）。"""
+    p = make_proposal(tmp_path, pid="20260902-000009-cc-evid09")
+    path = PR.write_proposal(p, tmp_path / "pending")
+    payload = {"lessons": [{
+        "type": ls.type, "evidence": "用户事后改写的另一句引文",
+        "target_file": ls.target_file,
+        "confidence": ls.confidence, "reason": ls.reason,
+        "change": {"action": ls.change.action, "heading": ls.change.heading,
+                   "new_text": "- 禁止 `select *`"}} for ls in p.lessons]}
+    content = path.read_text(encoding="utf-8")
+    m = PR._JSON_BLOCK_RE.search(content)
+    path.write_text(content[:m.start()] + "```json\n" + json.dumps(
+        payload, ensure_ascii=False, indent=1) + "\n```" + content[m.end():],
+        encoding="utf-8")
+    after = PR.load_proposal(path)
+    assert after.lessons[0].lesson_id != p.lessons[0].lesson_id  # id 随内容变化→二遍
+    assert after.lessons[0].evidence_edited is True              # 混合编辑兜底置位
+
+
 def test_load_proposal_evidence_unchanged_and_no_orig_false(tmp_path):
     """issue #113 验收 1 负道：未改写全 False；快照缺失时手改也不标（旧行为）。"""
     path = PR.write_proposal(
@@ -736,6 +757,23 @@ def test_write_load_roundtrip_evidence_edited_stored(tmp_path):
     path.write_text(content.replace('"evidence_edited": false',
                                     '"evidence_edited": true'), encoding="utf-8")
     assert PR.load_proposal(path).lessons[0].evidence_edited is True
+
+
+def test_rewrite_pending_md_preserves_evidence_edited_stored(tmp_path):
+    """issue #113 需求 4 第三序列化路径（review F2）：heading 规范化回写
+    不得洗掉机读块存储的 evidence_edited（无 .orig 时存储值是唯一通道）。"""
+    path = PR.write_proposal(
+        make_proposal(tmp_path, pid="20260902-000010-cc-evid10"),
+        tmp_path / "pending")
+    PR._orig_path(path).unlink()                   # 窄路径：无快照，存储值是唯一来源
+    content = path.read_text(encoding="utf-8")
+    path.write_text(content.replace('"evidence_edited": false',
+                                    '"evidence_edited": true'), encoding="utf-8")
+    p = PR.load_proposal(path)
+    assert p.lessons[0].evidence_edited is True
+    PR._rewrite_pending_md(p, path)                # normalize_headings 的回写通道
+    reloaded = PR.load_proposal(path)
+    assert reloaded.lessons[0].evidence_edited is True   # 回写不洗字段
 
 
 def test_finalize_review_preserves_evidence_edited(tmp_path):
