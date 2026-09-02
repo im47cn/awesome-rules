@@ -1097,35 +1097,28 @@ def _issue_acceptance_error(body):
             " checkbox 直接过）")
 
 
-# ── issue 创建标签合法性预检（第三层：状态机保留标签不可在 create 时携带）──
-# 状态机标签是链/调度器/sync 的属主写产物（语义源 state.py 的 LOCKS/
-# QUEUE/PR_SIDE + 裁决/接管态）：create 时携带即伪称生命周期事实——
-# accepted 绕过 triage 裁决（regression/README.md 语义），triaging/
-# in-progress 伪装链锁占用，PR 侧/裁决/接管态在无 PR、无裁决的创建时点
-# 语义不存在。唯一豁免 factory:needs-human：机器判定「不可自动、需人工」
-# 的合法落点（breaker_tripped 族命令式落标；upstream-sync-check.sh
-# local 漂移实证机器用法）。非 factory:* 标签（priority:* 等 dispatch
+# ── issue 创建标签合法性预检（第三层：factory: 命名空间保留给状态机）──
+# factory:* 是状态机/门控的属主写命名空间（regression/README.md 语义：
+# 「打其他 factory:* 标签会永远不被拾取」——triage-batch 只拾取零
+# factory:* 标签的 open issue）：create 时携带任何 factory:* 即伪称
+# 生命周期事实——accepted 绕过 triage 裁决、triaging/in-progress 伪装
+# 链锁占用、PR 侧/裁决/门控态（needs-review/validated 等）在无 PR、
+# 无裁决的创建时点语义不存在。命名空间拦截 fail-closed：typo
+# （factory:accepetd）与未来新增状态标签自动被拦，不依赖枚举镜像。
+# 唯一豁免 factory:needs-human：机器判定「不可自动、需人工」的合法
+# 落点（breaker_tripped 族命令式落标；upstream-sync-check.sh local
+# 漂移实证机器用法）。非 factory:* 标签（priority:* 等 dispatch
 # 消费面）不受限。
-# 禁止集是 state.py 三集合的镜像：hosting 保持自包含契约（传输层脚本
-# 不 import 核心层模块——hermetic 测试拷贝本文件到隔离目录独立执行）；
-# 两处等价由 test_forbidden_set_derivation 锁死，改状态机标签集时
-# 该测试强制同步语义决策。
-_CREATE_FORBIDDEN_LABELS = frozenset({
-    "factory:triaging", "factory:in-progress",     # LOCKS（链锁占用）
-    "factory:accepted",                            # QUEUE（triage 裁决产物）
-    "factory:needs-review", "factory:needs-fix",   # PR_SIDE（PR 侧状态）
-    "factory:approved",                            # PR_SIDE
-    "factory:rejected",                            # triage 裁决产物
-    "factory:in-review",                           # pr_open 接管态
-})  # 豁免 factory:needs-human（PR_SIDE 中机器「不可自动」的人工落点）
+
 
 def _issue_label_error(label):
-    """issue create 标签属状态机保留集时返回提示语；合法返回 None。"""
-    if label in _CREATE_FORBIDDEN_LABELS:
-        return (f"标签 {label} 是状态机保留标签（链/调度器/sync 属主写），"
+    """issue create 标签占 factory: 命名空间时返回提示语；合法返回 None。"""
+    if label and label.startswith("factory:") and label != "factory:needs-human":
+        return (f"标签 {label} 占用 factory: 命名空间（状态机/门控属主写），"
                 "create 时携带即伪称生命周期事实（accepted 绕 triage 裁决、"
-                "triaging/in-progress 伪装锁占用、PR 侧/裁决态在创建时点"
-                "语义不存在）。正道：零标签走 triage 裁决路径；确需人工"
+                "triaging/in-progress 伪装锁占用、PR 侧/门控态在创建时点"
+                "语义不存在；未知 factory:* 多为 typo 且会被 triage 批次"
+                "永久跳过）。正道：零标签走 triage 裁决路径；确需人工"
                 "接管用 factory:needs-human；分类用非 factory 标签"
                 "（如 priority:*）")
     return None
