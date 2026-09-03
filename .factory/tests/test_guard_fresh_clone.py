@@ -55,3 +55,14 @@ def test_absent_non_ignored_still_blocked(tmp_path):
     mod = _load_guard(_build_repo(tmp_path, PERIMETER + ["vanished/"]))
     with pytest.raises(RuntimeError, match="周界路径不存在"):
         mod.self_check()
+
+
+def test_rev_parse_failure_fails_closed(tmp_path):
+    """CodeRabbit wop-skills#14：REPO_ROOT 非 git 仓（rev-parse 失败）时
+    main_root 不得退化为空串相对 CWD 解析（fail-open）——git 不可用走
+    check-ignore fail-closed（与下方 git 异常立场一致），不静默放行。"""
+    root = _build_repo(tmp_path, PERIMETER)  # .localcfg/ 缺失非 ignored 检查路径
+    subprocess.run(["rm", "-rf", str(root / ".git")], check=True)
+    mod = _load_guard(root)
+    with pytest.raises(RuntimeError, match="git check-ignore"):
+        mod.self_check()

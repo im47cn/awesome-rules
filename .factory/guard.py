@@ -75,10 +75,16 @@ def self_check() -> None:
     #   其余 → 当前树 ∪ 主工作树（未跟踪非忽略目录可能只在主树）；
     #   两边皆缺且非 ignored → M-02 的「从未存在」，仍拦。
     import subprocess
-    main_root = subprocess.run(
+    rp = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "rev-parse", "--path-format=absolute", "--git-common-dir"],
         capture_output=True, text=True,
-    ).stdout.strip().removesuffix("/.git")
+    )
+    if rp.returncode != 0:
+        # 主树回退依赖 git 元数据：失败即放弃回退（fail-safe 偏严——
+        # 多拦误报不放过漂移），与下方 check-ignore fail-closed 立场一致
+        main_root = ""
+    else:
+        main_root = rp.stdout.strip().removesuffix("/.git")
     if absent := [
         p
         for p in sorted(guard_paths)

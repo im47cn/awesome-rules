@@ -486,6 +486,7 @@ if [ "${DRY}" = 0 ]; then
   ${HOST} pr create \
     --head "$BRANCH" --title "$PR_TITLE" \
     --base "${BASE_BRANCH}" \
+    --body-file <(echo "Closes #${ISSUE}"; echo; echo "工厂链产物见 ${DIR}"; echo; echo "链: triage → prime → plan → implement ↔ review（ralph ≤${RALPH_MAX} 轮）→ guard → holdout") \
     --label "factory:needs-review" \
   # PR 落地后 issue 侧转移：accepted → in-review（PR 状态接管 issue，§7）。
   # in-progress 由链属主自清：锁不进 PR 阶段，避免 in-review+in-progress

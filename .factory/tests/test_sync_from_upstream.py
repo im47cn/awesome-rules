@@ -19,6 +19,7 @@
 """
 
 import glob
+import os
 import json
 import re
 import subprocess
@@ -404,13 +405,14 @@ class TestPR105ReviewRegressions:
         (fake / "sourcery").chmod(0o755)
         env = _run_env()
         env["PATH"] = f"{fake}:{env['PATH']}"
-        before = (set(glob.glob("/tmp/.factory-stage.*"))
-                  | set(glob.glob("/tmp/.factory-dist.*")))
+        tmp_root = os.environ.get("TMPDIR") or "/tmp"
+        before = (set(glob.glob(f"{tmp_root}/.factory-stage.*"))
+                  | set(glob.glob(f"{tmp_root}/.factory-dist.*")))
         proc = self._run(dn, str(up), "--apply", "--anchor", "main", env=env)
         assert proc.returncode == 1, "追平后闸返回 1 → 拦截退出"
         assert "Sourcery 回归闸拦截" in proc.stderr
-        after = (set(glob.glob("/tmp/.factory-stage.*"))
-                 | set(glob.glob("/tmp/.factory-dist.*")))
+        after = (set(glob.glob(f"{tmp_root}/.factory-stage.*"))
+                 | set(glob.glob(f"{tmp_root}/.factory-dist.*")))
         assert after - before == set(), "中途退出不得泄漏 /tmp 暂存文件（评论 3）"
 
 class TestSelfOverwriteSafety:

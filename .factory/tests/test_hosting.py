@@ -413,6 +413,17 @@ class TestCodeupMarkerModel:
         assert out["review"] != "changes_requested"  # 载体缺席不得误报打回
         assert "降级空集" in capsys.readouterr().err
 
+    def test_marker_label_prefix_only_returns_empty(self, monkeypatch):
+        """CodeRabbit wop-skills#14：标记评论恰为前缀/前缀+空白时切片为空，
+        旧实现 splitlines()[0] 抛 IndexError（平台开放输入不可约束）——
+        空标记按无标记处理，不越过 HostingError 边界。"""
+        ad = self._ad(monkeypatch, {})
+        assert ad._marker_label("[factory:label:add] ") == ""
+        assert ad._marker_label("[factory:label:add]") == ""
+        # 常规形态不回归
+        assert ad._marker_label(
+            "[factory:label:add] factory:needs-review") == "factory:needs-review"
+
     def test_label_history_resolved_does_not_decrease(self, monkeypatch):
         """轮次语义：resolved 不减计数——全部 add 标记都计入事件流。"""
         ad = self._ad(monkeypatch, {

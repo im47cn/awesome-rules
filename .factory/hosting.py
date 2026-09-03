@@ -816,7 +816,10 @@ class CodeupAdapter:
 
     @staticmethod
     def _marker_label(content):
-        return content[len(_CU_LABEL_ADD):].splitlines()[0].strip()
+        # 平台开放输入：恰为前缀/前缀+空白时切片为空，splitlines()[0] 抛
+        # IndexError（CodeRabbit wop-skills#14）；空标记按无标记处理
+        rest = content[len(_CU_LABEL_ADD):].strip()
+        return rest.splitlines()[0].strip() if rest else ""
 
     def pr_view(self, p, repo=None):
         # 【live 2026-08-26】单体端点是仓库级（仓库级集合 404、单体正常）

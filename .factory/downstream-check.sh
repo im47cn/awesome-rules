@@ -24,7 +24,7 @@ CENTER="$(cd "$SCRIPT_DIR/.." && pwd)"
 MANIFEST="$SCRIPT_DIR/downstream.json"
 SYNC="$SCRIPT_DIR/sync-from-upstream.sh"
 LOCK="$SCRIPT_DIR/locks/downstream-check.lock"
-OUT_FILE="/tmp/.factory-downstream-check.$$"
+OUT_FILE="$(mktemp "${TMPDIR:-/tmp}/.factory-downstream-check.XXXXXX")"
 
 MODE="check"
 while [ $# -gt 0 ]; do
