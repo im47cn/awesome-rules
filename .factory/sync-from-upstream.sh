@@ -111,12 +111,14 @@ echo "上游: ${UP} @ ${ANCHOR} (${HEAD_SHA:0:9})"
 # 展开逻辑在 factory_lib.py dist-manifest（2026-08-28 自此处 heredoc 下沉，
 # 铁律 4：git 子进程编排归 Python；无清单=空输出，警告走 stderr）
 DIST_FILE="$(mktemp "${TMPDIR:-/tmp}/.factory-dist.XXXXXX")"
-STAGE_FILE="$(mktemp "${TMPDIR:-/tmp}/.factory-stage.XXXXXX")"
 # EXIT trap 兜底清理：Sourcery 拒绝、git 失败等 set -e 中途退出不泄漏
 # /tmp 暂存文件（PR #105 评论 3）——正常退出同样兜底，显式 rm 不再需要。
+# trap 紧随首个 mktemp 安装（PR #120 review 1）：第二个 mktemp（STAGE_FILE）
+# 失败时首个暂存不再泄漏。未达定义处的变量以 :- 防 set -u 中断 trap。
 # tmp = apply 循环 tmp+mv 的中转文件（#103）：中断即清；未入循环时未定义，
 # set -u 下 :- 防 unbound（rm -f 空串为无害 no-op）
-trap 'rm -f "$DIST_FILE" "$STAGE_FILE" "${tmp:-}"' EXIT
+trap 'rm -f "$DIST_FILE" "${STAGE_FILE:-}" "${tmp:-}"' EXIT
+STAGE_FILE="$(mktemp "${TMPDIR:-/tmp}/.factory-stage.XXXXXX")"
 python3 "$SCRIPT_DIR/factory_lib.py" dist-manifest "$UP" "$HEAD_SHA" > "$DIST_FILE"
 
 # Sourcery 回归闸（2026-08-31 事故锚：追平所取上游快照早于下游已修复版，

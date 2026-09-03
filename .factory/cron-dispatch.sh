@@ -15,7 +15,7 @@ cd "$REPO" || { echo "无法进入 ${REPO}" >&2; exit 2; }
 export PATH HOME="${HOME:?cron 环境未设置 HOME}"
 mkdir -p "${REPO}/.factory/locks"  # 净克隆首跑：目录 gitignored 不存在时 shlock 建锁 ENOENT 被误读为锁被持而静默退出（源仓 PR#79 审查）；下方日志重定向同依赖此目录
 # 运行时状态自举：locks/ gitignored，不随分发/仓库移动到达；缺失时 breaker
-# fail-closed 静默停摆（awesome-rules 2026-09-01 实证）。floor 是静态配置，
+# fail-closed 静默停摆（源仓 2026-09-01 实证）。floor 是静态配置，
 # 缺失自举默认值；ledger 是 R4 成本账本——_load_ledger 对缺失文件返回 []
 # （breaker 按空账本放行），缺失与空账本语义等价。2026-09-01 用户要求
 # "先帮我处理（自愈）"：缺失自动建空账本消除告警，留痕（stderr + LOG）

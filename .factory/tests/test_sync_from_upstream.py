@@ -16,6 +16,8 @@
 - 字节码密闭（issue #107：apply 子进程 import hosting 在下游仓留未跟踪
   __pycache__，污染「落库后工作树干净」断言）→ TestApplyCommit
   .test_apply_leaves_no_pycache_in_downstream（显式零字节码契约）
+- PR #120 审查回归（mktemp 泄漏：trap 晚于首个 mktemp，第二个 mktemp
+  失败时首个暂存文件泄漏 /tmp）→ TestPR120ReviewRegressions
 """
 
 import glob
@@ -414,6 +416,37 @@ class TestPR105ReviewRegressions:
         after = (set(glob.glob(f"{tmp_root}/.factory-stage.*"))
                  | set(glob.glob(f"{tmp_root}/.factory-dist.*")))
         assert after - before == set(), "中途退出不得泄漏 /tmp 暂存文件（评论 3）"
+
+class TestPR120ReviewRegressions:
+    """PR #120 审查评论回归：mktemp 暂存泄漏——trap 晚于首个 mktemp。"""
+
+    def _run(self, dn, *args, env=None):
+        return subprocess.run(
+            ["bash", str(dn / ".factory/sync-from-upstream.sh"), *args],
+            cwd=dn, env=env or _run_env(), capture_output=True, text=True,
+        )
+
+    def test_second_mktemp_failure_leaks_no_dist_file(self, repos, tmp_path):
+        """review 1：第二个 mktemp（STAGE_FILE）失败时首个（DIST_FILE）
+        不得泄漏——trap 须紧随首个 mktemp 安装（修复前两个 mktemp 均完成
+        后才装 trap，第二个失败即泄漏）。计数 fake：首调放行次调失败。"""
+        up, dn, _ = repos
+        fake = tmp_path / "bin"
+        fake.mkdir()
+        (fake / "mktemp").write_text(
+            "#!/bin/sh\n"
+            'n=$(($(cat "$0.calls" 2>/dev/null || echo 0) + 1)); echo "$n" > "$0.calls"\n'
+            '[ "$n" -lt 2 ] && exec /usr/bin/mktemp "$@"\n'
+            "exit 1\n", encoding="utf-8")
+        (fake / "mktemp").chmod(0o755)
+        env = _run_env()
+        env["PATH"] = f"{fake}:{env['PATH']}"
+        tmp_root = os.environ.get("TMPDIR") or "/tmp"
+        before = set(glob.glob(f"{tmp_root}/.factory-dist.*"))
+        proc = self._run(dn, str(up), "--check", "--anchor", "main", env=env)
+        assert proc.returncode != 0, "第二个 mktemp 失败须中断脚本"
+        after = set(glob.glob(f"{tmp_root}/.factory-dist.*"))
+        assert after - before == set(), "第二个 mktemp 失败不得泄漏首个暂存（review 1）"
 
 class TestSelfOverwriteSafety:
     """issue #103：apply 覆盖 $dst 为运行中脚本自身时的原子替换契约。
