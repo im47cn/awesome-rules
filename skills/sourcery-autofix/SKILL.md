@@ -26,7 +26,9 @@ description: >
 
 1. **圈定范围**：合并 `git diff --name-only <base>...HEAD`（已提交）、
    `git diff --cached --name-only`（暂存）、`git diff --name-only`（工作区）
-   三源去重，过滤 `.py|.go|.java|.cs|.php|.ts|.js` 且排除已删除文件；
+  三源去重，过滤 `.py|.ts|.js`（CLI 实测支持面——php 等 CLI 静默不扫，
+  喂入 fix 循环会以 check exit 0 虚假闭环，见 sourcery-gate.sh 头注释）
+  且排除已删除文件；
    全仓扫描禁止（翻历史 issue 噪音）；
 2. **同配置**：仓库有 `.sourcery.yaml` 必须 `--config .sourcery.yaml`——
    本地、CI gate、sourcery-ai[bot] 三方同引擎同配置，否则本地修的 gate 不认；
