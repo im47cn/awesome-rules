@@ -7,8 +7,8 @@
 > 门禁 `control_gate`（全盘拒绝控制候选）+ `split_eval` 分层切分 + badcase 语料
 > 扩充至 71 例（设计时 6 例）——replay 评估集共 73 cases
 > **剩余项**：无（2026-09-03 收尾：badcase_runner strict 空放行型修正已落地 §3.2、
-> CI `replay-dry-run` 哨兵已接线 §5.3、带 LLM `--budget 16` 端到端已实跑 §7.4、
-> §7.6/§7.7 缺口测试已补）
+> CI `replay-dry-run` 哨兵已接线 §5.3、带 LLM `--budget 16` 端到端已跑通 §7.4、
+> §7.6/§7.7 缺口测试已补；引擎阈值未产出提案的分歧见 §7.4 注）
 > **范围**：高频重复任务 → 确定性打分评估集 → GEPA 进化信号源（对标 SkillOpt-Sleep 的 replay 机制）
 > **参考**：[GEPA arXiv 2507.19457](https://arxiv.org/abs/2507.19457)、
 > [Microsoft/SkillOpt](https://github.com/microsoft/SkillOpt)（sleep 阶段 replay 打分）、
@@ -246,8 +246,8 @@ replay 评估集共 73 cases），验收以实跑全绿为准。
 | spec:replay-eval-1 | `--strict-exact` 修正后全绿（空放行型不再虚设，见 §3.2） | `scripts/tests/test_badcase_runner.py::TestStrictExact` 6 项：否定式 `test_empty_expected_with_findings_fails`（空 expected + 实检必 FAIL）、`test_empty_expected_clean_stays_green`、非 strict 分界 2 项、拦截型双向锚 `test_declared_rules_bidirectional` | `python3 scripts/badcase_runner.py --skill ddl-guard --strict-exact` → 71/71 全绿 exit 0 |
 | spec:replay-eval-2 | dry-run：评估集构成正确、打分器全 case 可运行、报告 baseline | `test_cmd_evolve_replay_dry_run`、`test_cmd_evolve_replay_custom_eval_dir_ok`、`test_script_baseline_f1_*` 5 项（含未注册脚本 fail-closed、exit 1/2 解析） | 实跑 dry-run：73 cases（59 train / 14 holdout）、脚本基线 F1=1.000；CI `replay-dry-run` 哨兵已接线（§5.3，run 块三断言本地实跑通过） |
 | spec:replay-eval-3 | 「全盘拒绝」控制候选 holdout F1 < baseline（含放行型 case 后显著低于） | `test_control_gate_reject_all_below_clean`、`test_control_gate_empty_holdout`、`test_cmd_evolve_replay_gate_fail` | 实跑两次复现：`门禁通过：全盘拒绝控制候选 F1=0.048 < baseline 1.000` |
-| spec:replay-eval-4 | 一次 `--budget 16` 端到端跑通：引擎返回 best candidate + holdout 分数，产物 pending 提案（不自动应用/commit） | `test_cmd_evolve_replay_full_run`、`test_cmd_evolve_replay_with_budget`、`test_cmd_evolve_replay_no_improvement`、`test_write_skill_proposal_lands_pending_prompt_evolution` | 实跑进行中（`--budget 16`，门禁已过，GEPA rollout 运行；终局 baseline/best holdout 数字与提案产物随后续提交更新本格） |
-| spec:replay-eval-5 | 变异候选 validate 拦截：删 frontmatter / 超长 → 丢弃 | `test_validate_candidate_rejects_frontmatter_drop_and_oversize`；引擎侧 `test_gepa.py::test_run_gepa_discards_invalid_mutation` | — |
+| spec:replay-eval-4 | 一次 `--budget 16` 端到端跑通：引擎返回 best candidate + holdout 分数，产物 pending 提案（不自动应用/commit） | `test_cmd_evolve_replay_full_run`、`test_cmd_evolve_replay_with_budget`、`test_cmd_evolve_replay_no_improvement`、`test_write_skill_proposal_lands_pending_prompt_evolution` | 实跑完成（2026-09-03 12:15–13:22）：引擎返回 `baseline(c0) holdout=0.018  best(c0) holdout=0.018`、迭代报告落 `~/.config/ar/skill-evo/evolve/20260903-052201/`、iter0 变异即被 validate 拦截（「违反候选约束，丢弃」，§7.5 实跑佐证）、exit 0 不自动 apply/commit。**注（spec 分歧上报）**：本环境 LLM 端点（zai/glm，单调用 180s 封顶）holdout F1 仅 0.018，improvement=0 未过 0.2 阈值，引擎按 evo.py 445 行设计**未写提案、仅存报告**——任务书验收 ④「产物为 pending 提案」在本次实跑未成立；提案落盘路径由 `test_cmd_evolve_replay_full_run` 差集断言守护（落 pending、不自动 apply），非脚本缺陷 |
+| spec:replay-eval-5 | 变异候选 validate 拦截：删 frontmatter / 超长 → 丢弃 | `test_validate_candidate_rejects_frontmatter_drop_and_oversize`；引擎侧 `test_gepa.py::test_run_gepa_discards_invalid_mutation` | 端到端实跑 iter0 即现「违反候选约束，丢弃」（§7.4 报告 iterations） |
 | spec:replay-eval-6 | 打分器确定性：同一候选同一 case 分数一致（随机性固定 seed） | `test_execute_deterministic_same_report_same_score`（2026-09-03 补） | CLI `--seed` 默认 0（evo.py） |
 | spec:replay-eval-7 | 提取层对照抽验：人工报告提取结果与原文逐条核对 | `test_extract_rules_against_real_report`（2026-09-03 补）：真实报告原文 fail-closed 不臆造 + 契约清单逐条一致 | 真实语料 `skills/ddl-guard/test/ddl-202607071777审查报告.md`（7.4KB 正文，含表格/代码块噪音） |
 | spec:replay-eval-8 | `include_manual=True`：manual_rules 并入 expected 且 LLM 侧可检出命中 | `test_load_eval_set_include_manual_merges`、`test_parse_expected_manual_rule_ids_vs_desc`、`test_rule_matches_anyof_alias`、`test_reconcile_unexpected_respects_alias`、`test_reconcile_merged_hit_not_unexpected`、`test_f1_score_merged_hit_bounded` | dry-run 构成可见（005/006/008 人工规则并入 expected，别名取首 token） |
