@@ -54,6 +54,7 @@ copy_one "lefthook/run-tests.sh" "$TARGET/.lefthook/run-tests.sh"
 copy_one "lefthook/spec-check.sh" "$TARGET/.lefthook/spec-check.sh"
 copy_one "lefthook/sourcery-gate.sh" "$TARGET/.lefthook/sourcery-gate.sh"
 copy_one "lefthook/mutation-gate.sh" "$TARGET/.lefthook/mutation-gate.sh"
+copy_one "lefthook/coderabbit-gate.sh" "$TARGET/.lefthook/coderabbit-gate.sh"
 # spec 反向核对脚本（与 spec-check.sh 配套，随 hook 分发到项目 .lefthook/）
 copy_one "../spec_check.py" "$TARGET/.lefthook/spec_check.py"
 
