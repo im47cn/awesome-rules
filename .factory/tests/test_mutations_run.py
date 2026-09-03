@@ -409,17 +409,53 @@ class TestMainSmoke:
     argparse 解析 → 过滤 → 汇总 → 判定全链路不炸，退出码语义正确。
     """
 
-    def test_main_only_nonexistent_id_exit0(self, monkeypatch, capsys):
-        """--only 不存在的 id → 空清单零注入 → 全绿路径退出码 0。"""
+    def test_main_only_nonexistent_id_config_error(self, monkeypatch, capsys):
+        """--only 含未知 id → 配置错误 rc 2（下游 wop-web-tools 反哺：过滤空
+        清单以 0 退出写戳 = 配置错误伪装成全量验证；rc 2 对齐 guard 用法错误
+        语义。原 exit0 断言固化的正是此缺陷，已翻转）。"""
         monkeypatch.setattr(mut, "write_stamp", lambda *a, **k: None)  # 不动 evidence-stamp
         monkeypatch.setattr(sys, "argv", ["run.py", "--only", "X-nonexistent"])
         rc = mut.main()
-        assert rc == 0
-        out = capsys.readouterr().out
-        assert "门灵敏度冒烟通过" in out
+        assert rc == 2
+        assert "未知缺陷 id" in capsys.readouterr().err
+
+    def test_main_target_outside_repo_fails_config(self, monkeypatch, capsys, tmp_path):
+        """target 越出 REPO_ROOT（`..` 与绝对路径）→ FAIL-config → rc 1
+        （下游 wop-web-tools 反哺：--defects 载外部 JSON 时 `..` 可指向仓外
+        文件注入+写回，进程非正常终止 = 注入残留落仓外）。"""
+        for target in ("../escape-probe-918273", str(tmp_path / "outside-918273")):
+            cfg = {"defects": [{
+                "id": "T-99", "description": "越仓探针", "target": target,
+                "find": "不可能存在的锚点 918273", "replace": "x",
+                "gate": "guard", "expect_block": True,
+            }]}
+            p = tmp_path / "defects-probe.json"
+            p.write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
+            monkeypatch.setattr(mut, "write_stamp", lambda *a, **k: None)
+            monkeypatch.setattr(sys, "argv", ["run.py", "--defects", str(p)])
+            rc = mut.main()
+            assert rc == 1
+            assert "越出仓库根" in capsys.readouterr().out
 
     def test_main_missing_defects_file_raises(self, monkeypatch, tmp_path):
         """--defects 指向缺失文件 → FileNotFoundError 传播（fail-fast，无静默空跑）。"""
         monkeypatch.setattr(sys, "argv", ["run.py", "--defects", str(tmp_path / "nope.json")])
         with pytest.raises(FileNotFoundError):
             mut.main()
+
+    def test_write_stamp_glob_latest_evidence(self, tmp_path, monkeypatch):
+        """write_stamp() 缺省取 mutations/ 目录最新 EVIDENCE-*.md（下游
+        wop-web-tools 反哺：静态默认文件名会过期，写戳引用不存在的留档 =
+        stamp 说谎）。显式 evidence 参数仍原样直写。"""
+        (tmp_path / "EVIDENCE-2026-08-24.md").write_text("old", encoding="utf-8")
+        (tmp_path / "EVIDENCE-2026-08-26.md").write_text("new", encoding="utf-8")
+        monkeypatch.setattr(mut, "STAMP", tmp_path / "evidence-stamp.json")
+        monkeypatch.setattr(mut, "perimeter_blob", lambda: "fake-blob")
+        blob = mut.write_stamp()
+        stamp = json.loads((tmp_path / "evidence-stamp.json").read_text(encoding="utf-8"))
+        assert blob == "fake-blob"
+        assert stamp["evidence"] == "EVIDENCE-2026-08-26.md"
+        # 显式 evidence 参数直写不改
+        mut.write_stamp("EVIDENCE-2026-08-24.md")
+        stamp2 = json.loads((tmp_path / "evidence-stamp.json").read_text(encoding="utf-8"))
+        assert stamp2["evidence"] == "EVIDENCE-2026-08-24.md"
