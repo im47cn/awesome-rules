@@ -816,7 +816,10 @@ class CodeupAdapter:
 
     @staticmethod
     def _marker_label(content):
-        return content[len(_CU_LABEL_ADD):].splitlines()[0].strip()
+        # 平台开放输入：恰为前缀/前缀+空白时切片为空，splitlines()[0] 抛
+        # IndexError（CodeRabbit wop-skills#14）；空标记按无标记处理
+        rest = content[len(_CU_LABEL_ADD):].strip()
+        return rest.splitlines()[0].strip() if rest else ""
 
     def pr_view(self, p, repo=None):
         # 【live 2026-08-26】单体端点是仓库级（仓库级集合 404、单体正常）
@@ -1001,9 +1004,12 @@ class CodeupAdapter:
         # 评论标记承载（#66，平台缺口 c）：全部 add 标记 → 事件流。
         # resolved 不减计数（重派前 remove、再打回再 add，轮次单调递增
         # ——对齐 GitHub label-add 事件语义）；中立 schema 同 GitHub 侧。
-        return [{"op": "add", "label": self._marker_label(m["content"])}
-                for m in self._marker_comments(p)
-                if m["content"].startswith(_CU_LABEL_ADD)]
+        return [
+            {"op": "add", "label": label}
+            for m in self._marker_comments(p)
+            if m["content"].startswith(_CU_LABEL_ADD)
+            and (label := self._marker_label(m["content"]))
+        ]  # 前缀-only 评论空标记 → walrus 短路不产无效事件（#119）
 
 
 ADAPTERS = {"github": GitHubAdapter, "codeup": CodeupAdapter}

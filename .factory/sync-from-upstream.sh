@@ -110,8 +110,8 @@ echo "上游: ${UP} @ ${ANCHOR} (${HEAD_SHA:0:9})"
 # 清单是上游主权，锚点即版本）。无清单=上游版本旧，全部按 local。
 # 展开逻辑在 factory_lib.py dist-manifest（2026-08-28 自此处 heredoc 下沉，
 # 铁律 4：git 子进程编排归 Python；无清单=空输出，警告走 stderr）
-DIST_FILE="/tmp/.factory-dist.$$"
-STAGE_FILE="/tmp/.factory-stage.$$"; : > "$STAGE_FILE"
+DIST_FILE="$(mktemp "${TMPDIR:-/tmp}/.factory-dist.XXXXXX")"
+STAGE_FILE="$(mktemp "${TMPDIR:-/tmp}/.factory-stage.XXXXXX")"
 # EXIT trap 兜底清理：Sourcery 拒绝、git 失败等 set -e 中途退出不泄漏
 # /tmp 暂存文件（PR #105 评论 3）——正常退出同样兜底，显式 rm 不再需要。
 # tmp = apply 循环 tmp+mv 的中转文件（#103）：中断即清；未入循环时未定义，
@@ -173,7 +173,7 @@ while IFS=$'\t' read -r kind rel; do
       # tmp+mv 原子替换（#103）：$dst 可能是运行中脚本自身——bash 惰性逐段
       # 读源文件，`> "$dst"` 直写截断同 inode，旧读位移落在新内容中途即
       # syntax error 半同步态；同目录 rename 换 inode，旧 inode 保活至跑完
-      tmp="$dst.factory-new.$$"
+      tmp="$(mktemp "${dst}.factory-new.XXXXXX")"
       git -C "$UP" cat-file blob "$up_blob" > "$tmp" && mv -f "$tmp" "$dst" \
         || { echo "  [$kind] $rel: 上游 blob 拉取失败" >&2; exit 2; }
       chmod "${up_mode: -3}" "$dst" 2>/dev/null || chmod +x "$dst"
@@ -190,7 +190,7 @@ while IFS=$'\t' read -r kind rel; do
     DRIFT=1
     if [ "$MODE" = apply ]; then
       # 同 fill-in：tmp+mv 原子替换（#103）——漂移覆盖恰是自覆盖的主形态
-      tmp="$dst.factory-new.$$"
+      tmp="$(mktemp "${dst}.factory-new.XXXXXX")"
       git -C "$UP" cat-file blob "$up_blob" > "$tmp" && mv -f "$tmp" "$dst" \
         || { echo "  [full] $rel: 上游 blob 拉取失败" >&2; exit 2; }
       chmod "${up_mode: -3}" "$dst" 2>/dev/null || chmod +x "$dst"
