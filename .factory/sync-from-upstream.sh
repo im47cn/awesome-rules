@@ -81,8 +81,7 @@ if [ "$MODE" = apply ] && [ "$COMMIT" = 1 ]; then
     IGNORE_FILE="$REPO/.git-blame-ignore-revs"
     if ! { printf '%s\n' "$ignore_state" | grep -q '^?? ' \
         && [ -f "$IGNORE_FILE" ] \
-        && [ "$(wc -l < "$IGNORE_FILE" | tr -d ' ')" = 1 ] \
-        && head -n 1 "$IGNORE_FILE" | grep -q '^# factory: 追平提交忽略清单'; }; then
+        && cmp -s "$IGNORE_FILE" <(printf '%s\n' '# factory: 追平提交忽略清单（git blame --ignore-revs 消噪）'); }; then
       echo "拒绝 --commit：目标仓 .git-blame-ignore-revs 有未提交改动（先落库或反哺）:" >&2
       printf '%s\n' "$ignore_state" >&2
       exit 1

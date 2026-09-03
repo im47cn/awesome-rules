@@ -270,6 +270,39 @@ class TestApplyCommit:
         assert proc.returncode == 1, proc.stdout + proc.stderr
         assert "拒绝 --commit" in proc.stderr
         assert _head_count(dn) == 2, "拒绝不得产生提交"
+        assert "manual note beyond header" in (dn / ".git-blame-ignore-revs").read_text(
+            encoding="utf-8"), "本地改动须原样保留"
+
+    def test_manual_untracked_no_trailing_newline_refuses_commit(self, repos):
+        """Sourcery #118 bug_risk：残留判定从 wc -l 换行计数升级为 cmp 整文件精确
+        比对——「合法头 + 无尾换行第二行」此前 wc -l 只数 1 个换行而误放行，
+        人工内容随之并入同步提交；现必须拒绝（数量 + 前缀形态判定已不可绕过）。"""
+        up, dn, _ = repos
+        assert self._run(dn, str(up), "--apply", "--anchor", "main").returncode == 0
+        _git(dn, "add", "-A")
+        _git(dn, "commit", "-qm", "manual catch-up")
+        (dn / ".git-blame-ignore-revs").write_text(
+            "# factory: 追平提交忽略清单（git blame --ignore-revs 消噪）\n"
+            "manual note without trailing newline", encoding="utf-8")
+        proc = self._run(dn, str(up), "--apply", "--commit", "--anchor", "main")
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert "拒绝 --commit" in proc.stderr
+        assert _head_count(dn) == 2, "拒绝不得产生提交"
+
+    def test_manual_untracked_header_suffix_refuses_commit(self, repos):
+        """Sourcery #118 bug_risk：单行头 + 同行任意尾随此前仅前缀匹配而误放行；
+        现 cmp 整文件比对拒绝一切与脚本首建单行头不符的内容。"""
+        up, dn, _ = repos
+        assert self._run(dn, str(up), "--apply", "--anchor", "main").returncode == 0
+        _git(dn, "add", "-A")
+        _git(dn, "commit", "-qm", "manual catch-up")
+        (dn / ".git-blame-ignore-revs").write_text(
+            "# factory: 追平提交忽略清单（git blame --ignore-revs 消噪） extra\n",
+            encoding="utf-8")
+        proc = self._run(dn, str(up), "--apply", "--commit", "--anchor", "main")
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert "拒绝 --commit" in proc.stderr
+        assert _head_count(dn) == 2, "拒绝不得产生提交"
 
     def test_firstrun_residual_header_ships_with_drift_commit(self, repos):
         """设计内状态放行（PR #105 评论 1）：首建残留 = untracked 单行注释头，
