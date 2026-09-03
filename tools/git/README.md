@@ -121,6 +121,10 @@ npm run release       # 正式执行：bump 版本 + 更新 CHANGELOG.md + 打 t
 - `.lefthook/run-tests.sh` —— pre-push 项目自定义测试入口壳：项目有 `scripts/pre-push-tests.sh` 则执行（非零退出阻断 push），无则跳过。**`lefthook.yml` 是分发物（`--update` 会覆盖，勿手工加段）**，项目级测试/构建门禁一律写进 `scripts/pre-push-tests.sh`
 - `.versionrc.js` —— changelog 中文分节、emoji 前缀
 
+> **pre-push 并发注记（面向下游业务项目）**：`lefthook.yml` pre-push 各 commands 默认**并行执行**（未标 `piped`/`sequential`）：coverage-full / tests / sourcery-gate / mutation-gate / coderabbit-gate 按各自触发条件启用后同时跑。
+> 根或 `backend/` 有 `pyproject.toml` 的项目，coverage-full 会真跑 `pytest --cov`，且与项目自身 tests 闸并发跑同一测试树；下游测试若对全局 `TMPDIR` 做 glob 差集断言（`after - before == set()`），两进程同模板临时文件会随机打破断言（flake）——此类断言建议改用私有前缀或目录隔离。
+> awesome-rules 本仓无 `pyproject.toml`（`package.json` 亦未声明 vitest），coverage-full 恒休眠，不受影响。
+
 > 修改规则时请**同步更新 `steering/git-conventions.md`**，保持规范文档为唯一事实源。
 
 ## 适用场景
