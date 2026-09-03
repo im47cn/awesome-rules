@@ -167,6 +167,8 @@ class TestCodeupShapes:
         """类标 Link POST 失败 → 降级告警不冒泡（skills#12 审查收口：标记
         评论已承载状态机语义，Link 仅平台原生补充——对齐 _label_id 降级）。"""
         ad = self._ad({
+            # add 幂等预检（php#17）：无既有未 resolved 标记 → 发标记评论
+            ("POST", "/comments/list"): {"result": []},
             ("POST", "/changeRequests/3/comments"): {"result": {"id": "c1"}},
             ("GET", "/labels"): [{"name": "factory:needs-review", "id": 7}],
             # 故意不路由 POST .../labels → fake_req 抛 HostingError → 降级
@@ -239,6 +241,7 @@ class TestCodeupShapes:
         ad = self._ad({
             ("GET", "/labels"): {"result": [
                 {"id": "lbl-9", "name": "factory:needs-review"}]},
+            ("POST", "/comments/list"): {"result": []},
             # #66 标记模型：add 先发标记评论，类标 Link 为补充载体
             ("POST", "/comments"): {"success": True},
             ("POST", "/changeRequests/7/labels"): {"success": True}}, monkeypatch)
@@ -249,6 +252,39 @@ class TestCodeupShapes:
         assert marker[2]["resolved"] is False
         link = [s for s in ad.seen if s[0] == "POST" and "labels" in s[1]][0]
         assert link[2] == {"labelIdList": ["lbl-9"]}  # live 破案键名（labelIds 拒）
+
+    def test_pr_create_requires_base_fail_closed(self, monkeypatch):
+        """Codeup pr create 缺 --base fail-closed（web-tools#5 Sourcery）：
+        targetBranch 因仓而异（master/main 均有实仓），猜默认会静默落错
+        基线；显式 base 透传 targetBranch。"""
+        ad = self._ad({("POST", "/changeRequests"): {
+            "result": {"localId": 9, "detailUrl": "u"}}}, monkeypatch)
+        with pytest.raises(hosting.HostingError) as e:
+            ad.pr_create("br", "t", "b")
+        assert e.value.code == 2
+        assert "--base" in str(e.value)
+        assert ad.pr_create("br", "t", "b", base="release/x") == {
+            "number": 9, "url": "u"}
+        assert ad.seen[0][2]["targetBranch"] == "release/x"
+
+    def test_space_id_maps_path_namespace(self, monkeypatch, tmp_path):
+        """namespace = remote path 首段（php#17 Sourcery）：
+        gtsp/open-platform/<repo> 的中间层不是 namespace，旧 [1] 索引
+        永不命中 conf 键；单段 path（无 namespace 层）fail-closed。"""
+        conf = tmp_path / "spaces.conf"
+        conf.write_text("gtsp|SID-1\n", encoding="utf-8")
+        monkeypatch.setenv("YUNXIAO_ACCESS_TOKEN", "t")
+        monkeypatch.setenv("CODEUP_ORG_ID", "org")
+        monkeypatch.setenv("CODEUP_REPO_ID", "42")
+        monkeypatch.setenv("FACTORY_SPACES_CONF", str(conf))
+        monkeypatch.delenv("CODEUP_SPACE_ID", raising=False)
+        ad = hosting.CodeupAdapter()
+        ad._remote = lambda: ("610b3c9d", "gtsp/open-platform/gtsp-wop-gateway")
+        assert ad._space_id() == "SID-1"
+        ad._remote = lambda: ("610b3c9d", "plain-repo")
+        with pytest.raises(hosting.HostingError) as e:
+            ad._space_id()
+        assert e.value.code == 2
 
 
 class TestCodeupGaps:
@@ -310,6 +346,18 @@ class TestCodeupMarkerModel:
         ad = self._ad(monkeypatch, {})
         assert ad.pr_set_labels(7, remove=["x"]) is True
         assert not [s for s in ad.seen if s[0] == "PUT"]
+        assert "幂等跳过" in capsys.readouterr().err
+
+    def test_add_idempotent_existing_marker(self, monkeypatch, capsys):
+        """add 幂等（php#17 Sourcery）：已有同名未 resolved 标记 → 跳过
+        POST 不堆重复；类标 Link 仍 best-effort（未路由路径走 _ad 兜底
+        空列表 → 降级告警，不影响 True 契约）。"""
+        ad = self._ad(monkeypatch, {False: [
+            {"id": "c-1", "content": "[factory:label:add] factory:needs-review"}]})
+        assert ad.pr_set_labels(7, add=["factory:needs-review"]) is True
+        posts = [s for s in ad.seen if s[0] == "POST"
+                 and s[1].endswith("/changeRequests/7/comments")]
+        assert not posts  # 未发新标记评论（幂等跳过）
         assert "幂等跳过" in capsys.readouterr().err
 
     def test_pr_labels_merges_two_carriers(self, monkeypatch):

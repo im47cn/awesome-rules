@@ -201,12 +201,27 @@ _lease_sw_fence() {  # <key> <epoch> <mid> → 0=仍持有 1=已被夺走/过期
 }
 
 _lease_sw_release() {  # <key> <epoch> <mid> → 尽力释放（幂等）：持有者匹配才删锁，计数器留档
-  local key="$1" epoch="$2" mid="$3" lock
+  local key="$1" epoch="$2" mid="$3" lock tomb
   _lease_sw_notice
   lock="$(_lease_sw_path "$key" .lock)"
   [ -f "$lock" ] || return 0
   _lease_sw_read "$lock" || return 0
-  [ "$_SW_MID" = "$mid" ] && [ "$_SW_EPOCH" = "$epoch" ] && rm -f "$lock"
+  [ "$_SW_MID" = "$mid" ] && [ "$_SW_EPOCH" = "$epoch" ] || return 0
+  # 原子释放（对齐 claim 的 rename 协议）：读-验-rm 非原子——验证与
+  # rm 之间锁可过期被新 claimer 接管（mv 走旧 inode + O_EXCL 建新锁），
+  # rm -f 按路径删掉的是新主的锁（单写者破坏，web-tools#5 Sourcery）。
+  # 先 mv 到唯一墓碑（单赢家），对墓碑重验内容（随 inode 走）：仍是我
+  # → 删墓碑；已非我（误搬新主锁）→ 位空则放回、位占则弃残本——
+  # 绝不删位上现有锁。
+  tomb="${lock}.rel.$$.$RANDOM"
+  mv "$lock" "$tomb" 2>/dev/null || return 0
+  _lease_sw_read "$tomb" || { rm -f "$tomb"; return 0; }
+  if [ "$_SW_MID" = "$mid" ] && [ "$_SW_EPOCH" = "$epoch" ]; then
+    rm -f "$tomb"
+  else
+    [ -e "$lock" ] || mv "$tomb" "$lock" 2>/dev/null
+    rm -f "$tomb"
+  fi
   return 0
 }
 
