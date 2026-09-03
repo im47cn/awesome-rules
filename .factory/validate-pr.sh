@@ -69,12 +69,14 @@ if [ "${DRY}" = 0 ]; then
       fail docstring "docstring 门失败（详见 ${DIR}/docstring-output.txt）" 1
     fi
   fi
-  for suite in $(python3 "${REPO}/.factory/factory_lib.py" suites "${CHANGED[@]}"); do
+  # NUL 分隔消费（PR #116）：套件名可含空格（skills/foo bar/...），for 词拆分
+  # 会拆碎名致证据段静默跳过；suites 产出 NUL → read -d '' 逐条保真
+  while IFS= read -r -d '' suite; do
     [ -d "${REPO}/${suite}" ] || continue
     echo "" >> "${DIR}/tests-output.txt"
     echo "── 证据段（verbose）: ${suite}" >> "${DIR}/tests-output.txt"
     (cd "${REPO}/${suite}" && python3 -m pytest -o addopts="" -v) >> "${DIR}/tests-output.txt" 2>&1 || true
-  done
+  done < <(python3 "${REPO}/.factory/factory_lib.py" suites "${CHANGED[@]}")
 else
   echo "[dry-run] 测试门（final_gate_cmd） → ${DIR}/tests-output.txt + 证据段"
   echo "[dry-run] docstring 门（docstring_gate_cmd，未配置则跳过） → ${DIR}/docstring-output.txt"

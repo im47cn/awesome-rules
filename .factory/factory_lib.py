@@ -1015,8 +1015,11 @@ def main(argv: list[str]) -> int:
             print(f"{node:10s} n={len(xs):2d}  p50={pct(xs,0.5):5d}s  p95={p95:5d}s  预算={cur}  建议≤{suggest}m")
         return 0
     if cmd == "suites":
+        # NUL 分隔（PR #116 CodeRabbit）：套件名可含空格（skills/foo bar/...），
+        # 换行 + shell for 词拆分（$(...) 去换行按 IFS 切）会拆碎名、静默跳过
+        # 证据段；消费端（fix-issue.sh/validate-pr.sh）用 read -d '' 逐条保真。
         for s in evidence_suites(argv[2:]):
-            print(s)
+            sys.stdout.write(s + "\0")
         return 0
     if cmd == "final-gate":
         # final-gate —— 确定性测试门命令（ADR-009 唯一取值口；fix-issue.sh

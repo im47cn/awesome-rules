@@ -443,12 +443,14 @@ if [ "${DRY}" = 0 ]; then
   fi
   # 证据段：触及的测试套件以 -v 重跑附于末尾——holdout 不许推测，
   # 需要可引用的测试名/参数化用例名（-q 点号无法建立诉求对应关系）
-  for suite in $(python3 "${REPO}/.factory/factory_lib.py" suites ${CHANGED[@]+"${CHANGED[@]}"}); do
+  # NUL 分隔消费（PR #116）：套件名可含空格（skills/foo bar/...），for 词拆分
+  # 会拆碎名致证据段静默跳过；suites 产出 NUL → read -d '' 逐条保真
+  while IFS= read -r -d '' suite; do
     [ -d "${WT}/${suite}" ] || continue
     echo "" >> "${DIR}/tests-output.txt"
     echo "── 证据段（verbose）: ${suite}" >> "${DIR}/tests-output.txt"
     (cd "${WT}/${suite}" && python3 -m pytest -o addopts="" -v) >> "${DIR}/tests-output.txt" 2>&1 || true
-  done
+  done < <(python3 "${REPO}/.factory/factory_lib.py" suites ${CHANGED[@]+"${CHANGED[@]}"})
 else
   echo "[dry-run] guard.py --files <changed> + 测试门(final_gate_cmd) → ${DIR}/tests-output.txt（脚本生成）"
   echo "[dry-run] docstring 门（docstring_gate_cmd，未配置则跳过） → ${DIR}/docstring-output.txt"
