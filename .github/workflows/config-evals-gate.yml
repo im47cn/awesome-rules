@@ -12,6 +12,13 @@
 #   schedule + workflow_dispatch 全量回归：抓长期漂移（依赖升级、
 #   badcase 语料退化、层清单失配）。
 #
+# runner 用 macos-latest：gauntlet 的 pytest-factory 层跑 .factory 生态
+# （downstream-check.sh/cron-dispatch.sh 互斥锁硬编码 macOS 专有
+# /usr/bin/shlock，注释明言「macOS 无 flock」），ubuntu runner 无此工具，
+# 该层恒红——平台失真而非逻辑失败。macos-latest 与本地 pre-push 环境
+# 同构（CI = 本地不可绕过的镜像）。改 .factory 脚本做跨平台双锁属
+# 分发面产品级语义变更，超出本 gate 范围（P3 分发层另行评估）。
+#
 # 受控面 = CLAUDE.md + steering/ + skills/ + hooks/ + scripts/ + tools/ +
 # .factory/（skills/**/badcase 语料、skills/**/eval 评分语料、check_*.py、
 # gauntlet.sh、.factory/ 分发面本体变更都在此面内；docs/、templates/、
@@ -32,7 +39,7 @@ permissions:
 
 jobs:
   gate:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,6 +52,11 @@ jobs:
       # gauntlet 探测带 pytest+pytest_cov 的解释器，探测不到 exit 2 硬失败。
       - name: Install pytest deps
         run: pip install pytest pytest-cov
+
+      # gauntlet lint-shellcheck 层需要 shellcheck；macOS runner 不自带
+      # （ubuntu runner 自带，本地 mac 亦需 brew 安装）。
+      - name: Install shellcheck
+        run: brew install shellcheck
 
       # 单步内 diff + 执行：PR 未触及受控面即早退；push/schedule/dispatch
       # 不设早退（全量）。
