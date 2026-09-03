@@ -341,8 +341,7 @@ def main() -> int:
         # 下游 wop-web-tools 反哺：未知 id 过滤结果为空仍以 0 退出写戳
         # = 配置错误伪装成全量验证。缺失即拒绝（exit 2，对齐 guard 用法语义）。
         all_ids = {d.id for d in defects}
-        missing = wanted - all_ids
-        if missing:
+        if missing := wanted - all_ids:
             print(f"配置错误: --only 含未知缺陷 id: {sorted(missing)}"
                   f"（已知: {sorted(all_ids)}）", file=sys.stderr)
             return 2
