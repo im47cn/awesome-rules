@@ -24,8 +24,10 @@ expected.md 期望模型（双通道）:
 
 严格模式（--strict-exact，发版回归用）：在「期望的都检出」之上再要求双向相等——
 每条实际检出规则都必须命中某条期望，捕获「夹具多出未声明规则」（新规则落地、
-夹具意外触发其他规则）。子串匹配的歧义（如"依赖方向"含于"跨域依赖方向"）会
-让双向判定不可靠，严格模式退化为精确等值匹配。
+夹具意外触发其他规则）。expected 为空（放行型 case）时同样生效：任何实际
+检出都无期望可命中 → unexpected → FAIL，放行型夹具不因「无期望」虚设。
+子串匹配的歧义（如"依赖方向"含于"跨域依赖方向"）会让双向判定不可靠，
+严格模式退化为精确等值匹配。
 
 """
 
@@ -272,8 +274,9 @@ def run_badcase(skill_name, case_name, case_dir: Path, project_root: Path,
     if errors:
         result.error = "; ".join(errors)
 
-    # 比对期望规则
-    if strict_exact and expected_rules:
+    # 比对期望规则（strict 模式无条件双向：expected 为空的放行型 case
+    # 也要算 unexpected 方向——夹具意外触发任何规则都不得静默放行）
+    if strict_exact:
         # 双向精确：捕获夹具多出未声明规则（新规则落地/意外触发）
         missing, unexpected = exact_match_failures(expected_rules, actual_rules)
         result.missing_rules = missing

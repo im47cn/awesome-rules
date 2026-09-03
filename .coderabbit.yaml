@@ -1,0 +1,5 @@
+# CodeRabbit 配置（平台 PR 评审与本地 CLI 共用；schema: https://docs.coderabbit.ai）
+# 本地门禁开关：本文件存在即启用 pre-push coderabbit-gate 建议性评审
+# （tools/git/lefthook/coderabbit-gate.sh），删除本文件即停用
+# 认证：coderabbit auth login；CLI 文档：https://docs.coderabbit.ai/cli
+language: zh-CN

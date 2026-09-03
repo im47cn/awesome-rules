@@ -616,3 +616,36 @@ def test_script_baseline_f1_check_script_unregistered_fails_closed(monkeypatch, 
                              "expected_empty": False})
     avg, details = R.script_baseline_f1({}, "ddl-guard", [case])
     assert "未注册" in details[0]["error"] and avg == 0.0
+
+
+# ── spec:replay-eval-6 打分器确定性（设计稿 §7.6）────────────────────────
+def test_execute_deterministic_same_report_same_score(monkeypatch):
+    """打分器确定性：同一候选同一 case（同一报告文本）两次打分，分数与反馈
+    完全一致——打分器（提取+对账+F1）是纯函数，随机性只在 LLM 执行层
+    （GEPA rng_seed 固定；evo.py evolve --seed 默认 0）。"""
+    def fake(prompt, cfg):
+        return '五段式审查报告……\n{"rules": ["禁用类型", "全角字符"]}'
+
+    ex = R.make_execute({}, fake, "ddl-guard")
+    case = _case(cid="d1", expected=["禁用类型"], files={"a.sql": "CREATE TABLE t;"})
+    assert ex("candidate-text", case) == ex("candidate-text", case)
+
+
+# ── spec:replay-eval-7 提取层对照抽验（设计稿 §5.2/§7.7）──────────────────
+def test_extract_rules_against_real_report():
+    """对真实人工审查报告跑提取：
+    ① 原报告早于输出契约（无 JSON 规则清单）→ fail-closed ([], False)，
+       不从叙述性正文臆造规则；
+    ② 报告按输出契约补 JSON 清单（008-real expected 声明的 6 类脚本规则，
+       源自 ddl_check 对同一 DDL 的实测检出）→ 提取结果与清单逐条一致。"""
+    import json
+    skill_dir = Path(__file__).resolve().parents[3] / "ddl-guard"
+    report = (skill_dir / "test" / "ddl-202607071777审查报告.md").read_text(
+        encoding="utf-8")
+    # ① 无清单 → 不可解析（报告含表格/代码块/中文标题等真实噪音，不误匹配）
+    assert R.extract_rules_from_report(report) == ([], False)
+    # ② 真实报告实体 + 契约清单 → 逐条保真（无增删无乱序）
+    _, expected_rules, _ = R.parse_expected(
+        skill_dir / "eval" / "008-real" / "expected.md")
+    tail = json.dumps({"rules": expected_rules}, ensure_ascii=False)
+    assert R.extract_rules_from_report(report + "\n" + tail) == (expected_rules, True)

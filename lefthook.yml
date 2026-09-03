@@ -29,3 +29,6 @@ pre-push:
     # Sourcery 硬闸: 仓库 opt-in（.sourcery.yaml 存在）才启用（与分发模板一致，仅路径不同）
     sourcery-gate:
       run: bash tools/git/lefthook/sourcery-gate.sh {push_files}
+    # CodeRabbit 建议性评审: 仓库 opt-in（.coderabbit.yaml 存在）才启用，push 时后台 --light 评审已提交变更（异步不阻塞、不拦 push，同分发模板仅路径不同）
+    coderabbit-gate:
+      run: bash tools/git/lefthook/coderabbit-gate.sh {push_files}

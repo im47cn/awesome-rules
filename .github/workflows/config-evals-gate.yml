@@ -12,6 +12,10 @@
 #   schedule + workflow_dispatch 全量回归：抓长期漂移（依赖升级、
 #   badcase 语料退化、层清单失配）。
 #
+#   replay-dry-run job（2026-09-03）：评估集完整性哨兵，零 LLM——dry-run
+#   打印评估集构成 + 脚本基线 F1，评估集语料退化（坏 expected/目录缺失/
+#   数量跌破 replay_min_cases）在 CI 显形。与 gate 并行不互锁；PR 侧触及
+#   skills/ 才跑（评估集语料与 replay 实现均在 skills/ 下）。
 # runner 用 macos-latest：gauntlet 的 pytest-factory 层跑 .factory 生态
 # （downstream-check.sh/cron-dispatch.sh 互斥锁硬编码 macOS 专有
 # /usr/bin/shlock，注释明言「macOS 无 flock」），ubuntu runner 无此工具，
@@ -86,3 +90,45 @@ jobs:
             || { echo "badcase: 空语料假绿（返回 0 但无 case）" >&2; exit 1; }
           grep -qE '0 失败' /tmp/badcase.log \
             || { echo "badcase: 存在失败" >&2; exit 1; }
+
+  # replay 评估集完整性哨兵（零 LLM，设计稿 docs/design/skill-evo-replay-eval.md
+  # §5.3/§7.2）：dry-run 是唯一无 LLM 成本的评估集完整性检查——评估集语料
+  # 退化（坏 expected/目录缺失/跌破 replay_min_cases=8）在此显形，而非等
+  # 昂贵的带 LLM 进化跑挂掉才发现。与 gate 并行，不互锁。
+  replay-dry-run:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: replay eval-set dry-run (zero LLM)
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            CHANGED=$(git diff --name-only "${BASE_SHA}"...HEAD -- skills/)
+            if [ -z "$CHANGED" ]; then
+              echo "no skills/ (eval corpus or replay impl) changes, skipping"
+              exit 0
+            fi
+            echo "changed files:"
+            echo "$CHANGED"
+          fi
+
+          python3 skills/skill-evo/scripts/evo.py evolve --skill ddl-guard --dry-run \
+            > /tmp/replay-dry-run.log
+          cat /tmp/replay-dry-run.log
+          grep -q '评估集：' /tmp/replay-dry-run.log \
+            || { echo "replay dry-run: 缺评估集构成输出" >&2; exit 1; }
+          grep -q '脚本基线（完美执行参照）F1' /tmp/replay-dry-run.log \
+            || { echo "replay dry-run: 缺脚本基线 F1 输出" >&2; exit 1; }
+          # 评估集 ≥ replay_min_cases（evo_config.py=8）：跌破即语料退化
+          N=$(grep -oE '评估集：[0-9]+ cases' /tmp/replay-dry-run.log \
+            | grep -oE '[0-9]+' | head -1 || true)
+          [ -n "$N" ] && [ "$N" -ge 8 ] \
+            || { echo "replay dry-run: 评估集 ${N:-0} < replay_min_cases=8（语料退化）" >&2; exit 1; }
+          echo "replay dry-run: 评估集 ${N} cases ≥ replay_min_cases=8，完整性哨兵通过"

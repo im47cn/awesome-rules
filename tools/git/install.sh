@@ -6,29 +6,74 @@
 # 用法:
 #   bash install.sh [目标项目根目录]            # 首次安装（默认当前目录）
 #   bash install.sh --update [目标项目根目录]   # 刷新 awesome-rules 最新配置到已装项目
+#   bash install.sh --check [目标项目根目录]    # 巡检已装项目分发件缺失/漂移（零副作用，可挂 CI）
 #
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# 参数解析：--update 切换刷新模式；其余非选项参数为目标目录
+# 参数解析：--update 刷新 / --check 巡检（同给时后出现者优先）；其余非选项参数为目标目录
 MODE=install
 TARGET_ARG=""
 for arg in "$@"; do
   case "$arg" in
     --update|-u) MODE=update;;
+    --check)     MODE=check;;
     -h|--help)
-      echo "用法: bash install.sh [--update] [目标项目根目录]"
+      echo "用法: bash install.sh [--update | --check] [目标项目根目录]"
       echo "  首次安装：交互式确认覆盖已存在文件"
       echo "  --update：刷新本仓库最新配置到目标项目，不碰非本工具的 hook"
+      echo "  --check：巡检目标项目分发件缺失/漂移，非交互零副作用，差异 exit 1 可挂 CI"
+      echo "  --update 与 --check 同给时，后出现者优先"
       exit 0;;
     *) TARGET_ARG="$arg";;
   esac
 done
 TARGET="$(cd "${TARGET_ARG:-$PWD}" && pwd)"
 
+# 分发清单（单一来源）：src 相对 SCRIPT_DIR → dst 相对 TARGET，install/update/check 三模式共用
+# ../spec_check.py 是 spec 反向核对脚本（与 spec-check.sh 配套），随 hook 分发到项目 .lefthook/
+DIST=(
+  "commitlint.config.js:commitlint.config.js"
+  ".versionrc.js:.versionrc.js"
+  "lefthook.yml:lefthook.yml"
+  "lefthook/coverage.sh:.lefthook/coverage.sh"
+  "lefthook/commitmsg-check.sh:.lefthook/commitmsg-check.sh"
+  "lefthook/run-tests.sh:.lefthook/run-tests.sh"
+  "lefthook/spec-check.sh:.lefthook/spec-check.sh"
+  "lefthook/sourcery-gate.sh:.lefthook/sourcery-gate.sh"
+  "lefthook/mutation-gate.sh:.lefthook/mutation-gate.sh"
+  "lefthook/coderabbit-gate.sh:.lefthook/coderabbit-gate.sh"
+  "../spec_check.py:.lefthook/spec_check.py"
+)
+
 # 变量后紧跟全角字符须用 ${} 界定，否则 bash 在部分 locale 下会把多字节字符误并入变量名
 echo "▸ 目标项目: ${TARGET}（模式: ${MODE}）"
+
+# ── 0. 巡检模式：按分发清单逐件比对（缺失/漂移），非交互零副作用 ──
+# 不 mkdir、不碰 ~/.gitmessage/git config/npm/package.json；cmp 字节比对与 hash 判定等价
+# （cmp 置于 if 条件位，避免 set -e 中断）；~/.gitmessage 是机器级全局文件，不在比对集
+if [ "$MODE" = "check" ]; then
+  missing=0
+  drift=0
+  for pair in "${DIST[@]}"; do
+    src="${pair%%:*}"
+    dst="${pair#*:}"
+    if [ ! -f "$TARGET/$dst" ]; then
+      echo "缺失  $dst"
+      missing=$((missing + 1))
+    elif ! cmp -s "$SCRIPT_DIR/$src" "$TARGET/$dst"; then
+      echo "漂移  ${dst}（与上游 awesome-rules 不一致）"
+      drift=$((drift + 1))
+    fi
+  done
+  if [ "$missing" -eq 0 ] && [ "$drift" -eq 0 ]; then
+    echo "✔ ${#DIST[@]}/${#DIST[@]} 分发件一致，无缺失无漂移"
+    exit 0
+  fi
+  echo "✘ 巡检发现：缺失 ${missing} 件、漂移 ${drift} 件（应装 ${#DIST[@]} 件）"
+  exit 1
+fi
 
 # ── 1. 检测 node / npm ──────────────────────────────────────────
 command -v node >/dev/null 2>&1 || { echo "✘ 未检测到 node，请先安装 node ≥ 16"; exit 1; }
@@ -45,17 +90,10 @@ copy_one() { # $1=源文件名(相对 SCRIPT_DIR) $2=目标路径
   cp "$SCRIPT_DIR/$1" "$2"
 }
 mkdir -p "$TARGET/.lefthook"
-for f in commitlint.config.js .versionrc.js lefthook.yml; do
-  copy_one "$f" "$TARGET/$f"
+for pair in "${DIST[@]}"; do
+  copy_one "${pair%%:*}" "$TARGET/${pair#*:}"
 done
-copy_one "lefthook/coverage.sh" "$TARGET/.lefthook/coverage.sh"
-copy_one "lefthook/commitmsg-check.sh" "$TARGET/.lefthook/commitmsg-check.sh"
-copy_one "lefthook/run-tests.sh" "$TARGET/.lefthook/run-tests.sh"
-copy_one "lefthook/spec-check.sh" "$TARGET/.lefthook/spec-check.sh"
-copy_one "lefthook/sourcery-gate.sh" "$TARGET/.lefthook/sourcery-gate.sh"
-copy_one "lefthook/mutation-gate.sh" "$TARGET/.lefthook/mutation-gate.sh"
-# spec 反向核对脚本（与 spec-check.sh 配套，随 hook 分发到项目 .lefthook/）
-copy_one "../spec_check.py" "$TARGET/.lefthook/spec_check.py"
+
 
 # commit 模板 → 用户主目录 ~/.gitmessage（全局，所有仓库/IDEA 一次识别）
 skip_tmpl=0
