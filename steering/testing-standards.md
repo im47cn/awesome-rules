@@ -97,6 +97,7 @@ inclusion: always
 | 单元测试失败 | 立即修复，不允许跳过 |
 | 集成测试失败 | 24 小时内修复或回滚 |
 | E2E 测试失败 | 先排除环境问题，非环境问题按集成测试处理 |
+- 脚本/组件改名时全量 grep 引用面（LaunchAgent plist、CI workflow、cron、文档示例）并逐处更新：调度器指向旧名是 exit 127 静默失败，无告警无产出，只能靠产物缺失（如 metrics 文件不增长）间接发现（2026-08 实证：日回归调度器死了 3 天才被盘点抓出）。改名 PR 应附引用面清理清单。
 - 构建信号以 Maven 实际编译/测试为准：LSP 在未启用 Lombok 注解处理器时对 builder/getter/setter 等生成成员的报错属于误报，不作为失败依据
 - 全量门禁失败时，先判定失败项属于本次变更还是 HEAD 既有（对 HEAD 版本重跑或核对本次未触碰的路径），归因后再决定修复策略，不默认揽责也不默认跳过
 - 既有 lint 告警按仓内惯例处置（如 shellcheck 逐条 `# shellcheck disable=SCxxxx` 指令并注明理由——字面 markdown 反引号属刻意单引号防展开），修复后复跑全量验证，不因"非本次引入"而留红
@@ -132,6 +133,8 @@ inclusion: always
 - 击杀/存活结论的复放验证集必须覆盖此后新增的测试文件：回退到旧测试集复跑会缺新用例、复现旧结论（wop-python-sdk 2026-08-29 教训：第二轮复验因回退测试集缺新文件重演出第一轮错误结论）
 
 ## 自建关卡脚本的反作弊要求
+
+- 用 `re.sub` 写回 JSON/代码产物时 replacement 必须走 `lambda m: s` 形式：re.sub 的 replacement 字符串层会解释 `\n`、`\g<1>` 等转义序列，`json.dumps` 产物里的 `\n` 两字符序列会被改写成裸换行直接破坏 JSON 合法性（2026-09 提案编辑事故实证，改 lambda 闭包后消失）。
 - mutations 注入运行期间不得并发执行其他门禁/检查：变异体临时落盘会污染并发进程读到的工作区视图（2026-08-28 实证：gauntlet 并发跑出 ddl_check.py 假红），须等 mutations 结束且确认变异全部恢复后串行重验
 
 - **ast 解析的 SyntaxWarning 泄漏**：用 `ast.parse` 扫描 `.py` 的静态门须局部抑制 `SyntaxWarning`（被扫文件 docstring 的无效转义会泄成层输出噪音）；`SyntaxError` 仍正常上抛走 rc=2，不弱化 fail-closed。
