@@ -48,6 +48,22 @@ bash /path/to/awesome-rules/tools/git/install.sh --update /path/to/业务项目
 - hook：自动清理本工具旧版直写的 `commit-msg` 后重跑 `lefthook install`；非本工具、非 lefthook 生成的 hook **一律跳过**，`core.hooksPath` 被 husky 等接管时同样跳过，避免破坏既有方案
 - 全局工具、`package.json` scripts：与首次相同（检测补装 / 幂等注入）
 
+### 巡检已装项目漂移（--check）
+
+`--update` 覆盖前先摸底：巡检已装项目的分发件与上游是否一致。
+
+```bash
+bash /path/to/awesome-rules/tools/git/install.sh --check /path/to/业务项目
+```
+
+`--check` 逐件比对 10 个分发件（根 3 件：`commitlint.config.js` / `.versionrc.js` / `lefthook.yml`；`.lefthook/` 下 7 件 hook 脚本与 `spec_check.py`），**非交互、零副作用**——不写任何文件、不碰 `~/.gitmessage` / git config / npm，也不依赖 node（巡检在 node 检测之前短路；`~/.gitmessage` 是机器级全局文件，不在比对集）：
+
+- 全部一致：输出 `10/10 分发件一致` 并 exit 0
+- 缺失或漂移：逐件点名（`缺失  <相对路径>` / `漂移  <相对路径>（与上游 awesome-rules 不一致）`）后 exit 1——可直接挂上游 CI 定期任务，漂移静默积累即门禁红灯
+- 旧版项目（仅 3 脚本 + 2 根配置的早期接入仓）按 10 件全集报缺失，输出即「应装未装」清单
+
+巡检是 `steering/git-conventions.md`「门禁脚本双向流」一节中覆盖式同步前人工 diff 规程的机械化：它只负责**检出**差异；检出后仍须按该规范人工确认方向——是「本地实验未回流」（实验改动应收编回流或还原）还是「上游演进未同步」（执行 `--update` 刷新），确认后再动。
+
 ### 团队成员激活（装过一次的仓库）
 
 `lefthook.yml` 随仓库共享，新成员 clone 后只需激活 hook（无需完整 `install.sh`）：
