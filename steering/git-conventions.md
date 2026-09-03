@@ -146,8 +146,10 @@ Refs #321
 
 ### 受保护 main 的写者治理
 
-- PR 落地竞态双形态：① main 高频合入窗口期，逐次 merge main 的收敛策略可能永远追不上（checks 全部重置 pending → main 再前进 → 回落 CONFLICTING 循环），对策是全绿后立即合并或临时冻结 main 其他合入；② 多会话并行修同一 PR 分支会 push 撞车（非 fast-forward 拒绝），动手修 CI 门禁前先 fetch 检查远端是否已有等效修复，PR 分支定唯一写者（wop-go-sdk 2026-08-31 实证：PR #15 两轮全绿→CONFLICTING 回落，本地 7a7d82e 与远端 bf57bdc 撞车后按「远端更完整」弃本地）
-- 本地 main 同为需治理的写者：`merge --ff-only` 失败 = 本地与远端 main 分叉信号，绝不顺手 rebase/merge 修平（feature 分支的分叉收敛处方不适用于 main）；处置前必须完成等价性验证三件套——逐条识别本地独有提交、patch-id 对比（判定重放/重写等价）、tree diff 证明无本地独有内容——验证不充分则保持原状收尾，不强求同步（wop-typescript-sdk 2026-09-02 实证：预备性提交先落本地 main 两提交，PR #21 重开为 #22 经 bot 分支重写重放，合并后本地 main ahead 2/behind 4；patch-id 证明等价、tree diff 仅差远端修复净效果，reset --hard origin/main 无损）
+- PR 落地竞态双形态：① main 高频合入窗口期，逐次 merge main 的收敛策略可能永远追不上（checks 全部重置 pending → main 再前进 → 回落 CONFLICTING 循环），对策是全绿后立即合并或临时冻结 main 其他合入；② 多会话并行修同一 PR 分支会 push 撞车（非 fast-forward 拒绝），动手修改该 PR 分支前——代码、文档、CI 门禁等任何改动，修 CI 门禁只是典型场景——先 fetch 检查远端是否已有等效修复，确认自己是唯一写者后再开工（wop-go-sdk 2026-08-31 实证：PR #15 两轮全绿→CONFLICTING 回落，本地 7a7d82e 与远端 bf57bdc 撞车后按「远端更完整」弃本地）
+- 本地 main 同为需治理的写者：`merge --ff-only` 失败不直接等于分叉——先 `git fetch`、确认工作树干净（`git status --porcelain` 为空）并核对 merge 的具体报错：脏工作树会在 ref 本可快进时中止 merge，直接按分叉处置会把未提交修改误判为可丢弃内容。仅当确认本地与 `origin/main` 各有独有提交后才按 ref 分叉处置，绝不顺手 rebase/merge 修平（feature 分支的分叉收敛处方不适用于 main）
+- 分叉处置前必须完成等价性验证三件套——逐条识别本地独有提交、patch-id 对比（判定重放/重写等价）、tree diff 证明无本地独有内容。三件套只证内容等价、不证无损：空提交、合并提交、净效果为零的先改后回退提交没有可比较的 net patch（`.factory/feedback.py` 的 `_patch_id` 对此类返回 None），此类提交只按精确 SHA 匹配，匹配不上即「不可判定」——保持原状收尾，绝不把 patch-id 缺失当等价证据
+- `reset --hard origin/main` 前必须留 backup ref（如 `git branch backup/main-<date>`）或 `git bundle` 全量备份，并在提交图上逐条确认每个本地独有提交的处置结果（已等价重放 / SHA 原样存在 / 明确丢弃）——空提交与合并提交的审计、署名、提交说明不体现于 tree diff；验证不充分则保持原状收尾，不强求同步（wop-typescript-sdk 2026-09-02 实证：预备性提交先落本地 main 两提交，PR #21 重开为 #22 经 bot 分支重写重放，合并后本地 main ahead 2/behind 4；patch-id 证明等价、tree diff 仅差远端修复净效果，reset --hard origin/main 无损）
 - 根因预防：预备性/阶段性提交禁止落本地 main（一律走分支）；PR 分支经重放/重写合并后立即同步本地 main，不留分叉窗口
 
 ### 门禁脚本双向流：本地先实践，成熟后反哺
