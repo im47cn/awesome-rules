@@ -96,7 +96,7 @@ class TestSyncRcContract:
         assert "full 面干净，无动作" in proc.stdout
         lines = calls.read_text().splitlines()
         assert lines, "凭据探测须真实发生"
-        assert all("auth" in l for l in lines), f"干净基态不得触发远端命令: {lines}"
+        assert all("auth" in line for line in lines), f"干净基态不得触发远端命令: {lines}"
 
     def test_fatal_sync_rc2_propagates(self, synced):
         """Sourcery PR#14 评论 1：sync --check 致命 rc=2 原样上抛，
@@ -113,7 +113,7 @@ class TestSyncRcContract:
         assert "full 面干净" not in proc.stdout
         assert "仅 local 面漂移" not in proc.stdout
         lines = calls.read_text().splitlines()
-        assert all("auth" in l for l in lines), f"rc=2 不得触发 issue/PR 流: {lines}"
+        assert all("auth" in line for line in lines), f"rc=2 不得触发 issue/PR 流: {lines}"
 
     def test_full_drift_dryrun_exits_1(self, synced):
         """full 漂移 rc=1 语义不回归：--dry-run 报告并 exit 1（人工介入信号）。"""
@@ -124,4 +124,4 @@ class TestSyncRcContract:
         assert proc.returncode == 1, proc.stdout + proc.stderr
         assert "[dry-run] full 漂移存在" in proc.stdout
         lines = calls.read_text().splitlines()
-        assert all("auth" in l for l in lines), f"dry-run 不得触发远端命令: {lines}"
+        assert all("auth" in line for line in lines), f"dry-run 不得触发远端命令: {lines}"
