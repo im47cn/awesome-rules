@@ -64,8 +64,7 @@ def _fake_home_env(tmp_path, path="/usr/bin:/bin"):
     PATH 用 POSIX 标准目录兜底（对齐 .factory/tests gitenv 的 _FALLBACK_DIRS
     先例）：dirname/cmp 均可解析，宿主私有目录不参与。
     """
-    env = {"HOME": str(tmp_path / "home"), "PATH": path}
-    return env
+    return {"HOME": str(tmp_path / "home"), "PATH": path}
 
 
 # ── 正道：全量一致即绿 ───────────────────────────────────────────────────────
@@ -127,7 +126,7 @@ def test_check_has_no_side_effects(tmp_path):
     home.mkdir()
     r = _check(target, env=_fake_home_env(tmp_path))
     assert r.returncode == 1
-    assert list(target.iterdir()) == []          # 未创建 .lefthook/ 等任何文件
+    assert not list(target.iterdir())          # 未创建 .lefthook/ 等任何文件
     assert not (home / ".gitmessage").exists()   # 未写机器级全局文件
 
 
