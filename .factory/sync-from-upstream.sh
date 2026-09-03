@@ -71,6 +71,23 @@ if [ "$MODE" = apply ] && [ "$COMMIT" = 1 ]; then
     printf '%s\n' "$dirty" >&2
     exit 1
   }
+  # 提交阶段会无条件 git add 根目录 .git-blame-ignore-revs（blame 消噪
+  # 清单，不在 .factory 面）——其 tracked 修改或人工 untracked 内容会被
+  # 并入同步提交而淹没本地改动（Sourcery PR#14 评论 2）。放行仅限脚本
+  # 首建残留：untracked 单行注释头（设计随下一次真追平的 add 一并入库，
+  # PR #105 评论 1 锚定）；tracked 改动 / staged / 人工 untracked 均拒绝
+  ignore_state="$(git -C "$REPO" status --porcelain -- .git-blame-ignore-revs || true)"
+  if [ -n "$ignore_state" ]; then
+    IGNORE_FILE="$REPO/.git-blame-ignore-revs"
+    if ! { printf '%s\n' "$ignore_state" | grep -q '^?? ' \
+        && [ -f "$IGNORE_FILE" ] \
+        && [ "$(wc -l < "$IGNORE_FILE" | tr -d ' ')" = 1 ] \
+        && head -n 1 "$IGNORE_FILE" | grep -q '^# factory: 追平提交忽略清单'; }; then
+      echo "拒绝 --commit：目标仓 .git-blame-ignore-revs 有未提交改动（先落库或反哺）:" >&2
+      printf '%s\n' "$ignore_state" >&2
+      exit 1
+    fi
+  fi
 fi
 
 # 锚点解析：--anchor > 上次 lock > main（优先级左→右；下游迁移

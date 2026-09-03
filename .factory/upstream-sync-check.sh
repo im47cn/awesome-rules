@@ -53,12 +53,21 @@ if ! ${HOST} auth ok >/dev/null 2>&1; then
   exit 3
 fi
 
-# 漂移检查：--check exit 1 = full 面有漂移；local 面仅报告（stdout 摘要）
-CHECK_OUT="$(bash "$FACTORY/sync-from-upstream.sh" "$UP" --check 2>&1)" && {
+# 漂移检查：--check exit 1 = full 面有漂移；local 面仅报告（stdout 摘要）。
+# rc=0 干净；rc=1 漂移；rc=2+（用法/上游不可用/锚点不可解析）是致命失败——
+# 输出不带 [local]/[full] 标记，落入下方分支会被当「无漂移」吞掉而 exit 0，
+# 调用方把致命检查失败误判为干净（Sourcery PR#14 评论 1）→ 必须原样上抛
+CHECK_RC=0
+CHECK_OUT="$(bash "$FACTORY/sync-from-upstream.sh" "$UP" --check 2>&1)" || CHECK_RC=$?
+if [ "$CHECK_RC" -eq 0 ]; then
   echo "$CHECK_OUT" | grep -q 'local.*人工\|漂移' || true
   echo "upstream-sync: full 面干净，无动作"
   exit 0
-}
+fi
+if [ "$CHECK_RC" -ge 2 ]; then
+  echo "$CHECK_OUT" >&2
+  exit "$CHECK_RC"
+fi
 
 echo "$CHECK_OUT"
 # local 漂移落 needs-human issue（零 LLM 分诊：语义决策归人类）
