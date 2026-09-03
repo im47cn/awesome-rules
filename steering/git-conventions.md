@@ -114,7 +114,7 @@ Refs #321
 
 ### 历史重写与敏感信息
 
-- 撤销误提交分两类：未提交（`git checkout -- <file>` 有效）与已提交（必须 `git reset --hard <好提交>` 或 revert——`checkout --` 只是把已提交内容写回工作区，status 转干净但坏提交仍在分支上，push 即带出）。操作后用 `git log --oneline -3` + `git reflog -3` 双确认回滚真实生效，不凭 status 干净下结论。
+- 撤销误修改分三层（Sourcery PR #135 审查修正：checkout 不清暂存区、reset --hard 默认化有丢数据风险）：仅工作区（`git restore <file>`；`git checkout -- <file>` 同义但**不清暂存区**）、已 staged（`git restore --source=HEAD --staged --worktree <file>`——只 checkout 工作区会把 index 里的坏内容留给下一次提交带出）、已提交（默认 `git revert`；必须 `git reset --hard <好提交>` 时先建 backup ref（`git branch backup/pre-reset`）或 `git bundle` 备份、核对目标提交、确认 `git status --porcelain` 为空——reset 会连带丢弃其后全部本地提交与未提交修改；`checkout --` 已提交文件只是把坏内容写回工作区，status 转净但坏提交仍在分支上，push 即带出）。操作后 `git log --oneline -3` + `git reflog -3` 双确认回滚真实生效，不凭 status 干净下结论。
 - 历史重写（剔除提交 / 强推）后立即 `git fsck --lost-found` 盘点孤儿对象，逐一鉴定是否已被现有分支吸收：gc 默认约两周回收，窗口内不鉴定即永久丢失；该操作纯只读、无风险（2026-08-28 实证：剔除 29a0ffde 并强推后盘点约 50 个孤儿，全部确认已吸收或判定丢弃）
 
 <!-- 待 apply 的「暂存核验/分支同步/推送复核」类条款视语义落本节或「同步纪律」 -->
