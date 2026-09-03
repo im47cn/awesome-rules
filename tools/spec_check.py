@@ -112,25 +112,21 @@ def extract_test_tags(files: list[Path]) -> dict[str, list[tuple[Path, str, int]
         java_pending = False  # @Test 独占一行时，方法签名在下一行
         for i, line in enumerate(text.splitlines(), 1):
             if ext == ".go":
-                m = GO_TEST_FUNC_RE.match(line)
-                if m:
+                if m := GO_TEST_FUNC_RE.match(line):
                     current_test = m.group(1)
             elif ext == ".java":
                 if JAVA_ANNOT_RE.match(line):
-                    m = JAVA_SIG_RE.search(line)  # 同行: @Test public void foo()
-                    if m:
+                    if m := JAVA_SIG_RE.search(line):
                         current_test = m.group(1)
                         java_pending = False
                     else:
                         java_pending = True
                 elif java_pending:
-                    m = JAVA_SIG_RE.match(line)
-                    if m:
+                    if m := JAVA_SIG_RE.match(line):
                         current_test = m.group(1)
                         java_pending = False
             elif ext in (".ts", ".tsx", ".js", ".jsx"):
-                m = JS_TEST_RE.match(line)
-                if m:
+                if m := JS_TEST_RE.match(line):
                     current_test = m.group(1)
             for m in CLAUSE_RE.finditer(line):
                 tags.setdefault(m.group(0), []).append((f, current_test or f"<line {i}>", i))
@@ -170,7 +166,7 @@ def main() -> int:
 
     spec_clauses: dict[str, int] = {}
     for s in args.spec:
-        spec_clauses.update(extract_spec_clauses(Path(s)))
+        spec_clauses |= extract_spec_clauses(Path(s))
     test_tags = extract_test_tags(collect_test_files([Path(t) for t in args.tests], exts))
 
     if not spec_clauses:
@@ -182,8 +178,7 @@ def main() -> int:
 
     print("==== 条款 -> 测试 反向核对矩阵 ====")
     for cid in sorted(spec_clauses):
-        hits = test_tags.get(cid)
-        if hits:
+        if hits := test_tags.get(cid):
             for f, case, ln in hits:
                 print(f"  {cid}  <-  {f}::{case}  (line {ln})")
         else:
@@ -203,9 +198,7 @@ def main() -> int:
     covered = total - len(gaps)
     print(f"\n覆盖: {covered}/{total} 条款有测试")
 
-    rc = 0
-    if gaps:
-        rc = 1
+    rc = 1 if gaps else 0
     if orphans and not args.ignore_orphans:
         rc = rc or 1
     return rc
