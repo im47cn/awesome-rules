@@ -29,3 +29,6 @@ pre-push:
     # 变异分红线: src/main 生产代码变更时按模块跑 PIT（阈值见各模块 pom mutationThreshold，无 pitest 配置则提示跳过）
     mutation-gate:
       run: bash .lefthook/mutation-gate.sh {push_files}
+    # CodeRabbit 建议性评审: 仓库 opt-in（.coderabbit.yaml 存在）才启用，push 时后台 --light 评审已提交变更（异步不阻塞、不拦 push）
+    coderabbit-gate:
+      run: bash .lefthook/coderabbit-gate.sh {push_files}

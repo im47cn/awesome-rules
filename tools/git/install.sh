@@ -43,6 +43,7 @@ DIST=(
   "lefthook/spec-check.sh:.lefthook/spec-check.sh"
   "lefthook/sourcery-gate.sh:.lefthook/sourcery-gate.sh"
   "lefthook/mutation-gate.sh:.lefthook/mutation-gate.sh"
+  "lefthook/coderabbit-gate.sh:.lefthook/coderabbit-gate.sh"
   "../spec_check.py:.lefthook/spec_check.py"
 )
 
@@ -92,6 +93,7 @@ mkdir -p "$TARGET/.lefthook"
 for pair in "${DIST[@]}"; do
   copy_one "${pair%%:*}" "$TARGET/${pair#*:}"
 done
+
 
 # commit 模板 → 用户主目录 ~/.gitmessage（全局，所有仓库/IDEA 一次识别）
 skip_tmpl=0

@@ -28,7 +28,7 @@ bash /path/to/awesome-rules/tools/git/install.sh .
 `install.sh` 会：
 
 1. 检测 node / npm（需 node ≥ 16）
-2. 拷贝 10 个分发件到项目（**入库共享给全团队**）：`commitlint.config.js` + `.versionrc.js` + `lefthook.yml` + `.lefthook/{coverage,commitmsg-check,run-tests,spec-check,sourcery-gate,mutation-gate}.sh` + `.lefthook/spec_check.py`（清单与 `install.sh` 内置 `DIST` 单源对应，可用 `--check` 巡检漂移）；`commit-template.txt` → `~/.gitmessage`（全局 commit 模板）
+2. 拷贝 11 个分发件到项目（**入库共享给全团队**）：`commitlint.config.js` + `.versionrc.js` + `lefthook.yml` + `.lefthook/{coverage,commitmsg-check,run-tests,spec-check,sourcery-gate,mutation-gate,coderabbit-gate}.sh` + `.lefthook/spec_check.py`（清单与 `install.sh` 内置 `DIST` 单源对应，可用 `--check` 巡检漂移）；`commit-template.txt` → `~/.gitmessage`（全局 commit 模板）
 3. **全局**安装工具（`@commitlint/cli`、`@commitlint/config-conventional`、`commit-and-tag-version`、`lefthook`，检测已装则跳过）
 4. 执行 `lefthook install` 写入 hook shim（读项目内 `lefthook.yml`，调全局 commitlint）
 5. 在 `package.json` 注入 `release` / `release:dry` 脚本（调全局 commit-and-tag-version）
@@ -44,7 +44,7 @@ bash /path/to/awesome-rules/tools/git/install.sh --update /path/to/业务项目
 
 `--update` 与首次安装的区别：
 
-- 配置文件（`commitlint.config.js` / `.versionrc.js` / `lefthook.yml` / `.lefthook/*.sh`）与 commit 模板：**无条件覆盖**（首次安装遇已存在会询问）
+- 配置文件（`commitlint.config.js` / `.versionrc.js` / `lefthook.yml` / `.lefthook/*.sh` + `.lefthook/spec_check.py`）与 commit 模板：**无条件覆盖**（首次安装遇已存在会询问）
 - hook：自动清理本工具旧版直写的 `commit-msg` 后重跑 `lefthook install`；非本工具、非 lefthook 生成的 hook **一律跳过**，`core.hooksPath` 被 husky 等接管时同样跳过，避免破坏既有方案
 - 全局工具、`package.json` scripts：与首次相同（检测补装 / 幂等注入）
 
@@ -56,11 +56,11 @@ bash /path/to/awesome-rules/tools/git/install.sh --update /path/to/业务项目
 bash /path/to/awesome-rules/tools/git/install.sh --check /path/to/业务项目
 ```
 
-`--check` 逐件比对 10 个分发件（根 3 件：`commitlint.config.js` / `.versionrc.js` / `lefthook.yml`；`.lefthook/` 下 7 件 hook 脚本与 `spec_check.py`），**非交互、零副作用**——不写任何文件、不碰 `~/.gitmessage` / git config / npm，也不依赖 node（巡检在 node 检测之前短路；`~/.gitmessage` 是机器级全局文件，不在比对集）：
+`--check` 逐件比对 11 个分发件（根 3 件：`commitlint.config.js` / `.versionrc.js` / `lefthook.yml`；`.lefthook/` 下 8 件 hook 脚本与 `spec_check.py`），**非交互、零副作用**——不写任何文件、不碰 `~/.gitmessage` / git config / npm，也不依赖 node（巡检在 node 检测之前短路；`~/.gitmessage` 是机器级全局文件，不在比对集）：
 
-- 全部一致：输出 `10/10 分发件一致` 并 exit 0
+- 全部一致：输出 `11/11 分发件一致` 并 exit 0
 - 缺失或漂移：逐件点名（`缺失  <相对路径>` / `漂移  <相对路径>（与上游 awesome-rules 不一致）`）后 exit 1——可直接挂上游 CI 定期任务，漂移静默积累即门禁红灯
-- 旧版项目（仅 3 脚本 + 2 根配置的早期接入仓）按 10 件全集报缺失，输出即「应装未装」清单
+- 旧版项目（仅 3 脚本 + 2 根配置的早期接入仓）按 11 件全集报缺失，输出即「应装未装」清单
 
 巡检是 `steering/git-conventions.md`「同步纪律 → 门禁脚本双向流」小节中覆盖式同步前人工 diff 规程的机械化：它只负责**检出**差异；检出后仍须按该规范人工确认方向——是「本地实验未回流」（实验改动应收编回流或还原）还是「上游演进未同步」（执行 `--update` 刷新），确认后再动。
 
