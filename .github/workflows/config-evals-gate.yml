@@ -1,0 +1,76 @@
+# config-evals gate（配置变更回归 CI 硬闸）。
+# 目的：agent 配置/技能/门禁本体的变更（CLAUDE.md、steering/、skills/、
+# hooks/、scripts/、tools/、.factory/）必须过全量 gauntlet + badcase
+# --strict-exact——与本地 pre-push 同一检查面（gauntlet 是权威超集，
+# badcase strict-exact 补充双向精确比对），CI 侧不可被 --no-verify 绕过。
+#
+# 触发面设计：
+#   pull_request 不设 paths（paths 过滤会让不匹配的 PR 永远停在 Expected，
+#   required check 不兼容），改在步内 diff 判断，未触及受控面早退 exit 0。
+#   push main 无条件全量：工厂链存在直推 main 通道（不经 PR，df5362ab
+#   曾因此把 ADR-009 P1 违规注释带上 main），合并后兜底不可省。
+#   schedule + workflow_dispatch 全量回归：抓长期漂移（依赖升级、
+#   badcase 语料退化、层清单失配）。
+#
+# 受控面 = CLAUDE.md + steering/ + skills/ + hooks/ + scripts/ + tools/ +
+# .factory/（skills/**/badcase 语料、skills/**/eval 评分语料、check_*.py、
+# gauntlet.sh、.factory/ 分发面本体变更都在此面内；docs/、templates/、
+# .github/ 纯文档改动不触发）。
+name: config-evals-gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # 每周一 02:00 UTC 全量回归
+    - cron: "0 2 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # gauntlet 探测带 pytest+pytest_cov 的解释器，探测不到 exit 2 硬失败。
+      - name: Install pytest deps
+        run: pip install pytest pytest-cov
+
+      # 单步内 diff + 执行：PR 未触及受控面即早退；push/schedule/dispatch
+      # 不设早退（全量）。
+      - name: Run gauntlet + badcase strict-exact
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            CHANGED=$(git diff --name-only "${BASE_SHA}"...HEAD -- \
+              CLAUDE.md steering/ skills/ hooks/ scripts/ tools/ .factory/)
+            if [ -z "$CHANGED" ]; then
+              echo "no config/skill/gate files changed, skipping"
+              exit 0
+            fi
+            echo "changed files:"
+            echo "$CHANGED"
+          fi
+
+          # 权威超集：pytest 各套件 + shell 门 + 检查器负控制
+          # （orchestration/checker/spec-check self-test）+ git-sealing。
+          bash tools/gauntlet.sh
+
+          # badcase 双向精确比对（gauntlet 层清单不含 badcase，须显式补）。
+          # 空语料 return 0 假绿——断言至少 1 个 badcase 且全过。
+          python3 scripts/badcase_runner.py --strict-exact > /tmp/badcase.log
+          cat /tmp/badcase.log
+          grep -qE '共 [1-9][0-9]* 个 badcase' /tmp/badcase.log \
+            || { echo "badcase: 空语料假绿（返回 0 但无 case）" >&2; exit 1; }
+          grep -qE '0 失败' /tmp/badcase.log \
+            || { echo "badcase: 存在失败" >&2; exit 1; }
