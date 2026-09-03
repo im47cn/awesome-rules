@@ -28,7 +28,7 @@ bash /path/to/awesome-rules/tools/git/install.sh .
 `install.sh` 会：
 
 1. 检测 node / npm（需 node ≥ 16）
-2. 拷贝 `commitlint.config.js` + `.versionrc.js` + `lefthook.yml` + `.lefthook/{coverage,commitmsg-check}.sh` 到项目（**入库共享给全团队**）；`commit-template.txt` → `~/.gitmessage`（全局 commit 模板）
+2. 拷贝 10 个分发件到项目（**入库共享给全团队**）：`commitlint.config.js` + `.versionrc.js` + `lefthook.yml` + `.lefthook/{coverage,commitmsg-check,run-tests,spec-check,sourcery-gate,mutation-gate}.sh` + `.lefthook/spec_check.py`（清单与 `install.sh` 内置 `DIST` 单源对应，可用 `--check` 巡检漂移）；`commit-template.txt` → `~/.gitmessage`（全局 commit 模板）
 3. **全局**安装工具（`@commitlint/cli`、`@commitlint/config-conventional`、`commit-and-tag-version`、`lefthook`，检测已装则跳过）
 4. 执行 `lefthook install` 写入 hook shim（读项目内 `lefthook.yml`，调全局 commitlint）
 5. 在 `package.json` 注入 `release` / `release:dry` 脚本（调全局 commit-and-tag-version）
