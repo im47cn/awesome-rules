@@ -238,6 +238,103 @@ class TestApplyCommit:
         assert proc.returncode == 1
         assert "拒绝 --commit" in proc.stderr
         assert _head_count(dn) == 1, "失败不得产生提交"
+    def test_dirty_tracked_blame_ignore_refuses_commit(self, repos):
+        """Sourcery PR#14 评论 2：提交阶段无条件 git add 根 .git-blame-ignore-revs——
+        tracked 未提交修改必须被前置脏检查拦截（否则本地热修并入同步提交）。"""
+        up, dn, _ = repos
+        assert self._run(dn, str(up), "--apply", "--commit", "--anchor", "main").returncode == 0
+        ignore = dn / ".git-blame-ignore-revs"
+        assert ignore.exists(), "首跑已入库（tracked）"
+        ignore.write_text(
+            ignore.read_text(encoding="utf-8") + "local hotfix marker\n",
+            encoding="utf-8")
+        proc = self._run(dn, str(up), "--apply", "--commit", "--anchor", "main")
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert "拒绝 --commit" in proc.stderr
+        assert ".git-blame-ignore-revs" in proc.stderr
+        assert _head_count(dn) == 2, "拒绝不得产生提交"
+        assert "local hotfix marker" in ignore.read_text(encoding="utf-8"), \
+            "本地改动须原样保留（不得被追平覆盖/丢弃）"
+
+    def test_manual_untracked_blame_ignore_refuses_commit(self, repos):
+        """Sourcery PR#14 评论 2 反例：untracked 多行人工内容不得被无条件 add 入库
+        （放行仅限脚本首建残留：untracked 单行注释头，PR #105 评论 1 锚定）。"""
+        up, dn, _ = repos
+        assert self._run(dn, str(up), "--apply", "--anchor", "main").returncode == 0
+        _git(dn, "add", "-A")
+        _git(dn, "commit", "-qm", "manual catch-up")
+        (dn / ".git-blame-ignore-revs").write_text(
+            "# factory: 追平提交忽略清单（git blame --ignore-revs 消噪）\n"
+            "manual note beyond header\n", encoding="utf-8")
+        proc = self._run(dn, str(up), "--apply", "--commit", "--anchor", "main")
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert "拒绝 --commit" in proc.stderr
+        assert _head_count(dn) == 2, "拒绝不得产生提交"
+        assert "manual note beyond header" in (dn / ".git-blame-ignore-revs").read_text(
+            encoding="utf-8"), "本地改动须原样保留"
+
+    def test_manual_untracked_no_trailing_newline_refuses_commit(self, repos):
+        """Sourcery #118 bug_risk：残留判定从 wc -l 换行计数升级为 cmp 整文件精确
+        比对——「合法头 + 无尾换行第二行」此前 wc -l 只数 1 个换行而误放行，
+        人工内容随之并入同步提交；现必须拒绝（数量 + 前缀形态判定已不可绕过）。"""
+        up, dn, _ = repos
+        assert self._run(dn, str(up), "--apply", "--anchor", "main").returncode == 0
+        _git(dn, "add", "-A")
+        _git(dn, "commit", "-qm", "manual catch-up")
+        (dn / ".git-blame-ignore-revs").write_text(
+            "# factory: 追平提交忽略清单（git blame --ignore-revs 消噪）\n"
+            "manual note without trailing newline", encoding="utf-8")
+        proc = self._run(dn, str(up), "--apply", "--commit", "--anchor", "main")
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert "拒绝 --commit" in proc.stderr
+        assert _head_count(dn) == 2, "拒绝不得产生提交"
+
+    def test_manual_untracked_header_suffix_refuses_commit(self, repos):
+        """Sourcery #118 bug_risk：单行头 + 同行任意尾随此前仅前缀匹配而误放行；
+        现 cmp 整文件比对拒绝一切与脚本首建单行头不符的内容。"""
+        up, dn, _ = repos
+        assert self._run(dn, str(up), "--apply", "--anchor", "main").returncode == 0
+        _git(dn, "add", "-A")
+        _git(dn, "commit", "-qm", "manual catch-up")
+        (dn / ".git-blame-ignore-revs").write_text(
+            "# factory: 追平提交忽略清单（git blame --ignore-revs 消噪） extra\n",
+            encoding="utf-8")
+        proc = self._run(dn, str(up), "--apply", "--commit", "--anchor", "main")
+        assert proc.returncode == 1, proc.stdout + proc.stderr
+        assert "拒绝 --commit" in proc.stderr
+        assert _head_count(dn) == 2, "拒绝不得产生提交"
+
+    def test_firstrun_residual_header_ships_with_drift_commit(self, repos):
+        """设计内状态放行（PR #105 评论 1）：首建残留 = untracked 单行注释头，
+        不得被前置检查拒绝——随下一次真追平的 add 一并入库。与两条拒绝用例
+        构成精确边界（Sourcery PR#14 评论 2：拦 tracked 修改 + 人工 untracked，
+        放行仅脚本首建残留）。"""
+        up, dn, _ = repos
+        # 1) 全量追平入库（无 --commit），本地落库
+        assert self._run(dn, str(up), "--apply", "--anchor", "main").returncode == 0
+        _git(dn, "add", "-A")
+        _git(dn, "commit", "-qm", "full catch-up")
+        # 2) bootstrap --commit：无漂移 → IGNORE 首建、留工作树 untracked（不拦）
+        proc = self._run(dn, str(up), "--apply", "--commit", "--anchor", "main")
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "无变更可提交" in proc.stdout
+        ignore = dn / ".git-blame-ignore-revs"
+        assert ignore.exists()
+        assert len(ignore.read_text(encoding="utf-8").splitlines()) == 1, \
+            "残留须为单行注释头（脚本首建形态）"
+        # 3) 上游前进 → 真追平：残留随 add 一并入库，不得拒绝
+        x = up / ".factory/tools/x.sh"
+        x.write_text("#!/usr/bin/env bash\ntrue # v2\n", encoding="utf-8")
+        _git(up, "add", "-A")
+        _git(up, "commit", "-qm", "up v2")
+        proc = self._run(dn, str(up), "--apply", "--commit", "--anchor", "main")
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "已提交" in proc.stdout
+        assert _head_count(dn) == 3, "真追平须落库（fixture + catch-up + 追平）"
+        tracked = subprocess.run(
+            ["git", "-C", str(dn), "ls-files", "--", ".git-blame-ignore-revs"],
+            env=git_env(), capture_output=True, text=True).stdout
+        assert ".git-blame-ignore-revs" in tracked, "首建残留应随真追平入库（tracked）"
 
     def test_no_drift_rerun_makes_no_commit(self, repos):
         up, dn, _ = repos
