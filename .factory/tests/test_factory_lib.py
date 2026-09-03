@@ -514,3 +514,34 @@ class TestFinalGateSubcommand:
                             {"final_gate_cmd": "python3 tools/final_gate.py"})
         assert factory_lib.main(["factory_lib.py", "final-gate"]) == 0
         assert capsys.readouterr().out == "python3 tools/final_gate.py\n"
+
+class TestSuitesNulOutput:
+    """suites 子命令 NUL 分隔（PR #116 CodeRabbit）：套件名可含空格
+    （skills/doc review/…），换行分隔 + shell for 词拆分（$(…) 去换行
+    按 IFS 切）会把空格名拆碎、消费端静默跳过证据段；\0 让
+    fix-issue.sh/validate-pr.sh 的 read -d '' 逐条保真取回。"""
+
+    def test_space_in_suite_name_survives(self):
+        """带空格目录名产出带空格套件名——NUL 形态的成因锚点：若实现
+        按空白/换行切分即碎名（静默丢证据段）。"""
+        assert evidence_suites(["skills/doc review/scripts/g.py"]) == [
+            "skills/doc review/scripts"
+        ]
+
+    def test_single_suite_nul_terminated_no_newline(self, capsys):
+        """单套件：输出恰一个 NUL 结尾条目、零换行——词拆分形态在此
+        碎名/多词，read -d '' 收敛单条。"""
+        assert factory_lib.main(["factory_lib.py", "suites",
+                                 "skills/api-guard/scripts/api_check.py"]) == 0
+        assert capsys.readouterr().out == "skills/api-guard/scripts\0"
+
+    def test_multi_suite_roundtrip_read_d(self, capsys):
+        """多条目 + 空格名：复刻消费端 read -d '' 解析逐条保真（回归
+        fix-issue.sh/validate-pr.sh 消费协议，PR #116 B）。"""
+        files = ["skills/api-guard/scripts/a.py",
+                 "skills/doc review/scripts/g.py"]
+        assert factory_lib.main(["factory_lib.py", "suites", *files]) == 0
+        raw = capsys.readouterr().out
+        assert raw.endswith("\0")
+        assert raw[:-1].split("\0") == [
+            "skills/api-guard/scripts", "skills/doc review/scripts"]

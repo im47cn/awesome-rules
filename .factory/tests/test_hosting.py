@@ -11,9 +11,12 @@
 （conftest 注入 .factory 到 sys.path）
 """
 import json
+import os
 import re
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -99,7 +102,8 @@ class TestGithubCommands:
         ad = self._ad(calls)
         ad._gh = lambda args, repo_override=None, stdin=None: (
             calls.append((tuple(args), repo_override)) or _cp(out="https://x/pull/12"))
-        out = ad.pr_create("br", "t", "b", label="l", repo="up/stream")
+        out = ad.pr_create("br", "t", "b", label="l", base="main",
+                           repo="up/stream")
         assert out["number"] == 12
         assert calls[0][1] == "up/stream"  # feedback-upstream 的上游仓显式覆盖
 
@@ -120,6 +124,27 @@ class TestGithubCommands:
         assert hist == [{"op": "add", "label": "factory:needs-fix"},
                         {"op": "remove", "label": "factory:needs-fix"},
                         {"op": "add", "label": "other"}]
+    def test_pr_create_requires_explicit_base(self):
+        """CodeRabbit E（GitHub 侧镜像 codeup）：--base 显式必填——gh
+        猜默认分支（默认分支因仓而异）会静默落错基线；缺省 raise
+        HostingError code=2（fail-closed，绝不条件拼接静默省略）。"""
+        ad = hosting.GitHubAdapter()
+        ad.slug = lambda o=None: "o/r"
+        with pytest.raises(hosting.HostingError) as e:
+            ad.pr_create("br", "t", "b")
+        assert e.value.code == 2
+        assert "--base" in str(e.value)
+
+    def test_pr_create_explicit_base_into_gh_args(self):
+        """显式 base 进 gh 参数（args 含 --base 且后一位为主干名）——
+        宿主脚本（feedback-upstream/upstream-sync-check）base 落点锚。"""
+        calls = []
+        ad = self._ad(calls)
+        ad._gh = lambda args, repo_override=None, stdin=None: (
+            calls.append((tuple(args), repo_override)) or _cp(out="https://x/pull/12"))
+        assert ad.pr_create("br", "t", "b", base="main")["number"] == 12
+        args = calls[0][0]
+        assert args[args.index("--base") + 1] == "main"
 
 
 # ── Codeup：请求形状 + 缺口 fail-closed ────────────────────────────
@@ -876,3 +901,159 @@ class TestIssueCreateLabelGate:
                           "## 验收\n- [ ] x", "--label", "factory:accepted"])
         assert e.value.code == 2
         assert "预检未过" in capsys.readouterr().err
+
+class TestRepoSplitRouting:
+    """CodeRabbit D：--repo 双语义拆分（_repo_split）——目录形态（java#29
+    跨仓调用：平台检测用目录真实路径、slug 由该目录 remote 自解析）vs
+    owner/repo slug 形态（检测回退 "."、slug 原样进 ops）。拆分点是
+    「按 cwd 检测选错适配器」与「目录路径误当 slug 进 gh --repo」的
+    共同单点。"""
+
+    def test_split_three_shapes(self, tmp_path):
+        d = str(tmp_path)
+        assert hosting._repo_split(d) == (d, None)
+        assert hosting._repo_split("up/stream") == (".", "up/stream")
+        assert hosting._repo_split(None) == (".", None)
+
+    def test_main_slug_repo_detects_dot_passes_slug(self, monkeypatch):
+        """slug 形态：平台检测落在 cwd（"."）；pr view 的 --repo 原样
+        进 ops（gh --repo up/stream 语义）。"""
+        seen = {}
+
+        class _Ad:
+            def pr_view(self, p, repo=None):
+                seen["repo"] = repo
+                return {"number": 1}
+
+        monkeypatch.setattr(hosting, "current_adapter", lambda local: (
+            seen.__setitem__("local", local) or _Ad()))
+        hosting.main(["pr", "view", "1", "--repo", "up/stream"])
+        assert seen == {"local": ".", "repo": "up/stream"}
+
+    def test_main_dir_repo_detects_dir_ops_none(self, monkeypatch, tmp_path):
+        """目录形态：检测用目录真实路径（远端解析/平台选择以其为准）；
+        ops 收 repo=None——目录路径绝不进 gh --repo。"""
+        seen = {}
+        d = str(tmp_path)
+
+        class _Ad:
+            def pr_view(self, p, repo=None):
+                seen["repo"] = repo
+                return {"number": 1}
+
+        monkeypatch.setattr(hosting, "current_adapter", lambda local: (
+            seen.__setitem__("local", local) or _Ad()))
+        hosting.main(["pr", "view", "1", "--repo", d])
+        assert seen == {"local": d, "repo": None}
+
+
+class TestLabelAddCrossProcessLock:
+    """CodeRabbit C：add「预检+POST」跨进程互斥（_add_label_lock）——
+    mkdir 原子占锁 + pid 活性判死接管 + 无 pid 残锁年龄宽限 + 有界等锁
+    fail-closed。缺陷：双进程同仓同 PR 同名 add 各过预检再各 POST =
+    双未 resolved 标记（状态机重复转移）；锁内重预检幂等收敛恰一次
+    POST。"""
+
+    def test_active_owner_timeout_fail_closed(self, monkeypatch, tmp_path):
+        """活主持锁 → 等锁超时 HostingError code=1（fail-closed 拒双
+        写）：不排队不静默放行，宁可链失败重试（重试幂等收敛）。"""
+        monkeypatch.setenv("FACTORY_LOCK_DIR", str(tmp_path))
+        monkeypatch.setattr(hosting, "_LABEL_LOCK_TIMEOUT", 0.2)
+        ad = hosting.CodeupAdapter()
+        lock_dir = hosting._label_lock_dir(".", 7, "factory:needs-review")
+        os.makedirs(lock_dir)
+        Path(lock_dir, "pid").write_text(str(os.getpid()), encoding="ascii")
+        with pytest.raises(hosting.HostingError) as e:
+            with ad._add_label_lock(7, "factory:needs-review"):
+                pass
+        assert e.value.code == 1
+        assert "fail-closed" in str(e.value)
+
+    def test_dead_owner_lock_taken_over(self, monkeypatch, tmp_path):
+        """死者残锁（pid 活性判死）→ 清后接管：with 正常进入、退出清
+        目录——残锁不永久卡链（需人工清锁即锁故障）。"""
+        monkeypatch.setenv("FACTORY_LOCK_DIR", str(tmp_path))
+        ad = hosting.CodeupAdapter()
+        lock_dir = hosting._label_lock_dir(".", 7, "factory:needs-fix")
+        os.makedirs(lock_dir)
+        Path(lock_dir, "pid").write_text("99999999", encoding="ascii")
+        assert hosting._lock_stale(lock_dir, "99999999") is True
+        with ad._add_label_lock(7, "factory:needs-fix"):
+            assert os.path.isdir(lock_dir)  # 持锁期间在位
+        assert not os.path.isdir(lock_dir)  # 退出清理
+
+    def test_pidless_crash_dir_reclaimed_after_grace(self, monkeypatch, tmp_path):
+        """建锁→写 pid 的崩溃窗残锁（无 pid）：年龄超宽限才判死可接管，
+        宽限内按活等（不抢正在建锁的活主）；宽限 0 即刻接管。"""
+        monkeypatch.setenv("FACTORY_LOCK_DIR", str(tmp_path))
+        monkeypatch.setattr(hosting, "_LABEL_LOCK_STALE_GRACE", 0.0)
+        ad = hosting.CodeupAdapter()
+        lock_dir = hosting._label_lock_dir(".", 7, "factory:approved")
+        os.makedirs(lock_dir)  # 无 pid：崩溃窗形态
+        with ad._add_label_lock(7, "factory:approved"):
+            assert os.path.isdir(lock_dir)
+        assert not os.path.isdir(lock_dir)
+
+    def test_parallel_add_posts_exactly_once(self, monkeypatch, tmp_path):
+        """并发回归（核心契约）：两独立适配器实例（双进程/双链形态）
+        同仓同 PR 同名 add 并发——锁串行化 + 后到者锁内重预检幂等跳过，
+        POST comments 恰一次；无锁实现此处必双 POST。"""
+        monkeypatch.setenv("FACTORY_LOCK_DIR", str(tmp_path))
+        markers = []
+        posts = []
+        barrier = threading.Barrier(2)
+
+        def make_ad():
+            ad = hosting.CodeupAdapter()
+
+            def fake_req(method, path, body=None, query=None,
+                         _retry_rdc=True):
+                if method == "POST" and path.endswith("/comments/list"):
+                    return {"result": [
+                        {"id": f"c-{i}", "content": c}
+                        for i, c in enumerate(markers)]}
+                if method == "POST" and path.endswith("/changeRequests/7/comments"):
+                    posts.append(body["content"])
+                    markers.append(body["content"])
+                    time.sleep(0.05)  # 放大持锁窗：后到线程必撞上等锁
+                    return {"success": True}
+                return {"success": True, "result": []}  # 类标 Link 兜底
+            ad._req = fake_req
+            return ad
+
+        results = []
+
+        def worker():
+            try:
+                barrier.wait()
+                make_ad().pr_set_labels(7, add=["factory:needs-review"])
+                results.append("ok")
+            except Exception as exc:  # 子线程异常收敛进结果，不裸抛
+                results.append(repr(exc))
+
+        threads = [threading.Thread(target=worker) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert results == ["ok", "ok"]
+        assert len(posts) == 1
+        assert len(markers) == 1
+    def test_huge_garbage_pid_waits_then_fail_closed(self, monkeypatch,
+                                                     tmp_path):
+        """pid 内容超 C int 巨值（损坏写，审查 P3）：按活等不误清、不裸
+        traceback（OverflowError 穿透即破坏 fail-closed docstring 契约），
+        等锁超时抛 code=1。"""
+        monkeypatch.setenv("FACTORY_LOCK_DIR", str(tmp_path))
+        monkeypatch.setattr(hosting, "_LABEL_LOCK_TIMEOUT", 0.2)
+        ad = hosting.CodeupAdapter()
+        lock_dir = hosting._label_lock_dir(".", 7, "factory:needs-human")
+        os.makedirs(lock_dir)
+        Path(lock_dir, "pid").write_text("100000000000000000000",
+                                         encoding="ascii")
+        owner = hosting._lock_owner(lock_dir)
+        assert hosting._lock_stale(lock_dir, owner) is False  # 按活等
+        with pytest.raises(hosting.HostingError) as e:
+            with ad._add_label_lock(7, "factory:needs-human"):
+                pass
+        assert e.value.code == 1
