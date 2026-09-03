@@ -44,7 +44,7 @@ bash /path/to/awesome-rules/tools/git/install.sh --update /path/to/业务项目
 
 `--update` 与首次安装的区别：
 
-- 配置文件（`commitlint.config.js` / `.versionrc.js` / `lefthook.yml` / `.lefthook/*.sh`）与 commit 模板：**无条件覆盖**（首次安装遇已存在会询问）
+- 配置文件（`commitlint.config.js` / `.versionrc.js` / `lefthook.yml` / `.lefthook/*.sh` + `.lefthook/spec_check.py`）与 commit 模板：**无条件覆盖**（首次安装遇已存在会询问）
 - hook：自动清理本工具旧版直写的 `commit-msg` 后重跑 `lefthook install`；非本工具、非 lefthook 生成的 hook **一律跳过**，`core.hooksPath` 被 husky 等接管时同样跳过，避免破坏既有方案
 - 全局工具、`package.json` scripts：与首次相同（检测补装 / 幂等注入）
 
