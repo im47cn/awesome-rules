@@ -25,6 +25,10 @@ MANIFEST="$SCRIPT_DIR/downstream.json"
 SYNC="$SCRIPT_DIR/sync-from-upstream.sh"
 LOCK="$SCRIPT_DIR/locks/downstream-check.lock"
 OUT_FILE="$(mktemp "${TMPDIR:-/tmp}/.factory-downstream-check.XXXXXX")"
+# EXIT trap 紧随 mktemp 安装（PR #120 review 1）：用法错误/清单缺失损坏/
+# 锁竞争等早退路径此前落在 trap 之前会泄漏 /tmp 暂存；LOCK 为固定路径，
+# 尚未创建时 rm -f 是无害 no-op
+trap 'rm -f "$LOCK" "$OUT_FILE"' EXIT INT TERM
 
 MODE="check"
 while [ $# -gt 0 ]; do
@@ -61,7 +65,6 @@ if ! /usr/bin/shlock -f "$LOCK" -p $$; then
     echo "巡检锁被持，退出（另一实例运行中）" >&2; exit 0
   fi
 fi
-trap 'rm -f "$LOCK" "$OUT_FILE"' EXIT INT TERM
 
 # 清单路径 → 绝对路径（~/ 展开；相对路径以中心仓根为基准）
 resolve_path() {
