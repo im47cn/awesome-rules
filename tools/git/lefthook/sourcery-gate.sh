@@ -12,9 +12,14 @@ set -u
 command -v sourcery >/dev/null 2>&1 || { echo "[sourcery] 未安装 sourcery CLI，跳过"; exit 0; }
 
 # 语言过滤（与 sourcery 支持面一致；{push_files} 以参数列表传入）
+# .lefthook/ 是上游管理的分发面（install.sh 拷贝产物，真源已过本仓同名闸）：
+# 消费仓 .sourcery.yaml 是项目级裁决（如 low-code-quality 开关逐仓不同），
+# 不审判上游工具——否则每仓阈值差异会逼出下游补丁，违反零拷贝漂移治理
+# （先例：消费仓配置对 .factory/ 上游镜像面同样 ignore）。
 FILES=()
 for f in "$@"; do
   case "$f" in
+    .lefthook/*) continue ;;
     *.py|*.go|*.java|*.cs|*.php|*.ts|*.js) FILES+=("$f") ;;
   esac
 done
