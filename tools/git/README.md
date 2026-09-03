@@ -28,7 +28,7 @@ bash /path/to/awesome-rules/tools/git/install.sh .
 `install.sh` 会：
 
 1. 检测 node / npm（需 node ≥ 16）
-2. 拷贝 `commitlint.config.js` + `.versionrc.js` + `lefthook.yml` + `.lefthook/{coverage,commitmsg-check}.sh` 到项目（**入库共享给全团队**）；`commit-template.txt` → `~/.gitmessage`（全局 commit 模板）
+2. 拷贝 `commitlint.config.js` + `.versionrc.js` + `lefthook.yml` + `.lefthook/` 门禁脚本（coverage / commitmsg-check / run-tests / spec-check / sourcery-gate / mutation-gate / coderabbit-gate + spec_check.py）到项目（**入库共享给全团队**）；`commit-template.txt` → `~/.gitmessage`（全局 commit 模板）
 3. **全局**安装工具（`@commitlint/cli`、`@commitlint/config-conventional`、`commit-and-tag-version`、`lefthook`，检测已装则跳过）
 4. 执行 `lefthook install` 写入 hook shim（读项目内 `lefthook.yml`，调全局 commitlint）
 5. 在 `package.json` 注入 `release` / `release:dry` 脚本（调全局 commit-and-tag-version）
@@ -44,7 +44,7 @@ bash /path/to/awesome-rules/tools/git/install.sh --update /path/to/业务项目
 
 `--update` 与首次安装的区别：
 
-- 配置文件（`commitlint.config.js` / `.versionrc.js` / `lefthook.yml` / `.lefthook/*.sh`）与 commit 模板：**无条件覆盖**（首次安装遇已存在会询问）
+- 配置文件（`commitlint.config.js` / `.versionrc.js` / `lefthook.yml` / `.lefthook/*.sh` + `.lefthook/spec_check.py`）与 commit 模板：**无条件覆盖**（首次安装遇已存在会询问）
 - hook：自动清理本工具旧版直写的 `commit-msg` 后重跑 `lefthook install`；非本工具、非 lefthook 生成的 hook **一律跳过**，`core.hooksPath` 被 husky 等接管时同样跳过，避免破坏既有方案
 - 全局工具、`package.json` scripts：与首次相同（检测补装 / 幂等注入）
 
