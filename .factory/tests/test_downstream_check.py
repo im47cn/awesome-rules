@@ -12,6 +12,8 @@
   → TestPatrolResilience.test_missing_repo_path_error_continues
 - PR #120 审查回归（mktemp 暂存泄漏：trap 晚于 mktemp 安装，用法错误等
   早退路径泄漏 /tmp 文件）→ TestPR120ReviewRegressions
+- 锁互斥（PR #120 review 1 修正：LOCK 并入清理 trap 须在持锁成功后；
+  竞争退出路径删他人锁破坏互斥）→ TestPR120ReviewRegressions
 """
 
 import glob
@@ -209,3 +211,24 @@ class TestPR120ReviewRegressions:
         assert "未知参数" in proc.stderr
         after = set(glob.glob(f"{tmp_root}/.factory-downstream-check.*"))
         assert after - before == set(), "trap 安装前早退不得泄漏暂存（review 1）"
+
+    def test_lock_competition_keeps_foreign_lock(self, fleet, tmp_path):
+        """review 1 修正：他实例持锁时本实例 exit 0 退出，不得删除对方
+        锁文件——修复前 trap 提前并入 $LOCK，竞争退出时 rm 掉对方锁，
+        破坏互斥。活 PID 锁：content=本测试进程 PID（kill -0 存活）。"""
+        center, _, _, _ = fleet
+        lock = center / ".factory/locks/downstream-check.lock"
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text(f"{os.getpid()}\n", encoding="utf-8")
+        tmp_root = os.environ.get("TMPDIR") or "/tmp"
+        before = set(glob.glob(f"{tmp_root}/.factory-downstream-check.*"))
+        proc = subprocess.run(
+            ["bash", str(center / ".factory/downstream-check.sh")],
+            cwd=center, env=git_env(), capture_output=True, text=True,
+        )
+        assert proc.returncode == 0
+        assert "巡检锁被持" in proc.stderr
+        assert lock.exists(), "竞争退出不得删除对方锁（互斥）"
+        assert lock.read_text(encoding="utf-8").strip() == str(os.getpid())
+        after = set(glob.glob(f"{tmp_root}/.factory-downstream-check.*"))
+        assert after - before == set(), "竞争退出仍须清自身暂存（review 1）"

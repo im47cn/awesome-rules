@@ -26,9 +26,10 @@ SYNC="$SCRIPT_DIR/sync-from-upstream.sh"
 LOCK="$SCRIPT_DIR/locks/downstream-check.lock"
 OUT_FILE="$(mktemp "${TMPDIR:-/tmp}/.factory-downstream-check.XXXXXX")"
 # EXIT trap 紧随 mktemp 安装（PR #120 review 1）：用法错误/清单缺失损坏/
-# 锁竞争等早退路径此前落在 trap 之前会泄漏 /tmp 暂存；LOCK 为固定路径，
-# 尚未创建时 rm -f 是无害 no-op
-trap 'rm -f "$LOCK" "$OUT_FILE"' EXIT INT TERM
+# 锁竞争等早退路径此前落在 trap 之前会泄漏 /tmp 暂存。此处先只清
+# OUT_FILE——LOCK 尚未到手（竞争退出路径里 lock 文件属于对方实例），
+# 不能一并 rm，须持锁成功后再并入（下方第二段 trap 整体替换本段）
+trap 'rm -f "$OUT_FILE"' EXIT INT TERM
 
 MODE="check"
 while [ $# -gt 0 ]; do
@@ -65,6 +66,11 @@ if ! /usr/bin/shlock -f "$LOCK" -p $$; then
     echo "巡检锁被持，退出（另一实例运行中）" >&2; exit 0
   fi
 fi
+
+# 走到这里必已持锁（初试成功，或 stale 清锁后重试成功；竞争两分支均已
+# exit 0）——此时才把 LOCK 并入清理 trap，整体替换上面只清 OUT_FILE 的
+# 首段（PR #120 review 1 修正：早并入会在竞争退出时删对方锁，破坏互斥）
+trap 'rm -f "$LOCK" "$OUT_FILE"' EXIT INT TERM
 
 # 清单路径 → 绝对路径（~/ 展开；相对路径以中心仓根为基准）
 resolve_path() {
