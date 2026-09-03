@@ -122,12 +122,21 @@ DOCSTRING_GATE = _docstring_gate_words()
 GUARD_TIMEOUT = 300
 TESTS_TIMEOUT = 600
 
-def write_stamp(evidence: str = "EVIDENCE-2026-08-24.md") -> str | None:
-    """全绿出口调用：当前周界 blob 写入 stamp（None = 无法绑定，不写）。"""
+def write_stamp(evidence: str | None = None) -> str | None:
+    """全绿出口调用：当前周界 blob 写入 stamp（None = 无法绑定，不写）。
+
+    evidence 指向人工证据留档名；缺省时取 mutations/ 目录最新
+    EVIDENCE-*.md（下游 wop-web-tools 反哺：静态默认文件名会过期——
+    写戳引用不存在的留档 = stamp 说谎）。无留档如实记「无留档文件」。
+    """
     import datetime
     blob = perimeter_blob()
     if not blob:
         return None
+    if evidence is None:
+        ev_dir = STAMP.parent
+        cands = sorted(ev_dir.glob("EVIDENCE-*.md")) if ev_dir.is_dir() else []
+        evidence = cands[-1].name if cands else "（无留档文件）"
     STAMP.write_text(json.dumps({
         "perimeter_blob": blob,
         "evidence": evidence,
@@ -329,6 +338,14 @@ def main() -> int:
     stamp_stale_banner()
     if args.only:
         wanted = {x.strip() for x in args.only.split(",") if x.strip()}
+        # 下游 wop-web-tools 反哺：未知 id 过滤结果为空仍以 0 退出写戳
+        # = 配置错误伪装成全量验证。缺失即拒绝（exit 2，对齐 guard 用法语义）。
+        all_ids = {d.id for d in defects}
+        missing = wanted - all_ids
+        if missing:
+            print(f"配置错误: --only 含未知缺陷 id: {sorted(missing)}"
+                  f"（已知: {sorted(all_ids)}）", file=sys.stderr)
+            return 2
         defects = [d for d in defects if d.id in wanted]
 
     outcomes: list[Outcome] = []
@@ -336,7 +353,17 @@ def main() -> int:
 
     for d in defects:
         print(f"[{d.id}] {d.description}（gate={d.gate}）")
-        target = REPO_ROOT / d.target
+        # 下游 wop-web-tools 反哺：d.target 绝对路径会重置 REPO_ROOT 拼接
+        # （Path / 语义），`..` 可越仓——--defects 载外部 JSON 时指向仓外
+        # 文件注入+写回（进程非正常终止 = 注入残留落仓外）。resolve 后
+        # 必须仍在 REPO_ROOT 内。
+        target = (REPO_ROOT / d.target).resolve()
+        try:
+            target.relative_to(REPO_ROOT)
+        except ValueError:
+            outcomes.append(Outcome(d, "FAIL-config", f"target 越出仓库根: {d.target}"))
+            print("    FAIL-config: target 越出仓库根")
+            continue
         if not target.is_file():
             outcomes.append(Outcome(d, "FAIL-config", f"target 不存在: {d.target}"))
             print("    FAIL-config: target 不存在")
