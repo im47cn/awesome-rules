@@ -51,4 +51,5 @@ exit 0 收尾后重新 push。
 - review 输出概览区分「could be fixed by Sourcery」与「need to be fixed
   manually」，后者直接进闭环条款；
 - 硬闸为 **opt-in 门禁**：仅当仓库根存在 `.sourcery.yaml` 才启用（主动声明，
-  同 wop-java-sdk gate 模式）；未 opt-in / 未装 CLI / 无语言文件均跳过；
+  同 wop-java-sdk gate 模式）；未 opt-in / 未装 CLI / 无支持语言文件均跳过
+  （支持面=CLI 实测 py/ts/js，见 sourcery-gate.sh 头注释）；
