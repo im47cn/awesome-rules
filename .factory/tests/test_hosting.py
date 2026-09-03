@@ -442,6 +442,16 @@ class TestCodeupMarkerModel:
         hist = ad.label_history(7)
         assert hist == [{"op": "add", "label": "factory:needs-fix"}]
 
+    def test_label_history_ignores_changes_requested_markers(self, monkeypatch):
+        """输入面守卫：#119 walrus 版若删 startswith 过滤（M2 变异），
+        _marker_comments 收的 changes-requested 评论会被 _marker_label 盲切
+        成垃圾 label——label_history 只认 add 前缀，changes-req 评论不产事件。"""
+        ad = self._ad(monkeypatch, {False: [
+            {"id": "c-5", "content": "[factory:changes-requested] 理由"},
+            {"id": "c-6", "content": "[factory:label:add] factory:needs-fix"}]})
+        hist = ad.label_history(7)
+        assert hist == [{"op": "add", "label": "factory:needs-fix"}]
+
     def test_changes_requested_gesture_maps_review(self, monkeypatch):
         """[factory:changes-requested] 评论 → changes_requested（无
         reviewDecision 等价物场景）；reviewer PASS 映射不覆盖手势。"""
