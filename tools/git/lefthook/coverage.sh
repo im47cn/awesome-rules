@@ -20,13 +20,13 @@ else
   for b in '@{push}' '@{u}'; do
     git rev-parse --verify -q "$b" >/dev/null 2>&1 && { COMPARE="$b"; break; }
   done
-  [ -z "$COMPARE" ] && exit 0
+  [ -z "$COMPARE" ] && { echo "[cov] 跳过 (@{push}/@{u} 均不可解析, 疑首次推送)"; exit 0; }
   changed=$(git diff --name-only "$COMPARE...HEAD" 2>/dev/null || true)
 fi
 echo "$changed" | grep -qE '\.py$'       && HAS_PY=1 || HAS_PY=0
 echo "$changed" | grep -qE '\.(ts|tsx)$' && HAS_TS=1 || HAS_TS=0
 echo "$changed" | grep -qE '\.java$'     && HAS_JAVA=1 || HAS_JAVA=0
-[ $((HAS_PY + HAS_TS + HAS_JAVA)) -eq 0 ] && exit 0
+[ $((HAS_PY + HAS_TS + HAS_JAVA)) -eq 0 ] && { echo "[cov] 跳过 (变更集无 .py/.ts/.java)"; exit 0; }
 
 # python 解释器探测: python3 → python → py -3 (Windows 常无 python3, Git Bash 下回退 py 启动器)
 # pip --user 装出的 diff-cover.exe 在 Windows 落用户 Scripts 目录(多不在 PATH), 故一律以 -m 方式调用
@@ -57,8 +57,9 @@ fail=0
 
 # ---- python: . 或 backend/ 下有 pyproject.toml ----
 if [ "$HAS_PY" = 1 ]; then
-  for d in . backend; do
-    [ -f "$d/pyproject.toml" ] || continue
+  py_dirs=$(for d in . backend; do [ -f "$d/pyproject.toml" ] && printf '%s ' "$d"; done)
+  [ -n "$py_dirs" ] || echo "[cov] python: 跳过 (无 pyproject.toml)"
+  for d in $py_dirs; do
     if [ "$MODE" = "light" ]; then
       [ -f "$d/coverage.xml" ] || { echo "[cov] $d 无 coverage.xml, 跳过轻检 (跑一次 pytest --cov 生成; 红线在 pre-push full)"; continue; }
       echo "[cov] pre-commit $d python staged 变更覆盖检查 (≥${FAIL_UNDER}%)"
@@ -98,8 +99,9 @@ fi
 # 多模块: 收集根 + 一级子模块的 jacoco.xml 一并交给 diff-cover（多份 coverage 文件为位置参数），
 # 避免多模块 reactor 下根目录无产物导致门禁静默失效
 if [ "$HAS_JAVA" = 1 ]; then
-  for d in . backend; do
-    [ -f "$d/pom.xml" ] || continue
+  jv_dirs=$(for d in . backend; do [ -f "$d/pom.xml" ] && printf '%s ' "$d"; done)
+  [ -n "$jv_dirs" ] || echo "[cov] java: 跳过 (无 pom.xml)"
+  for d in $jv_dirs; do
     # mvnd (Maven Daemon) 优先，回退标准 mvn
     if command -v mvnd >/dev/null 2>&1; then MVN=(mvnd)
     elif command -v mvn >/dev/null 2>&1; then MVN=(mvn)
@@ -137,11 +139,11 @@ fi
 
 # ---- node: . 或 frontend/ 下 package.json 声明 vitest ----
 if [ "$HAS_TS" = 1 ]; then
-  for d in . frontend; do
-    [ -f "$d/package.json" ] || continue
-    grep -q '"vitest"' "$d/package.json" || continue
+  ts_dirs=$(for d in . frontend; do [ -f "$d/package.json" ] && grep -q '"vitest"' "$d/package.json" && printf '%s ' "$d"; done)
+  [ -n "$ts_dirs" ] || echo "[cov] node: 跳过 (无声明 vitest 的 package.json)"
+  for d in $ts_dirs; do
     if [ "$MODE" = "light" ]; then
-      [ -f "$d/coverage/lcov.info" ] || continue
+      [ -f "$d/coverage/lcov.info" ] || { echo "[cov] $d 无 coverage/lcov.info, 跳过轻检 (跑一次 vitest --coverage 生成; 红线在 pre-push full)"; continue; }
       echo "[cov] pre-commit $d ts staged 变更覆盖检查 (≥${FAIL_UNDER}%)"
       (cd "$d" && dc coverage/lcov.info --compare-branch=HEAD --ignore-unstaged --fail-under="$FAIL_UNDER") || fail=1
     else
