@@ -60,12 +60,17 @@ CLI（bash 侧调用面；py 侧 import current_adapter）：
   hosting.py pr merge <p> --method merge|squash|rebase
 """
 import argparse
+import contextlib
 import datetime
+import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -79,6 +84,73 @@ class HostingError(Exception):
     def __init__(self, msg, code=1):
         super().__init__(msg)
         self.code = code
+
+
+# ---------------------------------------------------------------------------
+# Codeup add「预检+POST」的跨进程互斥（PR #116 CodeRabbit）：锁原语与工厂
+# 调度锁同语义（mkdir 原子 + pid 活性判死接管），但锚点不同——hosting CLI
+# 常跨 cwd/worktree 调用，无统一仓内锚点，锁根取机器级临时目录
+# （FACTORY_LOCK_DIR 显式覆盖：测试隔离/多租户）。互斥对象=同仓
+# (adapter.repo 视角)同 PR 同名 add 的双进程写；粒度偏粗无害
+# （串行化而非错误化）。
+# ---------------------------------------------------------------------------
+
+_LABEL_LOCK_TIMEOUT = 5.0      # 等锁最久；超时 fail-closed（code=1）拒放行双写
+_LABEL_LOCK_STALE_GRACE = 2.0  # 无 pid 残锁的年龄宽限（建锁→写 pid 的崩溃窗）
+
+
+def _label_lock_root() -> str:
+    """add 互斥锁根：FACTORY_LOCK_DIR 显式（测试隔离）→ 系统临时目录
+    （跨进程共享——传输层锁须机器级可见；与工厂调度锁的主树锚点两域不重叠）。"""
+    return os.environ.get("FACTORY_LOCK_DIR") or os.path.join(
+        tempfile.gettempdir(), "factory-hosting-locks")
+
+
+def _pid_alive(pid: int) -> bool:
+    """pid 活性（kill(pid, 0) 语义）：EPERM=进程存在按活；内容异常
+    （垃圾/超 C int）不可判定 → 保守按活（等锁超时 fail-closed，不误清）。"""
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except (ValueError, OverflowError):
+        return True  # 内容异常（垃圾/超 C int）不可判定：保守按活——宁可
+        # 等锁超时 fail-closed（code=1）也不误清可能活着的持锁主
+
+
+def _lock_owner(lock_dir: str) -> str:
+    """锁内 pid 文件内容；无/读失败 → ""（建锁与写 pid 之间的崩溃窗形态）。"""
+    try:
+        with open(os.path.join(lock_dir, "pid"), encoding="ascii") as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
+def _lock_stale(lock_dir: str, owner: str) -> bool:
+    """死者残锁判定：有 pid 且进程已死 → 可接管；pid 内容异常按活等
+    （宁可等超时 fail-closed，不清活主）；无 pid → 目录年龄超宽限判死
+    （崩溃残锁可清；活主写 pid 在微秒级，不可能越过宽限）。"""
+    if owner:
+        try:
+            pid = int(owner)
+        except ValueError:
+            return False
+        return not _pid_alive(pid)
+    try:
+        return time.time() - os.stat(lock_dir).st_mtime > _LABEL_LOCK_STALE_GRACE
+    except OSError:
+        return False  # 目录已被他人清掉：外层重试 mkdir 收敛
+
+
+def _label_lock_dir(repo: str, p: int, name: str) -> str:
+    """同名 add 的互斥锁目录：sha1(repo|p|name) 折叠——repo/name 来自外部
+    输入，目录名不得含不可信路径字符。"""
+    h = hashlib.sha1(f"{repo}|{p}|{name}".encode()).hexdigest()[:16]
+    return os.path.join(_label_lock_root(), h)
 
 
 # ---------------------------------------------------------------------------
@@ -275,9 +347,14 @@ class GitHubAdapter:
         return True
 
     def pr_create(self, head, title, body, label=None, base=None, repo=None):
+        """创建 PR → 中立 {number,url}。--base 显式必填：默认分支因仓而异
+        （gh 猜默认 = 静默落错基线），同 codeup 形态 fail-closed（PR #116）。"""
+        if not base:
+            raise HostingError(
+                "github pr create 需要 --base（默认分支因仓而异，勿猜默认）",
+                code=2)
         args = ["pr", "create", "--head", head, "--title", title, "--body", body]
-        if base:
-            args += ["--base", base]
+        args += ["--base", base]
         if label:
             args += ["--label", label]
         r = self._gh(args, repo)
@@ -858,8 +935,10 @@ class CodeupAdapter:
         return out[:limit]
 
     def _label_markers(self, p, name):
-        # 同名 label 的未 resolved 标记（add/remove 幂等预检共用）；
-        # 普通循环逐条判别（无重复索引/无海象，规避 Sourcery 两口径分歧）
+        """同名 label 的未 resolved add 标记（add/remove 幂等预检共用）。
+
+        普通循环逐条判别（无重复索引/无海象，规避 Sourcery 两口径分歧）。
+        """
         out = []
         for m in self._marker_comments(p):
             c = m["content"]
@@ -870,9 +949,11 @@ class CodeupAdapter:
         return out
 
     def pr_set_labels(self, p, add=(), remove=(), repo=None):
-        # 评论标记模型（#66，承载平台缺口 b）：remove = 置 resolved
-        # （内容保留，轮次计数不减——对齐 GitHub label-add 事件语义）；
-        # add = 发标记评论 + 类标 Link 平台原生补充（两载体并存）。
+        """评论标记模型（#66，承载平台缺口 b）：remove = 置 resolved
+        （内容保留，轮次计数不减——对齐 GitHub label-add 事件语义）；
+        add = 标记评论 + 类标 Link 平台原生补充（两载体并存）。
+        add 的预检+POST 以跨进程锁串行（PR #116）：双进程同时过预检再
+        各 POST = 双未 resolved 标记；锁内重预检命中 → 幂等跳过。"""
         for name in remove:
             hits = self._label_markers(p, name)
             if not hits:
@@ -884,15 +965,18 @@ class CodeupAdapter:
                           body={"resolved": True})
         for name in add:
             # 幂等（对齐 remove 分支）：已有同名未 resolved 标记则跳过
-            # ——重试/双写场景重复 POST 会堆未 resolved 重复标记（php#17）
-            if hits := self._label_markers(p, name):
-                print(f"[hosting] add {name}: 已有未 resolved 标记（幂等跳过）",
-                      file=sys.stderr)
-                continue
-            self._req("POST", f"{self._base()}/changeRequests/{p}/comments",
-                      body={"comment_type": "GLOBAL_COMMENT",
-                            "content": f"{_CU_LABEL_ADD}{name}",
-                            "resolved": False})
+            # ——重试/双写场景重复 POST 会堆未 resolved 重复标记（php#17）。
+            # 预检+POST 在跨进程锁内（_add_label_lock）：锁外预检=裸竞态
+            # 窗口，后到者锁内重预检命中 → 幂等跳过，锁保证恰一次 POST。
+            with self._add_label_lock(p, name):
+                if hits := self._label_markers(p, name):
+                    print(f"[hosting] add {name}: 已有未 resolved 标记（幂等跳过）",
+                          file=sys.stderr)
+                    continue
+                self._req("POST", f"{self._base()}/changeRequests/{p}/comments",
+                          body={"comment_type": "GLOBAL_COMMENT",
+                                "content": f"{_CU_LABEL_ADD}{name}",
+                                "resolved": False})
         # 类标 Link best-effort：不存在（label create 未破案，界面人工路径）
         # 时降级告警——标记评论已承载状态机语义，链不因平台类标缺失受阻
         ids = []
@@ -912,6 +996,57 @@ class CodeupAdapter:
                 print(f"[hosting] 类标 Link 降级（标记评论已承载）: {e}",
                       file=sys.stderr)
         return True
+
+    @contextlib.contextmanager
+    def _add_label_lock(self, p, name):
+        """add「预检+POST」互斥上下文（见模块段注释）：mkdir 原子占锁 +
+        pid 活性判死接管 + 等锁有界；超时 raise HostingError(code=1)——宁可
+        让调用链失败重试（重试以幂等跳过收敛），不放行双写。"""
+        lock_dir = _label_lock_dir(self.repo, p, name)
+        deadline = time.monotonic() + _LABEL_LOCK_TIMEOUT
+        # 锁根常驻：ensure 父目录（多进程并发 makedirs exist_ok 原子无害）
+        os.makedirs(_label_lock_root(), exist_ok=True)
+        while True:
+            try:
+                os.mkdir(lock_dir)
+            except FileExistsError:
+                owner = _lock_owner(lock_dir)
+                if _lock_stale(lock_dir, owner):
+                    # 判死与清除分离（PR #116 审查 P2）：rename 领取清除权，
+                    # 他者先接管则 rename 失败、活锁不被动；owner 复核兜底
+                    # 判死→改名间他者已 mkdir 新活锁的窗口（原样放回不删）
+                    # ——与 lease 墓碑 check-move 竞态同族，杜绝误删活主。
+                    victim = f"{lock_dir}.dead.{os.getpid()}.{time.monotonic_ns()}"
+                    try:
+                        os.rename(lock_dir, victim)
+                    except OSError:
+                        continue  # 他者已清/接管：不抢，重评估
+                    if _lock_owner(victim) != owner:
+                        try:
+                            os.rename(victim, lock_dir)  # 判死后换新主：原样放回
+                        except OSError:
+                            pass
+                        continue
+                    shutil.rmtree(victim, ignore_errors=True)
+                    continue  # 死主残锁：清后重试（mkdir 收敛单赢家）
+                if time.monotonic() >= deadline:
+                    raise HostingError(
+                        f"add {name}: 同标签并发写互斥超时"
+                        f"（{_LABEL_LOCK_TIMEOUT:.0f}s，另一进程持锁），"
+                        "fail-closed 拒双写", code=1)
+                time.sleep(0.05)
+                continue
+            break
+        try:
+            with open(os.path.join(lock_dir, "pid"), "w",
+                      encoding="ascii") as fh:
+                fh.write(str(os.getpid()))
+        except OSError:
+            pass  # pid 写失败不阻塞占锁（活性判定退化为年龄宽限）
+        try:
+            yield
+        finally:
+            shutil.rmtree(lock_dir, ignore_errors=True)
 
     def _label_id(self, name):
         # 【文档推导】ListProjectLabels → name→id
@@ -1052,6 +1187,23 @@ def current_adapter(repo="."):
         return cls(repo)
     else:
         raise HostingError(f"未知 FACTORY_HOSTING: {FACTORY_HOSTING}", code=2)
+
+
+def _repo_split(raw):
+    """--repo 双语义拆分（PR #116 CodeRabbit）→ (local, slug)。
+
+    - 本地目录形态（存在，含 "."）：探测/远端解析用真实路径（该目录
+      remote 选平台、解析 slug），ops 收 slug=None——由目录 remote
+      自解析（java#29 跨仓调用的本意；目录路径绝不进 gh --repo）。
+    - owner/repo slug 形态：探测回退 "."（按 cwd remote 选平台），
+      slug 原样透传给 ops（gh --repo <slug>）。
+    未传 --repo → (".", None)。
+    """
+    if raw is None:
+        return ".", None
+    if os.path.isdir(raw):
+        return raw, None
+    return ".", raw
 
 
 # ---------------------------------------------------------------------------
@@ -1300,12 +1452,16 @@ def _cmd_pr_merge(ad, args):
 
 
 def main(argv):
-    """CLI 入口：解析 → 取适配器 → 命令分派。"""
+    """CLI 入口：解析 → --repo 双语义拆分 → 取适配器 → 命令分派。"""
     args = _build_parser().parse_args(argv)
     try:
         # --repo 目标仓驱动平台检测（java#29 Sourcery：按 cwd 检测在
-        # 跨仓 CLI 调用下会选错适配器）；未注册 --repo 的子命令回退 "."
-        ad = current_adapter(getattr(args, "repo", None) or ".")
+        # 跨仓 CLI 调用下会选错适配器）；拆分后探测用 local（目录真实
+        # 路径或 "."），args.repo 改写为 slug 形态——目录形态收 None
+        # （slug 由该目录 remote 自解析），slug 形态原样进 ops。
+        raw = getattr(args, "repo", None)
+        local, args.repo = _repo_split(raw)
+        ad = current_adapter(local)
 
         if args.cmd == "auth":
             sys.exit(0 if ad.auth_ok() else 1)
