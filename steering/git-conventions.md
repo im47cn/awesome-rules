@@ -144,6 +144,12 @@ Refs #321
 - 工作开始时先切到 `main` 并 `git pull --ff-only` 同步基线（同步对象是 `main` 而非当前 feature 分支——后者只拉自身 upstream，`main` 基线仍可能过时；无 upstream 的新分支上该命令直接失败，需同步工作分支时须显式指定其 upstream）：长期不 pull 会在下次同步时积累大体积 diff（自动提交的数据文件尤甚），且整个工作过程基于过时状态
 - 分叉分支（本地与远端各有新提交）上 `--ff-only` 必然失败并保持旧状态：改走显式 `git pull --rebase`（或 fetch 后 rebase）同步，不得因失败而跳过同步带着过时基线开工
 
+### 受保护 main 的写者治理
+
+- PR 落地竞态双形态：① main 高频合入窗口期，逐次 merge main 的收敛策略可能永远追不上（checks 全部重置 pending → main 再前进 → 回落 CONFLICTING 循环），对策是全绿后立即合并或临时冻结 main 其他合入；② 多会话并行修同一 PR 分支会 push 撞车（非 fast-forward 拒绝），动手修 CI 门禁前先 fetch 检查远端是否已有等效修复，PR 分支定唯一写者（wop-go-sdk 2026-08-31 实证：PR #15 两轮全绿→CONFLICTING 回落，本地 7a7d82e 与远端 bf57bdc 撞车后按「远端更完整」弃本地）
+- 本地 main 同为需治理的写者：`merge --ff-only` 失败 = 本地与远端 main 分叉信号，绝不顺手 rebase/merge 修平（feature 分支的分叉收敛处方不适用于 main）；处置前必须完成等价性验证三件套——逐条识别本地独有提交、patch-id 对比（判定重放/重写等价）、tree diff 证明无本地独有内容——验证不充分则保持原状收尾，不强求同步（wop-typescript-sdk 2026-09-02 实证：预备性提交先落本地 main 两提交，PR #21 重开为 #22 经 bot 分支重写重放，合并后本地 main ahead 2/behind 4；patch-id 证明等价、tree diff 仅差远端修复净效果，reset --hard origin/main 无损）
+- 根因预防：预备性/阶段性提交禁止落本地 main（一律走分支）；PR 分支经重放/重写合并后立即同步本地 main，不留分叉窗口
+
 ### 门禁脚本双向流：本地先实践，成熟后反哺
 
 - `.lefthook/*` 允许本地直接修改并立即生效（fast path）：上游合并节奏不受本地阻塞，实验性改动先在真实项目验证
