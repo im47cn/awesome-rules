@@ -23,7 +23,7 @@ pre-push:
     # 项目自定义测试入口: 有 scripts/pre-push-tests.sh 则执行（全量测试/构建检查等），无则跳过
     tests:
       run: bash .lefthook/run-tests.sh {push_files}
-    # Sourcery 硬闸: 仓库 opt-in（.sourcery.yaml 存在）才启用，语言文件 push 前 review --check
+    # Sourcery 硬闸: 仓库 opt-in（.sourcery.yaml 存在）才启用，支持语言（CLI 实测 py/ts/js）push 前 review --check
     sourcery-gate:
       run: bash .lefthook/sourcery-gate.sh {push_files}
     # 变异分红线: src/main 生产代码变更时按模块跑 PIT（阈值见各模块 pom mutationThreshold，无 pitest 配置则提示跳过）
