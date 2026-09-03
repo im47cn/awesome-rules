@@ -66,3 +66,19 @@ def test_rev_parse_failure_fails_closed(tmp_path):
     mod = _load_guard(root)
     with pytest.raises(RuntimeError, match="git check-ignore"):
         mod.self_check()
+
+
+def test_rev_parse_failure_cwd_lookalike_still_fails_closed(tmp_path, monkeypatch):
+    """CodeRabbit #119：rev-parse 失败且 CWD 恰含同名周界路径时，
+    main_root 为 "" 会令 Path("")/p 相对 CWD 解析、exists() 误真而放行
+    （fail-open）——None 语义禁掉主树回退，check-ignore 照常 fail-closed。
+    此场景击杀旧实现（空串哨兵放行），本实现必须仍抛。"""
+    root = _build_repo(tmp_path, PERIMETER)  # REPO_ROOT 缺 .localcfg/
+    lookalike = tmp_path / "lookalike"
+    lookalike.mkdir()
+    (lookalike / ".localcfg").mkdir()
+    monkeypatch.chdir(lookalike)  # CWD 含同名路径：旧实现误判存在
+    subprocess.run(["rm", "-rf", str(root / ".git")], check=True)
+    mod = _load_guard(root)
+    with pytest.raises(RuntimeError, match="git check-ignore"):
+        mod.self_check()

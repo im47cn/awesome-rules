@@ -1004,9 +1004,14 @@ class CodeupAdapter:
         # 评论标记承载（#66，平台缺口 c）：全部 add 标记 → 事件流。
         # resolved 不减计数（重派前 remove、再打回再 add，轮次单调递增
         # ——对齐 GitHub label-add 事件语义）；中立 schema 同 GitHub 侧。
-        return [{"op": "add", "label": self._marker_label(m["content"])}
-                for m in self._marker_comments(p)
-                if m["content"].startswith(_CU_LABEL_ADD)]
+        out = []
+        for m in self._marker_comments(p):
+            if not m["content"].startswith(_CU_LABEL_ADD):
+                continue
+            label = self._marker_label(m["content"])
+            if label:  # 前缀-only 评论空标记 → 不产无效事件（#119）
+                out.append({"op": "add", "label": label})
+        return out
 
 
 ADAPTERS = {"github": GitHubAdapter, "codeup": CodeupAdapter}

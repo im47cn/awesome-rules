@@ -433,6 +433,15 @@ class TestCodeupMarkerModel:
         assert hist == [{"op": "add", "label": "factory:needs-fix"},
                         {"op": "add", "label": "factory:needs-fix"}]
 
+    def test_label_history_skips_empty_label_markers(self, monkeypatch):
+        """CodeRabbit #119：前缀-only 评论 _marker_label 返回 ""——
+        label_history 不得产出 {"op": "add", "label": ""} 无效事件。"""
+        ad = self._ad(monkeypatch, {False: [
+            {"id": "c-3", "content": "[factory:label:add] "},
+            {"id": "c-4", "content": "[factory:label:add] factory:needs-fix"}]})
+        hist = ad.label_history(7)
+        assert hist == [{"op": "add", "label": "factory:needs-fix"}]
+
     def test_changes_requested_gesture_maps_review(self, monkeypatch):
         """[factory:changes-requested] 评论 → changes_requested（无
         reviewDecision 等价物场景）；reviewer PASS 映射不覆盖手势。"""

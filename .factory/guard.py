@@ -81,14 +81,18 @@ def self_check() -> None:
     )
     if rp.returncode != 0:
         # 主树回退依赖 git 元数据：失败即放弃回退（fail-safe 偏严——
-        # 多拦误报不放过漂移），与下方 check-ignore fail-closed 立场一致
-        main_root = ""
+        # 多拦误报不放过漂移），与下方 check-ignore fail-closed 立场一致。
+        # None 而非 ""：Path("")/p 会相对当前工作目录解析，CWD 同名周界
+        # 路径可令 exists() 误真放行——None 语义彻底禁掉主树回退分支
+        main_root = None
     else:
         main_root = rp.stdout.strip().removesuffix("/.git")
     if absent := [
         p
         for p in sorted(guard_paths)
-        if not (REPO_ROOT / p).exists() and not (Path(main_root) / p).exists()
+        if not (REPO_ROOT / p).exists() and (
+            main_root is None or not (Path(main_root) / p).exists()
+        )
     ]:
         # check-ignore 批量豁免（rc 0=有命中 1=全否）；git 失败 fail-closed
         ci = subprocess.run(

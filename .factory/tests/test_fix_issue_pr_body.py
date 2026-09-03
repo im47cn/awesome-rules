@@ -21,3 +21,10 @@ def test_pr_create_keeps_base_and_label_contract():
     """评审波新增契约（显式 --base / needs-review label）与 body 共存。"""
     assert '--base "${BASE_BRANCH}"' in SRC
     assert '--label "factory:needs-review"' in SRC
+
+
+def test_pr_body_carries_dir_and_chain_summary():
+    """CodeRabbit #119：body 除 Closes 前缀外还须含产物目录与链流程说明
+    （人工 reviewer 定位产物/理解流程的正文契约）。"""
+    assert '工厂链产物见 ${DIR}' in SRC
+    assert "implement ↔ review（ralph ≤${RALPH_MAX} 轮）→ guard → holdout" in SRC

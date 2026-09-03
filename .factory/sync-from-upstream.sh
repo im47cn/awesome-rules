@@ -173,7 +173,7 @@ while IFS=$'\t' read -r kind rel; do
       # tmp+mv 原子替换（#103）：$dst 可能是运行中脚本自身——bash 惰性逐段
       # 读源文件，`> "$dst"` 直写截断同 inode，旧读位移落在新内容中途即
       # syntax error 半同步态；同目录 rename 换 inode，旧 inode 保活至跑完
-      tmp="$dst.factory-new.$$"
+      tmp="$(mktemp "${dst}.factory-new.XXXXXX")"
       git -C "$UP" cat-file blob "$up_blob" > "$tmp" && mv -f "$tmp" "$dst" \
         || { echo "  [$kind] $rel: 上游 blob 拉取失败" >&2; exit 2; }
       chmod "${up_mode: -3}" "$dst" 2>/dev/null || chmod +x "$dst"
@@ -190,7 +190,7 @@ while IFS=$'\t' read -r kind rel; do
     DRIFT=1
     if [ "$MODE" = apply ]; then
       # 同 fill-in：tmp+mv 原子替换（#103）——漂移覆盖恰是自覆盖的主形态
-      tmp="$dst.factory-new.$$"
+      tmp="$(mktemp "${dst}.factory-new.XXXXXX")"
       git -C "$UP" cat-file blob "$up_blob" > "$tmp" && mv -f "$tmp" "$dst" \
         || { echo "  [full] $rel: 上游 blob 拉取失败" >&2; exit 2; }
       chmod "${up_mode: -3}" "$dst" 2>/dev/null || chmod +x "$dst"
