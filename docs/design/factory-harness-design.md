@@ -460,7 +460,7 @@ gauntlet 增层 `factory-local-validity`（JSON 可解析 + guard.py 冒烟
 对 `downstream.json` 登记的 10 个下游仓完成只读实测（拉取率 / 滞后度 / install.sh 调用 / 平台假设），结论与设计全文见 **`distribution-verification-and-suite-design.md`**（本目录）。要点：
 
 - **真消费 6/10（严口径）~ 8/10（宽口径）≥ 半数** → 实施分发套件（intent/ 目录约定 + REVIEW.md 配套 + CI gate 模板注入），不选「不实施/单仓试点」。
-- **滞后普遍**：全部仓落后上游 HEAD（追平 0–35/49，中位 ~23）；ADR-011 巡检面 7 件仅 wop-go-sdk 追平；下游自发追平 8 仓为 0——收敛优先于分发。
+- **滞后普遍**：全部仓落后上游 HEAD（追平 0–35/49，中位 ~23）；ADR-011 巡检面 7 件仅 wop-go-sdk 追平；下游自发追平 8 仓为 0（分母口径见设计文档 §1.7）——收敛优先于分发。
 - **schema 已分叉**：下游 5 仓自扩 `docstring_gate_cmd`（上游无）；php/gateway 各 13 件 full 面本地改待反哺收编（反哺管线 PR #86/#88 在用但吞吐不足）。
 - **平台假设**：`/usr/bin/shlock` 硬依赖遍布 9 仓 cron-dispatch.sh（P1 PR #120 实测 ubuntu ENOENT）；CI gate 注入与 C 阶段前置依赖跨平台锁（mkdir 原子锁）替换。
 - 死亡谷形态实证：wop-web-tools 移植 + 重证完成后未合 main（origin/main 无 .factory）。

@@ -41,11 +41,11 @@
 | wop-web-tools | GitHub | main 无(0);移植分支 factor/install-blackbox-factory(50)未合并;工作树 `?? .factory/` 未跟踪 | 无 | – | – | 0 | dispatch.log 9-03 exit=0(本机未跟踪副本) | 0 | 13 |
 | wop-go-sdk | GitHub | origin/main(62,9-03) | 2be9f99d(9-02) | 47/47 | 0 | 35 | dispatch.log 9-03 exit=0 | 6(最近 `factory: 上游同步追平(2be9f99d4)` 9-02) | 13 |
 
-注:锚点 full 数不同(42/43/47)因各锚点对应上游不同时期的 full 面大小;「vs 上游HEAD」是统一分母(49)的可比口径。逐仓复核命令与冻结 sha 见 §4.2;其中 php/dotnet 两行件数与 go 追平计数未能按当前 refs 复现,已标 [INFERENCE]。
+注:锚点 full 数不同(42/43/47)因各锚点对应上游不同时期的 full 面大小;「vs 上游HEAD」是统一分母(49)的可比口径。逐仓复核命令与冻结 sha 见 §4.2;其中 php/dotnet 两行件数与 gateway/go 追平计数未能按当前 refs 复现,已标 [INFERENCE]。
 
 ### 1.3 逐仓量化细节(要点)
 
-- **wop-go-sdk(标杆形态)**:唯一 =锚点 47/47 且 0 本地改的仓;唯一带 `upstream` 字段新格式 lock + `blame_ignore: true`;唯一追平了 ADR-011 巡检面(downstream-check.sh 等)的仓;6 次追平提交呈自动化命名(`factory: 上游同步追平(<sha8>)`)。中心驱动追平(ADR-011 B 阶段)在它身上已闭环。
+- **wop-go-sdk(标杆形态)**:唯一 =锚点 47/47 且 0 本地改的仓;唯一带 `upstream` 字段新格式 lock + `blame_ignore: true`;唯一追平了 ADR-011 巡检面(downstream-check.sh 等)的仓;6 次追平提交呈自动化命名(`factory: 上游同步追平(<sha8>)`)(审计注:该 6 按当前 refs 任何 grep 口径至多得 3,且计数只增不减、非采集后演进可解释——不可机械复现,标 [INFERENCE],见 §4.2)。中心驱动追平(ADR-011 B 阶段)在它身上已闭环。
 - **wop-dotnet-sdk**:43/43 = 锚点、0 本地改、3 次追平、分支 factory/sync-63301f27 与 PR 流痕迹——自动化形态第二例,但锚点(9-01)后上游又演进 22 件未追。
 - **wop-java-sdk**:41/42,唯一本地改是 `tests/test_hosting.py`(hosting 适配演练残留);锚后 28 件演进未追。
 - **wop-php-sdk / gtsp-wop-gateway**:各 13 件本地改(factory_lib/feedback/guard/hosting/state + 7 个 tests;php 另含 cron-dispatch.sh)——下游深度定制(forge 适配 + docstring 门),是 full 面覆盖策略与下游演化冲突最尖锐的两仓。
@@ -87,7 +87,7 @@
 
 **三大病(设计必须正面回应)**:
 
-1. **滞后普遍病**:vs 上游 HEAD 追平 0–35/49(中位 ~23);上游锚点后演进速度 14–29 件/数天(04ee96d0→HEAD 29 件,20f6a632→28,63301f27→22,2be9f99d→14)。下游自发追平提交:8 仓为 0。ADR-011 中心驱动追平目前闭环 1 仓(go-sdk)。
+1. **滞后普遍病**:vs 上游 HEAD 追平 0–35/49(中位 ~23);上游锚点后演进速度 14–29 件/数天(04ee96d0→HEAD 29 件,20f6a632→28,63301f27→22,2be9f99d→14)。下游自发追平提交:8 仓为 0(口径:分母=main 有 .factory 的 9 仓,剔 E 类 web-tools;gateway/dotnet/go 的追平为中心驱动命名,不计自发;唯一自发非零为 typescript 4 次手工——表 1 追平列零值行仅 6,勿按仓直读)。ADR-011 中心驱动追平目前闭环 1 仓(go-sdk)。
 2. **schema 分叉病**:`docstring_gate_cmd` 下游先行未收编;php/gateway 各 13 件 full 面本地改随时会被 blob 覆盖冲掉——反哺管线在用(PR #86 go-sdk 单仓、PR #88 multi-repo 批量)但吞吐跟不上漂移产生速度。
 3. **移植死亡谷病**:web-tools 移植 + 重证 100% 完成后卡在「未合 main」3 天,治理资产散在移植分支与本机未跟踪副本;skills 缺 tests/ 15 件属同族(移植不完整无门禁可见)。
 
@@ -169,7 +169,7 @@
 | DIST-2 | test_adopt_md_required_fields / test_missing_intent_blocks_automation | 结构校验单测(否定式) |
 | DIST-3 | test_review_md_appended_per_dispatch | git log 交叉核对脚本 |
 | DIST-4 | test_ci_templates_no_dispatch_scripts / test_ubuntu_inject_smoke | 模板 lint + CI 冒烟(否定式) |
-| DIST-5 | test_no_shlock_refs / test_mkdir_lock_mutex / test_ubuntu_dispatch_smoke | grep 断言 + 并发互斥 + 冒烟(否定式) |
+| DIST-5 | test_no_shlock_refs / test_mkdir_lock_mutex / test_ubuntu_dispatch_smoke_exit0 / test_missing_shlock_negative | grep 断言 + 并发互斥 + 冒烟(exit=0 并断言日志/锁释放/dispatch 发生,见 §2.6 验收基准)+ 缺 shlock 独立负例(否定式) |
 | DIST-6 | test_unknown_key_requires_debt_entry | 配置校验单测(否定式) |
 | DIST-7 | test_drift_redline_triggers_issue / test_redline_idempotent | 巡检幂等单测 |
 | DIST-8 | test_stale_port_branch_flagged / test_e_grade_excluded_from_automation | 巡检单测(否定式) |
@@ -205,7 +205,7 @@
 | 仓 | 冻结复核 sha(平台期) | 件数 | vs49 | 追平(采集时) | 关键输出摘要 |
 |---|---|---|---|---|---|
 | gtsp-wop-service | `7ed324e`(9-03 10:22,dev 分支尖端) | 50 | 27 | 0 | locks/ 已建(9-01)、无 dispatch.log;ledger 0 行;键 11 |
-| gtsp-wop-gateway | `81a4d3c`(8-31,fix/sourcery-review 尖端未再动) | 56 | 23 | 1 | sync 链 `ad5f3f0`(8-26)@c798c943 → `d64d4f8`(8-28)`chore(factory): sync 上游 @04ee96d0（ADR-009 数据化）`;ledger 2 行;leases/ `issue:KFPT-22.epoch`、`issue:KFPT-26.epoch`;远端 factory 系分支 4(sync-2be9f99、issue-KFPT-26、hotfix-review-s1-s2-p1、feat/factory-forge);键 11 |
+| gtsp-wop-gateway | `81a4d3c`(8-31,fix/sourcery-review 尖端未再动) | 56 | 23 | 1 [INFERENCE] | sync 链 `ad5f3f0`(8-26)@c798c943 → `d64d4f8`(8-28)`chore(factory): sync 上游 @04ee96d0（ADR-009 数据化）`;ledger 2 行;leases/ `issue:KFPT-22.epoch`、`issue:KFPT-26.epoch`;远端 factory 系分支 4(sync-2be9f99、issue-KFPT-26、hotfix-review-s1-s2-p1、feat/factory-forge);键 11;*表列 1 与 grep 口径不符:`--grep='sync 上游'` 于 81a4d3c 历史内 = 2(ad5f3f0、d64d4f8,均 ≤采集截止)——疑按锚点 04ee96d0 对应的 ADR-009 数据化单次计,口径敏感 |
 | wop-python-sdk | `8be4c9d`(9-02 13:05;平台期 9-01 23:06→9-03 01:41) | 55 | 23 | 0 | dispatch.log 第 1301 行 `── 2026-09-03 10:58:26 dispatch 结束（exit=0）`;键 11(现工作树 12,后续追平加 `port_point`) |
 | wop-java-sdk | `5abc8df`(9-02 23:27;平台期 9-02 15:39→9-03 01:37) | 57 | 21 | 0 | dispatch.log 9-03 exit=0;键 12(+docstring_gate_cmd) |
 | wop-typescript-sdk | `6885b89`(9-02 23:02;平台期 9-01 14:01→9-02 23:02) | 55 | 23 | 4(手工) | 追平判读基料(可复现):`git log 6885b89 --format='%h %ad %s' -- .factory` 枚举 8-31 八个触碰提交,「追平」语义内嵌于特性提交标题(4107d94 追平 Sourcery 回归闸、297c6e3 三方合并恢复+追平、9061d27 docstring 门含 .factory 追平等)而非独立 sync 消息——单一 grep 必欠计,故标「手工形态」;dispatch.log 9-03 exit=0;键 11(现 12) |
