@@ -1,6 +1,14 @@
 # skill-evo replay-eval 设计文档
 
-> **状态**：设计中（待实现）· 基于 GEPA 引擎（`scripts/evo_gepa.py`）零改动复用
+> **状态**：已实现（2026-09-01 落地主体；2026-09-03 收尾核对）· 基于 GEPA 引擎（`scripts/evo_gepa.py`）零改动复用
+> **落地范围**：`evo_replay.py` + 单测 46 项（`tests/test_replay.py`，LLM 全 mock）+
+> `evo.py` CLI 接线（`evolve --skill/--eval/--dry-run/--budget/--seed`）+ 评估集语料
+> `eval/007-clean`（放行型）/`eval/008-real`（混合型，含 1 条人工补充规则）+
+> 门禁 `control_gate`（全盘拒绝控制候选）+ `split_eval` 分层切分 + badcase 语料
+> 扩充至 71 例（设计时 6 例）——replay 评估集共 73 cases
+> **剩余项**：无（2026-09-03 收尾：badcase_runner strict 空放行型修正已落地 §3.2、
+> CI `replay-dry-run` 哨兵已接线 §5.3、带 LLM `--budget 16` 端到端已跑通 §7.4、
+> §7.6/§7.7 缺口测试已补；引擎阈值未产出提案的分歧见 §7.4 注）
 > **范围**：高频重复任务 → 确定性打分评估集 → GEPA 进化信号源（对标 SkillOpt-Sleep 的 replay 机制）
 > **参考**：[GEPA arXiv 2507.19457](https://arxiv.org/abs/2507.19457)、
 > [Microsoft/SkillOpt](https://github.com/microsoft/SkillOpt)（sleep 阶段 replay 打分）、
@@ -128,9 +136,11 @@ manual_rules 再求 F1——基线是「脚本完美执行」参照，人工规�
 005/006/008 的 manual_rules（6/2/1 条）即 headroom 所在——LLM 检出的语义规则越多，
 F1 越接近 1.0，这是可度量的进化信号。
 
-**required: badcase_runner 缺口修正**：当前 `if strict_exact and expected_rules:` 中
-expected_rules 为空时走 else 分支恒 `passed=True`——放行型 case 形同虚设。修正为
-strict 双向比对无条件生效（`if strict_exact:`），空 expected 时 unexpected 方向照常计算。
+**required: badcase_runner 缺口修正（已修，2026-09-03）**：原 `if strict_exact and
+expected_rules:` 中 expected_rules 为空时走 else 分支恒 `passed=True`——放行型 case
+形同虚设。已修正为 strict 双向比对无条件生效（`if strict_exact:`），空 expected 时
+unexpected 方向照常计算；回归测试 `scripts/tests/test_badcase_runner.py`
+（空放行型检出必 FAIL / 干净保持绿 / 非 strict 不受影响 / 拦截型双向锚，spec:replay-eval-1）。
 
 ## 4. 打分模型（逐 case F1，双维对称惩罚）
 
@@ -192,7 +202,9 @@ def scorer_registry() -> dict
 现成 `run_check_script` 从脚本 JSON stdout 取 rules；GEPA 链路需**从 LLM 审查报告**
 提取规则名（报告不含规则名 → 视为未检出，容错不崩溃）。提取层保真度须对照抽验：
 用 `test/ddl-202607071777审查报告.md` 跑一遍提取，与报告原文人工比对，作为提取层上线门槛
-（对齐 evidence 逐字核验哲学）。
+（对齐 evidence 逐字核验哲学）。已固化为测试 `test_extract_rules_against_real_report`
+（2026-09-03）：原报告（早于输出契约，无 JSON 清单）→ fail-closed 不臆造；报告实体 +
+契约清单（008-real expected 声明的 6 类脚本规则）→ 提取逐条一致。
 
 ### 5.3 `evo.py` CLI 扩展
 
@@ -202,6 +214,11 @@ def scorer_registry() -> dict
 # baseline = 脚本直跑且只算脚本可及规则（过滤 manual_rules）的 F1——「脚本完美执行」
 # 参照；F1=1.0 的 case 即脚本转述型饱和（001-004），F1<1.0 且 manual 非空即 headroom
 ```
+
+CI 接线（2026-09-03）：`config-evals-gate.yml` 新增 `replay-dry-run` job（与 gate
+并行不互锁）——零 LLM 完整性哨兵，断言评估集构成/脚本基线输出/数量 ≥
+`replay_min_cases`（8）；PR 侧触及 `skills/` 才跑（评估集语料与 replay 实现均在
+`skills/` 下），push/schedule/dispatch 全量。
 
 ## 6. 护栏（打分器即宪法）
 
@@ -217,20 +234,23 @@ def scorer_registry() -> dict
    「门灵敏度先行」：打分器自身先过变异测试）
 5. **冷启动**：评估集 ≥8 cases 才可跑（阈值入 config，对齐 `gepa_min_cases=10` 哲学）
 
-## 7. 验收标准
+## 7. 验收标准（条款 → 测试反向核对矩阵）
 
-1. `badcase_runner.py --skill ddl-guard --strict-exact` 修正后 6 例仍全绿（回归）
-2. `evolve --skill ddl-guard --dry-run`：评估集构成正确、打分器对全部 case 可运行、
-   报告 baseline 分数
-3. 「全盘拒绝」控制候选 holdout F1 < baseline F1（含放行型 case 后显著低于）
-4. 一次 `--budget 16` 端到端跑通：引擎返回 best candidate + holdout 分数，
-   产物是 pending 提案（不自动应用、不自动 commit）
-5. 变异候选 validate 拦截：删 frontmatter / 超长 → 丢弃（复用 evo_evolve 契约测试模式）
-6. 打分器确定性：同一候选同一 case 分数一致（LLM 执行随机性用固定 seed 或取 min 归一）
-7. 提取层对照抽验：人工报告提取结果与原文逐条核对通过
-8. 人工补充规则参与对账：`include_manual=True` 下 005/006 的 manual_rules 并入
-   expected（dry-run 评估集构成可见），且 LLM 执行侧能检出（拼音/语义类规则
-   出现在 actual_rules 时命中）——headroom 在打分中可度量
+反向核对约定：每条条款列出守护测试（grep 索引标签 `# spec:replay-eval-N`，N=条款号）
+与实跑证据，非仅覆盖率数字；否定式条款（1：空放行型在 strict 下检出必 FAIL）有
+专门失败面测试。计数演进：设计时 badcase 6 例 → 语料已扩充至 71 例（另 eval/ 2 例，
+replay 评估集共 73 cases），验收以实跑全绿为准。
+
+| ID | 条款 | 守护测试 | 实跑证据（2026-09-03） |
+|----|------|---------|----------------------|
+| spec:replay-eval-1 | `--strict-exact` 修正后全绿（空放行型不再虚设，见 §3.2） | `scripts/tests/test_badcase_runner.py::TestStrictExact` 6 项：否定式 `test_empty_expected_with_findings_fails`（空 expected + 实检必 FAIL）、`test_empty_expected_clean_stays_green`、非 strict 分界 2 项、拦截型双向锚 `test_declared_rules_bidirectional` | `python3 scripts/badcase_runner.py --skill ddl-guard --strict-exact` → 71/71 全绿 exit 0 |
+| spec:replay-eval-2 | dry-run：评估集构成正确、打分器全 case 可运行、报告 baseline | `test_cmd_evolve_replay_dry_run`、`test_cmd_evolve_replay_custom_eval_dir_ok`、`test_script_baseline_f1_*` 5 项（含未注册脚本 fail-closed、exit 1/2 解析） | 实跑 dry-run：73 cases（59 train / 14 holdout）、脚本基线 F1=1.000；CI `replay-dry-run` 哨兵已接线（§5.3，run 块三断言本地实跑通过） |
+| spec:replay-eval-3 | 「全盘拒绝」控制候选 holdout F1 < baseline（含放行型 case 后显著低于） | `test_control_gate_reject_all_below_clean`、`test_control_gate_empty_holdout`、`test_cmd_evolve_replay_gate_fail` | 实跑两次复现：`门禁通过：全盘拒绝控制候选 F1=0.048 < baseline 1.000` |
+| spec:replay-eval-4 | 一次 `--budget 16` 端到端跑通：引擎返回 best candidate + holdout 分数，产物 pending 提案（不自动应用/commit） | `test_cmd_evolve_replay_full_run`、`test_cmd_evolve_replay_with_budget`、`test_cmd_evolve_replay_no_improvement`、`test_write_skill_proposal_lands_pending_prompt_evolution` | 实跑完成（2026-09-03 12:15–13:22）：引擎返回 `baseline(c0) holdout=0.018  best(c0) holdout=0.018`、迭代报告落 `~/.config/ar/skill-evo/evolve/20260903-052201/`、iter0 变异即被 validate 拦截（「违反候选约束，丢弃」，§7.5 实跑佐证）、exit 0 不自动 apply/commit。**注（spec 分歧上报）**：本环境 LLM 端点（zai/glm，单调用 180s 封顶）holdout F1 仅 0.018，improvement=0 未过 0.2 阈值，引擎按 evo.py 445 行设计**未写提案、仅存报告**——任务书验收 ④「产物为 pending 提案」在本次实跑未成立；提案落盘路径由 `test_cmd_evolve_replay_full_run` 差集断言守护（落 pending、不自动 apply），非脚本缺陷 |
+| spec:replay-eval-5 | 变异候选 validate 拦截：删 frontmatter / 超长 → 丢弃 | `test_validate_candidate_rejects_frontmatter_drop_and_oversize`；引擎侧 `test_gepa.py::test_run_gepa_discards_invalid_mutation` | 端到端实跑 iter0 即现「违反候选约束，丢弃」（§7.4 报告 iterations） |
+| spec:replay-eval-6 | 打分器确定性：同一候选同一 case 分数一致（随机性固定 seed） | `test_execute_deterministic_same_report_same_score`（2026-09-03 补） | CLI `--seed` 默认 0（evo.py） |
+| spec:replay-eval-7 | 提取层对照抽验：人工报告提取结果与原文逐条核对 | `test_extract_rules_against_real_report`（2026-09-03 补）：真实报告原文 fail-closed 不臆造 + 契约清单逐条一致 | 真实语料 `skills/ddl-guard/test/ddl-202607071777审查报告.md`（7.4KB 正文，含表格/代码块噪音） |
+| spec:replay-eval-8 | `include_manual=True`：manual_rules 并入 expected 且 LLM 侧可检出命中 | `test_load_eval_set_include_manual_merges`、`test_parse_expected_manual_rule_ids_vs_desc`、`test_rule_matches_anyof_alias`、`test_reconcile_unexpected_respects_alias`、`test_reconcile_merged_hit_not_unexpected`、`test_f1_score_merged_hit_bounded` | dry-run 构成可见（005/006/008 人工规则并入 expected，别名取首 token） |
 
 ## 8. 路线图
 
