@@ -172,6 +172,15 @@ inclusion: always
 - **时序窗口 mock 化**：真实僵尸窗口依赖 launchd 收尸时序无法稳定复现，规格须以确定性 mock 锁定（`EPERM→…→ESRCH` 序列通过 + 探活持续成功超时失败），范式见 `.factory/tests/test_mutations_run.py::_assert_group_dead`
 - **机器执行层**：`tools/check_killpg_strict.py`（gauntlet 层 `lint-killpg-strict`，扫描面 = tracked *.py）静态拦截 K1（`os.killpg` 缺 EPERM 容忍）与 K2（`raises(ProcessLookupError)` 单发探活）；负控制 NC8 见 `tools/test_gauntlet_checks.sh`
 
+### 泄漏断言的 tempdir 隔离【强制】
+
+> 适用：任何对临时目录做枚举/差集断言的测试（泄漏检测、产物清点、after-before 差集等）。
+> 背景：PR #137——mktemp 泄漏断言对共享系统 tempdir glob 同模板文件，套件外进程瞬时写入同模板即随机打破差集（pre-push 闸两次 flake，隔离重跑绿证实环境性）；该未隔离形态已扩散至 8 个下游仓。
+
+- **注入而非枚举**：测试不得观测系统共享 tempdir——用 `monkeypatch.setenv("TMPDIR", str(private_tmp))` 把被测面对齐 pytest 私有目录（范式 `.factory/tests/conftest.py::private_tmp`），断言 glob 对注入目录；外部写者不再可见，泄漏检测语义不变
+- **禁止硬编码系统目录**：测试代码禁 `gettempdir()`（tempfile 按进程缓存首次取值，TMPDIR 注入只达子进程，测试进程内恒取系统共享目录）与以 `/tmp` 字面量为对象的直接枚举调用（`glob.glob`/裸 `glob`/`x.glob`/`os.listdir`/`Path("/tmp").iterdir()|glob()`）；shell 侧等价要求 = `"${TMPDIR:-/tmp}"` 默认值形态（尊重注入）
+- **机器执行层**：`tools/check_tempdir_usage.py`（gauntlet 层 `lint-tempdir-isolation`，扫描面 = tracked 测试文件 test_*.py / conftest.py）静态拦截 R1（`gettempdir(`）与 R2（`/tmp` 字面量枚举调用），检查器损坏恒 rc=2 绝不算通过；负控制 NC17/NC17b/NC17c 见 `tools/test_gauntlet_checks.sh`
+
 ### Tripwire：前提失效硬失败【强制】
 
 - 脚本依赖的环境前提（环境变量、缓存清理、工具版本）修复后必须留后验：前提不成立时直接 raise / 退出非零，禁止静默降级继续——静默降级的偏差方向永远是"虚假通过"，不会以红色形式暴露

@@ -918,6 +918,56 @@ else
     bad "NC16b 块内注释致截断: gauntlet[$_sc_g] vs 探针[$_sc_b]"
 fi
 
+# ── NC17 tempdir-isolation 负控制：PR #137 泄漏断言原形必须被拦 ────────
+# 夹具经 heredoc 落盘到 $TMP（仓外、显式 file 参数直查模式）；本检查器
+# 扫描面仅 tracked 测试 .py（test_*.py / conftest.py），本脚本 .sh 不自匹配。
+mkdir -p "$TMP/nc17"
+cat >"$TMP/nc17/test_leak_bad.py" <<'EOF'
+import glob, os, tempfile
+from pathlib import Path
+
+glob.glob(os.path.join(tempfile.gettempdir(), ".factory-dist.*"))
+os.listdir("/tmp")
+list(Path("/tmp").iterdir())
+EOF
+if "$PY" tools/check_tempdir_usage.py "$TMP/nc17/test_leak_bad.py" >"$TMP/out17" 2>&1; then
+    _rc17=0
+else
+    _rc17=$?
+fi
+if [ "$_rc17" -eq 1 ] && grep -q 'R1' "$TMP/out17" && grep -q 'R2' "$TMP/out17"; then
+    ok "NC17 共享 tempdir 枚举击杀（R1 gettempdir + R2 /tmp 字面量）"
+else
+    bad "NC17 期望 rc=1+R1+R2, 实际 rc=${_rc17}, 输出: $(cat "$TMP/out17")"
+fi
+
+# NC17b 注入式隔离夹具放行：monkeypatch TMPDIR + 对注入目录 glob
+# （PR #137 修复范式原形）——检查器边界是共享目录观测，不是见 glob 就拦
+cat >"$TMP/nc17/test_leak_good.py" <<'EOF'
+import glob, os
+
+def test_no_leak(monkeypatch, private_tmp):
+    monkeypatch.setenv("TMPDIR", str(private_tmp))
+    assert sorted(glob.glob(os.path.join(os.environ["TMPDIR"], ".factory-dist.*"))) == []
+EOF
+if "$PY" tools/check_tempdir_usage.py "$TMP/nc17/test_leak_good.py" >"$TMP/out17b" 2>&1; then
+    ok "NC17b 注入式 private_tmp 夹具放行"
+else
+    bad "NC17b 期望 rc=0, 实际输出: $(cat "$TMP/out17b")"
+fi
+
+# NC17c 检查器损坏路径：rc=2 绝不算通过（NC6/NC8c/NC9c 同一语义）
+if "$PY" tools/check_tempdir_usage.py "$TMP/definitely-missing" >"$TMP/out17c" 2>&1; then
+    _rc17c=0
+else
+    _rc17c=$?
+fi
+if [ "$_rc17c" -eq 2 ]; then
+    ok "NC17c tempdir 检查器损坏路径 rc=2"
+else
+    bad "NC17c 期望 rc=2, 实际 rc=${_rc17c:-0}"
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────
 if [ "$fails" -gt 0 ]; then
     echo "checker-self-test: $fails 项失败"
