@@ -815,6 +815,7 @@ pre-push:
     sourcery-gate:
       run: x
 EOF
+    # shellcheck disable=SC2016  # 字面 markdown 反引号，刻意单引号防展开（双引号会真执行命令替换）
     printf '> **pre-push 并发注记**：`lefthook.yml` pre-push 各 commands 并行执行：%s 同时跑。\n' \
         "$_listed" >"$_d/tools/git/README.md"
 }
