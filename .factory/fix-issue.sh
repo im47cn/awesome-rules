@@ -147,7 +147,7 @@ $(python3 "${REPO}/.factory/factory_lib.py" repo-vars)
 - 仓库根: ${WT}（链独立 worktree，勿越界改主工作区）
 - issue 编号: ${ISSUE}"
   t0=$(date +%s)
-  touch "${DIR}/.${name}-t0" 2>/dev/null || true  # B1: 节点起点标记（产物 mtime 参照）
+  touch "${DIR}/.${name}-t0" 2>/dev/null || return 1  # B1: 节点起点标记（产物 mtime 参照）
   if ! omp_node "${WT}" "${DIR}/${name}.log" "$(node_timeout "${name}")" -- "${prompt}"; then
     _node_metric "${name}" "${t0}" "fail" >> "${DIR}/node-metrics.jsonl"
     echo "    节点 ${name} 失败（详见 ${DIR}/${name}.log）" >&2; return 1
