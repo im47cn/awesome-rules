@@ -21,8 +21,8 @@ BASH = shutil.which("bash") or "/bin/bash"
 
 # (src 相对仓库根, dst 相对目标项目根) —— install.sh DIST 的镜像清单（11 件）
 DIST = [
-    ("tools/git/commitlint.config.js", "commitlint.config.js"),
-    ("tools/git/.versionrc.js", ".versionrc.js"),
+    ("tools/git/commitlint.config.cjs", "commitlint.config.cjs"),
+    ("tools/git/.versionrc.cjs", ".versionrc.cjs"),
     ("tools/git/lefthook.yml", "lefthook.yml"),
     ("tools/git/lefthook/coverage.sh", ".lefthook/coverage.sh"),
     ("tools/git/lefthook/commitmsg-check.sh", ".lefthook/commitmsg-check.sh"),
@@ -35,13 +35,18 @@ DIST = [
 ]
 DIST_SRC = {dst: src for src, dst in DIST}
 
-# issue 实况：旧版已装项目（gtsp-wop-* 三仓）仅 5 件，缺 6 件
+# issue 实况：旧版已装项目（gtsp-wop-* 三仓）装的是 .js 时代 5 件（issue #131 前）
 LEGACY_INSTALLED = ("commitlint.config.js", "lefthook.yml",
                     ".lefthook/commitmsg-check.sh", ".lefthook/coverage.sh",
                     ".lefthook/run-tests.sh")
-LEGACY_MISSING = (".versionrc.js", ".lefthook/spec-check.sh",
-                  ".lefthook/sourcery-gate.sh", ".lefthook/mutation-gate.sh",
-                  ".lefthook/coderabbit-gate.sh", ".lefthook/spec_check.py")
+# 按 .cjs 新口径：旧装 .js 不匹配任何分发名 → 缺 7 件，且旧 .js 触发「遗留」检出
+LEGACY_MISSING = ("commitlint.config.cjs", ".versionrc.cjs",
+                  ".lefthook/spec-check.sh", ".lefthook/sourcery-gate.sh",
+                  ".lefthook/mutation-gate.sh", ".lefthook/coderabbit-gate.sh",
+                  ".lefthook/spec_check.py")
+
+# 旧 .js 分发名与 .cjs 同字节（git 100% 纯改名，issue #131）→ 种植旧名夹具借 .cjs 源
+LEGACY_SRC = {"commitlint.config.js": "tools/git/commitlint.config.cjs"}
 
 
 def _install(dsts, target):
@@ -49,7 +54,7 @@ def _install(dsts, target):
     for dst in dsts:
         dest = target / dst
         dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(REPO_ROOT / DIST_SRC[dst], dest)
+        shutil.copy2(REPO_ROOT / (DIST_SRC.get(dst) or LEGACY_SRC[dst]), dest)
 
 
 def _check(target, env=None):
@@ -91,15 +96,17 @@ def test_empty_target_names_all_eleven_missing(tmp_path):
     assert missing == set(DIST_SRC)  # 11 件全部点名（硬编码镜像防 DIST 缩水）
 
 
-def test_legacy_project_reports_missing_six_not_installed_five(tmp_path):
+def test_legacy_project_reports_missing_seven_and_flags_legacy_js(tmp_path):
     target = tmp_path / "proj"
     target.mkdir()
     _install(LEGACY_INSTALLED, target)
     r = _check(target, env=_fake_home_env(tmp_path))
     assert r.returncode == 1
     missing = {ln.split()[-1] for ln in r.stdout.splitlines() if ln.startswith("缺失")}
-    # 按 11 件全集报缺失（旧版少件即多件缺失），已装 5 件不误报
+    # 按 11 件全集报缺失（旧版 .js 不匹配新分发名即多件缺失），已装 4 件不误报
     assert missing == set(LEGACY_MISSING)
+    # 旧 .js 分发名单独点名「遗留」——指引重跑 --update 迁移 .cjs（issue #131）
+    assert any(ln.startswith("遗留  commitlint.config.js") for ln in r.stdout.splitlines())
     assert not [ln for ln in r.stdout.splitlines() if ln.startswith("漂移")]
 
 

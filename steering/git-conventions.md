@@ -33,7 +33,7 @@ inclusion: always
 
 ### scope（可选）
 
-按模块/技能填写，推荐值（须与 `commitlint.config.js` 的 `scope-enum` 保持一致）：
+按模块/技能填写，推荐值（须与 `commitlint.config.cjs` 的 `scope-enum` 保持一致）：
 
 | 类别 | scope |
 | --- | --- |

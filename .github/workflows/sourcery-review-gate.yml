@@ -39,8 +39,10 @@ jobs:
           # php 实测不扫描、go/java/cs 未实测——面外文件显式披露不送审
           # mapfile 数组化 + 引号展开：文件名可含空格，字符串变量未引号
           # 展开会分词/glob（PR #141 评论）；runner 是 bash ≥4，mapfile 可用
-          mapfile -t SUPPORTED < <(git diff --name-only "${BASE_SHA}"...HEAD -- '*.py' '*.ts' '*.js')
-          UNSENT=$(git diff --name-only "${BASE_SHA}"...HEAD -- '*.go' '*.java' '*.cs' '*.php')
+          # --diff-filter=d：剔除已删除路径——旧名在 HEAD 不存在，直接传给
+          # sourcery 会 "Path does not exist" exit 2（PR #142 .js→.cjs 案例）。
+          mapfile -t SUPPORTED < <(git diff --name-only --diff-filter=d "${BASE_SHA}"...HEAD -- '*.py' '*.ts' '*.js')
+          UNSENT=$(git diff --name-only --diff-filter=d "${BASE_SHA}"...HEAD -- '*.go' '*.java' '*.cs' '*.php')
           if [ -n "${UNSENT}" ]; then
             echo "::warning::以下文件在 Sourcery 实测支持面外，未送审（口径见本 workflow 头注）"
             echo "${UNSENT}"
