@@ -158,7 +158,7 @@ $(python3 "${REPO}/.factory/factory_lib.py" repo-vars)
   # 完整产出但末行写"产物：/path/plan.json"被 grep 误杀）；产物缺失/未更新仍
   # fail-closed（上一轮残留物 mtime < 起点标记，不误判通过）。无声明节点回退
   # stdout ARTIFACT: 行检查。
-  artifact="$(grep -m1 -oE 'ARTIFACT: \$ISSUE_DIR/[^` ]+' "${REPO}/.factory/prompts/${name}.md" | sed 's#.*/##')"
+  artifact="$(grep -m1 -oE 'ARTIFACT: \$ISSUE_DIR/[^` ]+' "${REPO}/.factory/prompts/${name}.md" | sed 's#.*/##' || true)"
   if [ -z "${artifact}" ]; then
     grep -q "ARTIFACT:" "${DIR}/${name}.log" || {
       _node_metric "${name}" "${t0}" "no-artifact" >> "${DIR}/node-metrics.jsonl"
