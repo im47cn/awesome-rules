@@ -875,6 +875,49 @@ else
     bad "NC15c 无闸面期望 rc=0: $(cat "$TMP/out15c")"
 fi
 
+# ── NC16 lint-shellcheck 清单漂移锁：run_tests ↔ gauntlet 两处镜像一致 ──
+# scripts/run_tests.sh 的 lint-shellcheck 层文件清单镜像自 tools/gauntlet.sh
+# （权威清单），此前靠注释互指人工同步（2026-09-04 reviewer 建议）；本用例
+# 机械比对两处清单集合，gauntlet 侧增删文件而 run_tests 未同步即红。
+# 抽取口径：跳过注释行，从首处非注释 lint-shellcheck 行起，到「含
+# tools/*.sh 且无续行符」的清单尾行止，收集 tools/*.sh token。
+_sc_list() {
+    awk '/lint-shellcheck/ && $0 !~ /^[ \t]*#/ {_in=1}
+         _in && $0 !~ /^[ \t]*#/ { print
+               if ($0 ~ /tools\/[A-Za-z0-9_.\/-]+\.sh/ && $0 !~ /\\$/) exit }' "$1" \
+      | grep -oE 'tools/[A-Za-z0-9_./-]+\.sh' | sort -u
+}
+_sc_g=$(_sc_list tools/gauntlet.sh)
+_sc_r=$(_sc_list scripts/run_tests.sh)
+if [ -n "$_sc_g" ] && [ "$_sc_g" = "$_sc_r" ]; then
+    # shellcheck disable=SC2086  # $_sc_g 是多行词表，按空白分词是意图
+    ok "NC16 lint-shellcheck 清单镜像一致（$(printf '%s\n' $_sc_g | wc -l | tr -d ' ') 文件）"
+else
+    bad "NC16 清单漂移：gauntlet[$_sc_g] vs run_tests[$_sc_r]"
+fi
+
+# 负控制：夹具副本删一文件 → 断言必须转红（证明比对有效，非恒真）
+NC16A="$TMP/nc16a"; mkdir -p "$NC16A"
+sed 's| tools/test_spec_check.sh||' scripts/run_tests.sh >"$NC16A/run_tests.sh"
+_sc_a=$(_sc_list "$NC16A/run_tests.sh")
+if [ -n "$_sc_a" ] && [ "$_sc_a" != "$_sc_g" ]; then
+    ok "NC16a 清单漂移检出（删一文件即不等）"
+else
+    bad "NC16a 期望漂移被检出: gauntlet[$_sc_g] vs 篡改[$_sc_a]"
+fi
+
+# 边界：清单块内插注释（含 tools/*.sh 字样）不得截断抽取（防假红；
+# 注释行无续行符，未过滤会被误判为清单尾行）
+NC16B="$TMP/nc16b"; mkdir -p "$NC16B"
+awk '/^echo "── lint-shellcheck"$/ {print; print "  # 注释探针 tools/fake-note.sh"; next} {print}' \
+    scripts/run_tests.sh >"$NC16B/run_tests.sh"
+_sc_b=$(_sc_list "$NC16B/run_tests.sh")
+if [ "$_sc_b" = "$_sc_g" ]; then
+    ok "NC16b 清单块内注释不截断（抽取仍全集）"
+else
+    bad "NC16b 块内注释致截断: gauntlet[$_sc_g] vs 探针[$_sc_b]"
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────
 if [ "$fails" -gt 0 ]; then
     echo "checker-self-test: $fails 项失败"
