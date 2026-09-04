@@ -33,7 +33,9 @@ jobs:
       - name: Run sourcery review on changed language files
         run: |
           BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          FILES=$(git diff --name-only "${BASE_SHA}"...HEAD -- '*.py' '*.go' '*.java' '*.cs' '*.php' '*.ts' '*.js')
+          # --diff-filter=d：剔除已删除路径——重命名/删除的旧名在 HEAD 不存在，
+          # 直接传给 sourcery 会 "Path does not exist" exit 2（PR #142 .js→.cjs 案例）。
+          FILES=$(git diff --name-only --diff-filter=d "${BASE_SHA}"...HEAD -- '*.py' '*.go' '*.java' '*.cs' '*.php' '*.ts' '*.js')
           if [ -z "$FILES" ]; then
             echo "no language files changed, skipping"
             exit 0
