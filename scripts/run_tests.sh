@@ -79,7 +79,7 @@ fi
 # lint-shellcheck 层（权威清单），两处须同步维护。本地 push 面此前缺此层，
 # CI（config-evals-gate 全量 gauntlet）拦下而本地四闸放行（2026-09-04
 # SC2016 实证「本地绿 CI 红」）。软门禁：未装 shellcheck 时提示安装指引后
-# 跳过（mac: brew install shellcheck；CI 侧仍会拦），装好即自动生效硬拦。
+# 跳过（安装指引见层内提示；CI 侧仍会拦），装好即自动生效硬拦。
 echo "── lint-shellcheck"
 if command -v shellcheck >/dev/null 2>&1; then
   if ! shellcheck tools/gauntlet.sh tools/must_not_match.sh \
@@ -88,7 +88,7 @@ if command -v shellcheck >/dev/null 2>&1; then
     FAILED+=("lint-shellcheck")
   fi
 else
-  echo "[lint] 缺 shellcheck，跳过（brew install shellcheck 启用；CI 侧仍会拦）"
+  echo "[lint] 缺 shellcheck，跳过（mac: brew install shellcheck / Linux: apt install shellcheck 启用；CI 侧仍会拦）"
 fi
 
 if [ "${#FAILED[@]}" -gt 0 ]; then
