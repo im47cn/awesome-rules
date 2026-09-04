@@ -4,7 +4,7 @@
 # 一致：commit-msg/commitmsg / coverage-light / spec-check / coverage-full / tests /
 # sourcery-gate / mutation-gate / coderabbit-gate。
 # ⚠ 不要对本仓库跑 tools/git/install.sh --update（会用模板覆盖本文件的路径）
-# 规范事实源：steering/git-conventions.md + 全局红线「变更行覆盖率 ≥95%」
+# 规范事实源：steering/git-conventions.md + 覆盖率红线「变更行 java ≥98% / python・ts ≥90%，java 全量行/分支 ≥98%」
 # 团队成员激活：npm i -g lefthook && lefthook install（或 npm run setup:hooks）
 # 占位符 {staged_files}/{push_files} 是触发条件：有对应文件变更才执行（lefthook 2.x 无占位符恒 skip）
 commit-msg:
@@ -12,7 +12,7 @@ commit-msg:
     commitmsg:
       run: bash tools/git/lefthook/commitmsg-check.sh {1}
 
-# 变更行覆盖率红线（≥95%；本仓库无 pyproject/pom/vitest 配置时各分支自动跳过）
+# 覆盖率红线（变更行 java ≥98% / python・ts ≥90%，java 全量行/分支 ≥98%；本仓库无 pyproject/pom/vitest 配置时各分支自动跳过）
 pre-commit:
   commands:
     coverage-light:

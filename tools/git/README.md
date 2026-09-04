@@ -11,7 +11,7 @@ scenario: 提交校验/生成 changelog/发版
 |---|---|---|
 | commit 模板 | 提交前预填格式提示（IDE / 编辑器） | `.gitmessage` + `commit.template` |
 | commitlint | 提交时校验 message 格式 | `@commitlint/cli` + `config-conventional`，hook 由 [lefthook](https://github.com/evilmartians/lefthook) 托管 |
-| 变更行覆盖率红线 | pre-commit 轻检 / pre-push 全量兜底，≥95% | `lefthook.yml` + `.lefthook/coverage.sh`（diff-cover，支持 pytest-cov / vitest / Maven+JaCoCo） |
+| 覆盖率红线 | pre-commit 轻检（变更行 java ≥98% / python・ts ≥90%）+ pre-push 全量兜底（java 另执行 JaCoCo 全量行/分支 ≥98%） | `lefthook.yml` + `.lefthook/coverage.sh`（diff-cover 增量 + JaCoCo 报告级全量计数，支持 pytest-cov / vitest / Maven+JaCoCo） |
 | commit 规范校验（自动装环境） | Java 等后端机器 clone 后首次提交自动补装 commitlint | `.lefthook/commitmsg-check.sh`：缺 commitlint 时 `npm install -g` 自动安装，规则单一来源 commitlint |
 | commit-and-tag-version | 自动生成 changelog + 按语义 bump 版本号 | `commit-and-tag-version` |
 
@@ -117,7 +117,7 @@ npm run release       # 正式执行：bump 版本 + 更新 CHANGELOG.md + 打 t
 - `commitlint.config.js` —— type/scope 枚举、主题行 ≤50 字符、breaking 标记（事后校验）
 - `lefthook.yml` —— hook 编排（commit-msg → 规范校验；pre-commit/pre-push → 覆盖率红线），入库随 clone 共享
 - `.lefthook/commitmsg-check.sh` —— commit 规范校验（缺 commitlint 自动 `npm install -g`；无 node 提示后放行，装 node 后首次提交自动补装）
-- `.lefthook/coverage.sh` —— 变更行覆盖率红线（diff-cover ≥95%，light/full 双模式；python/node/java；缺 diff-cover 自动安装，见「覆盖率红线依赖」），入库随 clone 共享
+- `.lefthook/coverage.sh` —— 覆盖率红线（增量 diff-cover：变更行 java ≥98% / python・ts ≥90%；java 全量：JaCoCo 报告级行/分支 ≥98%，light/full 双模式；python/node/java；缺 diff-cover 自动安装，见「覆盖率红线依赖」），入库随 clone 共享
 - `.lefthook/run-tests.sh` —— pre-push 项目自定义测试入口壳：项目有 `scripts/pre-push-tests.sh` 则执行（非零退出阻断 push），无则跳过。**`lefthook.yml` 是分发物（`--update` 会覆盖，勿手工加段）**，项目级测试/构建门禁一律写进 `scripts/pre-push-tests.sh`
 - `.versionrc.js` —— changelog 中文分节、emoji 前缀
 
@@ -131,7 +131,7 @@ npm run release       # 正式执行：bump 版本 + 更新 CHANGELOG.md + 打 t
 ## 适用场景
 
 - ✅ **Node / 前端 / 全栈项目**：原生支持
-- ✅ **Java / Maven 项目**：提交规范校验（无 node 也有 bash 兜底）+ 覆盖率红线（Maven + JaCoCo → diff-cover）原生支持；changelog/版本号功能仍依赖 node
+- ✅ **Java / Maven 项目**：提交规范校验（无 node 也有 bash 兜底）+ 覆盖率红线（JaCoCo 全量行/分支门禁 + diff-cover 变更行增量）原生支持；changelog/版本号功能仍依赖 node
 - ✅ **Windows**：Git Bash（随 Git for Windows 自带）下完整可用，python 解释器自动探测，见「覆盖率红线依赖」
 - ⚠️ **Gradle 等其他构建**：覆盖率暂未接入（可自行扩展 `.lefthook/coverage.sh`）
 
