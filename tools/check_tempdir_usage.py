@@ -25,8 +25,9 @@
       67c2965b 原则）；输入目录非 git 仓库时 fail-closed 拒判。
 rc:  0 = 通过（或扫描面内无测试文件）
      1 = 存在违规（检查确实执行且判定失败）
-     2 = 检查器自身失败（路径不存在、非 git 仓库、读取错误）——绝不算通过
+     2 = 检查器自身失败（路径不存在、非 git 仓库、git 调用失败、读取错误）——绝不算通过
 """
+import ast
 import re
 import subprocess
 import sys
@@ -46,11 +47,41 @@ RE_TMP_ENUM = re.compile(
 def _is_test_py(name: str) -> bool:
     return name == "conftest.py" or (name.startswith("test_") and name.endswith(".py"))
 
+def _mask_prose_strings(text: str) -> str:
+    """独立字符串语句（docstring / 游离 prose 示例）整段替换为等长空白，
+    换行保留（行号不变）。不能全量掩蔽字符串内容：R2 的证据恰在字符串
+    实参里（glob.glob("/tmp/…") 的 "/tmp"），全掩即致盲——只掩
+    Expr-Constant-str 语句，赋值与调用实参等真实代码不掩。ast 解析失败
+    （语法错/含空字节）回退原文：该文件本无法作为测试运行，按原行为扫描。"""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return text
+    lines = text.split("\n")
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)):
+            sl, sc = node.lineno, node.col_offset
+            el, ec = node.end_lineno, node.end_col_offset
+            if sl == el:
+                lines[sl - 1] = lines[sl - 1][:sc] + " " * (ec - sc) + lines[sl - 1][ec:]
+            else:
+                # 多行字符串：首行掐尾、中间行清空、末行掐头至串尾（col 偏移
+                # 是 UTF-8 字节口径，非 ASCII 串内只可能多掩空白级字符，无害）
+                lines[sl - 1] = lines[sl - 1][:sc]
+                for i in range(sl + 1, el):
+                    lines[i - 1] = ""
+                cut = min(ec, len(lines[el - 1]))
+                lines[el - 1] = " " * cut + lines[el - 1][cut:]
+    return "\n".join(lines)
+
 
 def check_text(text: str):
-    """返回 [(lineno, message)]；纯注释行豁免（防规范转述文字误报）。"""
+    """返回 [(lineno, message)]；纯注释行与 docstring/prose 示例文字豁免
+    （防规范转述文字误报；掩蔽策略见 _mask_prose_strings——R2 证据在
+    字符串实参内，不能全量掩蔽字符串内容）。"""
     out = []
-    for i, ln in enumerate(text.split("\n"), 1):
+    for i, ln in enumerate(_mask_prose_strings(text).split("\n"), 1):
         if ln.strip().startswith("#"):
             continue
         if RE_GETTEMPDIR.search(ln):
@@ -63,18 +94,24 @@ def check_text(text: str):
 
 
 def tracked_test_files(d: Path):
-    """dir → tracked 测试文件 Path 清单；非 git 仓库 fail-closed（rc2）。"""
-    probe = subprocess.run(["git", "-C", str(d), "rev-parse", "--is-inside-work-tree"],
-                           capture_output=True, text=True)
-    if probe.returncode != 0 or probe.stdout.strip() != "true":
-        print(f"check_tempdir_usage: {d} 非 git 仓库，fail-closed 拒判", file=sys.stderr)
-        raise SystemExit(2)
-    # -z 防文件名含换行；pathspec '.' 限定 -C 目录子树
-    ls = subprocess.run(["git", "-C", str(d), "ls-files", "-z", "--", "."],
-                        capture_output=True, text=True)
-    if ls.returncode != 0:
-        print(f"check_tempdir_usage: git ls-files 失败: {ls.stderr.strip()}", file=sys.stderr)
-        raise SystemExit(2)
+    """dir → tracked 测试文件 Path 清单；非 git 仓库 fail-closed（rc2）。
+    git 调用本身失败（git 缺失/不可执行、输出不可解码）同 fail-closed
+    rc2——环境坏绝不算通过（rc 语义见模块头注）。"""
+    try:
+        probe = subprocess.run(["git", "-C", str(d), "rev-parse", "--is-inside-work-tree"],
+                               capture_output=True, text=True)
+        if probe.returncode != 0 or probe.stdout.strip() != "true":
+            print(f"check_tempdir_usage: {d} 非 git 仓库，fail-closed 拒判", file=sys.stderr)
+            raise SystemExit(2)
+        # -z 防文件名含换行；pathspec '.' 限定 -C 目录子树
+        ls = subprocess.run(["git", "-C", str(d), "ls-files", "-z", "--", "."],
+                            capture_output=True, text=True)
+        if ls.returncode != 0:
+            print(f"check_tempdir_usage: git ls-files 失败: {ls.stderr.strip()}", file=sys.stderr)
+            raise SystemExit(2)
+    except (OSError, UnicodeDecodeError) as e:
+        print(f"check_tempdir_usage: git 调用失败（{e}），fail-closed 拒判", file=sys.stderr)
+        raise SystemExit(2) from e
     return [d / rel for rel in ls.stdout.split("\0")
             if rel and _is_test_py(rel.rsplit("/", 1)[-1])]
 

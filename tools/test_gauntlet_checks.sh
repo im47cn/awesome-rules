@@ -968,6 +968,44 @@ else
     bad "NC17c 期望 rc=2, 实际 rc=${_rc17c:-0}"
 fi
 
+# NC17d docstring/prose 示例文字豁免（PR #140 评论二）：规范转述里的
+# gettempdir()/"/tmp" 字面量示例不得误报——独立字符串语句整段掩蔽后扫描
+cat >"$TMP/nc17/test_doc_prose.py" <<'EOF'
+"""规范转述（负控制：文档示例文字不得误报）。
+
+违规形态示例（仅文档转述，非真实代码）：
+  sorted(glob.glob("/tmp/xxx-*"))
+  os.listdir("/tmp"); list(Path("/tmp").iterdir())
+  tempfile.gettempdir() 恒返回系统共享目录。
+真实断言对齐 private_tmp 注入目录。
+"""
+import glob
+
+
+def test_ok(tmp_path):
+    assert sorted(glob.glob(str(tmp_path / "*"))) == []
+EOF
+if "$PY" tools/check_tempdir_usage.py "$TMP/nc17/test_doc_prose.py" >"$TMP/out17d" 2>&1; then
+    ok "NC17d docstring/prose 示例文字豁免（无误报）"
+else
+    bad "NC17d 期望 rc=0, 实际输出: $(cat "$TMP/out17d")"
+fi
+
+# NC17e git 不可用（PATH 剥离，PR #140 评论一）：subprocess OSError 须
+# fail-closed rc=2，绝不因环境坏而静默通过
+mkdir -p "$TMP/nc17/empty-bin"
+_pypath="$(command -v "$PY" || true)"
+if env PATH="$TMP/nc17/empty-bin" "$_pypath" tools/check_tempdir_usage.py . >"$TMP/out17e" 2>&1; then
+    _rc17e=0
+else
+    _rc17e=$?
+fi
+if [ "$_rc17e" -eq 2 ]; then
+    ok "NC17e git 不可用 fail-closed rc=2"
+else
+    bad "NC17e 期望 rc=2, 实际 rc=${_rc17e}, 输出: $(cat "$TMP/out17e")"
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────
 if [ "$fails" -gt 0 ]; then
     echo "checker-self-test: $fails 项失败"
