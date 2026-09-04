@@ -1,10 +1,12 @@
 # Sourcery review gate（CI 侧硬闸）。
 # 本地 pre-push 钩子（tools/git/lefthook/sourcery-gate.sh）可被 --no-verify 绕过，
 # 本 workflow 在 PR 上强制执行同一检查面，无法绕过。
-# 语义：对 PR 改动中的语言文件跑 `sourcery review --check --config .sourcery.yaml`。
+# 语义：对 PR 改动中实测支持的语言文件跑 `sourcery review --check --config .sourcery.yaml`。
+# 语言口径与本地 pre-push 同源（issue #123，CLI 1.45.0 实测）：有效 = .py/.ts/.js；
+# .php 实测不扫描、.go/.java/.cs 未实测——送审面外文件以 ::warning 显式披露，不静默吞。
 # 注意：与本地 pre-push 的 push_files 语义不同——本地在 merge 型 PR 上会扫描
 # merge 双父 diff 的并集（更宽），CI 只扫 PR 自身的 base...HEAD diff。
-# 无语言文件改动时早退 exit 0（保持 required check 兼容：paths 过滤会让
+# 无实测支持语言文件改动时早退 exit 0（保持 required check 兼容：paths 过滤会让
 # 不匹配的 PR 永远停在 Expected，故不设 paths，改在步内判断）。
 name: sourcery-review-gate
 
@@ -33,14 +35,22 @@ jobs:
       - name: Run sourcery review on changed language files
         run: |
           BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          # --diff-filter=d：剔除已删除路径——重命名/删除的旧名在 HEAD 不存在，
-          # 直接传给 sourcery 会 "Path does not exist" exit 2（PR #142 .js→.cjs 案例）。
-          FILES=$(git diff --name-only --diff-filter=d "${BASE_SHA}"...HEAD -- '*.py' '*.go' '*.java' '*.cs' '*.php' '*.ts' '*.js')
-          if [ -z "$FILES" ]; then
-            echo "no language files changed, skipping"
+          # 语言口径与本地 pre-push 同源（issue #123）：实测有效 = py/ts/js；
+          # php 实测不扫描、go/java/cs 未实测——面外文件显式披露不送审
+          # mapfile 数组化 + 引号展开：文件名可含空格，字符串变量未引号
+          # 展开会分词/glob（PR #141 评论）；runner 是 bash ≥4，mapfile 可用
+          # --diff-filter=d：剔除已删除路径——旧名在 HEAD 不存在，直接传给
+          # sourcery 会 "Path does not exist" exit 2（PR #142 .js→.cjs 案例）。
+          mapfile -t SUPPORTED < <(git diff --name-only --diff-filter=d "${BASE_SHA}"...HEAD -- '*.py' '*.ts' '*.js')
+          UNSENT=$(git diff --name-only --diff-filter=d "${BASE_SHA}"...HEAD -- '*.go' '*.java' '*.cs' '*.php')
+          if [ -n "${UNSENT}" ]; then
+            echo "::warning::以下文件在 Sourcery 实测支持面外，未送审（口径见本 workflow 头注）"
+            echo "${UNSENT}"
+          fi
+          if [ "${#SUPPORTED[@]}" -eq 0 ]; then
+            echo "no measured-supported language files changed (.py/.ts/.js), skipping"
             exit 0
           fi
-          echo "changed files:"
-          echo "$FILES"
-          # shellcheck disable=SC2086
-          sourcery review --check --config .sourcery.yaml $FILES
+          echo "changed files (measured-supported):"
+          printf '%s\n' "${SUPPORTED[@]}"
+          sourcery review --check --config .sourcery.yaml "${SUPPORTED[@]}"

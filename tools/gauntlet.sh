@@ -127,6 +127,13 @@ else
     # 扫描面 = tracked *.py（67c2965b 原则）
     run_layer lint-killpg-strict "$PY" tools/check_killpg_strict.py \
         .factory tools scripts hooks skills arch-hawkeye .github
+    # 测试 tempdir 枚举静态门（PR #137 泄漏断言隔离的防回归面；该未隔离
+    # 形态已扩散 8 个下游仓）：测试进程 gettempdir()/对 /tmp 字面量直接
+    # glob/listdir 枚举的是系统共享目录，套件外写者随机打破差集断言——
+    # 须走 conftest private_tmp 夹具注入（范式 .factory/tests/conftest.py）。
+    # 扫描面 = tracked 测试文件（test_*.py / conftest.py）。负控制 NC17。
+    run_layer lint-tempdir-isolation "$PY" tools/check_tempdir_usage.py \
+        .factory tools scripts hooks skills arch-hawkeye .github
     # 托管平台出口收口门（ADR-007 层级契约）：零 gh 直调 + issue 副作用
     # 经 factory-lib 收口（hosting.py 仅传输层）。负控制 NC12。
     run_layer lint-factory-hosting-exit "$PY" tools/check_hosting_exit.py .

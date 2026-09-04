@@ -18,8 +18,11 @@ inclusion: always
 
 ## 覆盖率阈值
 
-- 新增代码：分支/行覆盖率 ≥ 70%
-- 核心业务逻辑：≥ 80%
+- Java 实现代码【强制】：以 JaCoCo 执行全量（存量+新增）行/分支覆盖率门禁 ≥ 98%；统计前先按「覆盖率统计范围与排除实践」剔除生成代码——lombok 生成成员、MapStruct `*ConverterImpl`（如 `WopGatewayAclConverterImpl`）等不进分母，98% 只约束手写实现代码；增量 `diff-cover --compare-branch` 仅作为补充检查（变更行 java ≥98% / 非 Java ≥90），不替代全量门槛
+- 非 Java 新增代码：分支/行覆盖率 ≥ 90%
+- 非 Java 核心业务逻辑：≥ 98%
+
+> 理由：剔除生成代码后剩余均为手写实现逻辑，98% 意味着未覆盖部分至多约为总量的 2%，且须由 CR 逐条解释，不得整块豁免兜底。
 
 ## 测试范围
 
@@ -38,7 +41,7 @@ inclusion: always
 
 | 类别 | 内容 | 排除机制 |
 | --- | --- | --- |
-| **生成代码** | Lombok 生成成员；MapStruct Impl；代码生成器产物（PO/Mapper）；WSDL/OpenAPI 客户端桩 | 注解驱动：`lombok.config` 开 `addLombokGeneratedAnnotation`（JaCoCo 0.8+ 对任何名为 `Generated` 的注解自动免计），随类走零误伤 |
+| **生成代码** | Lombok 生成成员；MapStruct Impl（`*ConverterImpl`，如 `WopGatewayAclConverterImpl`）；代码生成器产物（PO/Mapper）；WSDL/OpenAPI 客户端桩 | 注解驱动：`lombok.config` 开 `addLombokGeneratedAnnotation`（JaCoCo 0.8.2+ 对任何名为 `Generated` 的注解自动免计）；门禁校验 JaCoCo 插件版本 ≥ 0.8.2，随类走零误伤 |
 | **声明式/装配代码** | `@Configuration` Bean 装配；`@ConfigurationProperties` 绑定类；Application 主类；常量类；Feign 接口/标记接口（无方法体本就不计） | pom jacoco `excludes`（按包/类名模式），如 `**/*Application*`、`**/config/**` |
 | **边界壳（逐案定夺）** | MQ Listener/定时任务纯转发薄壳；Controller 薄壳 | 优先测而非排除（`@WebMvcTest`/消息驱动测试）；确不测的用 diff-cover `--exclude` 豁免门禁但保留报告真实 |
 
@@ -115,12 +118,11 @@ inclusion: always
 - 本地 pre-commit/pre-push 门禁的 lint 与测试范围、口径必须与 CI 完全同口径或更宽，并随 CI 演进同步维护；任一侧范围缺失都会产生「本地绿、CI 红」的假信号，问题要到 CI 才暴露、浪费一轮流水线
 - 协议适配、渠道移植类迁移项目，应建设录制-回放-比对测试设施：golden 样本按「渠道×事件」版本化管理，作为迁移每批次准入门禁；样本比对不一致的批次不得进入灰度。
 
-- 本地 pre-commit/pre-push 门禁的 lint 与测试范围、口径必须与 CI 完全同口径或更宽，并随 CI 演进同步维护；任一侧范围缺失都会产生「本地绿、CI 红」的假信号，问题要到 CI 才暴露、浪费一轮流水线
 - 基于覆盖率产物的增量门禁（diff-cover 等）复用本地 lcov/xml 文件：补充测试后必须重新生成覆盖率产物再提交，陈旧产物会把已覆盖代码误判为缺失导致门禁误拦
 - lint/工具自动改写（Sourcery、docstring 回填等）提交后复查两件事：① 覆盖率是否无解释下降——改写可能落入度量工具盲区（wop-python-sdk 2026-08-31：coverage.py 对 walrus+yield 生成器的 break 弧不记录，Sourcery 改写致 99.78%，最小探针隔离复现后回退 4 行恢复 100%）；② 行号锚定的配置（覆盖率白名单、报告定位）是否漂移——同日 docstring 插入使 2 条白名单行号漂移，失配告警当场拦截；结构性辅助提交与锚定配置不得盲过
 
 - 全部测试必须通过
-- 新增代码覆盖率 ≥ 70%，核心业务 ≥ 80%
+- 覆盖率门禁与「覆盖率阈值」同口径：Java 以 JaCoCo 报告级计数执行全量（存量+新增）行/分支 ≥ 98% 红线（剔除生成代码后），增量 diff-cover 变更行 java ≥ 98% / 非 Java ≥ 90% 为补充检查；非 Java 核心业务 ≥ 98% 由 CR 把关
 - 测试总耗时不超过最近 main 分支全量运行的 120%
 
 ## 变异测试纪律
@@ -171,6 +173,15 @@ inclusion: always
 - **探活断言**：禁止 `pytest.raises(ProcessLookupError)` 单发判定；须带 deadline 轮询等组消失——`EPERM` = 组内仅剩待-reap 僵尸（同 UID 下真活进程不可能 `EPERM`）复探等收尸，`ESRCH` = 组彻底消失；探活成功（rc=0）仅表示信号调用成功、组仍有成员（Linux 上未收尸僵尸同样探活成功），不得据此断言真活成员，需区分真活/僵尸时用显式子进程状态（waitpid/ps）判定，组未在 deadline 内消失才判失败
 - **时序窗口 mock 化**：真实僵尸窗口依赖 launchd 收尸时序无法稳定复现，规格须以确定性 mock 锁定（`EPERM→…→ESRCH` 序列通过 + 探活持续成功超时失败），范式见 `.factory/tests/test_mutations_run.py::_assert_group_dead`
 - **机器执行层**：`tools/check_killpg_strict.py`（gauntlet 层 `lint-killpg-strict`，扫描面 = tracked *.py）静态拦截 K1（`os.killpg` 缺 EPERM 容忍）与 K2（`raises(ProcessLookupError)` 单发探活）；负控制 NC8 见 `tools/test_gauntlet_checks.sh`
+
+### 泄漏断言的 tempdir 隔离【强制】
+
+> 适用：任何对临时目录做枚举/差集断言的测试（泄漏检测、产物清点、after-before 差集等）。
+> 背景：PR #137——mktemp 泄漏断言对共享系统 tempdir glob 同模板文件，套件外进程瞬时写入同模板即随机打破差集（pre-push 闸两次 flake，隔离重跑绿证实环境性）；该未隔离形态已扩散至 8 个下游仓。
+
+- **注入而非枚举**：测试不得观测系统共享 tempdir——用 `monkeypatch.setenv("TMPDIR", str(private_tmp))` 把被测面对齐 pytest 私有目录（范式 `.factory/tests/conftest.py::private_tmp`），断言 glob 对注入目录；外部写者不再可见，泄漏检测语义不变
+- **禁止硬编码系统目录**：测试代码禁 `gettempdir()`（tempfile 按进程缓存首次取值，TMPDIR 注入只达子进程，测试进程内恒取系统共享目录）与以 `/tmp` 字面量为对象的直接枚举调用（`glob.glob`/裸 `glob`/`x.glob`/`os.listdir`/`Path("/tmp").iterdir()|glob()`）；shell 侧等价要求 = `"${TMPDIR:-/tmp}"` 默认值形态（尊重注入）
+- **机器执行层**：`tools/check_tempdir_usage.py`（gauntlet 层 `lint-tempdir-isolation`，扫描面 = tracked 测试文件 test_*.py / conftest.py）静态拦截 R1（`gettempdir(`）与 R2（`/tmp` 字面量枚举调用），检查器损坏恒 rc=2 绝不算通过；负控制 NC17/NC17b/NC17c 见 `tools/test_gauntlet_checks.sh`
 
 ### Tripwire：前提失效硬失败【强制】
 
