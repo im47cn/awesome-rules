@@ -41,7 +41,7 @@ inclusion: always
 
 | 类别 | 内容 | 排除机制 |
 | --- | --- | --- |
-| **生成代码** | Lombok 生成成员；MapStruct Impl（`*ConverterImpl`，如 `WopGatewayAclConverterImpl`）；代码生成器产物（PO/Mapper）；WSDL/OpenAPI 客户端桩 | 注解驱动：`lombok.config` 开 `addLombokGeneratedAnnotation`（JaCoCo 0.8+ 对任何名为 `Generated` 的注解自动免计），随类走零误伤 |
+| **生成代码** | Lombok 生成成员；MapStruct Impl（`*ConverterImpl`，如 `WopGatewayAclConverterImpl`）；代码生成器产物（PO/Mapper）；WSDL/OpenAPI 客户端桩 | 注解驱动：`lombok.config` 开 `addLombokGeneratedAnnotation`（JaCoCo 0.8.2+ 对任何名为 `Generated` 的注解自动免计）；门禁校验 JaCoCo 插件版本 ≥ 0.8.2，随类走零误伤 |
 | **声明式/装配代码** | `@Configuration` Bean 装配；`@ConfigurationProperties` 绑定类；Application 主类；常量类；Feign 接口/标记接口（无方法体本就不计） | pom jacoco `excludes`（按包/类名模式），如 `**/*Application*`、`**/config/**` |
 | **边界壳（逐案定夺）** | MQ Listener/定时任务纯转发薄壳；Controller 薄壳 | 优先测而非排除（`@WebMvcTest`/消息驱动测试）；确不测的用 diff-cover `--exclude` 豁免门禁但保留报告真实 |
 
