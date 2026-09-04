@@ -162,11 +162,31 @@ if [ "$HAS_JAVA" = 1 ]; then
       (
         cd "$d" || exit 1
         # pom 钉了 jacoco-maven-plugin 版本时, 无版本 CLI 坐标会复用 pom 声明的版本；
-        # <0.8.3 无「名为 Generated 的注解」过滤, 生成代码会进分母使门禁数字失真 → 前提破坏直接拦
+        # 「名为 Generated 的注解」过滤自 0.8.2 引入（简单名等值, #731）, 0.8.3 起放宽为子串匹配（#822）；
+        # <0.8.2 生成代码会进分母使门禁数字失真 → 前提破坏直接拦
         jver=$(grep -A3 '<artifactId>jacoco-maven-plugin</artifactId>' pom.xml 2>/dev/null \
           | grep -o '<version>[^<]*</version>' | sed -n '1p' | sed 's/<[^>]*>//g')
-        if [ -n "$jver" ] && ! ver_ge "$jver" 0.8.3; then
-          echo "✗ [cov] $d jacoco-maven-plugin $jver < 0.8.3（Generated 注解过滤缺失, 生成代码会误入分母）, 升级后重试"
+        # 版本可为属性占位符 ${...}: 先解析同 pom 单层属性值; 仍非字面量则无法静态判定, 提示放行（不误拦合法项目）
+        case "$jver" in
+          *"\$"'{'*'}'*)
+            prop=${jver#\$\{}; prop=${prop%\}}
+            pval=$(grep -o "<$prop>[^<]*</$prop>" pom.xml 2>/dev/null | sed -n '1p' | sed 's/<[^>]*>//g')
+            case "$pval" in *[!0-9.-]*) pval= ;; esac
+            if [ -n "$pval" ]; then jver=$pval
+            else
+              echo "[cov] ⚠ $d jacoco 版本为属性引用 $jver, 无法静态解析, 跳过版本校验（确保运行时 ≥0.8.2）"
+              jver=
+            fi
+            ;;
+        esac
+        case "$jver" in
+          *[!0-9.-]*)
+            echo "[cov] ⚠ $d jacoco 版本「$jver」非数字字面量, 跳过版本校验（确保运行时 ≥0.8.2）"
+            jver=
+            ;;
+        esac
+        if [ -n "$jver" ] && ! ver_ge "$jver" 0.8.2; then
+          echo "✗ [cov] $d jacoco-maven-plugin $jver < 0.8.2（Generated 注解过滤缺失, 生成代码会误入分母）, 升级后重试"
           exit 1
         fi
         echo "[cov] ▶ $d: mvn test + jacoco report + 全量红线(行/分支 ≥${FAIL_UNDER_JAVA}%) + diff-cover 变更行(≥${FAIL_UNDER_JAVA}%)"
@@ -176,7 +196,7 @@ if [ "$HAS_JAVA" = 1 ]; then
         [ $rc -ne 0 ] && exit 1
         xmls=$(ls target/site/jacoco/jacoco.xml */target/site/jacoco/jacoco.xml 2>/dev/null || true)
         [ -n "$xmls" ] || { echo "[cov] $d 未生成任何 jacoco.xml, 跳过"; exit 0; }
-        # 全量红线（存量+新增）: 汇总报告级 LINE/BRANCH 计数（生成代码剔除由 JaCoCo ≥0.8.3 注解过滤保证）
+        # 全量红线（存量+新增）: 汇总报告级 LINE/BRANCH 计数（生成代码剔除由 JaCoCo ≥0.8.2 注解过滤保证）
         read -r lm lc bm bc <<<"$(jacoco_totals $xmls)"
         if [ $((lm + lc)) -eq 0 ]; then
           echo "[cov] $d jacoco 报告无 LINE 计数, 跳过全量红线"
