@@ -37,17 +37,18 @@ jobs:
           BASE_SHA="${{ github.event.pull_request.base.sha }}"
           # 语言口径与本地 pre-push 同源（issue #123）：实测有效 = py/ts/js；
           # php 实测不扫描、go/java/cs 未实测——面外文件显式披露不送审
-          SUPPORTED=$(git diff --name-only "${BASE_SHA}"...HEAD -- '*.py' '*.ts' '*.js')
+          # mapfile 数组化 + 引号展开：文件名可含空格，字符串变量未引号
+          # 展开会分词/glob（PR #141 评论）；runner 是 bash ≥4，mapfile 可用
+          mapfile -t SUPPORTED < <(git diff --name-only "${BASE_SHA}"...HEAD -- '*.py' '*.ts' '*.js')
           UNSENT=$(git diff --name-only "${BASE_SHA}"...HEAD -- '*.go' '*.java' '*.cs' '*.php')
-          if [ -n "$UNSENT" ]; then
+          if [ -n "${UNSENT}" ]; then
             echo "::warning::以下文件在 Sourcery 实测支持面外，未送审（口径见本 workflow 头注）"
-            echo "$UNSENT"
+            echo "${UNSENT}"
           fi
-          if [ -z "$SUPPORTED" ]; then
+          if [ "${#SUPPORTED[@]}" -eq 0 ]; then
             echo "no measured-supported language files changed (.py/.ts/.js), skipping"
             exit 0
           fi
           echo "changed files (measured-supported):"
-          echo "$SUPPORTED"
-          # shellcheck disable=SC2086
-          sourcery review --check --config .sourcery.yaml $SUPPORTED
+          printf '%s\n' "${SUPPORTED[@]}"
+          sourcery review --check --config .sourcery.yaml "${SUPPORTED[@]}"
