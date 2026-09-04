@@ -26,8 +26,11 @@ from gitenv import git_env  # noqa: E402  (tests/ 兄弟模块，pytest rootdir 
 
 FACTORY = Path(__file__).resolve().parents[1]
 
-TRIP_MSG = ("成本熔断（R4）：ledger 累计超 floor 上限，停止派发；"
-            "人工复核 locks/floor.json 与 ledger.jsonl 后方可恢复")
+# D（2026-09-05）：breaker.sh 不再固定包装"成本熔断 ledger 累计超 floor"误导
+# 文案，rc=3 时透传 factory_lib breaker_check 的 CircuitOpen 真实消息
+# （"熔断：今日已跑 N 次" / "熔断：连续失败 N 次…需人工介入"）。
+RUNS_TRIP_MSG = "熔断：今日已跑 1 次（上限 1）"          # TRIP_FLOOR + 1 条今日成功行
+STREAK_TRIP_MSG = "熔断：连续失败 3 次（上限 3），需人工介入"  # FLOOR + 3 连败
 FAIL_CLOSED_MSG = "fail-closed 停止派发"
 FLOOR = {"max_runs_per_day": 10, "max_consecutive_failures": 3}
 TRIP_FLOOR = {"max_runs_per_day": 1, "max_consecutive_failures": 3}
@@ -118,12 +121,12 @@ class TestBreakerGate:
         r = self._gate(tmp_path, json.dumps({"max_runs_per_day": 1, "max_consecutive_failures": 3}),
                        _e(0) + "\n")
         assert r.returncode == 3
-        assert TRIP_MSG in r.stderr
+        assert RUNS_TRIP_MSG in r.stderr
 
     def test_streak_trips_exit_3(self, tmp_path):
         r = self._gate(tmp_path, json.dumps(FLOOR), "".join(_e(1) + "\n" for _ in range(3)))
         assert r.returncode == 3
-        assert TRIP_MSG in r.stderr
+        assert STREAK_TRIP_MSG in r.stderr
         assert "连续失败" in r.stderr  # factory_lib 判定明细先行
 
     def test_pass_silent_exit_0(self, tmp_path):
@@ -166,7 +169,7 @@ class TestDispatchWiring:
     def test_trips_before_any_downstream(self, tmp_path):
         repo, r = self._dispatch(tmp_path, json.dumps(TRIP_FLOOR), _e(0) + "\n")
         assert r.returncode == 3
-        assert TRIP_MSG in r.stderr
+        assert RUNS_TRIP_MSG in r.stderr
         # 死在门口：无 gh 数据面调用（仅启动时的 hosting auth 探测）、无下游脚本
         gh_calls = [ln.rstrip() for ln in _stub_lines(tmp_path) if ln.startswith("gh ")]
         assert gh_calls == ["gh auth status"]  # dispatch_main 的 hosting auth 探测（ADR-008）
@@ -200,7 +203,7 @@ class TestFixIssueWiring:
     def test_trips_before_lock_and_gh(self, tmp_path):
         repo, r = self._fix(tmp_path, json.dumps(TRIP_FLOOR), _e(0) + "\n")
         assert r.returncode == 5  # 本地映射码（3 已被锁竞争占用，见接线注释）
-        assert TRIP_MSG in r.stderr
+        assert RUNS_TRIP_MSG in r.stderr
         # 连互斥锁都未占、未到 gh 探测
         assert not (repo / ".factory/locks/dispatcher").exists()
         assert "需要 gh CLI" not in r.stderr
@@ -254,7 +257,7 @@ class TestCronDispatchWiring:
         repo, r = self._cron(tmp_path, json.dumps(TRIP_FLOOR), _e(0) + "\n")
         assert r.returncode == 3
         log = (repo / ".factory/locks/dispatch.log").read_text(encoding="utf-8")
-        assert TRIP_MSG in log  # 停摆信息随块重定向落 dispatch.log
+        assert RUNS_TRIP_MSG in log  # 停摆信息随块重定向落 dispatch.log
         assert _sentinel_hit(tmp_path) == []  # triage-batch / dispatch 均未跑
 
     def test_passes_through_to_both_callees(self, tmp_path):
