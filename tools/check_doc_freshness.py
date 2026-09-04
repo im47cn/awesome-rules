@@ -39,6 +39,10 @@
         「等」明示枚举非穷尽，该行不查
      c. hooks/load-steering.sh「审查类任务可使用」清单 ⊇ 全部
         *-guard 技能
+  R8 分发闸枚举覆盖：tools/git/README.md 的 pre-push 并发注记行枚举的
+     command 名 ⊇ tools/git/lefthook.yml pre-push: commands 键全集
+     （行内按分隔符切 token 与命令名取交集，容忍多余措辞；加/删闸
+     不更新注记即漂移；yml 或 README 任一缺失则整条跳过）
 
 豁免（误报控制，两条稳定通道）：
   --allow REGEX（可重复）：正则 search 命中证据行（[级别] 文件:行 →
@@ -79,6 +83,9 @@ R4_REVERSED_RE = re.compile(r"(\d+)\s*[项条]\s*测试")
 
 R5_REUSE_RE = re.compile(r"复用\s*arch-guard")
 R5_CHECKOUT_RE = re.compile(r"git\s+checkout\s+-b\s+factory/issue")
+
+# R8 陈述侧口径：注记行按分隔符切 token，与 pre-push command 名取交集
+R8_SPLIT_RE = re.compile(r"[\s/、，,`*（）()：:。；;]+")
 
 DEF_TEST_RE = re.compile(r"(?m)^\s*(?:async\s+)?def\s+test_")
 
@@ -201,8 +208,11 @@ def rule_r3(root: Path, g: Gate) -> None:
                 for cont in seg[j + 1:]:
                     if not cont.startswith("│"):
                         break
-                    name = re.sub(r"^[│├└─\s]+", "", cont.split("#")[0]).strip().rstrip("/")
-                    if name:
+                    if (
+                        name := re.sub(r"^[│├└─\s]+", "", cont.split("#")[0])
+                        .strip()
+                        .rstrip("/")
+                    ):
                         tree_names.append(name)
                 break
         if tree_line is not None:
@@ -281,11 +291,11 @@ def rule_r5(root: Path, g: Gate) -> None:
                        "R5 禁用表述「复用 arch-guard」（实际依赖经 doc-gen，防复发）")
             if "复用来源" in ln:
                 m = re.search(r"\]\(([^)\s]+)\)", ln)
-                target = m.group(1) if m else None
+                target = m[1] if m else None
                 if target is None:
                     bk = re.search(r"`([^`\s]+)`", ln)
-                    if bk and ("/" in bk.group(1) or bk.group(1).endswith(".py")):
-                        target = bk.group(1)
+                    if bk and ("/" in bk[1] or bk[1].endswith(".py")):
+                        target = bk[1]
                 if target is None:
                     g.info(f"{rel}:{i}",
                            "R5 复用来源行未解析出路径（口径变更请同步本门规则）")
@@ -339,9 +349,8 @@ def _steering_topic(path: Path) -> str | None:
     if content.startswith("---"):
         end = content.find("\n---", 3)
         if end != -1:
-            m = re.search(r"(?m)^title:\s*(.+)$", content[3:end])
-            if m:
-                title = m.group(1).strip()
+            if m := re.search(r"(?m)^title:\s*(.+)$", content[3:end]):
+                title = m[1].strip()
     return re.sub(r"(规范|标准)$", "", title) if title else None
 
 
@@ -421,6 +430,53 @@ def rule_r7(root: Path, g: Gate) -> None:
             g.fail("hooks/load-steering.sh:1", "R7c 未找到「审查类任务可使用」清单行")
 
 
+def rule_r8(root: Path, g: Gate) -> None:
+    """R8 分发闸枚举覆盖：README 并发注记 ⊇ lefthook pre-push commands。"""
+    yml = root / "tools" / "git" / "lefthook.yml"
+    readme = root / "tools" / "git" / "README.md"
+    if not yml.is_file() or not readme.is_file():
+        return  # 无分发面即无枚举漂移面
+    # 事实侧：仅 pre-push 段内 2 空格 commands: 映射下的 4 空格键是 command
+    # （pre-push 下其它 2 空格键如 env: 挂的 4 空格子键不得误收；6 空格 run: 不匹配）
+    commands: list[str] = []
+    in_pre_push = False
+    in_commands = False
+    for ln in _lines(yml):
+        if ln.lstrip().startswith("#"):
+            continue
+        if re.match(r"^\S", ln):
+            if in_pre_push:
+                break  # 下一个顶层段，pre-push 结束
+            in_pre_push = ln.startswith("pre-push:")
+            continue
+        if not in_pre_push:
+            continue
+        if m2 := re.match(r"^  ([A-Za-z0-9][\w-]*):", ln):
+            in_commands = m2[1] == "commands"  # 2 空格键切换进出 commands 映射
+            continue
+        if in_commands:
+            if m4 := re.match(r"^    ([A-Za-z0-9][\w-]*):", ln):
+                commands.append(m4[1])
+    if not commands:
+        return  # 无 pre-push commands 即无注记枚举面
+    # 陈述侧：注记行切 token 与命令名取交集（只查 ⊇，多余措辞不罚）
+    note_line: int | None = None
+    note_text = ""
+    for i, ln in enumerate(_lines(readme), 1):
+        if "pre-push 并发注记" in ln:
+            note_line, note_text = i, ln
+            break
+    if note_line is None:
+        g.fail("tools/git/README.md:1",
+               f"R8 pre-push 并发注记行未找到（{len(set(commands))} 个 commands 未被枚举覆盖）")
+        return
+    listed = set(R8_SPLIT_RE.split(note_text)) & set(commands)
+    for name in sorted(set(commands)):
+        if name not in listed:
+            g.fail(f"tools/git/README.md:{note_line}",
+                   f"R8 并发注记缺 pre-push command {name}（lefthook.yml pre-push 共 {len(set(commands))} 闸）")
+
+
 def _source_line(root: Path, where: str) -> str | None:
     """证据行 'path:line' → 源行文本（行级豁免标记判断用）。"""
     path_part, _, line_part = where.rpartition(":")
@@ -435,7 +491,7 @@ def _source_line(root: Path, where: str) -> str | None:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="实现↔文档一致性门禁（R1-R7）")
+    ap = argparse.ArgumentParser(description="实现↔文档一致性门禁（R1-R8）")
     ap.add_argument("root", nargs="?", default=".",
                     help="仓库根（默认当前目录）")
     ap.add_argument("--allow", action="append", default=[], metavar="REGEX",
@@ -447,9 +503,11 @@ def main() -> int:
         return 2
     root = Path(args.root).resolve()
 
-    missing = [s for s in (".factory", ".factory/README.md", "README.md", "skills")
-               if not (root / s).exists()]
-    if missing:
+    if missing := [
+        s
+        for s in (".factory", ".factory/README.md", "README.md", "skills")
+        if not (root / s).exists()
+    ]:
         print(f"doc-freshness: 结构性错误 {root} 缺 {'、'.join(missing)}", file=sys.stderr)
         return 2
     try:
@@ -466,6 +524,7 @@ def main() -> int:
     rule_r5(root, g)
     rule_r6(root, g)
     rule_r7(root, g)
+    rule_r8(root, g)
 
     fails: list[str] = []
     infos: list[str] = []

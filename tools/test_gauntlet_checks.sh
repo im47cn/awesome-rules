@@ -792,6 +792,132 @@ if "$PY" tools/check_git_sealing.py "$NC14" >"$TMP/out14c" 2>&1; then
 else
     bad "NC14c 期望 rc=0, 实际: $(cat "$TMP/out14c")"
 fi
+# ── NC15 doc-freshness R8 负控制：分发闸枚举漂移必须被拦下 ──────────────
+# 夹具：NC10 最小仓叠加 tools/git 双文件面（yml pre-push 3 commands +
+# README 注记行）。2026-09-03 实证形态：pre-push 加第六闸/闸改名而注记
+# 不更新，reviewer 人工核对才发现——本条让闸数漂移机械化拦截。
+nc15_setup() {
+    _d=$1; _listed=$2   # _listed：注记行枚举段（全枚举=正控制，缺闸=负控制）
+    nc10_setup "$_d"
+    mkdir -p "$_d/tools/git"
+    cat >"$_d/tools/git/lefthook.yml" <<'EOF'
+commit-msg:
+  commands:
+    commitmsg:
+      run: x
+pre-push:
+  commands:
+    coverage-full:
+      run: x
+    tests:
+      run: x
+    # 段内注释行复刻真实 yml 形态（注释跳过分支不靠主仓运行偶然覆盖）
+    sourcery-gate:
+      run: x
+  # pre-push 下非 commands 的 2 空格键挂 4 空格子键：不得误收为 command
+  # （正控注记只列 3 闸，若误收 LEASE_TOKEN 正控即红——R8 状态机负控制）
+  env:
+    LEASE_TOKEN: x
+EOF
+    # shellcheck disable=SC2016  # 字面 markdown 反引号，刻意单引号防展开（双引号会真执行命令替换）
+    printf '> **pre-push 并发注记**：`lefthook.yml` pre-push 各 commands 并行执行：%s 同时跑。\n' \
+        "$_listed" >"$_d/tools/git/README.md"
+}
+
+# 正控制：注记全枚举 → 整门 rc=0（含 R8 对真形态无误报）
+NC15="$TMP/nc15"; nc15_setup "$NC15" 'coverage-full / tests / sourcery-gate'
+if "$PY" tools/check_doc_freshness.py "$NC15" >"$TMP/out15" 2>&1; then
+    ok "NC15 干净 fixture 全绿（R8 注记全枚举无误报）"
+else
+    bad "NC15 干净 fixture 期望 rc=0: $(cat "$TMP/out15")"
+fi
+
+# 漏闸：注记缺 tests（新增/改名闸不更新注记的漂移形态）
+NC15A="$TMP/nc15a"; nc15_setup "$NC15A" 'coverage-full / sourcery-gate'
+if "$PY" tools/check_doc_freshness.py "$NC15A" >"$TMP/out15a" 2>&1; then
+    _rc15a=0
+else
+    _rc15a=$?
+fi
+if [ "$_rc15a" -eq 1 ] && grep -q 'R8' "$TMP/out15a" \
+    && grep -q '缺 pre-push command tests' "$TMP/out15a"; then
+    ok "NC15a R8 注记缺闸检出"
+else
+    bad "NC15a 期望 rc=1+R8+缺 tests, 实际 rc=${_rc15a}: $(cat "$TMP/out15a")"
+fi
+
+# 注记行整体删除：枚举面消失本身即漂移（不得静默跳过）
+NC15B="$TMP/nc15b"; nc15_setup "$NC15B" 'coverage-full / tests / sourcery-gate'
+printf '# Git 工具\n' >"$NC15B/tools/git/README.md"
+if "$PY" tools/check_doc_freshness.py "$NC15B" >"$TMP/out15b" 2>&1; then
+    _rc15b=0
+else
+    _rc15b=$?
+fi
+if [ "$_rc15b" -eq 1 ] && grep -q 'R8' "$TMP/out15b" \
+    && grep -q '注记行未找到' "$TMP/out15b"; then
+    ok "NC15b R8 注记行删除检出（枚举面消失即漂移）"
+else
+    bad "NC15b 期望 rc=1+R8+未找到, 实际 rc=${_rc15b}: $(cat "$TMP/out15b")"
+fi
+
+# 无 pre-push 段：yml 存在但无闸面 → 整条跳过（与 R6/R7 缺面跳过同构）
+NC15C="$TMP/nc15c"; nc15_setup "$NC15C" 'x'
+cat >"$NC15C/tools/git/lefthook.yml" <<'EOF'
+commit-msg:
+  commands:
+    commitmsg:
+      run: x
+EOF
+if "$PY" tools/check_doc_freshness.py "$NC15C" >"$TMP/out15c" 2>&1; then
+    ok "NC15c R8 无 pre-push 段时整条跳过"
+else
+    bad "NC15c 无闸面期望 rc=0: $(cat "$TMP/out15c")"
+fi
+
+# ── NC16 lint-shellcheck 清单漂移锁：run_tests ↔ gauntlet 两处镜像一致 ──
+# scripts/run_tests.sh 的 lint-shellcheck 层文件清单镜像自 tools/gauntlet.sh
+# （权威清单），此前靠注释互指人工同步（2026-09-04 reviewer 建议）；本用例
+# 机械比对两处清单集合，gauntlet 侧增删文件而 run_tests 未同步即红。
+# 抽取口径：跳过注释行，从首处非注释 lint-shellcheck 行起，到「含
+# tools/*.sh 且无续行符」的清单尾行止，收集 tools/*.sh token。
+_sc_list() {
+    awk '/lint-shellcheck/ && $0 !~ /^[ \t]*#/ {_in=1}
+         _in && $0 !~ /^[ \t]*#/ { print
+               if ($0 ~ /tools\/[A-Za-z0-9_.\/-]+\.sh/ && $0 !~ /\\$/) exit }' "$1" \
+      | grep -oE 'tools/[A-Za-z0-9_./-]+\.sh' | sort -u
+}
+_sc_g=$(_sc_list tools/gauntlet.sh)
+_sc_r=$(_sc_list scripts/run_tests.sh)
+if [ -n "$_sc_g" ] && [ "$_sc_g" = "$_sc_r" ]; then
+    # shellcheck disable=SC2086  # $_sc_g 是多行词表，按空白分词是意图
+    ok "NC16 lint-shellcheck 清单镜像一致（$(printf '%s\n' $_sc_g | wc -l | tr -d ' ') 文件）"
+else
+    bad "NC16 清单漂移：gauntlet[$_sc_g] vs run_tests[$_sc_r]"
+fi
+
+# 负控制：夹具副本删一文件 → 断言必须转红（证明比对有效，非恒真）
+NC16A="$TMP/nc16a"; mkdir -p "$NC16A"
+sed 's| tools/test_spec_check.sh||' scripts/run_tests.sh >"$NC16A/run_tests.sh"
+_sc_a=$(_sc_list "$NC16A/run_tests.sh")
+if [ -n "$_sc_a" ] && [ "$_sc_a" != "$_sc_g" ]; then
+    ok "NC16a 清单漂移检出（删一文件即不等）"
+else
+    bad "NC16a 期望漂移被检出: gauntlet[$_sc_g] vs 篡改[$_sc_a]"
+fi
+
+# 边界：清单块内插注释（含 tools/*.sh 字样）不得截断抽取（防假红；
+# 注释行无续行符，未过滤会被误判为清单尾行）
+NC16B="$TMP/nc16b"; mkdir -p "$NC16B"
+awk '/^echo "── lint-shellcheck"$/ {print; print "  # 注释探针 tools/fake-note.sh"; next} {print}' \
+    scripts/run_tests.sh >"$NC16B/run_tests.sh"
+_sc_b=$(_sc_list "$NC16B/run_tests.sh")
+if [ "$_sc_b" = "$_sc_g" ]; then
+    ok "NC16b 清单块内注释不截断（抽取仍全集）"
+else
+    bad "NC16b 块内注释致截断: gauntlet[$_sc_g] vs 探针[$_sc_b]"
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────
 if [ "$fails" -gt 0 ]; then
     echo "checker-self-test: $fails 项失败"

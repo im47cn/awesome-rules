@@ -8,7 +8,7 @@
 #   2. gauntlet       : sh tools/gauntlet.sh
 #                       （全量门禁唯一入口，见 docs/design/spec-2026-08-21-gauntlet-entry.md）
 #   3. doc-freshness  : python3 tools/check_doc_freshness.py
-#                       （陈述↔事实一致性 R1-R5；gauntlet 内已有同名子层，
+#                       （陈述↔事实一致性 R1-R8；gauntlet 内已有同名子层，
 #                        独立成层是为了单层日志与失败归因）
 #   4. dispatch-liveness: python3 .factory/regression/dispatch_liveness.py
 #                       （调度器活性：停摆标记在=FAIL；streak 文件超 26h

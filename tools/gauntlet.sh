@@ -80,7 +80,7 @@ else
     run_layer pytest-doc-gen "$PY" -m pytest skills/doc-gen/scripts/tests -q
     run_layer pytest-arch-hawkeye "$PY" -m pytest arch-hawkeye/scripts/tests -q
     run_layer plugin-versions "$PY" tools/check_plugin_versions.py
-    # 实现↔文档一致性（数字/清单/指向漂移，R1-R5 语义见脚本头注释）
+    # 实现↔文档一致性（数字/清单/指向漂移，R1-R8 语义见脚本头注释）
     run_layer doc-freshness "$PY" tools/check_doc_freshness.py
     run_layer md-link-check "$PY" scripts/md_link_check.py .
 
@@ -95,7 +95,7 @@ else
                tools/test_gauntlet_orchestration.sh tools/test_gauntlet_checks.sh \
                tools/test_spec_check.sh \
                hooks/load-steering.sh hooks/on-session-end.sh
-    # lint 范围只含本仓新增 tools/ 脚本：hooks/ 属既有代码，其基线告警不属本门范围
+    # lint 范围只含本仓新增 tools/ 脚本：hooks/ 属既有代码，其基线告警不属本门范围；清单镜像于 scripts/run_tests.sh lint-shellcheck 层，两处同步维护
     run_layer lint-shellcheck shellcheck tools/gauntlet.sh tools/must_not_match.sh \
                 tools/test_gauntlet_orchestration.sh tools/test_gauntlet_checks.sh \
                 tools/test_spec_check.sh

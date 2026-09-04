@@ -38,7 +38,7 @@ inclusion: always
 | 类别 | scope |
 | --- | --- |
 | 业务域 | `api`、`db`、`ui`、`ci` |
-| 工程 | `dependency`、`tools`、`docs`、`deps`、`release` |
+| 工程 | `dependency`、`tools`、`scripts`、`docs`、`deps`、`release` |
 
 新增技能时同步追加到两处。
 
