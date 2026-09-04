@@ -50,13 +50,15 @@ PAR_TAGS=()     # 失败聚合标签
 PAR_LOGS=()     # 段日志私有文件
 PAR_PIDS=()     # 后台段进程
 
-par_launch() {  # par_launch <段头> <失败标签> <命令串>
+par_launch() {  # par_launch <段头> <失败标签> <命令串，"\$1" 为 PY 占位>
   local log="$LOG_DIR/seg-$(( ${#PAR_PIDS[@]} + 1 )).log"
   PAR_HEADERS+=("$1")
   PAR_TAGS+=("$2")
   PAR_LOGS+=("$log")
-  # -o pipefail：段内管道（badcase | tail）保留真实退出码
-  bash -o pipefail -c "$3" >"$log" 2>&1 &
+  # -o pipefail：段内管道（badcase | tail）保留真实退出码。
+  # PY 经位置参数 $1 传入、不拼入命令串：撇号路径不再炸语法，调用方可控
+  # 的 PYTHON 也不会被重解析为 shell 源码（PR #139 review：注入面）。
+  bash -o pipefail -c "$3" _ "$PY" >"$log" 2>&1 &
   PAR_PIDS+=("$!")
 }
 
@@ -64,18 +66,28 @@ for suite in "${SUITES[@]}"; do
   target="tests"
   [ -d "$suite/tests" ] || target="."
   par_launch "── pytest $suite" "$suite" \
-    "cd '$suite' && '$PY' -m pytest '$target' -o addopts='' -q"
+    "cd '$suite' && \"\$1\" -m pytest '$target' -o addopts='' -q"
 done
-par_launch "── badcase" "badcase" "'$PY' scripts/badcase_runner.py | tail -3"
+par_launch "── badcase" "badcase" "\"\$1\" scripts/badcase_runner.py | tail -3"
 par_launch "── lease-sql(非PG段)" "lease-sql" \
   "LEASE_SKIP_PG=1 bash .factory/tests/test-lease-sql.sh"
 
-echo "⚡ ${#PAR_PIDS[@]} 段并行执行中（最长段 .factory/tests ≈43s），日志待全部完成后按段序回放"
+# 两轮：先全量 wait 收状态，再按段序回放——早段日志不抢跑（全部段
+# 真正结束后才 cat），失败聚合仍在回放时按段序进行。
 FAILED=()
-i=0
+PAR_STATUS=()
 for pid in "${PAR_PIDS[@]}"; do
-  echo "${PAR_HEADERS[$i]}"
-  if ! wait "$pid"; then
+  if wait "$pid"; then
+    PAR_STATUS+=(0)
+  else
+    PAR_STATUS+=(1)
+  fi
+done
+
+i=0
+for header in "${PAR_HEADERS[@]}"; do
+  echo "$header"
+  if [ "${PAR_STATUS[$i]}" -ne 0 ]; then
     FAILED+=("${PAR_TAGS[$i]}")
   fi
   cat "${PAR_LOGS[$i]}"
