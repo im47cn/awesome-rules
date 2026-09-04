@@ -18,7 +18,7 @@ inclusion: always
 
 ## 覆盖率阈值
 
-- Java 实现代码【强制】：全量（存量+新增）行/分支覆盖率 ≥ 98%；统计前先按「覆盖率统计范围与排除实践」剔除生成代码——lombok 生成成员、MapStruct `*ConverterImpl`（如 `WopGatewayAclConverterImpl`）等不进分母，98% 只约束手写实现代码
+- Java 实现代码【强制】：以 JaCoCo 执行全量（存量+新增）行/分支覆盖率门禁 ≥ 98%；统计前先按「覆盖率统计范围与排除实践」剔除生成代码——lombok 生成成员、MapStruct `*ConverterImpl`（如 `WopGatewayAclConverterImpl`）等不进分母，98% 只约束手写实现代码。增量 `diff-cover --compare-branch` 仅作为补充检查，不替代全量门槛
 - 非 Java 新增代码：分支/行覆盖率 ≥ 90%
 - 非 Java 核心业务逻辑：≥ 98%
 
