@@ -918,6 +918,126 @@ else
     bad "NC16b 块内注释致截断: gauntlet[$_sc_g] vs 探针[$_sc_b]"
 fi
 
+# ── NC17 tempdir-isolation 负控制：PR #137 泄漏断言原形必须被拦 ────────
+# 夹具经 heredoc 落盘到 $TMP（仓外、显式 file 参数直查模式）；本检查器
+# 扫描面仅 tracked 测试 .py（test_*.py / conftest.py），本脚本 .sh 不自匹配。
+mkdir -p "$TMP/nc17"
+cat >"$TMP/nc17/test_leak_bad.py" <<'EOF'
+import glob, os, tempfile
+from pathlib import Path
+
+glob.glob(os.path.join(tempfile.gettempdir(), ".factory-dist.*"))
+os.listdir("/tmp")
+list(Path("/tmp").iterdir())
+EOF
+if "$PY" tools/check_tempdir_usage.py "$TMP/nc17/test_leak_bad.py" >"$TMP/out17" 2>&1; then
+    _rc17=0
+else
+    _rc17=$?
+fi
+if [ "$_rc17" -eq 1 ] && grep -q 'R1' "$TMP/out17" && grep -q 'R2' "$TMP/out17"; then
+    ok "NC17 共享 tempdir 枚举击杀（R1 gettempdir + R2 /tmp 字面量）"
+else
+    bad "NC17 期望 rc=1+R1+R2, 实际 rc=${_rc17}, 输出: $(cat "$TMP/out17")"
+fi
+
+# NC17b 注入式隔离夹具放行：monkeypatch TMPDIR + 对注入目录 glob
+# （PR #137 修复范式原形）——检查器边界是共享目录观测，不是见 glob 就拦
+cat >"$TMP/nc17/test_leak_good.py" <<'EOF'
+import glob, os
+
+def test_no_leak(monkeypatch, private_tmp):
+    monkeypatch.setenv("TMPDIR", str(private_tmp))
+    assert sorted(glob.glob(os.path.join(os.environ["TMPDIR"], ".factory-dist.*"))) == []
+EOF
+if "$PY" tools/check_tempdir_usage.py "$TMP/nc17/test_leak_good.py" >"$TMP/out17b" 2>&1; then
+    ok "NC17b 注入式 private_tmp 夹具放行"
+else
+    bad "NC17b 期望 rc=0, 实际输出: $(cat "$TMP/out17b")"
+fi
+
+# NC17c 检查器损坏路径：rc=2 绝不算通过（NC6/NC8c/NC9c 同一语义）
+if "$PY" tools/check_tempdir_usage.py "$TMP/definitely-missing" >"$TMP/out17c" 2>&1; then
+    _rc17c=0
+else
+    _rc17c=$?
+fi
+if [ "$_rc17c" -eq 2 ]; then
+    ok "NC17c tempdir 检查器损坏路径 rc=2"
+else
+    bad "NC17c 期望 rc=2, 实际 rc=${_rc17c:-0}"
+fi
+
+# NC17d docstring/prose 示例文字豁免（PR #140 评论二）：规范转述里的
+# gettempdir()/"/tmp" 字面量示例不得误报——独立字符串语句整段掩蔽后扫描
+cat >"$TMP/nc17/test_doc_prose.py" <<'EOF'
+"""规范转述（负控制：文档示例文字不得误报）。
+
+违规形态示例（仅文档转述，非真实代码）：
+  sorted(glob.glob("/tmp/xxx-*"))
+  os.listdir("/tmp"); list(Path("/tmp").iterdir())
+  tempfile.gettempdir() 恒返回系统共享目录。
+真实断言对齐 private_tmp 注入目录。
+"""
+import glob
+
+
+def test_ok(tmp_path):
+    assert sorted(glob.glob(str(tmp_path / "*"))) == []
+EOF
+if "$PY" tools/check_tempdir_usage.py "$TMP/nc17/test_doc_prose.py" >"$TMP/out17d" 2>&1; then
+    ok "NC17d docstring/prose 示例文字豁免（无误报）"
+else
+    bad "NC17d 期望 rc=0, 实际输出: $(cat "$TMP/out17d")"
+fi
+
+# NC17e git 不可用（PATH 剥离，PR #140 评论一）：subprocess OSError 须
+# fail-closed rc=2，绝不因环境坏而静默通过
+mkdir -p "$TMP/nc17/empty-bin"
+_pypath="$(command -v "$PY" || true)"
+if env PATH="$TMP/nc17/empty-bin" "$_pypath" tools/check_tempdir_usage.py . >"$TMP/out17e" 2>&1; then
+    _rc17e=0
+else
+    _rc17e=$?
+fi
+if [ "$_rc17e" -eq 2 ]; then
+    ok "NC17e git 不可用 fail-closed rc=2"
+else
+    bad "NC17e 期望 rc=2, 实际 rc=${_rc17e}, 输出: $(cat "$TMP/out17e")"
+fi
+
+# NC17f R1 标识符边界（CodeRabbit PR #140）：fake_gettempdir() 等本地助手
+# 不调真实 API——旧正则按子串误命中判 rc=1，收紧后须放行
+cat >"$TMP/nc17/test_r1_ident.py" <<'EOF'
+def fake_gettempdir():
+    return "/srv/scratch"
+
+
+def test_helper_only():
+    assert fake_gettempdir()
+EOF
+if "$PY" tools/check_tempdir_usage.py "$TMP/nc17/test_r1_ident.py" >"$TMP/out17f" 2>&1; then
+    ok "NC17f R1 标识符边界（fake_gettempdir 放行，真实 API 仍由 NC17 拦）"
+else
+    bad "NC17f 期望 rc=0, 实际输出: $(cat "$TMP/out17f")"
+fi
+
+# NC17g 现存非 git 目录（CodeRabbit PR #140）：不同于 NC17c 不存在路径
+# （main 早退），须真实走到 tracked_test_files 的 rev-parse fail-closed 分支。
+# 夹具不能放 $TMP 下——NC1 已 git init "$TMP"，其内目录必在 worktree 中。
+_nc17g_plain=$(mktemp -d)
+if "$PY" tools/check_tempdir_usage.py "$_nc17g_plain" >"$TMP/out17g" 2>&1; then
+    _rc17g=0
+else
+    _rc17g=$?
+fi
+rm -rf "$_nc17g_plain"
+if [ "$_rc17g" -eq 2 ]; then
+    ok "NC17g 现存非 git 目录 fail-closed rc=2"
+else
+    bad "NC17g 期望 rc=2, 实际 rc=${_rc17g}, 输出: $(cat "$TMP/out17g")"
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────
 if [ "$fails" -gt 0 ]; then
     echo "checker-self-test: $fails 项失败"
