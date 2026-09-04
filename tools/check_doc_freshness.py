@@ -208,8 +208,11 @@ def rule_r3(root: Path, g: Gate) -> None:
                 for cont in seg[j + 1:]:
                     if not cont.startswith("│"):
                         break
-                    name = re.sub(r"^[│├└─\s]+", "", cont.split("#")[0]).strip().rstrip("/")
-                    if name:
+                    if (
+                        name := re.sub(r"^[│├└─\s]+", "", cont.split("#")[0])
+                        .strip()
+                        .rstrip("/")
+                    ):
                         tree_names.append(name)
                 break
         if tree_line is not None:
@@ -288,11 +291,11 @@ def rule_r5(root: Path, g: Gate) -> None:
                        "R5 禁用表述「复用 arch-guard」（实际依赖经 doc-gen，防复发）")
             if "复用来源" in ln:
                 m = re.search(r"\]\(([^)\s]+)\)", ln)
-                target = m.group(1) if m else None
+                target = m[1] if m else None
                 if target is None:
                     bk = re.search(r"`([^`\s]+)`", ln)
-                    if bk and ("/" in bk.group(1) or bk.group(1).endswith(".py")):
-                        target = bk.group(1)
+                    if bk and ("/" in bk[1] or bk[1].endswith(".py")):
+                        target = bk[1]
                 if target is None:
                     g.info(f"{rel}:{i}",
                            "R5 复用来源行未解析出路径（口径变更请同步本门规则）")
@@ -346,9 +349,8 @@ def _steering_topic(path: Path) -> str | None:
     if content.startswith("---"):
         end = content.find("\n---", 3)
         if end != -1:
-            m = re.search(r"(?m)^title:\s*(.+)$", content[3:end])
-            if m:
-                title = m.group(1).strip()
+            if m := re.search(r"(?m)^title:\s*(.+)$", content[3:end]):
+                title = m[1].strip()
     return re.sub(r"(规范|标准)$", "", title) if title else None
 
 
@@ -446,9 +448,8 @@ def rule_r8(root: Path, g: Gate) -> None:
             in_pre_push = ln.startswith("pre-push:")
             continue
         if in_pre_push:
-            m = re.match(r"^    ([A-Za-z0-9][\w-]*):", ln)
-            if m:
-                commands.append(m.group(1))
+            if m := re.match(r"^    ([A-Za-z0-9][\w-]*):", ln):
+                commands.append(m[1])
     if not commands:
         return  # 无 pre-push commands 即无注记枚举面
     # 陈述侧：注记行切 token 与命令名取交集（只查 ⊇，多余措辞不罚）
@@ -495,9 +496,11 @@ def main() -> int:
         return 2
     root = Path(args.root).resolve()
 
-    missing = [s for s in (".factory", ".factory/README.md", "README.md", "skills")
-               if not (root / s).exists()]
-    if missing:
+    if missing := [
+        s
+        for s in (".factory", ".factory/README.md", "README.md", "skills")
+        if not (root / s).exists()
+    ]:
         print(f"doc-freshness: 结构性错误 {root} 缺 {'、'.join(missing)}", file=sys.stderr)
         return 2
     try:
