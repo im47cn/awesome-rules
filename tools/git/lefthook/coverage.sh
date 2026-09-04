@@ -2,10 +2,15 @@
 # 变更行覆盖率红线（awesome-rules tools/git 分发，由 lefthook 调用）
 # 用法: bash .lefthook/coverage.sh light   # pre-commit 轻检：复用已有 coverage 产物，不跑测试
 #       bash .lefthook/coverage.sh full    # pre-push 兜底：跑 pytest --cov / vitest --coverage
-# 红线: 变更行测试覆盖率 ≥95%（issue #3：与 steering testing 分层标准、模板 Proof ≥95% 统一）；无测试基础设施/无产物时提示后放行（全量兜底在 full）
+# 红线（分层，与 steering/testing-standards.md「覆盖率阈值」同口径）:
+#   变更行: java ≥98%、python/ts ≥90%（diff-cover 增量检查，light/full 双模式）
+#   java 全量（存量+新增）: JaCoCo 报告级行/分支 ≥98%（full 模式执行，红线主门槛）
+# 无测试基础设施/无产物时提示后放行（全量兜底在 full）
 set -u
 MODE="${1:-light}"
-FAIL_UNDER=95
+FAIL_UNDER_JAVA=98
+FAIL_UNDER_PY=90
+FAIL_UNDER_TS=90
 
 REPO=$(git rev-parse --show-toplevel)
 cd "$REPO"
@@ -53,6 +58,38 @@ dc() {
   fi
 }
 
+# 版本序比较: ver_ge <a> <b> → 真 当 a≥b（按 . 分段整数比较，剥 -SNAPSHOT 类后缀；10# 防前导 0 被当八进制）
+ver_ge() {
+  local a1 a2 a3 b1 b2 b3
+  IFS=. read -r a1 a2 a3 <<<"${1%%-*}"
+  IFS=. read -r b1 b2 b3 <<<"${2%%-*}"
+  a1=${a1:-0}; a2=${a2:-0}; a3=${a3:-0}; b1=${b1:-0}; b2=${b2:-0}; b3=${b3:-0}
+  [ "$((10#$a1))" -ne "$((10#$b1))" ] && { [ "$((10#$a1))" -gt "$((10#$b1))" ]; return; }
+  [ "$((10#$a2))" -ne "$((10#$b2))" ] && { [ "$((10#$a2))" -gt "$((10#$b2))" ]; return; }
+  [ "$((10#$a3))" -ge "$((10#$b3))" ]
+}
+
+# 汇总各 jacoco.xml 报告级（report 直接子级）LINE/BRANCH 计数 → "missed_line covered_line missed_branch covered_branch"
+# JaCoCo 生成器不写换行（整个报告是一行），且报告级 counter 在文档序最后（全部 </package> 之后）；
+# 故逐文件取「文档序最后一个」LINE/BRANCH counter 即报告级值（属性序 type→missed→covered 固定，总量 0 不写出），
+# 跨文件（多模块）累加；属性序/顺序已对真实 mvn 产物核实（wc -l = 0，与 python ElementTree 同值）
+jacoco_totals() {
+  awk '
+    function upd(s,   kv) {
+      split(s, kv, /"/)   # kv[2]=type kv[4]=missed kv[6]=covered
+      if (kv[2] == "LINE") { lm = kv[4]; lc = kv[6] } else { bm = kv[4]; bc = kv[6] }
+    }
+    FILENAME != cur { tlm += lm; tlc += lc; tbm += bm; tbc += bc; lm = lc = bm = bc = 0; cur = FILENAME }
+    {
+      s = $0
+      while (match(s, /<counter type="(LINE|BRANCH)" missed="[0-9]+" covered="[0-9]+"/)) {
+        upd(substr(s, RSTART, RLENGTH)); s = substr(s, RSTART + RLENGTH)
+      }
+    }
+    END { tlm += lm; tlc += lc; tbm += bm; tbc += bc; printf "%d %d %d %d\n", tlm+0, tlc+0, tbm+0, tbc+0 }
+  ' "$@"
+}
+
 fail=0
 
 # ---- python: . 或 backend/ 下有 pyproject.toml ----
@@ -62,8 +99,8 @@ if [ "$HAS_PY" = 1 ]; then
   for d in $py_dirs; do
     if [ "$MODE" = "light" ]; then
       [ -f "$d/coverage.xml" ] || { echo "[cov] $d 无 coverage.xml, 跳过轻检 (跑一次 pytest --cov 生成; 红线在 pre-push full)"; continue; }
-      echo "[cov] pre-commit $d python staged 变更覆盖检查 (≥${FAIL_UNDER}%)"
-      out=$(cd "$d" && dc coverage.xml --compare-branch=HEAD --ignore-unstaged --fail-under="$FAIL_UNDER")
+      echo "[cov] pre-commit $d python staged 变更覆盖检查 (≥${FAIL_UNDER_PY}%)"
+      out=$(cd "$d" && dc coverage.xml --compare-branch=HEAD --ignore-unstaged --fail-under="$FAIL_UNDER_PY")
       rc=$?
       printf '%s\n' "$out"
       if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -q 'No lines with coverage information'; then
@@ -84,12 +121,12 @@ if [ "$HAS_PY" = 1 ]; then
         fi
         cov_target="."
         [ -d src ] && cov_target="src"
-        echo "[cov] ▶ $d: pytest --cov=$cov_target + diff-cover (≥${FAIL_UNDER}%)"
+        echo "[cov] ▶ $d: pytest --cov=$cov_target + diff-cover (≥${FAIL_UNDER_PY}%)"
         "${PYTEST[@]}" --cov="$cov_target" --cov-report=xml:coverage.xml -q
         rc=$?
         [ $rc -eq 5 ] && { echo "[cov] $d 未收集到测试 (pytest rc=5), 跳过"; exit 0; }
         [ $rc -ne 0 ] && exit 1
-        dc coverage.xml --compare-branch="$COMPARE" --fail-under="$FAIL_UNDER"
+        dc coverage.xml --compare-branch="$COMPARE" --fail-under="$FAIL_UNDER_PY"
       ) || fail=1
     fi
   done
@@ -112,8 +149,8 @@ if [ "$HAS_JAVA" = 1 ]; then
         cd "$d" || exit 0
         xmls=$(ls target/site/jacoco/jacoco.xml */target/site/jacoco/jacoco.xml 2>/dev/null || true)
         [ -n "$xmls" ] || { echo "[cov] 无 jacoco 产物, 跳过轻检 (跑一次 mvn test 生成; 红线在 pre-push full)"; exit 0; }
-        echo "[cov] pre-commit $d java staged 变更覆盖检查 (≥${FAIL_UNDER}%)"
-        out=$(dc $xmls --compare-branch=HEAD --ignore-unstaged --fail-under="$FAIL_UNDER")
+        echo "[cov] pre-commit $d java staged 变更覆盖检查 (≥${FAIL_UNDER_JAVA}%)"
+        out=$(dc $xmls --compare-branch=HEAD --ignore-unstaged --fail-under="$FAIL_UNDER_JAVA")
         rc=$?
         printf '%s\n' "$out"
         if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -q 'No lines with coverage information'; then
@@ -124,14 +161,44 @@ if [ "$HAS_JAVA" = 1 ]; then
     else
       (
         cd "$d" || exit 1
-        echo "[cov] ▶ $d: mvn test + jacoco report + diff-cover (≥${FAIL_UNDER}%)"
+        # pom 钉了 jacoco-maven-plugin 版本时, 无版本 CLI 坐标会复用 pom 声明的版本；
+        # <0.8.3 无「名为 Generated 的注解」过滤, 生成代码会进分母使门禁数字失真 → 前提破坏直接拦
+        jver=$(grep -A3 '<artifactId>jacoco-maven-plugin</artifactId>' pom.xml 2>/dev/null \
+          | grep -o '<version>[^<]*</version>' | sed -n '1p' | sed 's/<[^>]*>//g')
+        if [ -n "$jver" ] && ! ver_ge "$jver" 0.8.3; then
+          echo "✗ [cov] $d jacoco-maven-plugin $jver < 0.8.3（Generated 注解过滤缺失, 生成代码会误入分母）, 升级后重试"
+          exit 1
+        fi
+        echo "[cov] ▶ $d: mvn test + jacoco report + 全量红线(行/分支 ≥${FAIL_UNDER_JAVA}%) + diff-cover 变更行(≥${FAIL_UNDER_JAVA}%)"
         # 全限定插件三连: 无需 pom 预配 jacoco（prepare-agent 默认注入 argLine）
         "${MVN[@]}" -q org.jacoco:jacoco-maven-plugin:prepare-agent test org.jacoco:jacoco-maven-plugin:report
         rc=$?
         [ $rc -ne 0 ] && exit 1
         xmls=$(ls target/site/jacoco/jacoco.xml */target/site/jacoco/jacoco.xml 2>/dev/null || true)
-        [ -n "$xmls" ] || { echo "[cov] $d 未生成任何 jacoco.xml, 跳过 diff-cover"; exit 0; }
-        dc $xmls --compare-branch="$COMPARE" --fail-under="$FAIL_UNDER"
+        [ -n "$xmls" ] || { echo "[cov] $d 未生成任何 jacoco.xml, 跳过"; exit 0; }
+        # 全量红线（存量+新增）: 汇总报告级 LINE/BRANCH 计数（生成代码剔除由 JaCoCo ≥0.8.3 注解过滤保证）
+        read -r lm lc bm bc <<<"$(jacoco_totals $xmls)"
+        if [ $((lm + lc)) -eq 0 ]; then
+          echo "[cov] $d jacoco 报告无 LINE 计数, 跳过全量红线"
+        else
+          lp=$(awk "BEGIN{printf \"%.1f\", 100*$lc/($lm+$lc)}")
+          if [ $((lc * 100)) -lt $((FAIL_UNDER_JAVA * (lm + lc))) ]; then
+            echo "✗ [cov] $d 全量行覆盖 ${lp}% < ${FAIL_UNDER_JAVA}%（存量+新增红线, 补测或按排除实践豁免后重跑）"
+            exit 1
+          fi
+          if [ $((bm + bc)) -gt 0 ]; then
+            bp=$(awk "BEGIN{printf \"%.1f\", 100*$bc/($bm+$bc)}")
+            if [ $((bc * 100)) -lt $((FAIL_UNDER_JAVA * (bm + bc))) ]; then
+              echo "✗ [cov] $d 全量分支覆盖 ${bp}% < ${FAIL_UNDER_JAVA}%（存量+新增红线）"
+              exit 1
+            fi
+          else
+            bp="n/a"
+          fi
+          echo "[cov] ✓ $d 全量行覆盖 ${lp}% / 分支 ${bp}% ≥ ${FAIL_UNDER_JAVA}%"
+        fi
+        # 增量补充检查（变更行）: 不替代上面的全量红线
+        dc $xmls --compare-branch="$COMPARE" --fail-under="$FAIL_UNDER_JAVA"
       ) || fail=1
     fi
   done
@@ -144,20 +211,20 @@ if [ "$HAS_TS" = 1 ]; then
   for d in $ts_dirs; do
     if [ "$MODE" = "light" ]; then
       [ -f "$d/coverage/lcov.info" ] || { echo "[cov] $d 无 coverage/lcov.info, 跳过轻检 (跑一次 vitest --coverage 生成; 红线在 pre-push full)"; continue; }
-      echo "[cov] pre-commit $d ts staged 变更覆盖检查 (≥${FAIL_UNDER}%)"
-      (cd "$d" && dc coverage/lcov.info --compare-branch=HEAD --ignore-unstaged --fail-under="$FAIL_UNDER") || fail=1
+      echo "[cov] pre-commit $d ts staged 变更覆盖检查 (≥${FAIL_UNDER_TS}%)"
+      (cd "$d" && dc coverage/lcov.info --compare-branch=HEAD --ignore-unstaged --fail-under="$FAIL_UNDER_TS") || fail=1
     else
       (
         cd "$d" || exit 1
-        echo "[cov] ▶ $d: vitest run --coverage + diff-cover (≥${FAIL_UNDER}%)"
+        echo "[cov] ▶ $d: vitest run --coverage + diff-cover (≥${FAIL_UNDER_TS}%)"
         npx vitest run --coverage || exit 1
         [ -f coverage/lcov.info ] || {
           echo "[cov] $d 未见 coverage/lcov.info (需 @vitest/coverage-v8), 跳过 diff-cover"; exit 0; }
-        dc coverage/lcov.info --compare-branch="$COMPARE" --fail-under="$FAIL_UNDER"
+        dc coverage/lcov.info --compare-branch="$COMPARE" --fail-under="$FAIL_UNDER_TS"
       ) || fail=1
     fi
   done
 fi
 
-[ $fail -ne 0 ] && echo "✗ [cov] 变更行覆盖率红线未通过 (≥${FAIL_UNDER}%)"
+[ $fail -ne 0 ] && echo "✗ [cov] 覆盖率红线未通过 (变更行: java ≥${FAIL_UNDER_JAVA}% / python・ts ≥${FAIL_UNDER_PY}%; java 全量行/分支 ≥${FAIL_UNDER_JAVA}%)"
 exit $fail

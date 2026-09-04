@@ -1,5 +1,5 @@
 # 由 awesome-rules tools/git/install.sh 分发 —— 入库共享，hook 由 lefthook 管理
-# 规范事实源：awesome-rules 仓库 steering/git-conventions.md + 全局红线「变更行覆盖率 ≥95%」
+# 规范事实源：awesome-rules 仓库 steering/git-conventions.md + 覆盖率红线「变更行 java ≥98% / python・ts ≥90%，java 全量行/分支 ≥98%」
 # 团队成员激活：npm i -g lefthook && lefthook install（或跑一次 install.sh）
 # 占位符 {staged_files}/{push_files} 是触发条件：有对应文件变更才执行（lefthook 2.x 无占位符恒 skip）
 commit-msg:
@@ -7,7 +7,7 @@ commit-msg:
     commitmsg:
       run: bash .lefthook/commitmsg-check.sh {1}
 
-# 变更行覆盖率红线（≥95%）
+# 覆盖率红线（变更行 java ≥98% / python・ts ≥90%；java 全量行/分支 ≥98%，口径见 steering/testing-standards.md「覆盖率阈值」）
 pre-commit:
   commands:
     coverage-light:
