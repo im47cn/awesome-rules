@@ -147,14 +147,26 @@ $(python3 "${REPO}/.factory/factory_lib.py" repo-vars)
 - 仓库根: ${WT}（链独立 worktree，勿越界改主工作区）
 - issue 编号: ${ISSUE}"
   t0=$(date +%s)
+  touch "${DIR}/.${name}-t0" 2>/dev/null || true  # B1: 节点起点标记（产物 mtime 参照）
   if ! omp_node "${WT}" "${DIR}/${name}.log" "$(node_timeout "${name}")" -- "${prompt}"; then
     _node_metric "${name}" "${t0}" "fail" >> "${DIR}/node-metrics.jsonl"
     echo "    节点 ${name} 失败（详见 ${DIR}/${name}.log）" >&2; return 1
   fi
   t1=$(date +%s)
-  if ! grep -q "ARTIFACT:" "${DIR}/${name}.log"; then
+  # B1（2026-09-05）：产物判定由"stdout 含 ARTIFACT: 字面行"改为"prompts 声明的
+  # 固定产物文件存在且 mtime ≥ 节点起点标记"。容忍 agent 末行格式漂移（实证：计划
+  # 完整产出但末行写"产物：/path/plan.json"被 grep 误杀）；产物缺失/未更新仍
+  # fail-closed（上一轮残留物 mtime < 起点标记，不误判通过）。无声明节点回退
+  # stdout ARTIFACT: 行检查。
+  artifact="$(grep -m1 -oE 'ARTIFACT: \$ISSUE_DIR/[^` ]+' "${REPO}/.factory/prompts/${name}.md" | sed 's#.*/##')"
+  if [ -z "${artifact}" ]; then
+    grep -q "ARTIFACT:" "${DIR}/${name}.log" || {
+      _node_metric "${name}" "${t0}" "no-artifact" >> "${DIR}/node-metrics.jsonl"
+      echo "    节点 ${name} 未声明产物（缺 ARTIFACT 行）" >&2; return 1
+    }
+  elif [ ! -f "${DIR}/${artifact}" ] || [ "${DIR}/${artifact}" -ot "${DIR}/.${name}-t0" ]; then
     _node_metric "${name}" "${t0}" "no-artifact" >> "${DIR}/node-metrics.jsonl"
-    echo "    节点 ${name} 未声明产物（缺 ARTIFACT 行）" >&2; return 1
+    echo "    节点 ${name} 产物缺失/未更新（${artifact} 不存在或早于节点起点标记）" >&2; return 1
   fi
   _node_metric "${name}" "${t0}" "ok" >> "${DIR}/node-metrics.jsonl"
   printf '    耗时 %ss\n' "$(( t1 - t0 ))"

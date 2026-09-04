@@ -91,8 +91,13 @@ NODE_TIMEOUT=30m .factory/fix-issue.sh 42           # 重跑链，triage 全新�
 triage 的输入，不是决策手势；标签才是）。
 ```
 
-节点失败（非零退出或产物缺 `ARTIFACT:` 行）= 整链终止，
-日志见 `artifacts/issue-N/<节点名>.log`。
+节点失败（非零退出，或声明的产物文件缺失/未更新）= 整链终止，
+日志见 `artifacts/issue-N/<节点名>.log`。产物存活判定（B1，
+2026-09-05）：prompts 声明的固定产物文件存在且 mtime ≥ 节点起点标记
+——容忍 stdout 末行格式漂移（#131 实测：计划完整产出但末行写
+"产物：…"、无 `ARTIFACT:` 前缀，被旧 grep 误杀）；stdout 末行
+`ARTIFACT: $ISSUE_DIR/<file>` 仍是节点协议要求与诊断依据，不再是
+存活判定的唯一信号。
 
 ## 产物清单（artifacts/issue-N/）
 
