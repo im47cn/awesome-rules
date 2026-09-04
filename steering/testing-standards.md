@@ -18,8 +18,11 @@ inclusion: always
 
 ## 覆盖率阈值
 
-- 新增代码：分支/行覆盖率 ≥ 70%
-- 核心业务逻辑：≥ 80%
+- Java 实现代码【强制】：全量（存量+新增）行/分支覆盖率 ≥ 98%；统计前先按「覆盖率统计范围与排除实践」剔除生成代码——lombok 生成成员、MapStruct `*ConverterImpl`（如 `WopGatewayAclConverterImpl`）等不进分母，98% 只约束手写实现代码
+- 非 Java 新增代码：分支/行覆盖率 ≥ 90%
+- 非 Java 核心业务逻辑：≥ 98%
+
+> 理由：剔除生成代码后剩余均为手写实现逻辑，98% 意味着未覆盖行只能以个位数例外存在并由 CR 逐条解释，而非整块兜底。
 
 ## 测试范围
 
@@ -38,7 +41,7 @@ inclusion: always
 
 | 类别 | 内容 | 排除机制 |
 | --- | --- | --- |
-| **生成代码** | Lombok 生成成员；MapStruct Impl；代码生成器产物（PO/Mapper）；WSDL/OpenAPI 客户端桩 | 注解驱动：`lombok.config` 开 `addLombokGeneratedAnnotation`（JaCoCo 0.8+ 对任何名为 `Generated` 的注解自动免计），随类走零误伤 |
+| **生成代码** | Lombok 生成成员；MapStruct Impl（`*ConverterImpl`，如 `WopGatewayAclConverterImpl`）；代码生成器产物（PO/Mapper）；WSDL/OpenAPI 客户端桩 | 注解驱动：`lombok.config` 开 `addLombokGeneratedAnnotation`（JaCoCo 0.8+ 对任何名为 `Generated` 的注解自动免计），随类走零误伤 |
 | **声明式/装配代码** | `@Configuration` Bean 装配；`@ConfigurationProperties` 绑定类；Application 主类；常量类；Feign 接口/标记接口（无方法体本就不计） | pom jacoco `excludes`（按包/类名模式），如 `**/*Application*`、`**/config/**` |
 | **边界壳（逐案定夺）** | MQ Listener/定时任务纯转发薄壳；Controller 薄壳 | 优先测而非排除（`@WebMvcTest`/消息驱动测试）；确不测的用 diff-cover `--exclude` 豁免门禁但保留报告真实 |
 
@@ -120,7 +123,7 @@ inclusion: always
 - lint/工具自动改写（Sourcery、docstring 回填等）提交后复查两件事：① 覆盖率是否无解释下降——改写可能落入度量工具盲区（wop-python-sdk 2026-08-31：coverage.py 对 walrus+yield 生成器的 break 弧不记录，Sourcery 改写致 99.78%，最小探针隔离复现后回退 4 行恢复 100%）；② 行号锚定的配置（覆盖率白名单、报告定位）是否漂移——同日 docstring 插入使 2 条白名单行号漂移，失配告警当场拦截；结构性辅助提交与锚定配置不得盲过
 
 - 全部测试必须通过
-- 新增代码覆盖率 ≥ 70%，核心业务 ≥ 80%
+- 覆盖率门禁与「覆盖率阈值」同口径：Java 实现代码全量 ≥ 98%（剔除生成代码后），非 Java 新增 ≥ 90% / 核心业务 ≥ 98%
 - 测试总耗时不超过最近 main 分支全量运行的 120%
 
 ## 变异测试纪律
