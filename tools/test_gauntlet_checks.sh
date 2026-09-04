@@ -792,6 +792,84 @@ if "$PY" tools/check_git_sealing.py "$NC14" >"$TMP/out14c" 2>&1; then
 else
     bad "NC14c 期望 rc=0, 实际: $(cat "$TMP/out14c")"
 fi
+# ── NC15 doc-freshness R8 负控制：分发闸枚举漂移必须被拦下 ──────────────
+# 夹具：NC10 最小仓叠加 tools/git 双文件面（yml pre-push 3 commands +
+# README 注记行）。2026-09-03 实证形态：pre-push 加第六闸/闸改名而注记
+# 不更新，reviewer 人工核对才发现——本条让闸数漂移机械化拦截。
+nc15_setup() {
+    _d=$1; _listed=$2   # _listed：注记行枚举段（全枚举=正控制，缺闸=负控制）
+    nc10_setup "$_d"
+    mkdir -p "$_d/tools/git"
+    cat >"$_d/tools/git/lefthook.yml" <<'EOF'
+commit-msg:
+  commands:
+    commitmsg:
+      run: x
+pre-push:
+  commands:
+    coverage-full:
+      run: x
+    tests:
+      run: x
+    # 段内注释行复刻真实 yml 形态（注释跳过分支不靠主仓运行偶然覆盖）
+    sourcery-gate:
+      run: x
+EOF
+    printf '> **pre-push 并发注记**：`lefthook.yml` pre-push 各 commands 并行执行：%s 同时跑。\n' \
+        "$_listed" >"$_d/tools/git/README.md"
+}
+
+# 正控制：注记全枚举 → 整门 rc=0（含 R8 对真形态无误报）
+NC15="$TMP/nc15"; nc15_setup "$NC15" 'coverage-full / tests / sourcery-gate'
+if "$PY" tools/check_doc_freshness.py "$NC15" >"$TMP/out15" 2>&1; then
+    ok "NC15 干净 fixture 全绿（R8 注记全枚举无误报）"
+else
+    bad "NC15 干净 fixture 期望 rc=0: $(cat "$TMP/out15")"
+fi
+
+# 漏闸：注记缺 tests（新增/改名闸不更新注记的漂移形态）
+NC15A="$TMP/nc15a"; nc15_setup "$NC15A" 'coverage-full / sourcery-gate'
+if "$PY" tools/check_doc_freshness.py "$NC15A" >"$TMP/out15a" 2>&1; then
+    _rc15a=0
+else
+    _rc15a=$?
+fi
+if [ "$_rc15a" -eq 1 ] && grep -q 'R8' "$TMP/out15a" \
+    && grep -q '缺 pre-push command tests' "$TMP/out15a"; then
+    ok "NC15a R8 注记缺闸检出"
+else
+    bad "NC15a 期望 rc=1+R8+缺 tests, 实际 rc=${_rc15a}: $(cat "$TMP/out15a")"
+fi
+
+# 注记行整体删除：枚举面消失本身即漂移（不得静默跳过）
+NC15B="$TMP/nc15b"; nc15_setup "$NC15B" 'coverage-full / tests / sourcery-gate'
+printf '# Git 工具\n' >"$NC15B/tools/git/README.md"
+if "$PY" tools/check_doc_freshness.py "$NC15B" >"$TMP/out15b" 2>&1; then
+    _rc15b=0
+else
+    _rc15b=$?
+fi
+if [ "$_rc15b" -eq 1 ] && grep -q 'R8' "$TMP/out15b" \
+    && grep -q '注记行未找到' "$TMP/out15b"; then
+    ok "NC15b R8 注记行删除检出（枚举面消失即漂移）"
+else
+    bad "NC15b 期望 rc=1+R8+未找到, 实际 rc=${_rc15b}: $(cat "$TMP/out15b")"
+fi
+
+# 无 pre-push 段：yml 存在但无闸面 → 整条跳过（与 R6/R7 缺面跳过同构）
+NC15C="$TMP/nc15c"; nc15_setup "$NC15C" 'x'
+cat >"$NC15C/tools/git/lefthook.yml" <<'EOF'
+commit-msg:
+  commands:
+    commitmsg:
+      run: x
+EOF
+if "$PY" tools/check_doc_freshness.py "$NC15C" >"$TMP/out15c" 2>&1; then
+    ok "NC15c R8 无 pre-push 段时整条跳过"
+else
+    bad "NC15c 无闸面期望 rc=0: $(cat "$TMP/out15c")"
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────
 if [ "$fails" -gt 0 ]; then
     echo "checker-self-test: $fails 项失败"

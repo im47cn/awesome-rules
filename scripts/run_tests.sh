@@ -67,7 +67,7 @@ if [ "${1:-}" != "--no-lock" ]; then
   fi
 fi
 
-# 文档新鲜度（实现↔文档一致性，R1-R5 见 tools/check_doc_freshness.py 头注释）。
+# 文档新鲜度（实现↔文档一致性，R1-R8 见 tools/check_doc_freshness.py 头注释）。
 # 刻意放在 --no-lock 分支外：工厂链 final_gate 跑的就是本脚本 --no-lock 形态
 # （plugin_lock/md_link_check）一起被 --no-lock 跳过。
 echo "── doc_freshness"

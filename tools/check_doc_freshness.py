@@ -39,6 +39,10 @@
         「等」明示枚举非穷尽，该行不查
      c. hooks/load-steering.sh「审查类任务可使用」清单 ⊇ 全部
         *-guard 技能
+  R8 分发闸枚举覆盖：tools/git/README.md 的 pre-push 并发注记行枚举的
+     command 名 ⊇ tools/git/lefthook.yml pre-push: commands 键全集
+     （行内按分隔符切 token 与命令名取交集，容忍多余措辞；加/删闸
+     不更新注记即漂移；yml 或 README 任一缺失则整条跳过）
 
 豁免（误报控制，两条稳定通道）：
   --allow REGEX（可重复）：正则 search 命中证据行（[级别] 文件:行 →
@@ -79,6 +83,9 @@ R4_REVERSED_RE = re.compile(r"(\d+)\s*[项条]\s*测试")
 
 R5_REUSE_RE = re.compile(r"复用\s*arch-guard")
 R5_CHECKOUT_RE = re.compile(r"git\s+checkout\s+-b\s+factory/issue")
+
+# R8 陈述侧口径：注记行按分隔符切 token，与 pre-push command 名取交集
+R8_SPLIT_RE = re.compile(r"[\s/、，,`*（）()：:。；;]+")
 
 DEF_TEST_RE = re.compile(r"(?m)^\s*(?:async\s+)?def\s+test_")
 
@@ -421,6 +428,47 @@ def rule_r7(root: Path, g: Gate) -> None:
             g.fail("hooks/load-steering.sh:1", "R7c 未找到「审查类任务可使用」清单行")
 
 
+def rule_r8(root: Path, g: Gate) -> None:
+    """R8 分发闸枚举覆盖：README 并发注记 ⊇ lefthook pre-push commands。"""
+    yml = root / "tools" / "git" / "lefthook.yml"
+    readme = root / "tools" / "git" / "README.md"
+    if not yml.is_file() or not readme.is_file():
+        return  # 无分发面即无枚举漂移面
+    # 事实侧：pre-push 段内 4 空格缩进键（commands: 2 缩进、run: 6 缩进均不匹配）
+    commands: list[str] = []
+    in_pre_push = False
+    for ln in _lines(yml):
+        if ln.lstrip().startswith("#"):
+            continue
+        if re.match(r"^\S", ln):
+            if in_pre_push:
+                break  # 下一个顶层段，pre-push 结束
+            in_pre_push = ln.startswith("pre-push:")
+            continue
+        if in_pre_push:
+            m = re.match(r"^    ([A-Za-z0-9][\w-]*):", ln)
+            if m:
+                commands.append(m.group(1))
+    if not commands:
+        return  # 无 pre-push commands 即无注记枚举面
+    # 陈述侧：注记行切 token 与命令名取交集（只查 ⊇，多余措辞不罚）
+    note_line: int | None = None
+    note_text = ""
+    for i, ln in enumerate(_lines(readme), 1):
+        if "pre-push 并发注记" in ln:
+            note_line, note_text = i, ln
+            break
+    if note_line is None:
+        g.fail("tools/git/README.md:1",
+               f"R8 pre-push 并发注记行未找到（{len(set(commands))} 个 commands 未被枚举覆盖）")
+        return
+    listed = set(R8_SPLIT_RE.split(note_text)) & set(commands)
+    for name in sorted(set(commands)):
+        if name not in listed:
+            g.fail(f"tools/git/README.md:{note_line}",
+                   f"R8 并发注记缺 pre-push command {name}（lefthook.yml pre-push 共 {len(set(commands))} 闸）")
+
+
 def _source_line(root: Path, where: str) -> str | None:
     """证据行 'path:line' → 源行文本（行级豁免标记判断用）。"""
     path_part, _, line_part = where.rpartition(":")
@@ -435,7 +483,7 @@ def _source_line(root: Path, where: str) -> str | None:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="实现↔文档一致性门禁（R1-R7）")
+    ap = argparse.ArgumentParser(description="实现↔文档一致性门禁（R1-R8）")
     ap.add_argument("root", nargs="?", default=".",
                     help="仓库根（默认当前目录）")
     ap.add_argument("--allow", action="append", default=[], metavar="REGEX",
@@ -466,6 +514,7 @@ def main() -> int:
     rule_r5(root, g)
     rule_r6(root, g)
     rule_r7(root, g)
+    rule_r8(root, g)
 
     fails: list[str] = []
     infos: list[str] = []
