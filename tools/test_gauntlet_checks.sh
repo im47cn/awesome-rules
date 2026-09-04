@@ -814,6 +814,10 @@ pre-push:
     # 段内注释行复刻真实 yml 形态（注释跳过分支不靠主仓运行偶然覆盖）
     sourcery-gate:
       run: x
+  # pre-push 下非 commands 的 2 空格键挂 4 空格子键：不得误收为 command
+  # （正控注记只列 3 闸，若误收 LEASE_TOKEN 正控即红——R8 状态机负控制）
+  env:
+    LEASE_TOKEN: x
 EOF
     # shellcheck disable=SC2016  # 字面 markdown 反引号，刻意单引号防展开（双引号会真执行命令替换）
     printf '> **pre-push 并发注记**：`lefthook.yml` pre-push 各 commands 并行执行：%s 同时跑。\n' \

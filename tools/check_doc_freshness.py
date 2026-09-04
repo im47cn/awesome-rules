@@ -436,9 +436,11 @@ def rule_r8(root: Path, g: Gate) -> None:
     readme = root / "tools" / "git" / "README.md"
     if not yml.is_file() or not readme.is_file():
         return  # 无分发面即无枚举漂移面
-    # 事实侧：pre-push 段内 4 空格缩进键（commands: 2 缩进、run: 6 缩进均不匹配）
+    # 事实侧：仅 pre-push 段内 2 空格 commands: 映射下的 4 空格键是 command
+    # （pre-push 下其它 2 空格键如 env: 挂的 4 空格子键不得误收；6 空格 run: 不匹配）
     commands: list[str] = []
     in_pre_push = False
+    in_commands = False
     for ln in _lines(yml):
         if ln.lstrip().startswith("#"):
             continue
@@ -447,9 +449,14 @@ def rule_r8(root: Path, g: Gate) -> None:
                 break  # 下一个顶层段，pre-push 结束
             in_pre_push = ln.startswith("pre-push:")
             continue
-        if in_pre_push:
-            if m := re.match(r"^    ([A-Za-z0-9][\w-]*):", ln):
-                commands.append(m[1])
+        if not in_pre_push:
+            continue
+        if m2 := re.match(r"^  ([A-Za-z0-9][\w-]*):", ln):
+            in_commands = m2[1] == "commands"  # 2 空格键切换进出 commands 映射
+            continue
+        if in_commands:
+            if m4 := re.match(r"^    ([A-Za-z0-9][\w-]*):", ln):
+                commands.append(m4[1])
     if not commands:
         return  # 无 pre-push commands 即无注记枚举面
     # 陈述侧：注记行切 token 与命令名取交集（只查 ⊇，多余措辞不罚）
