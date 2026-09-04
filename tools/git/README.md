@@ -28,7 +28,7 @@ bash /path/to/awesome-rules/tools/git/install.sh .
 `install.sh` 会：
 
 1. 检测 node / npm（需 node ≥ 16）
-2. 拷贝 11 个分发件到项目（**入库共享给全团队**）：`commitlint.config.js` + `.versionrc.js` + `lefthook.yml` + `.lefthook/{coverage,commitmsg-check,run-tests,spec-check,sourcery-gate,mutation-gate,coderabbit-gate}.sh` + `.lefthook/spec_check.py`（清单与 `install.sh` 内置 `DIST` 单源对应，可用 `--check` 巡检漂移）；`commit-template.txt` → `~/.gitmessage`（全局 commit 模板）
+2. 拷贝 11 个分发件到项目（**入库共享给全团队**）：`commitlint.config.cjs` + `.versionrc.cjs` + `lefthook.yml` + `.lefthook/{coverage,commitmsg-check,run-tests,spec-check,sourcery-gate,mutation-gate,coderabbit-gate}.sh` + `.lefthook/spec_check.py`（清单与 `install.sh` 内置 `DIST` 单源对应，可用 `--check` 巡检漂移；`.cjs` 命名兼容 ESM 项目，issue #131）；`commit-template.txt` → `~/.gitmessage`（全局 commit 模板）
 3. **全局**安装工具（`@commitlint/cli`、`@commitlint/config-conventional`、`commit-and-tag-version`、`lefthook`，检测已装则跳过）
 4. 执行 `lefthook install` 写入 hook shim（读项目内 `lefthook.yml`，调全局 commitlint）
 5. 在 `package.json` 注入 `release` / `release:dry` 脚本（调全局 commit-and-tag-version）
@@ -44,7 +44,7 @@ bash /path/to/awesome-rules/tools/git/install.sh --update /path/to/业务项目
 
 `--update` 与首次安装的区别：
 
-- 配置文件（`commitlint.config.js` / `.versionrc.js` / `lefthook.yml` / `.lefthook/*.sh` + `.lefthook/spec_check.py`）与 commit 模板：**无条件覆盖**（首次安装遇已存在会询问）
+- 配置文件（`commitlint.config.cjs` / `.versionrc.cjs` / `lefthook.yml` / `.lefthook/*.sh` + `.lefthook/spec_check.py`）与 commit 模板：**无条件覆盖**（首次安装遇已存在会询问）；旧版 `.js` 分发名与上游 `.cjs` 字节一致时自动删除迁移，被业务改写则保留点名（issue #131）
 - hook：自动清理本工具旧版直写的 `commit-msg` 后重跑 `lefthook install`；非本工具、非 lefthook 生成的 hook **一律跳过**，`core.hooksPath` 被 husky 等接管时同样跳过，避免破坏既有方案
 - 全局工具、`package.json` scripts：与首次相同（检测补装 / 幂等注入）
 
@@ -56,10 +56,10 @@ bash /path/to/awesome-rules/tools/git/install.sh --update /path/to/业务项目
 bash /path/to/awesome-rules/tools/git/install.sh --check /path/to/业务项目
 ```
 
-`--check` 逐件比对 11 个分发件（根 3 件：`commitlint.config.js` / `.versionrc.js` / `lefthook.yml`；`.lefthook/` 下 8 件 hook 脚本与 `spec_check.py`），**非交互、零副作用**——不写任何文件、不碰 `~/.gitmessage` / git config / npm，也不依赖 node（巡检在 node 检测之前短路；`~/.gitmessage` 是机器级全局文件，不在比对集）：
+`--check` 逐件比对 11 个分发件（根 3 件：`commitlint.config.cjs` / `.versionrc.cjs` / `lefthook.yml`；`.lefthook/` 下 8 件 hook 脚本与 `spec_check.py`），**非交互、零副作用**——不写任何文件、不碰 `~/.gitmessage` / git config / npm，也不依赖 node（巡检在 node 检测之前短路；`~/.gitmessage` 是机器级全局文件，不在比对集）：
 
 - 全部一致：输出 `11/11 分发件一致` 并 exit 0
-- 缺失或漂移：逐件点名（`缺失  <相对路径>` / `漂移  <相对路径>（与上游 awesome-rules 不一致）`）后 exit 1——可直接挂上游 CI 定期任务，漂移静默积累即门禁红灯
+- 缺失、漂移或遗留旧版 `.js` 分发名：逐件点名（`缺失  <相对路径>` / `漂移  <相对路径>（与上游 awesome-rules 不一致）` / `遗留  <相对路径>（旧版分发名，重跑 --update 迁移 .cjs）`）后 exit 1——可直接挂上游 CI 定期任务，漂移静默积累即门禁红灯
 - 旧版项目（仅 3 脚本 + 2 根配置的早期接入仓）按 11 件全集报缺失，输出即「应装未装」清单
 
 巡检是 `steering/git-conventions.md`「同步纪律 → 门禁脚本双向流」小节中覆盖式同步前人工 diff 规程的机械化：它只负责**检出**差异；检出后仍须按该规范人工确认方向——是「本地实验未回流」（实验改动应收编回流或还原）还是「上游演进未同步」（执行 `--update` 刷新），确认后再动。
@@ -114,12 +114,12 @@ npm run release       # 正式执行：bump 版本 + 更新 CHANGELOG.md + 打 t
 三份配置单一对齐 `steering/git-conventions.md`，是规范的「可执行镜像」：
 
 - `~/.gitmessage` —— commit 模板（装主目录 + 全局 `commit.template`，所有仓库/IDEA 一次识别）
-- `commitlint.config.js` —— type/scope 枚举、主题行 ≤50 字符、breaking 标记（事后校验）
+- `commitlint.config.cjs` —— type/scope 枚举、主题行 ≤50 字符、breaking 标记（事后校验）
 - `lefthook.yml` —— hook 编排（commit-msg → 规范校验；pre-commit/pre-push → 覆盖率红线），入库随 clone 共享
 - `.lefthook/commitmsg-check.sh` —— commit 规范校验（缺 commitlint 自动 `npm install -g`；无 node 提示后放行，装 node 后首次提交自动补装）
 - `.lefthook/coverage.sh` —— 变更行覆盖率红线（diff-cover ≥95%，light/full 双模式；python/node/java；缺 diff-cover 自动安装，见「覆盖率红线依赖」），入库随 clone 共享
 - `.lefthook/run-tests.sh` —— pre-push 项目自定义测试入口壳：项目有 `scripts/pre-push-tests.sh` 则执行（非零退出阻断 push），无则跳过。**`lefthook.yml` 是分发物（`--update` 会覆盖，勿手工加段）**，项目级测试/构建门禁一律写进 `scripts/pre-push-tests.sh`
-- `.versionrc.js` —— changelog 中文分节、emoji 前缀
+- `.versionrc.cjs` —— changelog 中文分节、emoji 前缀
 
 > **pre-push 并发注记（面向下游业务项目）**：`lefthook.yml` pre-push 各 commands 默认**并行执行**（未标 `piped`/`sequential`）：coverage-full / tests / sourcery-gate / mutation-gate / coderabbit-gate 按各自触发条件启用后同时跑。
 > 根或 `backend/` 有 `pyproject.toml` 的项目，coverage-full 在推送含 `.py` 变更、基线可解析且装了 `pytest`/`pytest-cov` 时才真跑 `pytest --cov`——此时若项目自身 tests 闸跑同一测试树，两进程即并发。
@@ -162,7 +162,7 @@ A: 三种方式的取舍：
 工具仍走**全局安装**（不进业务项目 `package.json`），延续「项目零依赖」原则。
 
 **Q: scope 用了枚举外的业务域被警告怎么办？**
-A: scope 校验为 `warn` 级别，不阻断提交。新增业务域请在 `commitlint.config.js` 的 `scope-enum` 补充，并同步 `steering/git-conventions.md`。
+A: scope 校验为 `warn` 级别，不阻断提交。新增业务域请在 `commitlint.config.cjs` 的 `scope-enum` 补充，并同步 `steering/git-conventions.md`。
 
 **Q: breaking change 如何触发 major 版本号？**
 A: 提交时标记 `feat!:` 或在 footer 写 `BREAKING CHANGE:`，`npm run release` 会自动 bump major。

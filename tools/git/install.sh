@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # awesome-rules —— Git 自动化工具一键安装 / 更新
-# 工具全局（commitlint/commit-and-tag-version/lefthook）+ 配置入库（commitlint.config.js/.versionrc.js/lefthook.yml）+ hook 仓库（lefthook 托管）
+# 工具全局（commitlint/commit-and-tag-version/lefthook）+ 配置入库（commitlint.config.cjs/.versionrc.cjs/lefthook.yml）+ hook 仓库（lefthook 托管）
 #
 # 用法:
 #   bash install.sh [目标项目根目录]            # 首次安装（默认当前目录）
@@ -34,8 +34,8 @@ TARGET="$(cd "${TARGET_ARG:-$PWD}" && pwd)"
 # 分发清单（单一来源）：src 相对 SCRIPT_DIR → dst 相对 TARGET，install/update/check 三模式共用
 # ../spec_check.py 是 spec 反向核对脚本（与 spec-check.sh 配套），随 hook 分发到项目 .lefthook/
 DIST=(
-  "commitlint.config.js:commitlint.config.js"
-  ".versionrc.js:.versionrc.js"
+  "commitlint.config.cjs:commitlint.config.cjs"
+  ".versionrc.cjs:.versionrc.cjs"
   "lefthook.yml:lefthook.yml"
   "lefthook/coverage.sh:.lefthook/coverage.sh"
   "lefthook/commitmsg-check.sh:.lefthook/commitmsg-check.sh"
@@ -67,6 +67,13 @@ if [ "$MODE" = "check" ]; then
       drift=$((drift + 1))
     fi
   done
+  # 旧版分发名（issue #131 前 .js 双件）：检出即漂移——ESM 项目会崩，须 --update 迁移
+  for legacy in commitlint.config.js .versionrc.js; do
+    if [ -f "$TARGET/$legacy" ]; then
+      echo "遗留  ${legacy}（旧版分发名，重跑 --update 迁移 .cjs）"
+      drift=$((drift + 1))
+    fi
+  done
   if [ "$missing" -eq 0 ] && [ "$drift" -eq 0 ]; then
     echo "✔ ${#DIST[@]}/${#DIST[@]} 分发件一致，无缺失无漂移"
     exit 0
@@ -92,6 +99,19 @@ copy_one() { # $1=源文件名(相对 SCRIPT_DIR) $2=目标路径
 mkdir -p "$TARGET/.lefthook"
 for pair in "${DIST[@]}"; do
   copy_one "${pair%%:*}" "$TARGET/${pair#*:}"
+done
+
+# 旧版分发名迁移清理（issue #131：.js → .cjs）：旧 .js 与新拷贝的 .cjs 字节
+# 相同 → 删（未改写的旧安装）；被业务改写 → 保留点名，不覆盖业务决策
+for legacy in commitlint.config.js .versionrc.js; do
+  if [ -f "$TARGET/$legacy" ]; then
+    if cmp -s "$TARGET/${legacy%.js}.cjs" "$TARGET/$legacy"; then
+      rm "$TARGET/$legacy"
+      echo "✔ 已迁移 ${legacy} → ${legacy%.js}.cjs（旧件未改写，删除）"
+    else
+      echo "⚠ 保留 ${legacy}（与上游 .cjs 不同——业务已改写，请人工确认后删除）"
+    fi
+  fi
 done
 
 
