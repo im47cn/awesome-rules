@@ -1006,6 +1006,38 @@ else
     bad "NC17e 期望 rc=2, 实际 rc=${_rc17e}, 输出: $(cat "$TMP/out17e")"
 fi
 
+# NC17f R1 标识符边界（CodeRabbit PR #140）：fake_gettempdir() 等本地助手
+# 不调真实 API——旧正则按子串误命中判 rc=1，收紧后须放行
+cat >"$TMP/nc17/test_r1_ident.py" <<'EOF'
+def fake_gettempdir():
+    return "/srv/scratch"
+
+
+def test_helper_only():
+    assert fake_gettempdir()
+EOF
+if "$PY" tools/check_tempdir_usage.py "$TMP/nc17/test_r1_ident.py" >"$TMP/out17f" 2>&1; then
+    ok "NC17f R1 标识符边界（fake_gettempdir 放行，真实 API 仍由 NC17 拦）"
+else
+    bad "NC17f 期望 rc=0, 实际输出: $(cat "$TMP/out17f")"
+fi
+
+# NC17g 现存非 git 目录（CodeRabbit PR #140）：不同于 NC17c 不存在路径
+# （main 早退），须真实走到 tracked_test_files 的 rev-parse fail-closed 分支。
+# 夹具不能放 $TMP 下——NC1 已 git init "$TMP"，其内目录必在 worktree 中。
+_nc17g_plain=$(mktemp -d)
+if "$PY" tools/check_tempdir_usage.py "$_nc17g_plain" >"$TMP/out17g" 2>&1; then
+    _rc17g=0
+else
+    _rc17g=$?
+fi
+rm -rf "$_nc17g_plain"
+if [ "$_rc17g" -eq 2 ]; then
+    ok "NC17g 现存非 git 目录 fail-closed rc=2"
+else
+    bad "NC17g 期望 rc=2, 实际 rc=${_rc17g}, 输出: $(cat "$TMP/out17g")"
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────
 if [ "$fails" -gt 0 ]; then
     echo "checker-self-test: $fails 项失败"

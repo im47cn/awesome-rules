@@ -33,7 +33,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-RE_GETTEMPDIR = re.compile(r"gettempdir\s*\(")
+# (?<![\w]) 标识符边界：fake_gettempdir() 等本地助手不调真实 API，不得
+# 误判 R1（CodeRabbit PR #140）；tempfile.gettempdir() 前导字符是 "."，
+# 不受边界影响照常命中。
+RE_GETTEMPDIR = re.compile(r"(?<![\w])gettempdir\s*\(")
 RE_TMP_ENUM = re.compile(
     r"""(?:
         (?:\bglob\s*\.\s*glob|(?<![\w.])glob|\.\s*glob|os\s*\.\s*listdir)
