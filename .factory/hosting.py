@@ -193,6 +193,20 @@ class GitHubAdapter:
             return False  # gh CLI 不在 PATH（环境缺失，非凭据问题）
         return r.returncode == 0
 
+    def auth_diagnose(self) -> str:
+        """auth_ok 失败的留痕诊断：返回 gh auth status 的 stderr（非空时，否则 stdout），并去除首尾空白。
+
+        【2026-09-05 02:00 wop 6 仓瞬断事故】auth_ok 只回布尔，失败
+        stderr 被丢弃 → 事后无法回溯是 keyring/网络/过期哪种。dispatch
+        preflight 失败路径调用，输出附着 dispatch 日志（同 bare 事故的
+        诊断附着模式）。"""
+        try:
+            r = subprocess.run(["gh", "auth", "status"],
+                               capture_output=True, text=True)
+        except FileNotFoundError:
+            return "gh CLI 不在 PATH（auth_ok 同因失败）"
+        return (r.stderr if r.stderr.strip() else r.stdout).strip()
+
     def issue_view(self, n, repo=None):
         return self._issue(self._gh_json(
             ["issue", "view", str(n),

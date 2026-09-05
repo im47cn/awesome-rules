@@ -919,6 +919,9 @@ def dispatch_main(args: list[str]) -> int:
         return 2
     if not adapter.auth_ok():
         print("托管平台不可用（hosting auth：gh 凭据或云效令牌）", file=sys.stderr)
+        if diag := getattr(adapter, "auth_diagnose", lambda: "")():
+            # 留痕可回溯（2026-09-05 02:00 事故：auth_ok 失败细节被丢弃）
+            print(f"hosting auth 诊断: {diag}", file=sys.stderr)
         return 2
     # 主树锚定：git-common-dir 在 worktree 中指向主 .git，据此回到主树
     # .factory（39b6b8ec 硬锁语义）；非 git 环境退回 CWD 仓 .factory

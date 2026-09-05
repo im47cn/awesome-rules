@@ -192,6 +192,16 @@ class TestDispatchWiring:
         assert any("pr list" in ln for ln in _stub_lines(tmp_path))  # gh 数据面已触达
 
 
+    def test_auth_failure_attaches_diagnosis(self, tmp_path):
+        """preflight auth 失败留痕（2026-09-05 02:00 事故）：无 gh CLI →
+        exit 2 + stderr 附 auth_diagnose 诊断，日志可回溯环境/凭据归因。"""
+        repo = _sandbox(tmp_path, json.dumps(FLOOR), "")
+        r = _run(["bash", ".factory/dispatch.sh"], repo, tmp_path, with_stubs=False)
+        assert r.returncode == 2
+        assert "托管平台不可用" in r.stderr
+        assert "hosting auth 诊断: gh CLI 不在 PATH" in r.stderr
+        assert "熔断" not in r.stderr
+
 # ---- 3. fix-issue.sh：AI 节点/租约/锁之前 ----
 
 class TestFixIssueWiring:
