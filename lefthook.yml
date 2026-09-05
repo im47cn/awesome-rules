@@ -1,8 +1,9 @@
 # 本仓库自用变体——直接引用 tools/git/lefthook/（单一源，零拷贝漂移）。
-# 与分发模板 tools/git/lefthook.yml 的差异仅两类：① 路径（模板用 .lefthook/，
-# 由 install.sh 拷贝产物到业务项目）；② 根仓语境注释。闸集合与 wiring 两侧
-# 一致：commit-msg/commitmsg / coverage-light / spec-check / coverage-full / tests /
-# sourcery-gate / mutation-gate / coderabbit-gate。
+# 与分发模板 tools/git/lefthook.yml 的差异：① 路径（模板用 .lefthook/，由 install.sh
+# 拷贝产物到业务项目）；② 根仓语境注释；③ pre-push 串行（parallel: false，见下——
+# 根仓高频 push 实测 coverage-full/tests 并发瞬态失败；模板保持并行待下游实测）。
+# 闸集合与 wiring 两侧一致：commit-msg/commitmsg / coverage-light / spec-check /
+# coverage-full / tests / sourcery-gate / mutation-gate / coderabbit-gate。
 # ⚠ 不要对本仓库跑 tools/git/install.sh --update（会用模板覆盖本文件的路径）
 # 规范事实源：steering/git-conventions.md + 覆盖率红线「变更行 java ≥98% / python・ts ≥90%，java 全量行/分支 ≥98%」
 # 团队成员激活：npm i -g lefthook && lefthook install（或 npm run setup:hooks）
@@ -22,6 +23,11 @@ pre-commit:
       run: bash tools/git/lefthook/spec-check.sh {staged_files}
 
 pre-push:
+  # 串行执行（2026-09-05）：coverage-full 与 tests 均为全量 pytest 进程——并行跑
+  # 撞 run_tests.sh「禁止双实例」禁令（lease 固定 /tmp/pgfactory-lease-test + 端口
+  # 55432；且共享 .pytest_cache/.coverage 写竞争）——曾致 push 瞬态失败（bg_9 tests
+  # ✗ 44.88s，手动串行复现即绿）。fail-fast：前闸失败后闸不再跑。
+  parallel: false
   commands:
     coverage-full:
       run: bash tools/git/lefthook/coverage.sh full {push_files}
