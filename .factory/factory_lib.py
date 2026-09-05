@@ -816,9 +816,26 @@ def _upstream_sync_check(cfg: _DispatchCfg) -> int:
     """M2 上游同步检查（设计 §11.2）：零 LLM、不占 R4 预算。
     不复用 fix-issue 链（guard PERIMETER 含 .factory/，链按设计拦工具链
     自变更）；exit 0 = 同步已推进 → 当轮即止（自我指涉护栏：后续派发仍跑
-    内存旧脚本，下一轮生效）；1/2/3 不阻断本轮派发。"""
+    内存旧脚本，下一轮生效）；1/2/3 不阻断本轮派发。
+
+    根仓免跑（2026-09-05 裁决：本仓库是根仓、无上游）：锁文件缺
+    upstream 字段 = 无上游声明 → 直接跳过，不再触发脚本 exit 2 噪音
+    （此前 103 轮 dispatch 日志刷「缺 upstream 字段」）。fork 侧
+    sync --apply 写锁带 upstream=根仓 URL → 走正常检查自动追平。"""
     check = cfg.factory / "upstream-sync-check.sh"
-    if os.access(check, os.X_OK) and (cfg.factory / "upstream-lock.json").is_file():
+    lock = cfg.factory / "upstream-lock.json"
+    if os.access(check, os.X_OK) and lock.is_file():
+        try:
+            payload = json.loads(lock.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError("upstream-lock.json must contain an object")
+            declared = payload.get("upstream")
+        except (OSError, ValueError):
+            print("（upstream-lock.json 不可读或非对象——跳过上游同步，需人工处置）")
+            return 0
+        if not declared and not os.environ.get("FACTORY_UPSTREAM"):
+            print("（根仓无上游声明，免上游同步——fork 侧仍自动追平）")
+            return 0
         if subprocess.run(["bash", str(check)]).returncode == 0:
             print("上游同步已推进，本轮派发即止（下轮生效）")
             return 0
