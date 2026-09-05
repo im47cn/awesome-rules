@@ -39,7 +39,7 @@
         「等」明示枚举非穷尽，该行不查
      c. hooks/load-steering.sh「审查类任务可使用」清单 ⊇ 全部
         *-guard 技能
-  R8 分发闸枚举覆盖：tools/git/README.md 的 pre-push 并发注记行枚举的
+  R8 分发闸枚举覆盖：tools/git/README.md 的 pre-push 执行模型注记行枚举的
      command 名 ⊇ tools/git/lefthook.yml pre-push: commands 键全集
      （行内按分隔符切 token 与命令名取交集，容忍多余措辞；加/删闸
      不更新注记即漂移；yml 或 README 任一缺失则整条跳过）
@@ -431,7 +431,7 @@ def rule_r7(root: Path, g: Gate) -> None:
 
 
 def rule_r8(root: Path, g: Gate) -> None:
-    """R8 分发闸枚举覆盖：README 并发注记 ⊇ lefthook pre-push commands。"""
+    """R8 分发闸枚举覆盖：README 执行模型注记 ⊇ lefthook pre-push commands。"""
     yml = root / "tools" / "git" / "lefthook.yml"
     readme = root / "tools" / "git" / "README.md"
     if not yml.is_file() or not readme.is_file():
@@ -463,18 +463,18 @@ def rule_r8(root: Path, g: Gate) -> None:
     note_line: int | None = None
     note_text = ""
     for i, ln in enumerate(_lines(readme), 1):
-        if "pre-push 并发注记" in ln:
+        if "pre-push 执行模型注记" in ln:
             note_line, note_text = i, ln
             break
     if note_line is None:
         g.fail("tools/git/README.md:1",
-               f"R8 pre-push 并发注记行未找到（{len(set(commands))} 个 commands 未被枚举覆盖）")
+               f"R8 pre-push 执行模型注记行未找到（{len(set(commands))} 个 commands 未被枚举覆盖）")
         return
     listed = set(R8_SPLIT_RE.split(note_text)) & set(commands)
     for name in sorted(set(commands)):
         if name not in listed:
             g.fail(f"tools/git/README.md:{note_line}",
-                   f"R8 并发注记缺 pre-push command {name}（lefthook.yml pre-push 共 {len(set(commands))} 闸）")
+                   f"R8 执行模型注记缺 pre-push command {name}（lefthook.yml pre-push 共 {len(set(commands))} 闸）")
 
 
 def _source_line(root: Path, where: str) -> str | None:
