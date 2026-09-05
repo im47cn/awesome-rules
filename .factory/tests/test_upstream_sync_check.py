@@ -125,3 +125,47 @@ class TestSyncRcContract:
         assert "[dry-run] full 漂移存在" in proc.stdout
         lines = calls.read_text().splitlines()
         assert all("auth" in line for line in lines), f"dry-run 不得触发远端命令: {lines}"
+
+
+class TestDispatchRootRepoSkip:
+    """调用方 factory_lib._upstream_sync_check 根仓免跑契约（2026-09-05）。
+
+    噪音 C 溯源：根仓锁文件缺 upstream 字段（本仓是源仓，无上游可同步），
+    但 dispatch 每轮仍跑 upstream-sync-check.sh → 脚本 exit 2 刷日志 103 轮。
+    裁决：根仓免跑（锁缺 upstream = 无上游声明），fork 侧 sync --apply
+    写锁带 upstream=根仓 URL → 走正常检查自动追平。"""
+    import factory_lib
+
+    def _mk(self, tmp_path, lock: dict | None):
+        from types import SimpleNamespace
+        factory = tmp_path / ".factory"
+        factory.mkdir()
+        check = factory / "upstream-sync-check.sh"
+        check.write_text("#!/usr/bin/env bash\necho invoked > $(dirname $0)/invoked-marker\nexit 0\n", encoding="utf-8")
+        check.chmod(0o755)
+        if lock is not None:
+            (factory / "upstream-lock.json").write_text(
+                json.dumps(lock, ensure_ascii=False), encoding="utf-8")
+        return SimpleNamespace(factory=factory)
+
+    def test_root_repo_skips_without_upstream_field(self, tmp_path, capsys):
+        """根仓：锁缺 upstream 字段 → 免跑（脚本不被调、无噪音、rc 0）。"""
+        cfg = self._mk(tmp_path, {"anchor": "20f6a63"})
+        assert self.factory_lib._upstream_sync_check(cfg) == 0
+        assert "根仓无上游声明，免上游同步" in capsys.readouterr().out
+        assert not (cfg.factory / "invoked-marker").exists(), "根仓不得调用 check 脚本"
+
+    def test_fork_repo_runs_check_with_upstream_field(self, tmp_path, capsys):
+        """fork：锁带 upstream=根仓 URL → 正常跑脚本（自动追平不回归）。"""
+        cfg = self._mk(tmp_path, {"anchor": "x", "upstream": "https://github.com/im47cn/awesome-rules"})
+        assert self.factory_lib._upstream_sync_check(cfg) == 0
+        assert "上游同步已推进" in capsys.readouterr().out
+        assert (cfg.factory / "invoked-marker").exists(), "fork 侧必须跑 check 脚本"
+
+    def test_corrupt_lock_skips_with_disclosure(self, tmp_path, capsys):
+        """坏 JSON 锁：不可读 → 免跑 + 披露需人工处置（不静默、不刷噪音）。"""
+        cfg = self._mk(tmp_path, None)
+        (cfg.factory / "upstream-lock.json").write_text("{broken", encoding="utf-8")
+        assert self.factory_lib._upstream_sync_check(cfg) == 0
+        assert "upstream-lock.json 不可读" in capsys.readouterr().out
+        assert not (cfg.factory / "invoked-marker").exists()
