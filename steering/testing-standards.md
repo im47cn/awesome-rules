@@ -98,7 +98,7 @@ inclusion: always
 
 ### 度量纪律【强制】
 
-- CRAP 必须基于**绿套件的全新覆盖率产物**计算：红/被跳过的测试虚抬风险，先修绿再度量；红线套件上的 CRAP 是噪声不是信号（同日实证：18 个 NPE 红测试把 `GatewayDispatchAppService` ΣCRAP 从 29.0 虚抬到 38.8、cov 82%；接线修复后 cov 100%、ΣCRAP 回落）
+- 失败测试不得作为通过门禁的依据；其已产生的 JaCoCo 执行数据是否纳入诊断必须明确。跳过测试应保留为未覆盖风险，skip 清单必须作为门禁失败或显式豁免条件，不得统称为「虚抬风险」
 - 方法级口径：comp 取 JaCoCo XML 方法 `COMPLEXITY` missed+covered 之和，cov 取 INSTRUCTION 覆盖率（LINE 兜底）；类级用 ΣCRAP 找风险聚集地，项目级用 **CRAP ≥ 30 方法计数**做门禁指标——平均覆盖率会被大量简单访问器稀释，CRAP 计数不会
 - 集成测试不必然降 CRAP：只重走单测已覆盖路径的集成用例对覆盖率零贡献（同日实证：17 个 RealRedis 集成用例全部执行 2.5s，覆盖率逐字节不变）。降 CRAP 的增量来自**故障注入**（畸形 Lua verdict、熔断分支等错误路径），不是「换更真的环境」
 
