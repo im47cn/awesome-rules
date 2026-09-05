@@ -28,7 +28,7 @@ bash /path/to/awesome-rules/tools/git/install.sh .
 `install.sh` 会：
 
 1. 检测 node / npm（需 node ≥ 16）
-2. 拷贝 11 个分发件到项目（**入库共享给全团队**）：`commitlint.config.cjs` + `.versionrc.cjs` + `lefthook.yml` + `.lefthook/{coverage,commitmsg-check,run-tests,spec-check,sourcery-gate,mutation-gate,coderabbit-gate}.sh` + `.lefthook/spec_check.py`（清单与 `install.sh` 内置 `DIST` 单源对应，可用 `--check` 巡检漂移；`.cjs` 命名兼容 ESM 项目，issue #131）；`commit-template.txt` → `~/.gitmessage`（全局 commit 模板）
+2. 拷贝 12 个分发件到项目（**入库共享给全团队**）：`commitlint.config.cjs` + `.versionrc.cjs` + `lefthook.yml` + `.lefthook/{coverage,commitmsg-check,run-tests,pre-push-delete-guard,spec-check,sourcery-gate,mutation-gate,coderabbit-gate}.sh` + `.lefthook/spec_check.py`（清单与 `install.sh` 内置 `DIST` 单源对应，可用 `--check` 巡检漂移；`.cjs` 命名兼容 ESM 项目，issue #131）；`commit-template.txt` → `~/.gitmessage`（全局 commit 模板）
 3. **全局**安装工具（`@commitlint/cli`、`@commitlint/config-conventional`、`commit-and-tag-version`、`lefthook`，检测已装则跳过）
 4. 执行 `lefthook install` 写入 hook shim（读项目内 `lefthook.yml`，调全局 commitlint）
 5. 在 `package.json` 注入 `release` / `release:dry` 脚本（调全局 commit-and-tag-version）
@@ -56,11 +56,11 @@ bash /path/to/awesome-rules/tools/git/install.sh --update /path/to/业务项目
 bash /path/to/awesome-rules/tools/git/install.sh --check /path/to/业务项目
 ```
 
-`--check` 逐件比对 11 个分发件（根 3 件：`commitlint.config.cjs` / `.versionrc.cjs` / `lefthook.yml`；`.lefthook/` 下 8 件 hook 脚本与 `spec_check.py`），**非交互、零副作用**——不写任何文件、不碰 `~/.gitmessage` / git config / npm，也不依赖 node（巡检在 node 检测之前短路；`~/.gitmessage` 是机器级全局文件，不在比对集）：
+`--check` 逐件比对 12 个分发件（根 3 件：`commitlint.config.cjs` / `.versionrc.cjs` / `lefthook.yml`；`.lefthook/` 下 9 件 hook 脚本与 `spec_check.py`），**非交互、零副作用**——不写任何文件、不碰 `~/.gitmessage` / git config / npm，也不依赖 node（巡检在 node 检测之前短路；`~/.gitmessage` 是机器级全局文件，不在比对集）：
 
-- 全部一致：输出 `11/11 分发件一致` 并 exit 0
+- 全部一致：输出 `12/12 分发件一致` 并 exit 0
 - 缺失、漂移或遗留旧版 `.js` 分发名：逐件点名（`缺失  <相对路径>` / `漂移  <相对路径>（与上游 awesome-rules 不一致）` / `遗留  <相对路径>（旧版分发名，重跑 --update 迁移 .cjs）`）后 exit 1——可直接挂上游 CI 定期任务，漂移静默积累即门禁红灯
-- 旧版项目（仅 3 脚本 + 2 根配置的早期接入仓）按 11 件全集报缺失，输出即「应装未装」清单
+- 旧版项目（仅 3 脚本 + 2 根配置的早期接入仓）按 12 件全集报缺失，输出即「应装未装」清单
 
 巡检是 `steering/git-conventions.md`「同步纪律 → 门禁脚本双向流」小节中覆盖式同步前人工 diff 规程的机械化：它只负责**检出**差异；检出后仍须按该规范人工确认方向——是「本地实验未回流」（实验改动应收编回流或还原）还是「上游演进未同步」（执行 `--update` 刷新），确认后再动。
 
@@ -122,6 +122,7 @@ npm run release       # 正式执行：bump 版本 + 更新 CHANGELOG.md + 打 t
 - `.versionrc.cjs` —— changelog 中文分节、emoji 前缀
 
 > **pre-push 执行模型注记（面向下游业务项目）**：`lefthook.yml` pre-push = **串行快速失败链**（`piped: true`）：命令按 `priority` 升序执行（同优先级按命令名字母序），任一检查失败 → 后续全部跳过（broken pipe），push 即被阻断。执行顺序：`tests`（priority 1）→ `coverage-full`（priority 2）→ 无 priority 的 `sourcery-gate` / `mutation-gate` / `coderabbit-gate`（最末，按字母序）——**tests 先行、通过后才跑覆盖率**。
+> 纯删除 push（`git push <remote> --delete <branch>`）不触发任何门禁：`{push_files}` 实为 `git diff HEAD @{push}`，与本次推送内容无关——各命令前置 `.lefthook/pre-push-delete-guard.sh`，所有行 local SHA 全零即纯删除，短路该门禁；守卫缺失/异常 fail-open，门禁照常执行。手动 `lefthook run pre-push` 须以 `</dev/null` 结尾（`use_stdin: true` 急切捕获 stdin，TTY 下阻塞等 EOF；真实 push 由 git 关闭管道，无此问题）。
 > 根或 `backend/` 有 `pyproject.toml` 的项目，coverage-full 在推送含 `.py` 变更、基线可解析且装了 `pytest`/`pytest-cov` 时才真跑 `pytest --cov`——因链串行，tests 与 coverage-full 不会并发（旧「并发注记」所述 TMPDIR glob 差集竞态在此模型下不存在，下游无需前缀隔离）。
 > awesome-rules 本仓无 `pyproject.toml`（`package.json` 亦未声明 vitest），coverage-full 恒休眠，不受影响。
 >

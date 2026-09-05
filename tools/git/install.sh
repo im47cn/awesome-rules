@@ -44,6 +44,7 @@ DIST=(
   "lefthook/sourcery-gate.sh:.lefthook/sourcery-gate.sh"
   "lefthook/mutation-gate.sh:.lefthook/mutation-gate.sh"
   "lefthook/coderabbit-gate.sh:.lefthook/coderabbit-gate.sh"
+  "lefthook/pre-push-delete-guard.sh:.lefthook/pre-push-delete-guard.sh"
   "../spec_check.py:.lefthook/spec_check.py"
 )
 
