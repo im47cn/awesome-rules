@@ -17,12 +17,20 @@ pre-commit:
       run: bash .lefthook/spec-check.sh {staged_files}
 
 pre-push:
+  # 2026-09-05 决策（@_user_1）: 先跑测试、通过后再跑覆盖率——lefthook 串行执行按
+  # 命令名字母序（priority 0/缺省=最后），tests 与 coverage-full 均跑全量 pytest
+  # （含 pyproject.toml 的仓 coverage-full 跑 pytest --cov），须 tests 先行；piped 链:
+  # tests 失败 → coverage-full 不跑。sourcery/mutation/coderabbit 无依赖走 tier 0。
+  piped: true
   commands:
-    coverage-full:
-      run: bash .lefthook/coverage.sh full {push_files}
+
     # 项目自定义测试入口: 有 scripts/pre-push-tests.sh 则执行（全量测试/构建检查等），无则跳过
     tests:
+      priority: 1
       run: bash .lefthook/run-tests.sh {push_files}
+    coverage-full:
+      priority: 2
+      run: bash .lefthook/coverage.sh full {push_files}
     # Sourcery 硬闸: 仓库 opt-in（.sourcery.yaml 存在）才启用，语言文件 push 前 review --check
     sourcery-gate:
       run: bash .lefthook/sourcery-gate.sh {push_files}
