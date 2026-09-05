@@ -42,8 +42,15 @@ SUITES=(
 )
 
 # ── 并行段：8 套件 + badcase + lease-sql ────────────────────────────────
+FAILED=()  # 先于 trap 注册（set -u 下 trap 引用 ${#FAILED[@]}，提前退出不 unbound）
 LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ar-run-tests.XXXXXX")"
-trap 'rm -rf "$LOG_DIR"' EXIT
+# 失败保留证据（2026-09-05 bg_9 教训：tests ✗ 44.88s 段日志被无条件删，
+# 手动串行复现即绿 → 只能归因瞬态。失败时保留 LOG_DIR 供定位失败段）。
+trap 'rc=$?; if [ $rc -ne 0 ] || [ "${#FAILED[@]}" -gt 0 ]; then
+  echo "❌ run_tests 失败 (rc=$rc)——段日志保留: $LOG_DIR" >&2
+else
+  rm -rf "$LOG_DIR"
+fi' EXIT
 
 PAR_HEADERS=()  # 段头（与串行版逐字一致）
 PAR_TAGS=()     # 失败聚合标签
@@ -74,7 +81,6 @@ par_launch "── lease-sql(非PG段)" "lease-sql" \
 
 # 两轮：先全量 wait 收状态，再按段序回放——早段日志不抢跑（全部段
 # 真正结束后才 cat），失败聚合仍在回放时按段序进行。
-FAILED=()
 PAR_STATUS=()
 for pid in "${PAR_PIDS[@]}"; do
   if wait "$pid"; then
