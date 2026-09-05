@@ -194,7 +194,7 @@ class GitHubAdapter:
         return r.returncode == 0
 
     def auth_diagnose(self) -> str:
-        """auth_ok 失败的留痕诊断：gh auth status 原始输出。
+        """auth_ok 失败的留痕诊断：返回 gh auth status 的 stderr（非空时，否则 stdout），并去除首尾空白。
 
         【2026-09-05 02:00 wop 6 仓瞬断事故】auth_ok 只回布尔，失败
         stderr 被丢弃 → 事后无法回溯是 keyring/网络/过期哪种。dispatch
