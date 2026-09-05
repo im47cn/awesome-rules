@@ -56,8 +56,12 @@ def _run_gate(tmp_path: Path, files: list[str], *, sourcery_yaml=True,
         (bindir / "sourcery").write_text(_SOURCERY_STUB, encoding="utf-8")
         (bindir / "sourcery").chmod(0o755)
         path = f"{bindir}:{path}"
+    else:
+        bindir = tmp_path / "empty-bin"
+        bindir.mkdir()
+        path = str(bindir)
     env = dict(os.environ, PATH=path, STUB_LOG=str(log), STUB_RC=str(stub_rc))
-    r = subprocess.run(["bash", str(GATE), *files], cwd=str(work), env=env,
+    r = subprocess.run(["/bin/bash", str(GATE), *files], cwd=str(work), env=env,
                        capture_output=True, text=True, timeout=30)
     calls = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
     return r, calls
