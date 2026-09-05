@@ -205,7 +205,7 @@ class GitHubAdapter:
                                capture_output=True, text=True)
         except FileNotFoundError:
             return "gh CLI 不在 PATH（auth_ok 同因失败）"
-        return (r.stderr or r.stdout).strip()
+        return (r.stderr if r.stderr.strip() else r.stdout).strip()
 
     def issue_view(self, n, repo=None):
         return self._issue(self._gh_json(
