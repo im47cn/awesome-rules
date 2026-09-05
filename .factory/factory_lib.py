@@ -826,11 +826,14 @@ def _upstream_sync_check(cfg: _DispatchCfg) -> int:
     lock = cfg.factory / "upstream-lock.json"
     if os.access(check, os.X_OK) and lock.is_file():
         try:
-            declared = json.loads(lock.read_text(encoding="utf-8")).get("upstream")
+            payload = json.loads(lock.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError("upstream-lock.json must contain an object")
+            declared = payload.get("upstream")
         except (OSError, ValueError):
-            print("（upstream-lock.json 不可读——跳过上游同步，需人工处置）")
+            print("（upstream-lock.json 不可读或非对象——跳过上游同步，需人工处置）")
             return 0
-        if not declared:
+        if not declared and not os.environ.get("FACTORY_UPSTREAM"):
             print("（根仓无上游声明，免上游同步——fork 侧仍自动追平）")
             return 0
         if subprocess.run(["bash", str(check)]).returncode == 0:

@@ -169,3 +169,20 @@ class TestDispatchRootRepoSkip:
         assert self.factory_lib._upstream_sync_check(cfg) == 0
         assert "upstream-lock.json 不可读" in capsys.readouterr().out
         assert not (cfg.factory / "invoked-marker").exists()
+
+    def test_valid_json_non_dict_lock_skips_with_disclosure(self, tmp_path, capsys):
+        """sourcery issue(bug_risk)：合法 JSON 非对象（[]/null/"bad"）→ .get 崩——
+        须校验 dict 形态后披露免跑（不 AttributeError）。"""
+        cfg = self._mk(tmp_path, None)
+        (cfg.factory / "upstream-lock.json").write_text("[]", encoding="utf-8")
+        assert self.factory_lib._upstream_sync_check(cfg) == 0
+        assert "不可读或非对象" in capsys.readouterr().out
+        assert not (cfg.factory / "invoked-marker").exists(), "非对象锁不得调用 check 脚本"
+
+    def test_env_declared_upstream_still_runs_check(self, tmp_path, capsys, monkeypatch):
+        """sourcery issue(broader_impact)：锁缺 upstream 但 FACTORY_UPSTREAM env 已设
+        （check 脚本 L45 支持的合法上游源）→ 不得误免跑，须调脚本。"""
+        monkeypatch.setenv("FACTORY_UPSTREAM", "https://github.com/im47cn/awesome-rules")
+        cfg = self._mk(tmp_path, {"anchor": "x"})
+        assert self.factory_lib._upstream_sync_check(cfg) == 0
+        assert (cfg.factory / "invoked-marker").exists(), "env 声明上游的 fork 必须跑 check 脚本"
