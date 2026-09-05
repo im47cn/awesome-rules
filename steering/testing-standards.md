@@ -69,7 +69,7 @@ inclusion: always
 
 ### 公式与阈值
 
-`CRAP(m) = comp² × (1 − cov)³ + comp`（comp = 方法圈复杂度，cov = 该方法覆盖率）
+`CRAP(m) = comp² × (1 − cov)³ + comp`（comp = 方法圈复杂度；cov = covered / (missed + covered) ∈ [0,1]，JaCoCo 显示的百分比如 50% 代入前须转为 0.5）
 
 阈值 **CRAP ≥ 30 需要处理**（crap4j 经典口径），校准直觉：
 
@@ -88,12 +88,12 @@ inclusion: always
 
 | 形态 | 读数 | 动作 |
 | --- | --- | --- |
-| 复杂但已驯服 | CC 高、cov 高 | 不急；重构可选，测试已是保护网（如 `FieldMappingEngine` ΣCRAP 114 / cov 98.6%） |
+| 复杂但已驯服 | CC 高、cov 高 | CRAP < 30 才可不急；若 ≥ 30 门禁失败仍须整改，高覆盖下通常选重构，测试已是保护网（如 `FieldMappingEngine` ΣCRAP 114 / cov 98.6%） |
 | 简单但裸奔 | CC 低、cov 0 | 先问该不该存在：死代码删除，不为它写测试 |
 | 又复杂又缺覆盖 | CC 高、cov < 90% | 先补测试（三次方项让覆盖收益最大） |
 | 复杂且覆盖够仍居榜首 | CC 高、cov ≥ 95% | 杠杆是重构拆分，补测几乎不动数字 |
 
-- 一句话判据：**CRAP 高且 cov < 90% → 写测试；CRAP 高且 cov ≥ 95% → 拆方法**（同日实证：`RateLimitFilter.doPre` CC 18 / cov 89.2% → CRAP 18.4，补满覆盖也只降到 18 仍居榜首——该方法的改进杠杆是拆分不是补测）
+- 一句话判据：**CRAP 高且 cov < 90% → 写测试；CRAP 高且 cov ≥ 95% → 拆方法**——整改手段按 cov 定，但无论何种手段，**CRAP ≥ 30 方法计数清零（= 0）是硬性退出条件**（同日实证：`RateLimitFilter.doPre` CC 18 / cov 89.2% → CRAP 18.4，补满覆盖也只降到 18 仍居榜首——该方法的改进杠杆是拆分不是补测）
 - 死代码识别三征：cov 0% + CC > 0 + 全仓零调用 → 删除而非补测（同日实证：`AccessLogFilter.truncate` 私有方法 CC 3 / cov 0% / 零调用，删除后风险整体消失——无法变更不存在的代码）
 
 ### 度量纪律【强制】
