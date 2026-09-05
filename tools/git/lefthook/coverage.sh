@@ -189,9 +189,10 @@ if [ "$HAS_JAVA" = 1 ]; then
           echo "✗ [cov] $d jacoco-maven-plugin $jver < 0.8.2（Generated 注解过滤缺失, 生成代码会误入分母）, 升级后重试"
           exit 1
         fi
-        echo "[cov] ▶ $d: mvn test + jacoco report + 全量红线(行/分支 ≥${FAIL_UNDER_JAVA}%) + diff-cover 变更行(≥${FAIL_UNDER_JAVA}%)"
+        echo "[cov] ▶ $d: mvn clean test + jacoco report + 全量红线(行/分支 ≥${FAIL_UNDER_JAVA}%) + diff-cover 变更行(≥${FAIL_UNDER_JAVA}%)"
         # 全限定插件三连: 无需 pom 预配 jacoco（prepare-agent 默认注入 argLine）
-        "${MVN[@]}" -q org.jacoco:jacoco-maven-plugin:prepare-agent test org.jacoco:jacoco-maven-plugin:report
+        # clean 防增量漏编: ff/切分支后 mtime 粒度内批量写文件, 增量编译可能漏编致旧 class 语义误拦（gateway 2026-09-05 实证: 脏 target 8 测试失败, clean 后 1212 全绿）
+        "${MVN[@]}" -q clean org.jacoco:jacoco-maven-plugin:prepare-agent test org.jacoco:jacoco-maven-plugin:report
         rc=$?
         [ $rc -ne 0 ] && exit 1
         xmls=$(ls target/site/jacoco/jacoco.xml */target/site/jacoco/jacoco.xml 2>/dev/null || true)
