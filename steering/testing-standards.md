@@ -65,7 +65,7 @@ inclusion: always
 
 ## CRAP 变更风险度量与门禁
 
-> 定位：CRAP（Change Risk Anti-Patterns，[crap4j FAQ](https://web.archive.org/web/20211020043803/http://www.crap4j.org/faq.html)）度量「改这段代码出事的概率」，不是「代码写得好不好」。复杂度本身不产生风险，**未被测试覆盖的复杂度**才产生风险；覆盖率门禁（≥98%）回答「测了多少」，CRAP 回答「剩余风险压在哪、用哪个杠杆拆」。适用于存量风险评估与测试编写优先级排序。
+> 定位：CRAP（Change Risk Analysis and Prediction，[crap4j FAQ](https://web.archive.org/web/20211020043803/http://www.crap4j.org/faq.html)）度量「改这段代码出事的概率」，不是「代码写得好不好」。复杂度本身不产生风险，**未被测试覆盖的复杂度**才产生风险；覆盖率门禁（≥98%）回答「测了多少」，CRAP 回答「剩余风险压在哪、用哪个杠杆拆」。适用于存量风险评估与测试编写优先级排序。
 
 ### 公式与阈值
 
