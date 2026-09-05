@@ -121,6 +121,31 @@ class TestGithubCommands:
                         {"op": "remove", "label": "factory:needs-fix"},
                         {"op": "add", "label": "other"}]
 
+    def test_auth_diagnose_reports_gh_stderr(self):
+        """auth 失败留痕：gh auth status 原始 stderr 返回（可回溯诊断）。"""
+        ad = hosting.GitHubAdapter()
+        orig = subprocess.run
+        hosting.subprocess.run = lambda *a, **k: _cp(rc=1, err="auth failed: bad keyring")
+        try:
+            diag = ad.auth_diagnose()
+        finally:
+            hosting.subprocess.run = orig
+        assert diag == "auth failed: bad keyring"
+
+    def test_auth_diagnose_gh_missing_from_path(self):
+        """无 gh CLI → 诊断标明环境缺失（区别于凭据/网络失败）。"""
+        ad = hosting.GitHubAdapter()
+        orig = subprocess.run
+
+        def _boom(*a, **k):
+            raise FileNotFoundError
+
+        hosting.subprocess.run = _boom
+        try:
+            diag = ad.auth_diagnose()
+        finally:
+            hosting.subprocess.run = orig
+        assert "gh CLI 不在 PATH" in diag
 
 # ── Codeup：请求形状 + 缺口 fail-closed ────────────────────────────
 
