@@ -64,6 +64,7 @@ else
     run_layer orchestration-self-test sh tools/test_gauntlet_orchestration.sh
     run_layer checker-self-test sh tools/test_gauntlet_checks.sh
     run_layer spec-check-self-test sh tools/test_spec_check.sh
+    run_layer delete-guard-self-test sh tools/test_pre-push-delete-guard.sh
 
     require_dir scripts .factory \
         skills/api-guard/scripts skills/ddl-guard/scripts skills/arch-guard/scripts \
@@ -93,12 +94,12 @@ else
 
     run_layer syntax-sh-n sh -n tools/gauntlet.sh tools/must_not_match.sh \
                tools/test_gauntlet_orchestration.sh tools/test_gauntlet_checks.sh \
-               tools/test_spec_check.sh \
+               tools/test_spec_check.sh tools/test_pre-push-delete-guard.sh \
                hooks/load-steering.sh hooks/on-session-end.sh
     # lint 范围只含本仓新增 tools/ 脚本：hooks/ 属既有代码，其基线告警不属本门范围；清单镜像于 scripts/run_tests.sh lint-shellcheck 层，两处同步维护
     run_layer lint-shellcheck shellcheck tools/gauntlet.sh tools/must_not_match.sh \
                 tools/test_gauntlet_orchestration.sh tools/test_gauntlet_checks.sh \
-                tools/test_spec_check.sh
+                tools/test_spec_check.sh tools/test_pre-push-delete-guard.sh
 
     # ── .factory/ shell 门（2026-08-22 feedback 事故后补） ─────────────
     # 事故：feedback 适配节点产出 BRANCH 未定义（SC2154）的 fix-issue.sh，
