@@ -132,7 +132,7 @@ echo "── lint-shellcheck"
 if command -v shellcheck >/dev/null 2>&1; then
   if ! shellcheck tools/gauntlet.sh tools/must_not_match.sh \
       tools/test_gauntlet_orchestration.sh tools/test_gauntlet_checks.sh \
-      tools/test_spec_check.sh; then
+      tools/test_spec_check.sh tools/test_pre-push-delete-guard.sh; then
     FAILED+=("lint-shellcheck")
   fi
 else

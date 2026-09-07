@@ -41,8 +41,9 @@ for m in $mods; do
   fi
   PL=(); [ "$m" != "." ] && PL=(-pl "$m")
   echo "▶ [mutation] $m: PIT mutationCoverage (阈值见 pom mutationThreshold)"
-  # 单模块跑 PIT 时 minion 从本地仓库取兄弟模块 jar —— 先静默 install 依赖(跳测试)消除 classpath 漂移
-  mvn -B -q ${PL[@]+"${PL[@]}"} -am install -DskipTests >/dev/null 2>&1 || true
+  # 单模块跑 PIT 时 minion 从本地仓库取兄弟模块 jar —— 先静默 clean install 依赖(跳测试):
+  # clean 防增量编译陈旧 class(2026-09-06 实证: 残留产物致 lambda$new$0 假红), 变异体须基于当前源码
+  mvn -B -q ${PL[@]+"${PL[@]}"} -am clean install -DskipTests >/dev/null 2>&1 || true
   if mvn -B ${PL[@]+"${PL[@]}"} org.pitest:pitest-maven:mutationCoverage; then
     echo "✓ [mutation] $m 变异分达标"
   else

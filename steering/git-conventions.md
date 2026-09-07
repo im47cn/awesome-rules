@@ -161,6 +161,8 @@ Refs #321
 - awesome-rules 是规范权威：同步方向上的冲突以上游为准；本地未回流的差异属于「实验中」，不算漂移，但回流前不得再次从上游覆盖式同步同名文件（否则实验丢失）
 - 漂移防线靠**差异可见**而非禁止直改：覆盖式同步（install.sh 重跑）前先 `diff` 本地 `.lefthook/` 与上游 `tools/git/lefthook/`，差异非空时人工确认是「本地实验未回流」还是「上游演进未同步」；`.factory` 工具链自身的同步与漂移检查走 `.factory/sync-from-upstream.sh`（三态清单 + feedback-upstream 反哺闭环，见 .factory/README.md「上游同步」）
 
+- pre-push 门禁的触发边界：纯删除型 push（`git push <remote> --delete <branch>`，本地无提交上传）不触发任何 pre-push 门禁（变更行覆盖率/测试/Sourcery/变异/CodeRabbit）；判定由 `.lefthook/pre-push-delete-guard.sh` 读 pre-push stdin 的 ref 更新行完成（所有行 local SHA 全零 = 纯删除），守卫缺失/异常时 fail-open——门禁照常执行，绝不因守卫问题拦死正常 push（lefthook `{push_files}` 实为 `git diff HEAD @{push}`，与本次推送内容无关，不能作为删除判据）
+
 ## Pull Request
 
 - AI 创建 PR 后即停，合并决定权归人工：不得在创建后自行 `gh pr merge`——即使推送被分支保护拒绝转走 PR 流，也不延伸为自动合并（2026-08-24 PR #50/#51 教训：创建后 15 秒自行合并，人工审查窗口被绕过）

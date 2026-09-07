@@ -21,22 +21,34 @@ pre-push:
   # 命令名字母序（priority 0/缺省=最后），tests 与 coverage-full 均跑全量 pytest
   # （含 pyproject.toml 的仓 coverage-full 跑 pytest --cov），须 tests 先行；piped 链:
   # tests 失败 → coverage-full 不跑。sourcery/mutation/coderabbit 无依赖走 tier 0。
+  # 纯删除 push（git push <remote> --delete <branch>）不触发任何门禁：{push_files} 实为
+  # git diff HEAD @{push}（lefthook internal/git/repo.go PushFiles），与本次推送内容无关，
+  # 删远程分支时若本地同名分支领先会误触发全部门禁。各命令前置 pre-push-delete-guard.sh
+  # （命令须 use_stdin: true 才能收到 stdin）：所有行 local SHA 全零 = 纯删除 → 守卫
+  # exit 0 短路该门禁；守卫缺失/读取失败/行格式异常一律 fail-open（exit 1），门禁照常
+  # 执行。手动 `lefthook run pre-push` 须以 </dev/null 结尾（use_stdin 急切捕获 stdin，
+  # TTY 下阻塞等 EOF；真实 push 由 git 关闭管道，无此问题）。
   piped: true
   commands:
 
     # 项目自定义测试入口: 有 scripts/pre-push-tests.sh 则执行（全量测试/构建检查等），无则跳过
     tests:
       priority: 1
-      run: bash .lefthook/run-tests.sh {push_files}
+      use_stdin: true
+      run: bash .lefthook/pre-push-delete-guard.sh || bash .lefthook/run-tests.sh {push_files}
     coverage-full:
       priority: 2
-      run: bash .lefthook/coverage.sh full {push_files}
+      use_stdin: true
+      run: bash .lefthook/pre-push-delete-guard.sh || bash .lefthook/coverage.sh full {push_files}
     # Sourcery 硬闸: 仓库 opt-in（.sourcery.yaml 存在）才启用，语言文件 push 前 review --check
     sourcery-gate:
-      run: bash .lefthook/sourcery-gate.sh {push_files}
+      use_stdin: true
+      run: bash .lefthook/pre-push-delete-guard.sh || bash .lefthook/sourcery-gate.sh {push_files}
     # 变异分红线: src/main 生产代码变更时按模块跑 PIT（阈值见各模块 pom mutationThreshold，无 pitest 配置则提示跳过）
     mutation-gate:
-      run: bash .lefthook/mutation-gate.sh {push_files}
+      use_stdin: true
+      run: bash .lefthook/pre-push-delete-guard.sh || bash .lefthook/mutation-gate.sh {push_files}
     # CodeRabbit 建议性评审: 仓库 opt-in（.coderabbit.yaml 存在）才启用，push 时后台 --light 评审已提交变更（异步不阻塞、不拦 push）
     coderabbit-gate:
-      run: bash .lefthook/coderabbit-gate.sh {push_files}
+      use_stdin: true
+      run: bash .lefthook/pre-push-delete-guard.sh || bash .lefthook/coderabbit-gate.sh {push_files}
