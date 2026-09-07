@@ -28,7 +28,7 @@ bash /path/to/awesome-rules/tools/git/install.sh .
 `install.sh` 会：
 
 1. 检测 node / npm（需 node ≥ 16）
-2. 拷贝 12 个分发件到项目（**入库共享给全团队**）：`commitlint.config.cjs` + `.versionrc.cjs` + `lefthook.yml` + `.lefthook/{coverage,commitmsg-check,run-tests,pre-push-delete-guard,spec-check,sourcery-gate,mutation-gate,coderabbit-gate}.sh` + `.lefthook/spec_check.py`（清单与 `install.sh` 内置 `DIST` 单源对应，可用 `--check` 巡检漂移；`.cjs` 命名兼容 ESM 项目，issue #131）；`commit-template.txt` → `~/.gitmessage`（全局 commit 模板）
+2. 拷贝全部分发件到项目（**入库共享给全团队**）：`commitlint.config.cjs` + `.versionrc.cjs` + `lefthook.yml` + `.lefthook/{coverage,commitmsg-check,run-tests,pre-push-delete-guard,spec-check,sourcery-gate,mutation-gate,coderabbit-gate}.sh` + `.lefthook/spec_check.py`（清单与 `install.sh` 内置 `DIST` 单源对应，可用 `--check` 巡检漂移；`.cjs` 命名兼容 ESM 项目，issue #131）；`commit-template.txt` → `~/.gitmessage`（全局 commit 模板）
 3. **全局**安装工具（`@commitlint/cli`、`@commitlint/config-conventional`、`commit-and-tag-version`、`lefthook`，检测已装则跳过）
 4. 执行 `lefthook install` 写入 hook shim（读项目内 `lefthook.yml`，调全局 commitlint）
 5. 在 `package.json` 注入 `release` / `release:dry` 脚本（调全局 commit-and-tag-version）
@@ -56,11 +56,11 @@ bash /path/to/awesome-rules/tools/git/install.sh --update /path/to/业务项目
 bash /path/to/awesome-rules/tools/git/install.sh --check /path/to/业务项目
 ```
 
-`--check` 逐件比对 12 个分发件（根 3 件：`commitlint.config.cjs` / `.versionrc.cjs` / `lefthook.yml`；`.lefthook/` 下 9 件 hook 脚本与 `spec_check.py`），**非交互、零副作用**——不写任何文件、不碰 `~/.gitmessage` / git config / npm，也不依赖 node（巡检在 node 检测之前短路；`~/.gitmessage` 是机器级全局文件，不在比对集）：
+`--check` 逐件比对全部分发件（根配置 `commitlint.config.cjs` / `.versionrc.cjs` / `lefthook.yml`；`.lefthook/` 下 hook 脚本与 `spec_check.py`），**非交互、零副作用**——不写任何文件、不碰 `~/.gitmessage` / git config / npm，也不依赖 node（巡检在 node 检测之前短路；`~/.gitmessage` 是机器级全局文件，不在比对集）：
 
-- 全部一致：输出 `12/12 分发件一致` 并 exit 0
+- 全部一致：输出 `N/N 分发件一致`（N = `install.sh` `DIST` 清单件数，随上游自动变化）并 exit 0
 - 缺失、漂移或遗留旧版 `.js` 分发名：逐件点名（`缺失  <相对路径>` / `漂移  <相对路径>（与上游 awesome-rules 不一致）` / `遗留  <相对路径>（旧版分发名，重跑 --update 迁移 .cjs）`）后 exit 1——可直接挂上游 CI 定期任务，漂移静默积累即门禁红灯
-- 旧版项目（仅 3 脚本 + 2 根配置的早期接入仓）按 12 件全集报缺失，输出即「应装未装」清单
+- 旧版项目（仅 3 脚本 + 2 根配置的早期接入仓）按 `DIST` 全集报缺失，输出即「应装未装」清单
 
 巡检是 `steering/git-conventions.md`「同步纪律 → 门禁脚本双向流」小节中覆盖式同步前人工 diff 规程的机械化：它只负责**检出**差异；检出后仍须按该规范人工确认方向——是「本地实验未回流」（实验改动应收编回流或还原）还是「上游演进未同步」（执行 `--update` 刷新），确认后再动。
 
