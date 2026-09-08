@@ -106,6 +106,11 @@ Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分�
 | [Gauntlet 门禁入口 SPEC](docs/design/spec-2026-08-21-gauntlet-entry.md) | 单一门禁入口 tools/gauntlet.sh：层编排 fail-closed + 检查器负控制 + 手动变异冒烟 |
 | [Gauntlet 门禁入口 EVIDENCE](docs/design/evidence-2026-08-21-gauntlet-entry.md) | 15 层全绿（927 tests / 4/4 变异击杀）证据报告，含三次门拦真问题与 errexit 缺陷修复记录 |
 | [P3 分发层数据验证与套件设计](docs/design/distribution-verification-and-suite-design.md) | 10 下游仓实测(冻结 sha 证据索引):DIST-1..10 条款、mkdir 跨平台锁、CI gate 注入方案 |
+| 项目架构图 | 仓库整体架构交互图：治理闭环 / 规范供给 / 分发与自进化（archify 生成 awesome-rules-architecture.html，规格 JSON 同目录） |
+| GTSP 分层架构图 | gtsp-* 完整档六模块分层与跨域解耦交互图（依据 steering/gtsp/01，生成 gtsp-layered-architecture.html） |
+| 工厂链执行时序图 | .factory 工厂链 issue→triage→holdout→PR 全流程时序（依据 fix-issue.sh 实现真相，生成 factory-chain-sequence.html） |
+
+> 注：以上三图为 archify 生成的本地产物，位于 docs/design/architecture/（已列 .gitignore 不入库），本地重新生成即可查看。
 
 ## 安装
 
