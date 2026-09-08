@@ -114,10 +114,8 @@ def _pid_alive(pid: int) -> bool:
         return True
     except ProcessLookupError:
         return False
-    except PermissionError:
+    except (PermissionError, ValueError, OverflowError):
         return True
-    except (ValueError, OverflowError):
-        return True  # 内容异常（垃圾/超 C int）不可判定：保守按活——宁可
         # 等锁超时 fail-closed（code=1）也不误清可能活着的持锁主
 
 
@@ -492,7 +490,7 @@ class CodeupAdapter:
             "FACTORY_SPACES_CONF",
             os.path.expanduser("~/.config/factory/codeup-spaces.conf"))
         ns_map = {}
-        try:
+        with contextlib.suppress(OSError):
             with open(conf, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
@@ -500,8 +498,6 @@ class CodeupAdapter:
                         continue
                     k, v = line.split("|", 1)
                     ns_map[k.strip()] = v.strip()
-        except OSError:
-            pass
         org, path = self._remote()
         if org and path and "/" in path and ns_map:
             # namespace = path 首段（gtsp/open-platform/<repo> → gtsp）；
@@ -646,10 +642,8 @@ class CodeupAdapter:
         """description 双形态（{"htmlValue":...} JSON 串 / 裸 HTML）→ 纯文本。"""
         s = raw or ""
         if s.lstrip().startswith("{"):
-            try:
+            with contextlib.suppress(ValueError):
                 s = json.loads(s).get("htmlValue") or ""
-            except ValueError:
-                pass
         # HTML 注释段原样保留：dedupe marker（<!-- m1 -->）与 labels 块
         # （<!-- factory:labels:v1: ... -->）靠注释承载——剥标签会把注释
         # 一起剥掉，marker 永不命中（#67 实现期实证）。labels 块的剥离
@@ -889,7 +883,7 @@ class CodeupAdapter:
         active = {self._marker_label(m["content"]) for m in markers
                   if not m["resolved"] and m["content"].startswith(_CU_LABEL_ADD)}
         names = []
-        try:
+        with contextlib.suppress(HostingError):
             payload = self._req("GET", f"{self._base()}/changeRequests/{p}/labels")
             items = payload if isinstance(payload, list) else (payload.get("result") or [])
             for l in items:
@@ -899,8 +893,6 @@ class CodeupAdapter:
                 if ok and name.startswith(_CU_FACTORY_PREFIX) and name not in active:
                     continue  # 工厂类标投影失真：以标记生命周期为准（仅读成功时）
                 names.append(name)
-        except HostingError:
-            pass  # 类标读失败不阻断详情（标记评论仍可承载）
         if ok:
             names += active
         return sorted({n for n in names if n})
@@ -1026,7 +1018,7 @@ class CodeupAdapter:
         while True:
             try:
                 os.mkdir(lock_dir)
-            except FileExistsError:
+            except FileExistsError as e:
                 owner = _lock_owner(lock_dir)
                 if _lock_stale(lock_dir, owner):
                     # 判死与清除分离（PR #116 审查 P2）：rename 领取清除权，
@@ -1039,10 +1031,8 @@ class CodeupAdapter:
                     except OSError:
                         continue  # 他者已清/接管：不抢，重评估
                     if _lock_owner(victim) != owner:
-                        try:
+                        with contextlib.suppress(OSError):
                             os.rename(victim, lock_dir)  # 判死后换新主：原样放回
-                        except OSError:
-                            pass
                         continue
                     shutil.rmtree(victim, ignore_errors=True)
                     continue  # 死主残锁：清后重试（mkdir 收敛单赢家）
@@ -1050,16 +1040,16 @@ class CodeupAdapter:
                     raise HostingError(
                         f"add {name}: 同标签并发写互斥超时"
                         f"（{_LABEL_LOCK_TIMEOUT:.0f}s，另一进程持锁），"
-                        "fail-closed 拒双写", code=1)
+                        "fail-closed 拒双写",
+                        code=1,
+                    ) from e
                 time.sleep(0.05)
                 continue
             break
-        try:
+        with contextlib.suppress(OSError):
             with open(os.path.join(lock_dir, "pid"), "w",
                       encoding="ascii") as fh:
                 fh.write(str(os.getpid()))
-        except OSError:
-            pass  # pid 写失败不阻塞占锁（活性判定退化为年龄宽限）
         try:
             yield
         finally:
@@ -1221,9 +1211,7 @@ def _repo_split(raw):
     """
     if raw is None:
         return ".", None
-    if os.path.isdir(raw):
-        return raw, None
-    return ".", raw
+    return (raw, None) if os.path.isdir(raw) else (".", raw)
 
 
 # ---------------------------------------------------------------------------
