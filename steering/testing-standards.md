@@ -256,6 +256,7 @@ inclusion: always
 ❌ - 断言 checkout 目录名等环境特定值（如 `root.name == "awesome-rules"`）：对 worktree/CI 等任意 checkout 形态是假红源；应断言结构不变量（判定根为入口文件的祖先目录 + 标志资产存在），并配负例断言（非根祖先不含标志资产）防判据退化为永真，以异名目录 worktree 实跑验证。
 
 - ❌ 用 `@Disabled` / `it.skip` 临时绕过失败
+- ❌ 被禁用用例静默留存：测试代码中存在 `@Disabled` / `@Ignore` / `it.skip` / `xit` / `pytest.mark.skip` / `unittest.skip`（含类级整体禁用）时，必须逐处给出 warn 信息提示用户处理——审查输出按 🟡 警告级列出 file:line 与禁用原因，由用户裁定：修复后启用、删除，或附原因与跟踪链接显式保留；禁用而不提示，「全部测试通过」会掩盖真实覆盖缺口
 - ❌ `Thread.sleep()` / `setTimeout` 等固定等待
 - ❌ 测试间共享可变状态（含修改 static 字段）
 - ❌ Mock 领域对象
