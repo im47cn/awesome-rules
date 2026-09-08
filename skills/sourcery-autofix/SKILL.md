@@ -26,7 +26,9 @@ description: >
 
 1. **圈定范围**：合并 `git diff --name-only <base>...HEAD`（已提交）、
    `git diff --cached --name-only`（暂存）、`git diff --name-only`（工作区）
-   三源去重，过滤 `.py|.go|.java|.cs|.php|.ts|.js` 且排除已删除文件；
+  三源去重，过滤 `.py|.ts|.js`（CLI 实测支持面——php 等 CLI 静默不扫，
+  喂入 fix 循环会以 check exit 0 虚假闭环，见 sourcery-gate.sh 头注释）
+  且排除已删除文件；
    全仓扫描禁止（翻历史 issue 噪音）；
 2. **同配置**：仓库有 `.sourcery.yaml` 必须 `--config .sourcery.yaml`——
    本地、CI gate、sourcery-ai[bot] 三方同引擎同配置，否则本地修的 gate 不认；
@@ -51,4 +53,5 @@ exit 0 收尾后重新 push。
 - review 输出概览区分「could be fixed by Sourcery」与「need to be fixed
   manually」，后者直接进闭环条款；
 - 硬闸为 **opt-in 门禁**：仅当仓库根存在 `.sourcery.yaml` 才启用（主动声明，
-  同 wop-java-sdk gate 模式）；未 opt-in / 未装 CLI / 无语言文件均跳过；
+  同 wop-java-sdk gate 模式）；未 opt-in / 未装 CLI / 无支持语言文件均跳过
+  （支持面=CLI 实测 py/ts/js，见 sourcery-gate.sh 头注释）；

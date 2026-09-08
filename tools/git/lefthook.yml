@@ -40,7 +40,7 @@ pre-push:
       priority: 2
       use_stdin: true
       run: bash .lefthook/pre-push-delete-guard.sh || bash .lefthook/coverage.sh full {push_files}
-    # Sourcery 硬闸: 仓库 opt-in（.sourcery.yaml 存在）才启用，语言文件 push 前 review --check
+    # Sourcery 硬闸: 仓库 opt-in（.sourcery.yaml 存在）才启用，支持语言（CLI 实测 py/ts/js）push 前 review --check
     sourcery-gate:
       use_stdin: true
       run: bash .lefthook/pre-push-delete-guard.sh || bash .lefthook/sourcery-gate.sh {push_files}
