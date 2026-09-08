@@ -29,3 +29,5 @@ target/
 
 # Node（release 工具链 devDependencies 安装产物）
 node_modules/
+
+docs/design/architecture/

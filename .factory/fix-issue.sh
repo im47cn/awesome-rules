@@ -145,7 +145,8 @@ $(python3 "${REPO}/.factory/factory_lib.py" repo-vars)
 任务参数:
 - ISSUE_DIR: ${DIR}
 - 仓库根: ${WT}（链独立 worktree，勿越界改主工作区）
-- issue 编号: ${ISSUE}"
+- issue 编号: ${ISSUE}
+- 节点预算（硬击杀线，编排器 --max-time）: $(node_timeout "${name}")"
   t0=$(date +%s)
   touch "${DIR}/.${name}-t0" 2>/dev/null || return 1  # B1: 节点起点标记（产物 mtime 参照）
   if ! omp_node "${WT}" "${DIR}/${name}.log" "$(node_timeout "${name}")" -- "${prompt}"; then
