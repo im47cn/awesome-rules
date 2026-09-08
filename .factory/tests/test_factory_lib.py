@@ -160,7 +160,13 @@ class TestNodeTimeout:
 
     def test_implement_gets_full_budget(self):
         from factory_lib import node_timeout
-        assert node_timeout("implement") == "30m"
+        # 2026-09-04 重校准：ok-run P95 1534s × 1.2 = 1840.8s → 31m
+        assert node_timeout("implement") == "31m"
+
+    def test_review_recalibrated_17m(self):
+        from factory_lib import node_timeout
+        # 2026-09-04 重校准：ok-run P95 845s × 1.2 = 1014s → 17m（原 15m 贴顶 94%）
+        assert node_timeout("review") == "17m"
 
     def test_unknown_node_defaults_15m(self):
         from factory_lib import node_timeout

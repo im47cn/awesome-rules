@@ -116,14 +116,19 @@ def _load_ledger(path: str) -> list[dict]:
 # 节点预算（S3 实测校准：#2/#5 链——裁决器秒级、prime/plan/review 分钟级、
 # implement 十分钟级）。env 覆盖：FACTORY_TIMEOUT_<NODE>（单节点）>
 # FACTORY_TIMEOUT（全局兜底）> 下表默认。
+# 重校准（2026-09-04，#113/#123/#124/#131 四链 28 节点次，ok-run P95）：
+# 口径 max(P95×1.2, 下列默认) 向上取整分钟——implement 1534s→31m、
+# review 845s→17m 上调；prime 687.6s / plan 882s / 裁决器均低于默认，不动。
+# 注意 report 子命令的建议口径（仅 ok-run P95+2m）不含撞顶截尾观测，
+# 手工复核时应将「no-artifact 且 secs≥预算」的行按预算值计入下界。
 NODE_TIMEOUTS = {
-    "triage": "5m",      # 无工具裁决器，实测 ~10s
-    "holdout": "5m",     # 无工具验证器，实测 ~15s
-    "prime": "15m",
-    "plan": "15m",
-    "review": "15m",
-    "pr-review": "15m",
-    "implement": "30m",  # P95 未知前保守；ledger.secs 积累后按分布再调
+    "triage": "5m",      # 无工具裁决器，P95 144s
+    "holdout": "5m",     # 无工具验证器，P95 86s
+    "prime": "15m",      # P95×1.2=687.6s < 默认，维持
+    "plan": "15m",       # P95×1.2=882s < 默认，维持
+    "review": "17m",     # P95 845s×1.2=1014s → 17m（原 15m，94% 贴顶）
+    "pr-review": "15m",  # 无 ok-run 样本，维持默认
+    "implement": "31m",  # P95 1534s×1.2=1840.8s → 31m（原 30m 撞顶 #113 r1）
 }
 
 
