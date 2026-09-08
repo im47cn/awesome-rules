@@ -189,7 +189,27 @@ ck "SW 短租期 fence 过期拒"  "1"    "$(SW 'lease_fence_ok issue:short 1 >/
 #    默认判的实现此处会误过——正是审查③指出的形态）
 SW 'lease_claim issue:hbs >/dev/null; sleep 1; lease_heartbeat issue:hbs 1 2 >/dev/null 2>&1'
 sleep 3
-ck "SW hb 短租期生效后过期"  "1"    "$(SW 'lease_fence_ok issue:hbs 1 >/dev/null 2>&1; echo $?')"
+# ⑨ 墓碑调和（PR #116 CodeRabbit）：release 在 mv 后/放回前被 SIGKILL →
+# .rel.* 截留锁位。claim 建锁前调和：新鲜墓碑 = 活锁被截留 → ln 原子放回
+# （_lease_sw_restore，位空得内容删源；随后主流程读新鲜即拒 ≤ 租期自解）；
+# 过期/坏内容 = 死锁残渣 → 清理后正常接管。A2 用 ⑧ 链后无主过期锁基底。
+rellock="$tp/.factory/locks/leases/issue:rel.lock"
+SW 'lease_claim issue:rel >/dev/null'              # e=1 在位
+mv "$rellock" "$rellock.rel.1.1"                   # 模拟 release 死在 mv 后（新鲜墓碑）
+ck "SW ⑨A1 新鲜墓碑 claim 拒"  "1"   "$(SW 'lease_claim issue:rel >/dev/null 2>&1; echo $?')"
+ck "SW ⑨A1 新鲜墓碑放回锁位"  "y"   "$([ -f "$rellock" ] && echo y || echo n)"
+ck "SW ⑨A1 墓碑清理"          "n"   "$([ -e "$rellock.rel.1.1" ] && echo y || echo n)"
+touch -t 200001010000 "$rellock"                   # 过期 → 死锁残渣形态
+mv "$rellock" "$rellock.rel.2.2"
+ck "SW ⑨A2 过期墓碑接管 e=2"  "2"   "$(SW 'lease_claim issue:rel')"
+ck "SW ⑨A2 残渣清且锁在位"    "y"   "$([ -f "$rellock" ] && [ ! -e "$rellock.rel.2.2" ] && echo y || echo n)"
+# ⑨c/d _lease_sw_restore 原子判位原语（ln 硬链：dst 空 → 得内容删源链；
+# dst 已占 → ln 失败弃残本、不碰位上现有内容）——直接驱动 helper 断言
+# 判位语义，而非经 claim 间接观察
+ck "SW ⑨c restore 位空放回"  "dst=fresh src=n" \
+   "$(env -u SUPABASE_DB REPO="$tp" bash -c "source '${LEASE_SH}'; echo fresh > '$tp/rc-src'; _lease_sw_restore '$tp/rc-src' '$tp/rc-dst'; printf 'dst=%s src=%s\n' \"\$(cat '$tp/rc-dst')\" \"\$([ -e '$tp/rc-src' ] && echo y || echo n)\"" 2>/dev/null)"
+ck "SW ⑨d restore 位占弃残"  "dst=other src=n" \
+   "$(env -u SUPABASE_DB REPO="$tp" bash -c "source '${LEASE_SH}'; echo fresh > '$tp/rd-src'; echo other > '$tp/rd-dst'; _lease_sw_restore '$tp/rd-src' '$tp/rd-dst'; printf 'dst=%s src=%s\n' \"\$(cat '$tp/rd-dst')\" \"\$([ -e '$tp/rd-src' ] && echo y || echo n)\"" 2>/dev/null)"
 
 # 双态边界：已设 SUPABASE_DB 但 psql 不可达 = 配置错误，仍 fail-closed（不降级）
 if command -v psql >/dev/null; then

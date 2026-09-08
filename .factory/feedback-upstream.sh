@@ -253,8 +253,10 @@ PR_BODY="$FB_DIR/pr-body.md"
   echo
   echo "适配说明: 见 ARTIFACT；上游门禁 gauntlet 全层绿。"
 } > "$PR_BODY"
+# base 显式（PR #116）：上游 fetch/补基硬编码 main，不猜 gh 默认分支
 PR_URL="$(FACTORY_HOSTING=github python3 "${REPO}/.factory/hosting.py" pr create \
   --repo "$UPSTREAM_REPO" --head "$BRANCH" \
+  --base main \
   --title "factory: 反哺 ${SELF_ID} 工厂改进（${N_TOTAL} commits）" \
   --body-file "$PR_BODY" \
   | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url") or "")')" \
