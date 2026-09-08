@@ -1054,6 +1054,8 @@ class TestLabelAddCrossProcessLock:
         同仓同 PR 同名 add 并发——锁串行化 + 后到者锁内重预检幂等跳过，
         POST comments 恰一次；无锁实现此处必双 POST。"""
         monkeypatch.setenv("FACTORY_LOCK_DIR", str(tmp_path))
+        # CI 无 YUNXIAO_ACCESS_TOKEN：pr_set_labels 入口校验先于 _req stub 生效
+        monkeypatch.setenv("YUNXIAO_ACCESS_TOKEN", "t")
         markers = []
         posts = []
         barrier = threading.Barrier(2)
