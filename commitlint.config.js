@@ -15,12 +15,13 @@ module.exports = {
     ],
 
     // ── scope 建议在枚举内（warn，业务域靠 warn 放行，不阻断）─────
-    //    枚举须与 steering/git-conventions.md 保持一致
-    //    新增技能时同步追加（技能名 = skills/ 下的目录名）
+    //    枚举须与 steering/git-conventions.md 保持一致（doc-freshness R9 门禁锚定：
+    //    技能目录名 ⊆ 本枚举 ⊆ 规范表；分发件 tools/git/commitlint.config.cjs 为
+    //    下游通用子集，不要求同步）
     'scope-enum': [1, 'always', [
       'api', 'db', 'ui', 'ci',          // 业务域
-      'alibabacloud-devops', 'api-guard', 'arch-guard', 'contract-guard', 'ddl-guard', 'doc-gen', 'impact-guard', 'skill-evo', 'work-report',  // 技能
-      'arch-hawkeye', 'tools', 'scripts', 'docs', 'deps', 'release',  // 工程
+      'alibabacloud-devops', 'api-guard', 'arch-guard', 'code-review', 'contract-guard', 'ddl-guard', 'doc-gen', 'impact-guard', 'skill-evo', 'sourcery-autofix', 'tokensave-mcp', 'work-report',  // 技能
+      'arch-hawkeye', 'tools', 'scripts', 'docs', 'deps', 'release', 'dependency',  // 工程
     ]],
 
     // ── 主题行长度（git 经典 50/72 规则，对应规范"主题行 ≤50 字符"）──
