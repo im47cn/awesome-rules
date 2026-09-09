@@ -436,8 +436,20 @@ if [ "${DRY}" = 0 ]; then
   while IFS= read -r -d '' f; do CHANGED+=("${f}"); done \
     < <(git -C "${WT}" diff --name-only -z "${BASE_BRANCH}...${BRANCH}" 2>/dev/null \
     || git -C "${WT}" diff --name-only -z HEAD~1)
+
+  # 权威改动面判定（#170 评审修正）：CHANGED 空还可能源于 diff 命令静默
+  # 失败（三点式 2>/dev/null 与 HEAD~1 兜底双败），不可与真零改动混同。
+  # log 失败 = 改动面不可判定 → fail-closed；guard 跳过与 §7.5 收官共用
+  # 本值，不二次取样。
+  COMMITS="$(git -C "${WT}" log --oneline "${BASE_BRANCH}..${BRANCH}")" \
+    || { echo "[zero-diff] git log ${BASE_BRANCH}..${BRANCH} 失败：改动面不可判定，fail-closed 终止" >&2; exit 1; }
   if [ "${#CHANGED[@]}" -gt 0 ]; then
     python3 "${REPO}/.factory/guard.py" --files ${CHANGED[@]+"${CHANGED[@]}"}
+  elif [ -n "${COMMITS}" ]; then
+    # 有提交却收不到 diff：diff 收集异常，保持既有 fail-closed 不变量
+    # （旧路径死于 guard exit 2，此处显式退出并说明原因）。
+    echo "[guard] CHANGED 空但 ${BASE_BRANCH}..${BRANCH} 有提交：diff 收集异常，fail-closed 终止" >&2
+    exit 1
   else
     # 零改动轮（issue #165 round-4 实证）：bash 3.2 空数组经 ${CHANGED[@]+…}
     # 展开消失，`--files` 零路径 = 用法错误 → guard fail-closed exit 2 误杀
@@ -503,7 +515,7 @@ fi
 # 污染人类评审面。holdout PASS 后零提交 → exit 0 收官：rc=0 不触发
 # trap 清标，accepted/in-progress 留守，派发器按设计跳过滞留
 # in-progress 的 issue（见文件头 S2 注释），验证轮不再被重派。
-if [ "${DRY}" = 0 ] && [ -z "$(git -C "${WT}" log --oneline "${BASE_BRANCH}..${BRANCH}")" ]; then
+if [ "${DRY}" = 0 ] && [ -z "${COMMITS}" ]; then
   echo "[zero-diff] 本轮零仓内改动（纯验证轮，holdout 已 PASS）：不 push、不建 PR，exit 0 收官。"
   exit 0
 fi
