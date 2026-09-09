@@ -1038,6 +1038,80 @@ else
     bad "NC17g 期望 rc=2, 实际 rc=${_rc17g}, 输出: $(cat "$TMP/out17g")"
 fi
 
+# ── NC19 diff-cover 负控制：变更行覆盖率不足必须被拦 ──────────────────
+# NC18 编号已被 R9 技能注册检查占用，本组顺延 NC19。
+NC19_TOOLS=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+# 夹具 = 临时 git 仓 + 真实 coverage 产物（coverage run 生成 .coverage，不经
+# 手写 XML——专测本门实际核算链路）。base 分支上 m.py 仅 1 行；工作区扩展出
+# 未被调用的 uncovered()（2 行未覆盖变更行）→ diff 覆盖率 4/6 < 90% 应 rc=1。
+NC19="$TMP/nc19"; mkdir -p "$NC19"
+git init -q -b base "$NC19"
+printf 'x = 1\n' >"$NC19/m.py"
+git -C "$NC19" add -A && git -C "$NC19" commit -qm base
+git -C "$NC19" checkout -q -b work
+cat >"$NC19/m.py" <<'EOF'
+x = 1
+
+def main():
+    pass
+
+def uncovered():
+    y = 2
+    z = 3
+
+main()
+EOF
+git -C "$NC19" commit -qam wip
+(cd "$NC19" && "$PY" -m coverage run m.py)
+if (cd "$NC19" && GAUNTLET_PY="$PY" DIFF_COVER_BASE=base \
+    "$NC19_TOOLS/run_diff_cover.sh" "$NC19") >"$TMP/out18" 2>&1; then
+    _rc18=0
+else
+    _rc18=$?
+fi
+if [ "$_rc18" -eq 1 ] && grep -q 'm.py' "$TMP/out18"; then
+    ok "NC19 变更行覆盖率不足被拦且指明文件（rc=1）"
+else
+    bad "NC19 期望 rc=1 且报告含 m.py, 实际 rc=${_rc18}: $(head -5 "$TMP/out18")"
+fi
+
+# NC19b 正控制：同构夹具去掉未覆盖变更行 → 全覆盖 rc=0（证明放行链路可走通）
+NC19B="$TMP/nc19b"; mkdir -p "$NC19B"
+git init -q -b base "$NC19B"
+printf 'x = 1\n' >"$NC19B/m.py"
+git -C "$NC19B" add -A && git -C "$NC19B" commit -qm base
+git -C "$NC19B" checkout -q -b work
+cat >"$NC19B/m.py" <<'EOF'
+x = 1
+
+def main():
+    pass
+
+main()
+EOF
+git -C "$NC19B" commit -qam wip
+(cd "$NC19B" && "$PY" -m coverage run m.py)
+if (cd "$NC19B" && GAUNTLET_PY="$PY" DIFF_COVER_BASE=base \
+    "$NC19_TOOLS/run_diff_cover.sh" "$NC19B") >"$TMP/out18b" 2>&1; then
+    ok "NC19b 变更行全覆盖放行（rc=0）"
+else
+    bad "NC19b 期望 rc=0: $(head -5 "$TMP/out18b")"
+fi
+
+# NC19c 检查器损坏路径：无 .coverage 产物 rc=2 绝不算通过（NC6/NC7c 同语义）
+NC19C="$TMP/nc19c"; mkdir -p "$NC19C"
+if (cd "$NC19C" && GAUNTLET_PY="$PY" \
+    "$NC19_TOOLS/run_diff_cover.sh" "$NC19C") >"$TMP/out18c" 2>&1; then
+    _rc18c=0
+else
+    _rc18c=$?
+fi
+if [ "$_rc18c" -eq 2 ]; then
+    ok "NC19c 无覆盖率产物 fail-closed rc=2"
+else
+    bad "NC19c 期望 rc=2, 实际 rc=${_rc18c}"
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────
 if [ "$fails" -gt 0 ]; then
     echo "checker-self-test: $fails 项失败"
