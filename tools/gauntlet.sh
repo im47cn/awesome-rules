@@ -72,7 +72,12 @@ else
         skills/doc-gen/scripts/tests arch-hawkeye/scripts/tests
 
     run_layer pytest-scripts "$PY" -m pytest scripts -q
-    run_layer pytest-factory "$PY" -m pytest .factory -q
+    # 收集面收窄到 tests/（issue #166）：整个 .factory 会扫进 .factory/worktrees/*
+    # 链工作树全仓副本（副本内 skills/*/tests 依赖各自 rootdir conftest，
+    # 在 .factory rootdir 下收集即 import 失败）→ rc=2 短路后续所有层。
+    # .factory 的 pytest 套件本就全在 tests/（scripts/run_tests.sh SUITES
+    # 同口径），窄面即对齐两处维护点。
+    run_layer pytest-factory "$PY" -m pytest .factory/tests -q
     run_layer pytest-api-guard "$PY" -m pytest skills/api-guard/scripts -q
     run_layer pytest-ddl-guard "$PY" -m pytest skills/ddl-guard/scripts -q
     run_layer pytest-arch-guard "$PY" -m pytest skills/arch-guard/scripts -q
