@@ -436,7 +436,14 @@ if [ "${DRY}" = 0 ]; then
   while IFS= read -r -d '' f; do CHANGED+=("${f}"); done \
     < <(git -C "${WT}" diff --name-only -z "${BASE_BRANCH}...${BRANCH}" 2>/dev/null \
     || git -C "${WT}" diff --name-only -z HEAD~1)
-  python3 "${REPO}/.factory/guard.py" --files ${CHANGED[@]+"${CHANGED[@]}"}
+  if [ "${#CHANGED[@]}" -gt 0 ]; then
+    python3 "${REPO}/.factory/guard.py" --files ${CHANGED[@]+"${CHANGED[@]}"}
+  else
+    # 零改动轮（issue #165 round-4 实证）：bash 3.2 空数组经 ${CHANGED[@]+…}
+    # 展开消失，`--files` 零路径 = 用法错误 → guard fail-closed exit 2 误杀
+    # 全绿链。零改动 = 无周界面可查，跳过 guard。
+    echo "[guard] 零改动轮：无周界面可查，guard 跳过"
+  fi
   # ADR-009 门命令数据化：final_gate_cmd 来自 factory-local.json（fail-closed：
   # factory_lib 加载失败此处即非零终止）；read -ra 拆词为 argv 数组执行。
   GATE_CMD="$(python3 "${REPO}/.factory/factory_lib.py" final-gate)"
@@ -490,6 +497,16 @@ PYA
     || { echo "holdout=FAIL，链终止（不建 PR；evidence 已存 chain-history）"; exit 1; }
 fi
 
+# --- 7.5 零改动轮收官：无 diff 即无 PR（issue #165 round-4 实证） ---
+# 纯验证轮的产出是工件与 issue 评论，不是代码。若继续走 §8，push 会把
+# BASE_BRANCH 领先 origin 的提交整段带进 PR diff（如未推的 main 提交），
+# 污染人类评审面。holdout PASS 后零提交 → exit 0 收官：rc=0 不触发
+# trap 清标，accepted/in-progress 留守，派发器按设计跳过滞留
+# in-progress 的 issue（见文件头 S2 注释），验证轮不再被重派。
+if [ "${DRY}" = 0 ] && [ -z "$(git -C "${WT}" log --oneline "${BASE_BRANCH}..${BRANCH}")" ]; then
+  echo "[zero-diff] 本轮零仓内改动（纯验证轮，holdout 已 PASS）：不 push、不建 PR，exit 0 收官。"
+  exit 0
+fi
 # --- 8. 开 PR（S1 到此为止：merge 由人类决定，铁律 5） ---
 if [ "${DRY}" = 0 ]; then
   # --no-verify：新分支首推无 @{push}，lefthook {push_files} 模板必然 exit 128；
