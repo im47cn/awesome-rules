@@ -89,6 +89,12 @@ def _run(cmd: list[str], repo: Path, tmp_path: Path, *, with_stubs: bool,
            "GH_REPO": "sandbox/repo", "SENTINEL_MARK": str(tmp_path / "sentinel"),
            "STUB_CALLS": str(tmp_path / "calls"),
            "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"}
+    # TZ 透传：_e() 用本进程 date.today() 写台账，breaker 子进程用其自身
+    # date.today() 判「今日」——两边时区不一致时（本机 shell TZ=UTC 而系统
+    # 时区 Asia/Shanghai，UTC 16:00-24:00 窗口两时区跨日）台账日期对不上，
+    # 熔断误放行 rc=0（2026-09-08 实证 4 败；CI 全链 UTC 一致故绿）
+    if "TZ" in os.environ:
+        env["TZ"] = os.environ["TZ"]
     env |= (extra_env or {})
     return subprocess.run(cmd, cwd=repo, env=env, capture_output=True,
                           text=True, timeout=120)
