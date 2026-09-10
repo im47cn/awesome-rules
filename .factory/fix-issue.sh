@@ -148,7 +148,12 @@ $(python3 "${REPO}/.factory/factory_lib.py" repo-vars)
 - issue 编号: ${ISSUE}
 - 节点预算（硬击杀线，编排器 --max-time）: $(node_timeout "${name}")"
   t0=$(date +%s)
-  touch "${DIR}/.${name}-t0" 2>/dev/null || return 1  # B1: 节点起点标记（产物 mtime 参照）
+  # B1: 节点起点标记（产物 mtime 参照）。创建失败也是节点死亡——先落 node-fail
+  # 再退（Sourcery 复审）；DIR 整体不可写时 printf 同败，由 trap 的 chain-abort 兜底
+  if ! touch "${DIR}/.${name}-t0" 2>/dev/null; then
+    printf 'node-fail %s round=%s node=%s reason=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ROUND:-0}" "${name}" "marker-create" >> "${DIR}/chain-history" 2>/dev/null || true
+    return 1
+  fi
   if ! omp_node "${WT}" "${DIR}/${name}.log" "$(node_timeout "${name}")" -- "${prompt}"; then
     _node_metric "${name}" "${t0}" "fail" >> "${DIR}/node-metrics.jsonl"
     printf 'node-fail %s round=%s node=%s reason=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ROUND:-0}" "${name}" "omp-exit" >> "${DIR}/chain-history" 2>/dev/null || true
@@ -223,11 +228,13 @@ ${cmts}
   if ! omp_node "${REPO}" "${DIR}/triage.log" "$(node_timeout triage)" --no-tools \
       --config "${REPO}/.factory/omp-isolated.yml" -- "${prompt}"; then
     _node_metric triage "${t0}" "fail" >> "${DIR}/node-metrics.jsonl"
+    printf 'node-fail %s round=%s node=%s reason=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ROUND:-0}" "triage" "omp-exit" >> "${DIR}/chain-history" 2>/dev/null || true
     echo "    triage 节点失败（详见 ${DIR}/triage.log）" >&2; return 1
   fi
   _node_metric triage "${t0}" "ok" >> "${DIR}/node-metrics.jsonl"
   python3 "${REPO}/.factory/factory_lib.py" parse "${DIR}/triage.log" "${DIR}/triage.json" accept,reject \
-    || { echo "    triage 输出无法解析为 JSON（见 factory_lib.parse_agent_json）" >&2; return 1; }
+    || { printf 'node-fail %s round=%s node=%s reason=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ROUND:-0}" "triage" "parse" >> "${DIR}/chain-history" 2>/dev/null || true; \
+         echo "    triage 输出无法解析为 JSON（见 factory_lib.parse_agent_json）" >&2; return 1; }
 }
 
 run_holdout() {  # 物理隔离验证器：--no-tools + 输入全部内联，agent 无任何工具
@@ -253,11 +260,13 @@ ${out}
   if ! omp_node "${REPO}" "${DIR}/holdout.log" "$(node_timeout holdout)" --no-tools \
       --config "${REPO}/.factory/omp-isolated.yml" -- "${prompt}"; then
     _node_metric holdout "${t0}" "fail" >> "${DIR}/node-metrics.jsonl"
+    printf 'node-fail %s round=%s node=%s reason=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ROUND:-0}" "holdout" "omp-exit" >> "${DIR}/chain-history" 2>/dev/null || true
     echo "    holdout 节点失败（详见 ${DIR}/holdout.log）" >&2; return 1
   fi
   _node_metric holdout "${t0}" "ok" >> "${DIR}/node-metrics.jsonl"
   python3 "${REPO}/.factory/factory_lib.py" parse "${DIR}/holdout.log" "${DIR}/holdout.json" PASS,FAIL \
-    || { echo "    holdout 输出无法解析为 JSON（见 factory_lib.parse_agent_json）" >&2; return 1; }
+    || { printf 'node-fail %s round=%s node=%s reason=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ROUND:-0}" "holdout" "parse" >> "${DIR}/chain-history" 2>/dev/null || true; \
+         echo "    holdout 输出无法解析为 JSON（见 factory_lib.parse_agent_json）" >&2; return 1; }
 }
 
 
