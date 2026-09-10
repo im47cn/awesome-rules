@@ -12,6 +12,7 @@ exit 0 误报无漂移，调用方（dispatch）把致命检查失败当无事�
 凭据面用 fake hosting.py 顶替（auth ok 恒 0，其余调用计数 + 非 0）——
 与 gitenv PATH 白名单配合，测试链零出网。
 """
+from __future__ import annotations
 
 import json
 import subprocess
