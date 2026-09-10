@@ -148,9 +148,15 @@ $(python3 "${REPO}/.factory/factory_lib.py" repo-vars)
 - issue 编号: ${ISSUE}
 - 节点预算（硬击杀线，编排器 --max-time）: $(node_timeout "${name}")"
   t0=$(date +%s)
-  touch "${DIR}/.${name}-t0" 2>/dev/null || return 1  # B1: 节点起点标记（产物 mtime 参照）
+  # B1: 节点起点标记（产物 mtime 参照）。创建失败也是节点死亡——先落 node-fail
+  # 再退（Sourcery 复审）；DIR 整体不可写时 printf 同败，由 trap 的 chain-abort 兜底
+  if ! touch "${DIR}/.${name}-t0" 2>/dev/null; then
+    printf 'node-fail %s round=%s node=%s reason=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ROUND:-0}" "${name}" "marker-create" >> "${DIR}/chain-history" 2>/dev/null || true
+    return 1
+  fi
   if ! omp_node "${WT}" "${DIR}/${name}.log" "$(node_timeout "${name}")" -- "${prompt}"; then
     _node_metric "${name}" "${t0}" "fail" >> "${DIR}/node-metrics.jsonl"
+    printf 'node-fail %s round=%s node=%s reason=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ROUND:-0}" "${name}" "omp-exit" >> "${DIR}/chain-history" 2>/dev/null || true
     echo "    节点 ${name} 失败（详见 ${DIR}/${name}.log）" >&2; return 1
   fi
   t1=$(date +%s)
@@ -163,10 +169,12 @@ $(python3 "${REPO}/.factory/factory_lib.py" repo-vars)
   if [ -z "${artifact}" ]; then
     grep -q "ARTIFACT:" "${DIR}/${name}.log" || {
       _node_metric "${name}" "${t0}" "no-artifact" >> "${DIR}/node-metrics.jsonl"
+      printf 'node-fail %s round=%s node=%s reason=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ROUND:-0}" "${name}" "no-artifact" >> "${DIR}/chain-history" 2>/dev/null || true
       echo "    节点 ${name} 未声明产物（缺 ARTIFACT 行）" >&2; return 1
     }
   elif [ ! -f "${DIR}/${artifact}" ] || [ "${DIR}/${artifact}" -ot "${DIR}/.${name}-t0" ]; then
     _node_metric "${name}" "${t0}" "no-artifact" >> "${DIR}/node-metrics.jsonl"
+    printf 'node-fail %s round=%s node=%s reason=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ROUND:-0}" "${name}" "stale-artifact" >> "${DIR}/chain-history" 2>/dev/null || true
     echo "    节点 ${name} 产物缺失/未更新（${artifact} 不存在或早于节点起点标记）" >&2; return 1
   fi
   _node_metric "${name}" "${t0}" "ok" >> "${DIR}/node-metrics.jsonl"
@@ -220,11 +228,13 @@ ${cmts}
   if ! omp_node "${REPO}" "${DIR}/triage.log" "$(node_timeout triage)" --no-tools \
       --config "${REPO}/.factory/omp-isolated.yml" -- "${prompt}"; then
     _node_metric triage "${t0}" "fail" >> "${DIR}/node-metrics.jsonl"
+    printf 'node-fail %s round=%s node=%s reason=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ROUND:-0}" "triage" "omp-exit" >> "${DIR}/chain-history" 2>/dev/null || true
     echo "    triage 节点失败（详见 ${DIR}/triage.log）" >&2; return 1
   fi
   _node_metric triage "${t0}" "ok" >> "${DIR}/node-metrics.jsonl"
   python3 "${REPO}/.factory/factory_lib.py" parse "${DIR}/triage.log" "${DIR}/triage.json" accept,reject \
-    || { echo "    triage 输出无法解析为 JSON（见 factory_lib.parse_agent_json）" >&2; return 1; }
+    || { printf 'node-fail %s round=%s node=%s reason=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ROUND:-0}" "triage" "parse" >> "${DIR}/chain-history" 2>/dev/null || true; \
+         echo "    triage 输出无法解析为 JSON（见 factory_lib.parse_agent_json）" >&2; return 1; }
 }
 
 run_holdout() {  # 物理隔离验证器：--no-tools + 输入全部内联，agent 无任何工具
@@ -250,11 +260,13 @@ ${out}
   if ! omp_node "${REPO}" "${DIR}/holdout.log" "$(node_timeout holdout)" --no-tools \
       --config "${REPO}/.factory/omp-isolated.yml" -- "${prompt}"; then
     _node_metric holdout "${t0}" "fail" >> "${DIR}/node-metrics.jsonl"
+    printf 'node-fail %s round=%s node=%s reason=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ROUND:-0}" "holdout" "omp-exit" >> "${DIR}/chain-history" 2>/dev/null || true
     echo "    holdout 节点失败（详见 ${DIR}/holdout.log）" >&2; return 1
   fi
   _node_metric holdout "${t0}" "ok" >> "${DIR}/node-metrics.jsonl"
   python3 "${REPO}/.factory/factory_lib.py" parse "${DIR}/holdout.log" "${DIR}/holdout.json" PASS,FAIL \
-    || { echo "    holdout 输出无法解析为 JSON（见 factory_lib.parse_agent_json）" >&2; return 1; }
+    || { printf 'node-fail %s round=%s node=%s reason=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ROUND:-0}" "holdout" "parse" >> "${DIR}/chain-history" 2>/dev/null || true; \
+         echo "    holdout 输出无法解析为 JSON（见 factory_lib.parse_agent_json）" >&2; return 1; }
 }
 
 
@@ -292,6 +304,14 @@ if [ "${DRY}" = 0 ]; then
   ROUND=$(( $(grep -c 'chain-start' "${DIR}/chain-history" 2>/dev/null || echo 0) + 1 ))
   # 清上一轮裁决产物：防陈旧 triage.json/holdout.json 污染本轮判定与台账分类
   rm -f "${DIR}/triage.json" "${DIR}/holdout.json"
+  # 归档上一轮过程产物 → *-pre-r${ROUND}.*（A：跨轮回流，下轮 prime/plan 的
+  # 增量输入。上轮死在更早节点时文件属更早轮——pre-rN 语义 =「本轮开始时的
+  # 内容」仍为真；B1 判定不受影响：归档即移走，旧文件不可能冒充本轮产物）
+  for _af in prime.md plan.json implement.md review.md; do
+    if [ -f "${DIR}/${_af}" ]; then
+      mv -f "${DIR}/${_af}" "${DIR}/${_af%.*}-pre-r${ROUND}.${_af##*.}" || true
+    fi
+  done
   CHAIN_T0=$(date +%s)
   echo "chain-start $(date -u +%Y-%m-%dT%H:%M:%SZ) round=${ROUND}" >> "${DIR}/chain-history"
   # 台账（EXIT 时写）：{ts, issue, round, type, exit, secs}——重派率/首轮通过率 jq 一行可算。
@@ -326,6 +346,23 @@ if [ "${DRY}" = 0 ]; then
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ISSUE}" "${ROUND}" "${kind}" "${rc}" \
       "$(( $(date +%s) - CHAIN_T0 ))" >> "${REPO}/.factory/locks/ledger.jsonl"
   }
+  # #14 补遗：抢救未提交 WIP——rev-list=0 时 trap 的 salvage push 无物可推
+  # （#165 r1-r3 实证：implement 未提交即死，WIP 随 worktree 强删湮灭）。
+  # intent-to-add 让 untracked 入 diff；binary diff 快照到 ISSUE_DIR 供下轮
+  # implement 作证据输入（只读参考，不自动续作）；空 diff 不留噪声文件。
+  # best-effort：恒 return 0，任何失败不中断清理链（#23 纪律）。
+  salvage_wip() {
+    local rc="$1" patch
+    if [ "${rc}" -eq 0 ] || [ ! -d "${WT}" ]; then return 0; fi
+    patch="${DIR}/salvage-r${ROUND}.patch"
+    git -C "${WT}" add -N . >/dev/null 2>&1 || true
+    if ! git -C "${WT}" diff HEAD --binary > "${patch}" 2>/dev/null || [ ! -s "${patch}" ]; then
+      rm -f "${patch}" 2>/dev/null || true
+    else
+      echo "  [salvage] 未提交 WIP 快照 → ${patch}"
+    fi
+    return 0
+  }
   # 失败清理 + 台账 + 产出抢救 + worktree 回收：
   # - set +e 首动作（#23）：trap 是状态机复位的唯一保障，内部任一命令
   #   非零不得中止清理链——trap 失败模式收敛为"多打日志"而非"静默中断"
@@ -335,6 +372,10 @@ if [ "${DRY}" = 0 ]; then
   #   下轮 -B 重置回基线孤儿化，implement 成果湮灭）。--force：下轮
   #   从基线重跑后非 FF，远端镜像语义 = 最新一轮产出；推送失败仅告警
   #   不阻断后续清理（网络故障不应二次放大为状态残留）
+  # - rc≠0 追加 chain-abort 行到 chain-history（A：下轮 prime/plan 的死因
+  #   输入）；未提交 WIP 由 salvage_wip 快照到 ISSUE_DIR，均须先于 worktree
+  #   强删。SIGKILL 下 trap 整体失守，此通道同殁——dispatcher 侧检测为
+  #   残余缺口，另行立项
   # - 非零退出移除流转标签回零标签态（可重试）；无论成败都记账；
   #   worktree 无论成败一并回收
   # - 清理顺序（PR#34 审查修复）：标签清理在 lease_cleanup **之前**——清标
@@ -343,7 +384,7 @@ if [ "${DRY}" = 0 ]; then
   #   或作为人工债务可见。lease_cleanup 收心跳+放租约，放清理链末尾。
   # D1: 本 trap 覆盖早期放锁 trap，故自带锁释放；派发链 MANUAL_LOCK=0 不动锁
   # shellcheck disable=SC2154  # rc 于本 trap 行内由 rc=$? 赋值，shellcheck 不解析 trap 字符串
-  trap 'rc=$?; set +e; write_ledger "${rc}"; if [ "${rc}" -ne 0 ] && [ "$(git -C "${REPO}" rev-list --count ${BASE_BRANCH}.."${BRANCH}" 2>/dev/null || echo 0)" -gt 0 ]; then git -C "${REPO}" push --force --no-verify origin "${BRANCH}" >/dev/null 2>&1 && echo "  [salvage] 失败链产出已推送 origin/${BRANCH}" || echo "  [warn] 失败链产出推送失败，产出仅在本地分支 ${BRANCH}" >&2; fi; git -C "${REPO}" worktree remove --force "${WT}" >/dev/null 2>&1 || true; [ "${rc}" -ne 0 ] && { issue_label remove factory:triaging; issue_label remove factory:accepted; issue_label remove factory:in-progress; }; lease_cleanup; [ "${MANUAL_LOCK}" = 1 ] && rm -rf "${LOCKDIR:-}" 2>/dev/null' EXIT
+  trap 'rc=$?; set +e; write_ledger "${rc}"; if [ "${rc}" -ne 0 ]; then printf "chain-abort %s round=%s exit=%s\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ROUND}" "${rc}" >> "${DIR}/chain-history" 2>/dev/null || true; fi; if [ "${rc}" -ne 0 ] && [ "$(git -C "${REPO}" rev-list --count ${BASE_BRANCH}.."${BRANCH}" 2>/dev/null || echo 0)" -gt 0 ]; then git -C "${REPO}" push --force --no-verify origin "${BRANCH}" >/dev/null 2>&1 && echo "  [salvage] 失败链产出已推送 origin/${BRANCH}" || echo "  [warn] 失败链产出推送失败，产出仅在本地分支 ${BRANCH}" >&2; fi; salvage_wip "${rc}"; git -C "${REPO}" worktree remove --force "${WT}" >/dev/null 2>&1 || true; [ "${rc}" -ne 0 ] && { issue_label remove factory:triaging; issue_label remove factory:accepted; issue_label remove factory:in-progress; }; lease_cleanup; [ "${MANUAL_LOCK}" = 1 ] && rm -rf "${LOCKDIR:-}" 2>/dev/null' EXIT
 else
   echo "[dry-run] hosting issue view #${ISSUE} → ${DIR}/issue.json"
   echo "[dry-run] label: +factory:triaging（裁决后 → accepted|rejected）"

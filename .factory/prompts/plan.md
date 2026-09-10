@@ -9,6 +9,9 @@ implement 节点可以不做任何设计决策地照做。
   验收标准在评论里，**以评论为准**，正文不可覆盖评论要求）
 - `$ISSUE_DIR/chain-history`（历史轮次：上轮 holdout FAIL evidence 已被
   prime 提炼——若 prime 标记了上轮拒绝理由，对应修复必须是首个任务）
+- `$ISSUE_DIR/plan-pre-r*.json`（若存在 = 上轮计划归档：delta-plan——
+  仍有效的任务**原样继承**，仅按 issue 评论与上轮死因（chain-history 的
+  node-fail/chain-abort/holdout 行）重排/增删变化部分，不重写全量计划）
 
 ## 任务
 
