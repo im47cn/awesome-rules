@@ -163,19 +163,30 @@ class TestNodeTimeout:
         # 2026-09-04 重校准：ok-run P95 1534s × 1.2 = 1840.8s → 31m
         assert node_timeout("implement") == "31m"
 
-    def test_review_recalibrated_17m(self):
+    def test_review_recalibrated_30m(self):
         from factory_lib import node_timeout
-        # 2026-09-04 重校准：ok-run P95 845s × 1.2 = 1014s → 17m（原 15m 贴顶 94%）
-        assert node_timeout("review") == "17m"
+        # 2026-09-04：P95 845s×1.2 → 17m；2026-09-10：17m 撞顶（#165 r2/r3 1026/1021s 败）→ 30m
+        assert node_timeout("review") == "30m"
 
     def test_unknown_node_defaults_15m(self):
         from factory_lib import node_timeout
         assert node_timeout("mystery") == "15m"
 
+    def test_prime_plan_raised_20m(self):
+        from factory_lib import node_timeout
+        # 2026-09-10：prime 900s 撞顶（#165 r6）、plan 901s 压线（r4）→ 各升至 20m
+        assert node_timeout("prime") == "20m"
+        assert node_timeout("plan") == "20m"
+
     def test_per_node_env_override_wins(self):
         from factory_lib import node_timeout
         env = {"FACTORY_TIMEOUT_IMPLEMENT": "45m", "FACTORY_TIMEOUT": "9m"}
         assert node_timeout("implement", env) == "45m"
+
+    def test_process_env_used_when_env_omitted(self, monkeypatch):
+        from factory_lib import node_timeout
+        monkeypatch.setenv("FACTORY_TIMEOUT_REVIEW", "42m")
+        assert node_timeout("review") == "42m"
 
     def test_global_env_fallback(self):
         from factory_lib import node_timeout

@@ -124,9 +124,9 @@ def _load_ledger(path: str) -> list[dict]:
 NODE_TIMEOUTS = {
     "triage": "5m",      # 无工具裁决器，P95 144s
     "holdout": "5m",     # 无工具验证器，P95 86s
-    "prime": "15m",      # P95×1.2=687.6s < 默认，维持
-    "plan": "15m",       # P95×1.2=882s < 默认，维持
-    "review": "17m",     # P95 845s×1.2=1014s → 17m（原 15m，94% 贴顶）
+    "prime": "20m",      # 旧样 P95×1.2=687.6s 已过期：现测 865/884s 贴顶、900s 撞顶（#165 r6）→ 20m
+    "plan": "20m",       # 旧样 P95×1.2=882s 已过期：#165 r4 实测 901s 压线过 → 20m
+    "review": "30m",     # 17m 撞顶（原 15m→17m 仍不够）：#165 r2/r3 1026/1021s 败、r4 1020s 压线 → 30m
     "pr-review": "15m",  # 无 ok-run 样本，维持默认
     "implement": "31m",  # P95 1534s×1.2=1840.8s → 31m（原 30m 撞顶 #113 r1）
 }
@@ -145,7 +145,9 @@ def node_metric_line(node: str, t0: int, now: int, status: str) -> str:
 
 
 def node_timeout(name: str, env: dict | None = None) -> str:
-    env = env if env is not None else {}
+    # 未显式传 env 时读进程环境：CLI（factory_lib.py timeout <node>）由此获得
+    # FACTORY_TIMEOUT_*/FACTORY_TIMEOUT 覆盖能力（launchd/cron 免 PR 调预算）。
+    env = env if env is not None else os.environ
     per_node = env.get(f"FACTORY_TIMEOUT_{name.upper().replace('-', '_')}")
     return per_node or env.get("FACTORY_TIMEOUT") or NODE_TIMEOUTS.get(name, "15m")
 
