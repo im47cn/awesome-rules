@@ -9,6 +9,16 @@
 - `$ISSUE_DIR/chain-history`（历史轮次证据：若含 `holdout ... verdict=FAIL`，
   其 evidence 是上轮验证器的拒绝理由——**本轮必须针对性消除**：通常是
   改动缺少可机械引用的验收证据，如为文档类改动补同步性测试）
+- `$ISSUE_DIR/chain-history` 的 `node-fail`/`chain-abort` 行（若存在 =
+  上轮链死因：`node-fail ... node=<名> reason=omp-exit|no-artifact|
+  stale-artifact` = 该节点被预算击杀/崩溃或产物判定 fail-closed；
+  `chain-abort ... exit=<码>` = 编排层死亡。上轮死因相关区域是本轮研究的
+  优先对象）
+- `$ISSUE_DIR` 下的 `*-pre-r*.*` 归档（若存在 = 本轮开始前的过程产物：
+  prime 笔记/plan.json/implement 日志/review 结论，r 编号最大者最近）。
+  **跨轮增量纪律**：仍成立的结论直接复用、不必重查——以 chain-history
+  最近一次 `chain-start` 行的时间戳为 `git log --since` 起点，只研究此后
+  的变化面；全量重查仅限首层（无归档可用）时
 - 仓库内自由阅读：任务参数「仓库参数」段所列阅读范围
 
 ## 任务

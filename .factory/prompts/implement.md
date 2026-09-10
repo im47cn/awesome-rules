@@ -8,6 +8,9 @@
   若任务与 `$ISSUE_DIR/issue.json` 评论冲突，停止并声明 blocked）
 - `$ISSUE_DIR/ralph-todo.md`（若存在且非空 = 修复轮：上一轮 review
   回流的可行动发现清单，见「修复轮」节；首轮不存在）
+- `$ISSUE_DIR/salvage-r*.patch`（若存在 = 上轮失败链的**未提交**工作快照：
+  只作证据——上轮做到哪、什么思路；**不是续作指令**，不自动 apply，
+  有效改动只由本轮 plan.json 决定）
 
 ## 纪律（违反任何一条 = 本节点失败）
 
