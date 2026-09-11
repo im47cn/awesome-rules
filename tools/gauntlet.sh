@@ -78,9 +78,15 @@ else
     # .factory 的 pytest 套件本就全在 tests/（scripts/run_tests.sh SUITES
     # 同口径），窄面即对齐两处维护点。
     run_layer pytest-factory "$PY" -m pytest .factory/tests -q
-    run_layer pytest-api-guard "$PY" -m pytest skills/api-guard/scripts -q
-    run_layer pytest-ddl-guard "$PY" -m pytest skills/ddl-guard/scripts -q
-    run_layer pytest-arch-guard "$PY" -m pytest skills/arch-guard/scripts -q
+    # 3 个带 --cov 的套件各写独立 COVERAGE_FILE（.coverage.<suite>）：既保各套件
+    # 自身 --cov-fail-under 的独立评估面不被跨套件数据稀释（评审 F1），又供
+    # diff-cover 层 combine 汇总（分产物合计，单套件产物会漏掉其余两个的变更行）
+    run_layer pytest-api-guard env COVERAGE_FILE="$PWD/.coverage.api-guard" \
+        "$PY" -m pytest skills/api-guard/scripts -q
+    run_layer pytest-ddl-guard env COVERAGE_FILE="$PWD/.coverage.ddl-guard" \
+        "$PY" -m pytest skills/ddl-guard/scripts -q
+    run_layer pytest-arch-guard env COVERAGE_FILE="$PWD/.coverage.arch-guard" \
+        "$PY" -m pytest skills/arch-guard/scripts -q
     run_layer pytest-impact-guard "$PY" -m pytest skills/impact-guard/scripts/tests -q
     run_layer pytest-skill-evo "$PY" -m pytest skills/skill-evo/scripts/tests -q
     run_layer pytest-doc-gen "$PY" -m pytest skills/doc-gen/scripts/tests -q
@@ -89,6 +95,12 @@ else
     # 实现↔文档一致性（数字/清单/指向漂移，R1-R8 语义见脚本头注释）
     run_layer doc-freshness "$PY" tools/check_doc_freshness.py
     run_layer md-link-check "$PY" scripts/md_link_check.py .
+    # 变更行覆盖率门（steering/testing-standards.md「覆盖率门禁与『覆盖率阈值』
+    # 同口径」「本地自验须与门禁同口径」两条的机械化落地）：增量 diff-cover
+    # 对 origin/main 核算，阈值 90%（非 Java 线）。度量边界：只核算 coverage
+    # 报告中的文件，未带 --cov 套件的变更行不在本门面内。负控制 NC19。
+    run_layer diff-cover env GAUNTLET_PY="$PY" DIFF_COVER_BASE=origin/main \
+        sh tools/run_diff_cover.sh
 
     layer_must_not_secrets() {
         # shellcheck disable=SC1091
@@ -98,12 +110,14 @@ else
     run_layer must-not-secrets layer_must_not_secrets
 
     run_layer syntax-sh-n sh -n tools/gauntlet.sh tools/must_not_match.sh \
-               tools/test_gauntlet_orchestration.sh tools/test_gauntlet_checks.sh \
+               tools/run_diff_cover.sh tools/test_gauntlet_orchestration.sh \
+               tools/test_gauntlet_checks.sh \
                tools/test_spec_check.sh tools/test_pre-push-delete-guard.sh \
                hooks/load-steering.sh hooks/on-session-end.sh
     # lint 范围只含本仓新增 tools/ 脚本：hooks/ 属既有代码，其基线告警不属本门范围；清单镜像于 scripts/run_tests.sh lint-shellcheck 层，两处同步维护
     run_layer lint-shellcheck shellcheck tools/gauntlet.sh tools/must_not_match.sh \
-                tools/test_gauntlet_orchestration.sh tools/test_gauntlet_checks.sh \
+                tools/run_diff_cover.sh tools/test_gauntlet_orchestration.sh \
+                tools/test_gauntlet_checks.sh \
                 tools/test_spec_check.sh tools/test_pre-push-delete-guard.sh
 
     # ── .factory/ shell 门（2026-08-22 feedback 事故后补） ─────────────
