@@ -33,14 +33,15 @@ inclusion: always
 
 ### scope（可选）
 
-按模块/技能填写，推荐值（须与 `commitlint.config.cjs` 的 `scope-enum` 保持一致）：
+按模块/技能填写，推荐值（须与根 `commitlint.config.js` 的 `scope-enum` 保持一致）：
 
 | 类别 | scope |
 | --- | --- |
 | 业务域 | `api`、`db`、`ui`、`ci` |
-| 工程 | `dependency`、`tools`、`scripts`、`docs`、`deps`、`release` |
+| 技能 | `skills/`（指针行——各技能 scope 由根配置的 scope 枚举自动包含，无需手工登记） |
+| 工程 | `dependency`、`tools`、`scripts`、`docs`、`deps`、`release`、`arch-hawkeye` |
 
-新增技能时同步追加到两处。
+新增技能时追加到根 `commitlint.config.js` 的 `scope-enum`（分发件 `tools/git/commitlint.config.cjs` 为下游通用子集，不要求同步）。
 
 ### 破坏性变更（强制标记）
 

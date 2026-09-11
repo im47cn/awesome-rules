@@ -43,6 +43,13 @@
      command 名 ⊇ tools/git/lefthook.yml pre-push: commands 键全集
      （行内按分隔符切 token 与命令名取交集，容忍多余措辞；加/删闸
      不更新注记即漂移；yml 或 README 任一缺失则整条跳过）
+  R9 commitlint scope 枚举一致性：root commitlint.config.js 为权威，
+     a. 其 scope-enum ⊇ 全部含 SKILL.md 的技能目录名；b. steering/
+     git-conventions.md scope 表与权威枚举双向对齐（技能由指针行覆盖）；
+     c. 分发件 .cjs 枚举 ⊆ 根枚举 且 scope-enum 声明前注释标注「下游」
+     定位（有意最小子集，不要求全集；2026-09-08 狩猎实证三方漂移后
+     收敛的口径，同日独立审查 Y4 补子集性校验）；表 token 形态契约
+     与解析失败 fail-closed 语义见 rule_r9 注释
 
 豁免（误报控制，两条稳定通道）：
   --allow REGEX（可重复）：正则 search 命中证据行（[级别] 文件:行 →
@@ -477,6 +484,113 @@ def rule_r8(root: Path, g: Gate) -> None:
                    f"R8 执行模型注记缺 pre-push command {name}（lefthook.yml pre-push 共 {len(set(commands))} 闸）")
 
 
+def _scope_enum(path: Path) -> tuple[set[str], int] | None:
+    """commitlint 配置 → scope-enum 值集合 + 声明行号；结构异常返回 None。
+
+    先剥 // 注释再找 ']]' 定界（注释含 ']]' 时先定界会截断尾部值——
+    审查 Y1），值数组取声明后最后一个 '[' 之后的单引号字面量
+    （兼容单行 .cjs 与多行带注释 .js）。
+    """
+    text = path.read_text(encoding="utf-8")
+    i = text.find("'scope-enum'")
+    if i < 0:
+        return None
+    line = text.count("\n", 0, i) + 1
+    stripped = "\n".join(re.sub(r"//.*", "", ln) for ln in text[i:].splitlines())
+    end = stripped.find("]]")
+    if end < 0:
+        return None
+    seg = stripped[:end]
+    k = seg.rfind("[")
+    if k < 0:
+        return None
+    return set(re.findall(r"'([^']+)'", seg[k:])), line
+
+
+def rule_r9(root: Path, g: Gate) -> None:
+    """R9 commitlint scope 枚举一致性：root .js 权威，三面锚定。
+
+    2026-09-08 狩猎实证三方漂移（root 缺 dependency/code-review/sourcery-
+    autofix/tokensave-mcp、doc 表缺技能行与 arch-hawkeye、分发 .cjs 与 doc
+    声称「保持一致」实为不同集合）。收敛后的不变量（.cjs 为下游通用子集，
+    属有意最小化，不要求全集）：
+      a. root commitlint.config.js scope-enum ⊇ 全部含 SKILL.md 的技能目录名
+      b. git-conventions.md scope 表 ↔ root 枚举双向对齐（技能由指针行覆盖）
+      c. 分发 .cjs 枚举 ⊆ 根枚举 + 声明前注释标注「下游」（防误当权威）
+    """
+    js = root / "commitlint.config.js"
+    doc = root / "steering" / "git-conventions.md"
+    if not js.is_file() or not doc.is_file():
+        return  # 无 commitlint 声明面即无枚举漂移面
+    parsed = _scope_enum(js)
+    if parsed is None or not parsed[0]:
+        g.fail("commitlint.config.js:1", "R9 scope-enum 解析失败（数组缺失或结构异常）")
+        return
+    enum, enum_line = parsed
+    where_js = f"commitlint.config.js:{enum_line}"
+
+    # a. 「新增技能时同步追加」机械化：技能目录名 ⊆ 权威枚举
+    skills = {d.name for d in (root / "skills").iterdir()
+              if d.is_dir() and (d / "SKILL.md").is_file()}
+    for name in sorted(skills):
+        if name not in enum:
+            g.fail(where_js, f"R9 scope-enum 缺技能 {name}（skills/ 有 SKILL.md 但未入枚举）")
+
+    # b. 规范表 ↔ 权威枚举双向对齐（技能由指针行覆盖，只比非技能值）
+    #    表内 token 只收 scope 形态（小写字母开头 + 数字/连字符——形态契约：
+    #    现行 scope 全集均为此形态；含 _ 或 . 的 token 不入比对，属声明的
+    #    边界，`skills/` 指针格与 `commitlint.config.js` 等文件名引用不参与）
+    in_scope = False
+    found = False
+    scope_head = 1  # 段首标题行号（证据锚点，防文档重排后漂移——审查 Y2）
+    doc_tokens: dict[str, int] = {}  # token → 首现行号
+    for n, ln in enumerate(_lines(doc), 1):
+        if ln.startswith("### scope"):
+            in_scope, found = True, True
+            scope_head = n
+            continue
+        if in_scope and ln.startswith("#"):
+            break  # 下一标题，scope 段结束
+        if in_scope and ln.startswith("|"):
+            for tok in re.findall(r"`([a-z][a-z0-9-]*)`", ln):
+                doc_tokens.setdefault(tok, n)
+    if not found:
+        g.fail("steering/git-conventions.md:1", "R9 scope 表未找到（无 '### scope' 段）")
+        return
+    where_doc = f"steering/git-conventions.md:{scope_head}"
+    for tok in sorted(enum - set(doc_tokens) - skills):
+        g.fail(where_doc,
+               f"R9 scope 表缺 root commitlint.config.js 中的 {tok}（表须 ⊇ 权威枚举全集；技能由指针行覆盖）")
+    for tok in sorted(set(doc_tokens) - enum):
+        g.fail(f"steering/git-conventions.md:{doc_tokens[tok]}",
+               f"R9 scope 表声明了 root commitlint.config.js 枚举外的 {tok}（表须与权威枚举一致，多余即漂移）")
+
+    # c. 分发件双向守护：子集性 + 定位声明锚定 scope-enum 声明前注释
+    #    （审查 Y4：全文任意角落出现「下游」即过的子串检查不构成约束）
+    cjs = root / "tools" / "git" / "commitlint.config.cjs"
+    if cjs.is_file():
+        cjs_text = cjs.read_text(encoding="utf-8")
+        cjs_parsed = _scope_enum(cjs)
+        if cjs_parsed is None or not cjs_parsed[0]:
+            # 解析失败/空枚举 fail-closed（复审 🟠-1：双引号重排等结构漂移
+            # 不得静默跳过子集与「下游」校验——与根 .js 同形态即报错对齐；
+            # 仅文件缺失仍跳过，兼容无分发件的净夹具，同 R8 缺失跳过惯例）
+            g.fail("tools/git/commitlint.config.cjs:1",
+                   "R9 分发件 scope-enum 解析失败或缺失（fail-closed，不得静默跳过子集校验）")
+        else:
+            cjs_vals, cjs_line = cjs_parsed
+            extra = sorted(cjs_vals - enum)
+            if extra:
+                g.fail(f"tools/git/commitlint.config.cjs:{cjs_line}",
+                       f"R9 分发件 scope-enum 含根枚举外值 {'、'.join(extra)}（.cjs 须为子集）")
+            ci = cjs_text.find("'scope-enum'")
+            ci = ci if ci >= 0 else 0
+            head_lines = cjs_text[:ci].splitlines()[-6:]
+            if "下游" not in "\n".join(head_lines):
+                g.fail(f"tools/git/commitlint.config.cjs:{cjs_line}",
+                       "R9 分发件 scope-enum 声明前注释未标注「下游」定位（须在枚举注释块注明防误判漂移）")
+
+
 def _source_line(root: Path, where: str) -> str | None:
     """证据行 'path:line' → 源行文本（行级豁免标记判断用）。"""
     path_part, _, line_part = where.rpartition(":")
@@ -491,7 +605,7 @@ def _source_line(root: Path, where: str) -> str | None:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="实现↔文档一致性门禁（R1-R8）")
+    ap = argparse.ArgumentParser(description="实现↔文档一致性门禁（R1-R9）")
     ap.add_argument("root", nargs="?", default=".",
                     help="仓库根（默认当前目录）")
     ap.add_argument("--allow", action="append", default=[], metavar="REGEX",
@@ -525,6 +639,7 @@ def main() -> int:
     rule_r6(root, g)
     rule_r7(root, g)
     rule_r8(root, g)
+    rule_r9(root, g)
 
     fails: list[str] = []
     infos: list[str] = []

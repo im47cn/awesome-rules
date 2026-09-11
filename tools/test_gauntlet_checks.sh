@@ -1038,6 +1038,173 @@ else
     bad "NC17g 期望 rc=2, 实际 rc=${_rc17g}, 输出: $(cat "$TMP/out17g")"
 fi
 
+# ── NC18 doc-freshness R9 负控制：commitlint scope 三面漂移必须被拦 ────
+# 在 NC10 最小仓上加 R9 面：根 commitlint.config.js（权威枚举，多行数组
+# 含注释——与真实形态一致）、分发件 .cjs（单行、带「下游」标注）、
+# git-conventions.md scope 表（含 '/' 指针格不参与枚举比对）、
+# 带 SKILL.md 的技能目录（锚定规则 a）。
+nc18_setup() {
+    _d=$1
+    nc10_setup "$_d"
+    mkdir -p "$_d/skills/ddl-guard" "$_d/steering" "$_d/tools/git"
+    printf -- '---\nname: ddl-guard\ndescription: t\n---\n' \
+        >"$_d/skills/ddl-guard/SKILL.md"
+    {
+        echo '# T'
+        echo '```'
+        echo '├── skills/'
+        echo '│   ├── foo/'
+        echo '│   └── ddl-guard/'
+        echo '```'
+    } >"$_d/README.md"
+    cat >"$_d/commitlint.config.js" <<'EOF'
+module.exports = {
+  rules: {
+    'scope-enum': [1, 'always', [
+      'api', 'ci',                    // 业务域
+      'ddl-guard',                    // 技能
+      'tools',                        // 工程
+    ]],
+  },
+};
+EOF
+    printf "// 下游通用子集\nmodule.exports = { rules: { 'scope-enum': [1, 'always', ['api', 'ci']] } };\n" \
+        >"$_d/tools/git/commitlint.config.cjs"
+    cat >"$_d/steering/git-conventions.md" <<'EOF'
+### scope（可选）
+
+| 类别 | scope |
+| --- | --- |
+| 业务域 | `api`、`ci` |
+| 技能 | `skills/`（指针行——各技能 scope 由根 `commitlint.config.js` 自动包含） |
+| 工程 | `tools` |
+EOF
+}
+
+NC18="$TMP/nc18"; nc18_setup "$NC18"
+if "$PY" tools/check_doc_freshness.py "$NC18" >"$TMP/o18" 2>&1; then
+    ok "NC18 干净 fixture 全绿（R9 三面一致）"
+else
+    bad "NC18 干净 fixture 期望 rc=0: $(cat "$TMP/o18")"
+fi
+
+# R9a 漏报：skills/ddl-guard 有 SKILL.md 但根枚举漏注册
+NC18A="$TMP/nc18a"; nc18_setup "$NC18A"
+sed -i '' "/'ddl-guard'/d" "$NC18A/commitlint.config.js"
+if "$PY" tools/check_doc_freshness.py "$NC18A" >"$TMP/o18a" 2>&1; then
+    _rc18a=0
+else
+    _rc18a=$?
+fi
+if [ "$_rc18a" -eq 1 ] && grep -q 'R9' "$TMP/o18a" && grep -q 'ddl-guard' "$TMP/o18a"; then
+    ok "NC18a R9 技能漏注册检出"
+else
+    bad "NC18a 期望 rc=1+R9+ddl-guard, 实际 rc=${_rc18a}: $(cat "$TMP/o18a")"
+fi
+
+# R9b 漏报：根枚举含 scope 表未登记的值（mystery 非技能名也非表内值）
+NC18B="$TMP/nc18b"; nc18_setup "$NC18B"
+sed -i '' "s/'api', 'ci',/'api', 'ci', 'mystery',/" "$NC18B/commitlint.config.js"
+if "$PY" tools/check_doc_freshness.py "$NC18B" >"$TMP/o18b" 2>&1; then
+    _rc18b=0
+else
+    _rc18b=$?
+fi
+if [ "$_rc18b" -eq 1 ] && grep -q 'R9' "$TMP/o18b" && grep -q 'mystery' "$TMP/o18b"; then
+    ok "NC18b R9 规范表缺枚举值检出"
+else
+    bad "NC18b 期望 rc=1+R9+mystery, 实际 rc=${_rc18b}: $(cat "$TMP/o18b")"
+fi
+
+# R9b 反向：规范表声明了根枚举外的值（ghost 不在权威枚举内）
+NC18C="$TMP/nc18c"; nc18_setup "$NC18C"
+# shellcheck disable=SC2016  # python 字面反引号，刻意单引号防 shell 展开
+"$PY" - "$NC18C/steering/git-conventions.md" <<'PYEOF'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+p.write_text(p.read_text(encoding="utf-8").replace(
+    "`api`、`ci`", "`api`、`ci`、`ghost`"), encoding="utf-8")
+PYEOF
+grep -q 'ghost' "$NC18C/steering/git-conventions.md" \
+    || bad "NC18c 夹具注入失败（ghost 未写入）"
+if "$PY" tools/check_doc_freshness.py "$NC18C" >"$TMP/o18c" 2>&1; then
+    _rc18c=0
+else
+    _rc18c=$?
+fi
+if [ "$_rc18c" -eq 1 ] && grep -q 'R9' "$TMP/o18c" && grep -q 'ghost' "$TMP/o18c"; then
+    ok "NC18c R9 表声明枚举外值检出"
+else
+    bad "NC18c 期望 rc=1+R9+ghost, 实际 rc=${_rc18c}: $(cat "$TMP/o18c")"
+fi
+
+# R9c 漏报：分发件 .cjs 缺「下游」定位标注
+NC18D="$TMP/nc18d"; nc18_setup "$NC18D"
+printf "module.exports = { rules: { 'scope-enum': [1, 'always', ['api', 'ci']] } };\n" \
+    >"$NC18D/tools/git/commitlint.config.cjs"
+if "$PY" tools/check_doc_freshness.py "$NC18D" >"$TMP/o18d" 2>&1; then
+    _rc18d=0
+else
+    _rc18d=$?
+fi
+if [ "$_rc18d" -eq 1 ] && grep -q 'R9' "$TMP/o18d" && grep -q '下游' "$TMP/o18d"; then
+    ok "NC18d R9 分发件缺下游标注检出"
+else
+    bad "NC18d 期望 rc=1+R9+下游, 实际 rc=${_rc18d}: $(cat "$TMP/o18d")"
+fi
+
+# NC18e R9 fail-closed 路径 1：根 .js 结构损坏（无 ']]' 闭合）须报解析失败
+NC18E="$TMP/nc18e"; nc18_setup "$NC18E"
+"$PY" - "$NC18E/commitlint.config.js" <<'PYEOF'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+p.write_text(p.read_text(encoding="utf-8").replace("]],", ""), encoding="utf-8")
+PYEOF
+if "$PY" tools/check_doc_freshness.py "$NC18E" >"$TMP/o18e" 2>&1; then
+    _rc18e=0
+else
+    _rc18e=$?
+fi
+if [ "$_rc18e" -eq 1 ] && grep -q 'R9' "$TMP/o18e" && grep -q '解析失败' "$TMP/o18e"; then
+    ok "NC18e R9 根配置结构损坏检出（fail-closed 解析失败路径）"
+else
+    bad "NC18e 期望 rc=1+R9+解析失败, 实际 rc=${_rc18e}: $(cat "$TMP/o18e")"
+fi
+
+# NC18f R9 fail-closed 路径 2：规范表缺 '### scope' 段须报表未找到
+NC18F="$TMP/nc18f"; nc18_setup "$NC18F"
+"$PY" - "$NC18F/steering/git-conventions.md" <<'PYEOF'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+p.write_text(p.read_text(encoding="utf-8").replace("### scope", "### 范围"), encoding="utf-8")
+PYEOF
+if "$PY" tools/check_doc_freshness.py "$NC18F" >"$TMP/o18f" 2>&1; then
+    _rc18f=0
+else
+    _rc18f=$?
+fi
+if [ "$_rc18f" -eq 1 ] && grep -q 'R9' "$TMP/o18f" && grep -q '未找到' "$TMP/o18f"; then
+    ok "NC18f R9 scope 表缺失检出（fail-closed 表未找到路径）"
+else
+    bad "NC18f 期望 rc=1+R9+未找到, 实际 rc=${_rc18f}: $(cat "$TMP/o18f")"
+fi
+
+# NC18g R9 fail-closed 路径 3：分发件 .cjs 结构漂移（双引号重排）须报解析失败
+# （复审 🟠-1：解析失败/空枚举曾静默跳过子集与「下游」校验）
+NC18G="$TMP/nc18g"; nc18_setup "$NC18G"
+printf '// 下游通用子集\nmodule.exports = { rules: { "scope-enum": [1, "always", ["api", "ci"]] } };\n' \
+    >"$NC18G/tools/git/commitlint.config.cjs"
+if "$PY" tools/check_doc_freshness.py "$NC18G" >"$TMP/o18g" 2>&1; then
+    _rc18g=0
+else
+    _rc18g=$?
+fi
+if [ "$_rc18g" -eq 1 ] && grep -q 'R9' "$TMP/o18g" && grep -q '解析失败' "$TMP/o18g"; then
+    ok "NC18g R9 分发件结构漂移检出（fail-closed 解析失败路径）"
+else
+    bad "NC18g 期望 rc=1+R9+解析失败, 实际 rc=${_rc18g}: $(cat "$TMP/o18g")"
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────
 if [ "$fails" -gt 0 ]; then
     echo "checker-self-test: $fails 项失败"
