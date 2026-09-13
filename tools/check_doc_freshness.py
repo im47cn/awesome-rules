@@ -520,8 +520,12 @@ def rule_r9(root: Path, g: Gate) -> None:
     """
     js = root / "commitlint.config.js"
     doc = root / "steering" / "git-conventions.md"
-    if not js.is_file() or not doc.is_file():
+    if not js.is_file():
         return  # 无 commitlint 声明面即无枚举漂移面
+    if not doc.is_file():
+        g.fail("steering/git-conventions.md:1",
+               "R9 scope 表缺失（commitlint.config.js 存在但文档缺失）")
+        return
     parsed = _scope_enum(js)
     if parsed is None or not parsed[0]:
         g.fail("commitlint.config.js:1", "R9 scope-enum 解析失败（数组缺失或结构异常）")
