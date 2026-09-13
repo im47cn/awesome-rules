@@ -502,9 +502,7 @@ def _scope_enum(path: Path) -> tuple[set[str], int] | None:
         return None
     seg = stripped[:end]
     k = seg.rfind("[")
-    if k < 0:
-        return None
-    return set(re.findall(r"'([^']+)'", seg[k:])), line
+    return None if k < 0 else (set(re.findall(r"'([^']+)'", seg[k:])), line)
 
 
 def rule_r9(root: Path, g: Gate) -> None:
@@ -583,12 +581,11 @@ def rule_r9(root: Path, g: Gate) -> None:
                    "R9 分发件 scope-enum 解析失败或缺失（fail-closed，不得静默跳过子集校验）")
         else:
             cjs_vals, cjs_line = cjs_parsed
-            extra = sorted(cjs_vals - enum)
-            if extra:
+            if extra := sorted(cjs_vals - enum):
                 g.fail(f"tools/git/commitlint.config.cjs:{cjs_line}",
                        f"R9 分发件 scope-enum 含根枚举外值 {'、'.join(extra)}（.cjs 须为子集）")
             ci = cjs_text.find("'scope-enum'")
-            ci = ci if ci >= 0 else 0
+            ci = max(ci, 0)
             head_lines = cjs_text[:ci].splitlines()[-6:]
             if "下游" not in "\n".join(head_lines):
                 g.fail(f"tools/git/commitlint.config.cjs:{cjs_line}",
