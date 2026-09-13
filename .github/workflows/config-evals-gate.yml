@@ -53,9 +53,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      # gauntlet 探测带 pytest+pytest_cov 的解释器，探测不到 exit 2 硬失败。
+      # gauntlet 探测带 pytest+pytest_cov 的解释器，探测不到 exit 2 硬失败；
+      # diff-cover 层（NC19/NC19b）需要 coverage+diff_cover，CI 未预装会 fail-closed 拒判。
       - name: Install pytest deps
-        run: pip install pytest pytest-cov
+        run: pip install pytest pytest-cov diff-cover
 
       # gauntlet lint-shellcheck 层需要 shellcheck；macOS runner 不自带
       # （ubuntu runner 自带，本地 mac 亦需 brew 安装）。
