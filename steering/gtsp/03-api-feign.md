@@ -11,7 +11,7 @@ scenario: Feign/URL 版本/参数校验
 
 - `@FeignClient` 必须声明四属性：`url`（配置占位符）、`name`（服务名）、`contextId`（唯一标识）、`path`（服务根路径，即 domain）
 - 方法路径 `/{version}/{resource}/{action}`，action 优先用 `create`/`query`/`update`/`remove`；CRUD 无法表达业务语义时用业务动作动词（`cancel`/`sync`/`confirm`/`apply`/`push` 等，见 §2）
-- 只定义新结构路径，**禁止多路径匹配**；**禁止 `@PathVariable`**
+- 只定义新结构路径，**禁止多路径匹配**；**禁止 `@PathVariable`**——path 变量任何形态均不允许，业务标识一律走请求参数/请求体，与 [`../openapi-standards.md`](../openapi-standards.md)「禁止 path 中传递唯一标识」及 api-guard `check_path_variable` 机械检查一致
 
 ## 2. URL 路径与版本
 
