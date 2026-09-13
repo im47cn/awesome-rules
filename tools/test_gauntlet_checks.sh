@@ -1294,6 +1294,48 @@ else
     bad "NC19c 期望 rc=2, 实际 rc=${_rc19c}"
 fi
 
+
+# ── NC21 sourcery-gate 订阅到期降级 / issue 硬拦双向（2026-09-13 live 实证）──
+# 到期输出形态为补匹配而来（原预判词全不命中，闸按设计拦死直到补匹配）；
+# 反向盯防两级收紧：issue 形态优先硬拦，认证词同现不降级。
+SGT="$TMP/nc21"; mkdir -p "$SGT/bin"
+SGT_GATE="$PWD/tools/git/lefthook/sourcery-gate.sh"
+: > "$SGT/.sourcery.yaml"   # opt-in 信号（gate 只查存在性）
+: > "$SGT/x.py"
+cat >"$SGT/bin/sourcery" <<'SHEOF'
+#!/bin/sh
+echo "The Sourcery CLI is not available with this tier of Sourcery."
+echo "Please upgrade at https://app.sourcery.ai"
+exit 1
+SHEOF
+chmod +x "$SGT/bin/sourcery"
+if (cd "$SGT" && PATH="$SGT/bin:$PATH" \
+        bash "$SGT_GATE" x.py) >"$TMP/out21" 2>&1; then
+    if grep -q '认证/订阅失效' "$TMP/out21"; then
+        ok "NC21 订阅到期形态显式降级放行（live 实证补匹配）"
+    else
+        bad "NC21 降级消息缺失: $(cat "$TMP/out21")"
+    fi
+else
+    bad "NC21 到期形态应降级 exit 0: $(cat "$TMP/out21")"
+fi
+cat >"$SGT/bin/sourcery" <<'SHEOF'
+#!/bin/sh
+echo "x.py:10: issue found"
+echo "2 issues found"
+exit 1
+SHEOF
+if (cd "$SGT" && PATH="$SGT/bin:$PATH" \
+        bash "$SGT_GATE" x.py) >"$TMP/out21b" 2>&1; then
+    bad "NC21b issue 形态应硬拦 rc!=0"
+else
+    if grep -q '存在未解决 issue' "$TMP/out21b"; then
+        ok "NC21b issue 形态硬拦（优先于降级，两级收紧保真）"
+    else
+        bad "NC21b 拦截提示缺失: $(cat "$TMP/out21b")"
+    fi
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────
 if [ "$fails" -gt 0 ]; then
     echo "checker-self-test: $fails 项失败"

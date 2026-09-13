@@ -67,7 +67,9 @@ if [ "$rc" -ne 0 ]; then
   if printf '%s\n' "$out" | grep -qE '[1-9][0-9]* issue'; then
     :  # issue 形态：按代码问题硬拦（落入下方拦截提示）
   elif printf '%s\n' "$out" | grep -qiE \
-    '^[[:space:]]*(error|fatal)[:!].*(authenticat|unauthorized|payment|subscri|trial|expir|token|quota)|your (trial|subscription) (has )?(ended|expired)|please (log ?in|sign ?in)|not logged in|invalid (token|api[ -]?key)'; then
+    '^[[:space:]]*(error|fatal)[:!].*(authenticat|unauthorized|payment|subscri|trial|expir|token|quota)|your (trial|subscription) (has )?(ended|expired)|please (log ?in|sign ?in)|not logged in|invalid (token|api[ -]?key)|^(the sourcery cli is )?not available with this tier|^please upgrade at'; then
+    # 行首锚定两形态为到期实证补匹配（2026-09-13 试用到期 live 触发：
+    # 原预判词全不命中，闸按设计保持拦截直到补匹配；NC21 回归盯防）
     echo "[sourcery] ⚠ CLI 认证/订阅失效（非代码问题），显式降级跳过；CI 侧门禁仍会拦——续订后本闸自动恢复硬拦"
     exit 0
   fi
