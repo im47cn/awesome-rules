@@ -2,7 +2,8 @@
 # Sourcery pre-push 硬闸（awesome-rules tools/git 分发，由 lefthook 调用）
 # opt-in 门禁：仅当仓库根存在 .sourcery.yaml（主动声明，同 wop-java-sdk gate 模式）才启用；
 # push 文件含实测支持语言时跑 review --check（同 .sourcery.yaml 配置），有未解决 issue → 阻断 push。
-# fail-safe：未 opt-in / 未装 sourcery CLI 均跳过（不因环境缺失误伤）。
+# fail-safe：未 opt-in / 未装 sourcery CLI 均跳过（不因环境缺失误伤）；CLI 在装
+# 但认证/订阅失效 → 显式降级跳过（防拦死一切 push 的砖化，见尾部分支注释）。
 # 语言口径（issue #123）：以 CLI 实测为准，不照抄宣称支持面——
 #   实测有效：.py/.ts/.js（sourcery 1.45.0 review --check 实跑产出评审）
 #   实测不扫描：.php（送审零输出，静默空转 = fail-open，不再进闸面）
@@ -48,7 +49,28 @@ if [ ${#UNSENT[@]} -gt 0 ]; then
   printf '  %s\n' "${UNSENT[@]}"
 fi
 echo "[sourcery] review --check：${#SUPPORTED[@]} 个实测支持文件"
-sourcery review --check --config .sourcery.yaml "${SUPPORTED[@]}"
+# 输出先捕获再回显（终端着色丢失无害）：rc≠0 时须区分「代码 issue」与
+# 「CLI 账号不可用」——后者拦死一切含 py/ts/js 的 push（砖化），降级放行。
+out=$(sourcery review --check --config .sourcery.yaml "${SUPPORTED[@]}" 2>&1)
 rc=$?
+printf '%s\n' "$out"
+# 认证/订阅失效降级（2026-09-13）：关键词形态为预判非实证（试用期内无法
+# 复现到期输出）——真实到期输出若不命中，闸保持拦截直到补匹配；届时本地
+# 仍可 --no-verify 应急。CI 侧 sourcery-review-gate 刻意不加降级：订阅是
+# 全局单点，失效时 CI 红是续订的正确信号，本地降级 + CI fail-closed 分层。
+# 两级收紧（评审 #178 bug_risk）：宽关键词任意位置命中会把含认证词的 issue
+# 诊断（如 unauthorized.py 文件名）一并放行——① issue 形态优先：输出含非零
+# issue 计数（"N issue(s)…"，"No issues detected" 无前置数字不命中）时
+# 一律硬拦，认证词同现不再降级；② 认证词锚定错误行形态（行首 error/fatal
+# 后接认证词，或完整句式），散落在文件名/诊断里的同词不触发。
+if [ "$rc" -ne 0 ]; then
+  if printf '%s\n' "$out" | grep -qE '[1-9][0-9]* issue'; then
+    :  # issue 形态：按代码问题硬拦（落入下方拦截提示）
+  elif printf '%s\n' "$out" | grep -qiE \
+    '^[[:space:]]*(error|fatal)[:!].*(authenticat|unauthorized|payment|subscri|trial|expir|token|quota)|your (trial|subscription) (has )?(ended|expired)|please (log ?in|sign ?in)|not logged in|invalid (token|api[ -]?key)'; then
+    echo "[sourcery] ⚠ CLI 认证/订阅失效（非代码问题），显式降级跳过；CI 侧门禁仍会拦——续订后本闸自动恢复硬拦"
+    exit 0
+  fi
+fi
 [ "$rc" -ne 0 ] && echo "[sourcery] 存在未解决 issue，push 被拦：跑 skills/sourcery-autofix 修复循环后重试（跳过: git push --no-verify）"
 exit "$rc"
