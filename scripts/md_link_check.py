@@ -128,7 +128,7 @@ def check_links(root: Path) -> list:
 # docs/research/ 研究跟踪档案的模板契约（2026-09-13 建立）：第 7 份档案的
 # 合规面不靠作者模仿——frontmatter 三键 + 五个必需章节机械化校验。
 _RESEARCH_FM_KEYS = ("last-checked", "re-check-trigger", "depth")
-_RESEARCH_SECTIONS = ("一句话定位", "事实快照", "可借鉴点", "不适", "资源链接")
+_RESEARCH_SECTIONS = ("一句话定位", "事实快照", "可借鉴点", "不适配点", "资源链接")
 
 
 def _research_contract(f: Path, root: Path) -> list:
