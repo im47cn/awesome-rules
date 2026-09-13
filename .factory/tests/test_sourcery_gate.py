@@ -14,6 +14,8 @@ glob 真缺陷（文件名含空格会拆参）。#141 无自动化测试——�
 - 无语言文件 → 跳过；.lefthook/（上游分发面）文件不审判
 - 含空格文件名 → 单参数传递（21351a6 引号展开修复锚定）
 - sourcery review 非零 → 闸透传非零并给跳过提示（硬闸语义）
+- CLI 在装但认证/订阅失效（rc≠0 + 认证类错误输出）→ 显式降级 exit 0
+  （2026-09-13 防砖化：trial 到期不得拦死一切 push；CI 侧 fail-closed 兜底）
 
 运行：python3 -m pytest .factory/tests -q（沙箱同构：tmp 工作目录 +
 PATH 桩 sourcery 记录 args/rc，真实调用目标脚本本体）。
@@ -31,6 +33,7 @@ GATE = FACTORY.parent / "tools/git/lefthook/sourcery-gate.sh"
 _SOURCERY_STUB = """#!/bin/sh
 echo "argc=$#" >> "$STUB_LOG"
 for a in "$@"; do printf 'arg=%s\\n' "$a" >> "$STUB_LOG"; done
+[ -n "${STUB_OUT:-}" ] && printf '%s\\n' "$STUB_OUT"
 exit "${STUB_RC:-0}"
 """
 
@@ -38,7 +41,7 @@ _BASE_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 
 
 def _run_gate(tmp_path: Path, files: list[str], *, sourcery_yaml=True,
-              with_cli=True, stub_rc=0) -> tuple[subprocess.CompletedProcess, list[str]]:
+              with_cli=True, stub_rc=0, stub_out="") -> tuple[subprocess.CompletedProcess, list[str]]:
     """tmp 工作目录 + 可选 .sourcery.yaml + 可选桩 sourcery；返回 (result, stub 调用行)。"""
     work = tmp_path / "work"
     work.mkdir()
@@ -60,7 +63,8 @@ def _run_gate(tmp_path: Path, files: list[str], *, sourcery_yaml=True,
         bindir = tmp_path / "empty-bin"
         bindir.mkdir()
         path = str(bindir)
-    env = dict(os.environ, PATH=path, STUB_LOG=str(log), STUB_RC=str(stub_rc))
+    env = dict(os.environ, PATH=path, STUB_LOG=str(log), STUB_RC=str(stub_rc),
+               STUB_OUT=stub_out)
     r = subprocess.run(["/bin/bash", str(GATE), *files], cwd=str(work), env=env,
                        capture_output=True, text=True, timeout=30)
     calls = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
@@ -152,3 +156,26 @@ def test_missing_cli_skips(tmp_path):
     assert r.returncode == 0, r.stderr
     assert "未安装 sourcery CLI" in r.stdout
     assert calls == []
+
+
+def test_auth_failure_degrades_explicitly(tmp_path):
+    """CLI 在装但认证/订阅失效（rc≠0 + 认证类错误输出）→ 显式降级 exit 0（防砖化）。
+
+    2026-09-13：trial 到期后 review 若认证失败，闸不得拦死一切含 py/ts/js 的
+    push——降级须显式（可审计非静默），且 CI 侧仍 fail-closed 兜底。
+    """
+    r, calls = _run_gate(tmp_path, ["a.py"], stub_rc=1,
+                         stub_out="Error: Your trial has ended. Please update your payment method.")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "认证/订阅失效" in r.stdout and "降级" in r.stdout
+    assert "push 被拦" not in r.stdout, "认证失效不得按代码 issue 拦截"
+    assert calls and calls[0] == "argc=5", calls  # 确曾真实调过 CLI（非提前跳过）
+
+
+def test_issue_failure_with_output_still_blocks(tmp_path):
+    """rc≠0 + issue 表格输出（无认证关键词）→ 仍硬拦（降级仅限认证失败形态）。"""
+    r, calls = _run_gate(tmp_path, ["a.py"], stub_rc=1,
+                         stub_out="tools/x.py:10-12 reintroduce-else\nTotal: 1 issue")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "push 被拦" in r.stdout and "--no-verify" in r.stdout
+    assert "认证/订阅失效" not in r.stdout, "issue 输出被误判为认证失败"
