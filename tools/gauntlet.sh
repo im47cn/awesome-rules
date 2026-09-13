@@ -32,7 +32,9 @@ fi
 # ── 陈旧产物清理 ───────────────────────────────────────────────────────
 # 上次运行的 .coverage / __pycache__ 既是 must-not 扫描的 grep 噪音，
 # 也可能被当成新结果读取——启动即清，不读取任何先前输出。
-find . -name .coverage -type f -not -path './.git/*' -delete
+# 通配 .coverage*：带后缀的 .coverage.<suite> 分跑产物残留同样会污染
+# diff-cover 层的 combine 汇总（评审 R1），精确名清理漏掉它们。
+find . -name '.coverage*' -type f -not -path './.git/*' -delete
 find . -name __pycache__ -type d -prune -not -path './.git/*' -exec rm -rf {} +
 
 # ── 层运行器 ───────────────────────────────────────────────────────────
