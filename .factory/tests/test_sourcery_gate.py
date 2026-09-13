@@ -179,3 +179,43 @@ def test_issue_failure_with_output_still_blocks(tmp_path):
     assert r.returncode == 1, r.stdout + r.stderr
     assert "push 被拦" in r.stdout and "--no-verify" in r.stdout
     assert "认证/订阅失效" not in r.stdout, "issue 输出被误判为认证失败"
+
+
+def test_auth_keyword_in_issue_diagnostic_still_blocks(tmp_path):
+    """认证词混入 issue 诊断（评审 #178 bug_risk 场景）→ issue 形态优先，仍硬拦。
+
+    文件名含 unauthorized、错误行含 subscription 等宽词散落形态不得放行；
+    降级仅当输出无 issue 计数且认证词锚定在错误行/完整句式上。
+    """
+    r, calls = _run_gate(
+        tmp_path, ["a.py"], stub_rc=1,
+        stub_out="tools/unauthorized.py:10-12 use-named-expression\n"
+                 " • 1 issue detected.\n"
+                 "Error: subscription quota exceeded")   # 宽词 + issue 计数混合
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "push 被拦" in r.stdout, "含 issue 计数的输出不得降级"
+    assert "认证/订阅失效" not in r.stdout
+
+
+def test_pure_error_line_auth_degrades(tmp_path):
+    """行首锚定的认证错误行（无 issue 计数）→ 降级放行（401/login 形态）。"""
+    r, calls = _run_gate(tmp_path, ["a.py"], stub_rc=1,
+                         stub_out="Error: 401 Unauthorized. Please log in with `sourcery login`.")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "认证/订阅失效" in r.stdout
+    assert "push 被拦" not in r.stdout
+
+
+def test_trial_banner_with_issues_still_blocks(tmp_path):
+    """试用提示横幅（ends on，进行时）+ issue 计数 → 仍硬拦（在期真实形态）。
+
+    横幅是 stderr 噪音且用词为 "ends on"（非 ended/expired），不得触发降级；
+    本形态即试用期内含 issue 的真实 push 输出，是防误降级的主线场景。
+    """
+    r, calls = _run_gate(
+        tmp_path, ["a.py"], stub_rc=1,
+        stub_out="Your trial ends on 2026-09-13, update your payment method\n"
+                 " • 4 issues detected.")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "push 被拦" in r.stdout
+    assert "认证/订阅失效" not in r.stdout

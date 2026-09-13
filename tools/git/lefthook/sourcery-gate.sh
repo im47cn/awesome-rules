@@ -58,10 +58,19 @@ printf '%s\n' "$out"
 # 复现到期输出）——真实到期输出若不命中，闸保持拦截直到补匹配；届时本地
 # 仍可 --no-verify 应急。CI 侧 sourcery-review-gate 刻意不加降级：订阅是
 # 全局单点，失效时 CI 红是续订的正确信号，本地降级 + CI fail-closed 分层。
-if [ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -qiE \
-  'authentication|unauthorized|payment method|subscription|trial (has )?ended|expired|please (log ?in|sign ?in)|not logged in|invalid (token|api[ -]?key)|quota'; then
-  echo "[sourcery] ⚠ CLI 认证/订阅失效（非代码问题），显式降级跳过；CI 侧门禁仍会拦——续订后本闸自动恢复硬拦"
-  exit 0
+# 两级收紧（评审 #178 bug_risk）：宽关键词任意位置命中会把含认证词的 issue
+# 诊断（如 unauthorized.py 文件名）一并放行——① issue 形态优先：输出含非零
+# issue 计数（"N issue(s)…"，"No issues detected" 无前置数字不命中）时
+# 一律硬拦，认证词同现不再降级；② 认证词锚定错误行形态（行首 error/fatal
+# 后接认证词，或完整句式），散落在文件名/诊断里的同词不触发。
+if [ "$rc" -ne 0 ]; then
+  if printf '%s\n' "$out" | grep -qE '[1-9][0-9]* issue'; then
+    :  # issue 形态：按代码问题硬拦（落入下方拦截提示）
+  elif printf '%s\n' "$out" | grep -qiE \
+    '^[[:space:]]*(error|fatal)[:!].*(authenticat|unauthorized|payment|subscri|trial|expir|token|quota)|your (trial|subscription) (has )?(ended|expired)|please (log ?in|sign ?in)|not logged in|invalid (token|api[ -]?key)'; then
+    echo "[sourcery] ⚠ CLI 认证/订阅失效（非代码问题），显式降级跳过；CI 侧门禁仍会拦——续订后本闸自动恢复硬拦"
+    exit 0
+  fi
 fi
 [ "$rc" -ne 0 ] && echo "[sourcery] 存在未解决 issue，push 被拦：跑 skills/sourcery-autofix 修复循环后重试（跳过: git push --no-verify）"
 exit "$rc"
