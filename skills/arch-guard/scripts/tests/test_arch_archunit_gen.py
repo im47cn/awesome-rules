@@ -111,8 +111,8 @@ def test_state_leakage_pattern_single_source():
 
 
 def test_cycles_rule_with_prefix():
-    src = _gen(project_package_prefix="com.wanlianyida")
-    assert 'matching("com.wanlianyida.(**)")' in src
+    src = _gen(project_package_prefix="com.example")
+    assert 'matching("com.example.(**)")' in src
 
 
 # ── 5. Java 8 兼容与 prefix 强制 ───────────────────────────────────────────
@@ -189,7 +189,7 @@ def test_properties_freeze_store():
     assert "allowStoreUpdate=true" in props
 
 
-# ── 7. 试点教训（cont-task/gateway/wop-service 三项目实测） ────────────────
+# ── 7. 试点教训（xx-task/gateway/xx-service 三项目实测） ────────────────
 
 def test_excludes_test_classes():
     """gateway 教训：测试类在 ..domain.. 包下调用 infrastructure 被误判违规。"""
@@ -199,7 +199,7 @@ def test_excludes_test_classes():
 
 
 def test_layers_pruned_to_existing(tmp_path):
-    """cont-task 教训：只有 interfaces/infrastructure 两层时，不生成空层规则
+    """xx-task 教训：只有 interfaces/infrastructure 两层时，不生成空层规则
     （'Layer X is empty' 也是违规行）。"""
     for d in ("interfaces", "infrastructure"):
         (tmp_path / "src/main/java/com/x" / d).mkdir(parents=True)

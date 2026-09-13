@@ -1,4 +1,4 @@
-<!-- 跨仓契约门禁 japicmp 配置(sha 重建方案, 已在 gtsp-wop-service 仓端到端实测验证, 2026-08-21)
+<!-- 跨仓契约门禁 japicmp 配置(sha 重建方案, 已在 gtsp-xx-service 仓端到端实测验证, 2026-08-21)
      结构: 父 pom pluginManagement 放公共参数; 契约模块各自声明插件并配 oldVersion(file.path)
 
      ===== baseline 机制: 记录上次绿构建的 commit sha, 用 git worktree 重建契约 jar =====
@@ -70,7 +70,7 @@
 .japicmp-baseline/
 -->
 
-<!-- ===== baseline 重建脚本(CI job / 本地预检通用, 以 gtsp-wop-service 为例) ===== -->
+<!-- ===== baseline 重建脚本(CI job / 本地预检通用, 以 gtsp-xx-service 为例) ===== -->
 <!--
 #!/bin/bash
 # 用法: rebuild-baseline.sh <baseline_sha> <仓库根目录>

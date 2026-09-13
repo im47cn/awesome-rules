@@ -1589,7 +1589,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
 // 排除测试类：测试代码不参与架构分层判定（测试位于 ..domain.. 包下调用 infrastructure
-// 属正常测试行为，非架构违规——gtsp-wop-gateway 试点实测教训）
+// 属正常测试行为，非架构违规——gtsp-xx-gateway 试点实测教训）
 @AnalyzeClasses(packages = "{_java_str(prefix)}", importOptions = ImportOption.DoNotIncludeTests.class)
 class ArchitectureGuardTest {{
 

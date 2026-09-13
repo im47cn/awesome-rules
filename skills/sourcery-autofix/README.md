@@ -4,7 +4,7 @@
 
 ## 为什么有这个技能
 
-wop-java-sdk 实践（`sourcery-review-gate.yml`）确立了「`sourcery review --check` 合并门禁 + 评论清零」契约：PR 存在未解决 issue 即禁止合并。该契约的痛点是**拦截发生在远端**——红叉后人工/AI 逐条修，往返成本高。本技能把修复前移到提交前：agent 主动跑 `review --fix` + 修复纪律，gate 只做兜底。
+xx-java-sdk 实践（`sourcery-review-gate.yml`）确立了「`sourcery review --check` 合并门禁 + 评论清零」契约：PR 存在未解决 issue 即禁止合并。该契约的痛点是**拦截发生在远端**——红叉后人工/AI 逐条修，往返成本高。本技能把修复前移到提交前：agent 主动跑 `review --fix` + 修复纪律，gate 只做兜底。
 
 ## 红线（修复纪律，先于命令）
 

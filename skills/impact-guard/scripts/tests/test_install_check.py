@@ -37,7 +37,7 @@ DIST = [
 ]
 DIST_SRC = {dst: src for src, dst in DIST}
 
-# issue 实况：旧版已装项目（gtsp-wop-* 三仓）装的是 .js 时代 5 件（issue #131 前）
+# issue 实况：旧版已装项目（内部三仓）装的是 .js 时代 5 件（issue #131 前）
 LEGACY_INSTALLED = ("commitlint.config.js", "lefthook.yml",
                     ".lefthook/commitmsg-check.sh", ".lefthook/coverage.sh",
                     ".lefthook/run-tests.sh")

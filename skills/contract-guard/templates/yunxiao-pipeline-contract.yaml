@@ -23,8 +23,8 @@ upstream-pipeline:
             steps:
               - run: |
                   CHANGED=$(git diff --name-only origin/${BASE_REF}...HEAD)
-                  echo "$CHANGED" | grep -E '^<契约模块路径, 如 gtsp-wop-service-api>' && export CONTRACT_CHANGED=1
-                  echo "$CHANGED" | grep -E '^<契约模块路径, 如 gtsp-wop-service-api-gateway>' && export CONTRACT_CHANGED=1
+                  echo "$CHANGED" | grep -E '^<契约模块路径, 如 gtsp-xx-service-api>' && export CONTRACT_CHANGED=1
+                  echo "$CHANGED" | grep -E '^<契约模块路径, 如 gtsp-xx-service-api-gateway>' && export CONTRACT_CHANGED=1
                   # 云效环境变量导出方式按实际 runner 调整; 无变更时跳过 job2/job3
         - job2_gate_and_deploy: # 重建 baseline + japicmp 门禁 + 自检 + 刷私服 SNAPSHOT
             steps:
@@ -55,13 +55,13 @@ upstream-pipeline:
                   mvn deploy -pl <契约模块1>,<契约模块2>
                   # 更新制品库变量 CONTRACT_BASELINE_SHA=${GIT_COMMIT_SHA} -- 失败即本 job 红
         # 接入验收(一次性, 不入日常流水线): 用已知含破坏性变更的历史 sha 重建 baseline 跑一次,
-        # 断言 BUILD FAILURE 且错误含 METHOD_REMOVED/incompatible —— 本次 gtsp-wop-service
+        # 断言 BUILD FAILURE 且错误含 METHOD_REMOVED/incompatible —— 本次 gtsp-xx-service
         # 接入已用 sha=8790133(appSign 拆分前) 完成端到端验收(检出 AppSecretDTO.getAppSecret 移除)
         - job3_trigger_downstream: # 下游契约编译触发
             steps:
               - triggerPipeline: "<下游仓 契约编译流水线>"
                 # 分支映射必须走配置(上下游分支不保证同名), 映射表存流水线变量组:
-                #   BRANCH_MAP: feature/20260812-open_platform_v1=feature_20260808_init,...
+                #   BRANCH_MAP: feature/20260812-v1=feature_20260808_init,...
 
 # ==================== 下游仓: 契约编译流水线 ====================
 # 独立最小流水线, 只验证"最新契约 SNAPSHOT 下我仍能编译+契约测试通过"

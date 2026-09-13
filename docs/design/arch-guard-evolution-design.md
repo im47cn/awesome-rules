@@ -108,7 +108,7 @@ arch-guard、ArchUnit、ArchGuard 是三个物种（AI 技能 / 测试断言库 
 
 选一个已索引的 GTSP 项目，**手写**一份 `ArchitectureGuardTest.java` 跑通：JUnit5 `@ArchTest` + `layeredArchitecture()` + `FreezingArchRule.freeze()` + `archunit.properties`。确认：JDK/gtsp-parent 兼容性、`mvn test` 时长可接受、违规输出可读。**Spike 不满足（如依赖冲突不可解/时长不可接受）则停在此处，Tier 1 + Phase 0/1 即终态**。
 
-**Spike 结果（2026-08-18，试点 = `gtsp-cont-task`，✅ GO）**：
+**Spike 结果（2026-08-18，试点 = `gtsp-xx-task`，✅ GO）**：
 
 | 验证点 | 结果 |
 |---|---|
@@ -166,11 +166,11 @@ Spike 产物存档：`skills/arch-guard/templates/archunit-spike/`（Architectur
 
 **验证**：生成器单测（配置矩阵 → 生成代码断言）；试点项目双跑对比——Tier 1 违规集 ⊆ ArchUnit 违规集，偏差逐条归因（ArchUnit 误报→调规则；Tier 1 漏报→记为修复证据）；`--verify` 对手工篡改的生成物报 exit 1。
 
-> **Phase 3 试点状态（2026-08-18，✅ 三项目接入完成）**：cont-task / gtsp-wop-gateway / gtsp-wop-service(core) 全部
+> **Phase 3 试点状态（2026-08-18，✅ 三项目接入完成）**：xx-task / gtsp-xx-gateway / gtsp-xx-service(core) 全部
 > 27 规则绿 + freeze store 建立存量基线（45/84/754 条）。双跑对比结论：Tier 1 每条违规在 ArchUnit 均有对应且
 > 证据更细（field/method/constructor 级），Tier 1 ⊆ ArchUnit 成立。试点新增三条生成器修正（已进 v2 产物与单测）：
 > ① `ImportOption.DoNotIncludeTests` 排除测试类（gateway 教训：测试类在 domain 包下调用 infrastructure 被误判）；
-> ② 按项目实际层裁剪 `layeredArchitecture` 定义（cont-task 教训：两层项目生成五层规则产生 "Layer X is empty" 假违规）；
+> ② 按项目实际层裁剪 `layeredArchitecture` 定义（xx-task 教训：两层项目生成五层规则产生 "Layer X is empty" 假违规）；
 > ③ 多模块项目 `.arch-guard.json` 在仓库根时需 `--config` 显式指定。试点另发现两项目 HEAD 自带坏测试
 > （gateway `RateLimitFilterTest` int→Long、wop `PlfBizLineExchangeServiceTest` 缺符号——依赖版本漂移），
 > 验证时临时移出已复原，属项目自身债务与本技能无关。
