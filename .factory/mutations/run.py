@@ -126,7 +126,7 @@ def write_stamp(evidence: str | None = None) -> str | None:
     """全绿出口调用：当前周界 blob 写入 stamp（None = 无法绑定，不写）。
 
     evidence 指向人工证据留档名；缺省时取 mutations/ 目录最新
-    EVIDENCE-*.md（下游 wop-web-tools 反哺：静态默认文件名会过期——
+    EVIDENCE-*.md（下游 xx-web-tools 反哺：静态默认文件名会过期——
     写戳引用不存在的留档 = stamp 说谎）。无留档如实记「无留档文件」。
     """
     import datetime
@@ -338,7 +338,7 @@ def main() -> int:
     stamp_stale_banner()
     if args.only:
         wanted = {x.strip() for x in args.only.split(",") if x.strip()}
-        # 下游 wop-web-tools 反哺：未知 id 过滤结果为空仍以 0 退出写戳
+        # 下游 xx-web-tools 反哺：未知 id 过滤结果为空仍以 0 退出写戳
         # = 配置错误伪装成全量验证。缺失即拒绝（exit 2，对齐 guard 用法语义）。
         all_ids = {d.id for d in defects}
         if missing := wanted - all_ids:
@@ -352,7 +352,7 @@ def main() -> int:
 
     for d in defects:
         print(f"[{d.id}] {d.description}（gate={d.gate}）")
-        # 下游 wop-web-tools 反哺：d.target 绝对路径会重置 REPO_ROOT 拼接
+        # 下游 xx-web-tools 反哺：d.target 绝对路径会重置 REPO_ROOT 拼接
         # （Path / 语义），`..` 可越仓——--defects 载外部 JSON 时指向仓外
         # 文件注入+写回（进程非正常终止 = 注入残留落仓外）。resolve 后
         # 必须仍在 REPO_ROOT 内。

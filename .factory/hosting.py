@@ -674,7 +674,7 @@ class CodeupAdapter:
                 "comments": cs}
 
     def _wi_get(self, n):
-        """双键寻址：serialNumber（KFPT-16）或 24-hex id 均 200（live）。"""
+        """双键寻址：serialNumber（T-16）或 24-hex id 均 200（live）。"""
         _, org = self._cfg()
         r = self._req(
             "GET",
@@ -827,7 +827,7 @@ class CodeupAdapter:
         d = d or {}
         wid = d.get("id")
         # 【live 2026-08-26】create 响应只含 24-hex id，无 serialNumber
-        # （实测项目 KFPT-21）；人类可读编号（KFPT-N）须回查
+        # （实测项目 T-21）；人类可读编号（T-N）须回查
         # 详情。回查失败降级 id（view/编辑两种键都认，但人在界面引用
         # 序号——宁可多一次 GET）
         number = d.get("serialNumber") or wid
@@ -900,7 +900,7 @@ class CodeupAdapter:
     @staticmethod
     def _marker_label(content):
         # 平台开放输入：恰为前缀/前缀+空白时切片为空，splitlines()[0] 抛
-        # IndexError（CodeRabbit wop-skills#14）；空标记按无标记处理
+        # IndexError（CodeRabbit xx-skills#14）；空标记按无标记处理
         rest = content[len(_CU_LABEL_ADD):].strip()
         return rest.splitlines()[0].strip() if rest else ""
 

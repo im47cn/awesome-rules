@@ -171,7 +171,7 @@ while IFS=$'\t' read -r kind rel; do
     echo "  [$kind] $rel: 本地缺失"
     [ "$kind" = full ] && DRIFT=1
     if [ "$MODE" = apply ] && [ "$kind" = full ]; then
-      mkdir -p "$(dirname "$dst")" # 缺失父目录先建（wop-skills：tests/ 整缺，重定向即崩）
+      mkdir -p "$(dirname "$dst")" # 缺失父目录先建（xx-skills：tests/ 整缺，重定向即崩）
       # tmp+mv 原子替换（#103）：$dst 可能是运行中脚本自身——bash 惰性逐段
       # 读源文件，`> "$dst"` 直写截断同 inode，旧读位移落在新内容中途即
       # syntax error 半同步态；同目录 rename 换 inode，旧 inode 保活至跑完

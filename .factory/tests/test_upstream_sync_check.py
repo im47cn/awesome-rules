@@ -1,4 +1,4 @@
-"""upstream-sync-check.sh 退出码契约回归（wop-skills PR#14 Sourcery 评论 1）。
+"""upstream-sync-check.sh 退出码契约回归（xx-skills PR#14 Sourcery 评论 1）。
 
 缺陷：sync --check 的致命 rc=2（用法/上游不可用/锚点不可解析）原被 `&& {}`
 短路吞掉——输出不带 [local]/[full] 标记时落入收尾分支，以「仅 local 面漂移」

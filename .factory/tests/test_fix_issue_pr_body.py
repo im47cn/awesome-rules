@@ -1,7 +1,7 @@
 """fix-issue.sh 建 PR 正文须含 Closes #${ISSUE}（链约定，state.py _linked_issue 消费）。
 
 回归锚：d6e6b57「PR 评审修复波」误删 --body-file 行 → PR 无正文、
-合并后 issue 不自动关（CodeRabbit wop-skills#14 实锤，正文原文经 git
+合并后 issue 不自动关（CodeRabbit xx-skills#14 实锤，正文原文经 git
 历史还原）。整链 mock 建 PR 成本高于收益，此守卫以源文本锚定最小
 契约面（脚本即执行计划）：body 行丢失即测试失败。
 """

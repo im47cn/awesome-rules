@@ -154,10 +154,10 @@ def test_helpers():
           {"op": "remove", "label": "factory:needs-fix"}]
     assert state._needs_fix_rounds(ev) == 1
     assert state._needs_fix_rounds(None) == 0
-    assert state._linked_issue(_pr()) == "9"   # ADR-008：编号统一字符串（Codeup 序号 KFPT-16）
+    assert state._linked_issue(_pr()) == "9"   # ADR-008：编号统一字符串（Codeup 序号 T-16）
     assert state._linked_issue({"body": None}) is None
     assert state._linked_issue({"body": "无关正文"}) is None
-    assert state._linked_issue({"body": "Closes #KFPT-16"}) == "KFPT-16"
+    assert state._linked_issue({"body": "Closes #T-16"}) == "T-16"
 
 
 def test_cli_table_and_plan(tmp_path):

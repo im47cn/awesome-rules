@@ -227,8 +227,8 @@ class TestDispatchParsers:
         checkout 即用）。2026-09-01：origin 别名 URL 曾被拒 → dispatch
         exit 2 停摆（与 ssh.github.com 同族回归）。"""
         assert extract_slug(
-            ["git@github-wop-bot:wop-platform/wop-go-sdk.git"]
-        ) == "wop-platform/wop-go-sdk"
+            ["git@github-wop-bot:wop-platform/xx-go-sdk.git"]
+        ) == "wop-platform/xx-go-sdk"
         assert extract_slug(["git@github-wop-bot.com:o/r.git"]) == ""
 
     def test_extract_slug_codeup_rejected(self):
