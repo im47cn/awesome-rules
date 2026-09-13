@@ -22,6 +22,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CENTER="$(cd "$SCRIPT_DIR/.." && pwd)"
 MANIFEST="$SCRIPT_DIR/downstream.json"
+# ADR-012：真实清单住 downstream.local.json（gitignored 仓特定数据）；
+# tracked 模板仅文档占位，local 存在则优先
+LOCAL_MANIFEST="$SCRIPT_DIR/downstream.local.json"
+[ -f "$LOCAL_MANIFEST" ] && MANIFEST="$LOCAL_MANIFEST"
 SYNC="$SCRIPT_DIR/sync-from-upstream.sh"
 LOCK="$SCRIPT_DIR/locks/downstream-check.lock"
 OUT_FILE="$(mktemp "${TMPDIR:-/tmp}/.factory-downstream-check.XXXXXX")"
@@ -54,7 +58,8 @@ for r in rows:
     if not isinstance(r, dict) or not isinstance(r.get("path"), str) or not r["path"].strip():
         sys.exit(1)
     print(r["path"])' "$MANIFEST" 2>/dev/null)" \
-  || { echo "下游清单损坏（需非空 repos[].path）: $MANIFEST" >&2; exit 2; }
+  || { echo "下游清单损坏（需非空 repos[].path）: $MANIFEST" \
+       "——真实清单写 .factory/downstream.local.json（gitignored，ADR-012）" >&2; exit 2; }
 
 mkdir -p "$SCRIPT_DIR/locks"  # 净克隆首跑：gitignored 目录缺失时 shlock ENOENT 被误读为锁被持
 if ! /usr/bin/shlock -f "$LOCK" -p $$; then

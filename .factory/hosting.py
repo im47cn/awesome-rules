@@ -156,9 +156,33 @@ def _label_lock_dir(repo: str, p: int, name: str) -> str:
 # 核心脚本不再各自扫 remote）
 # ---------------------------------------------------------------------------
 
-_SLUG_RE = re.compile(
-    r"^(?:[A-Za-z0-9_.-]+@)?(?:github\.com|ssh\.github\.com|github-wop-bot)(?::\d+)?[/:]"
-    r"(?P<slug>[^/]+/[^/]+?)(?:\.git)?/?$")
+# 主机白名单基础面 = github 双域名；bot ssh Host 别名等机器特定主机走
+# FACTORY_SLUG_EXTRA_HOSTS（逗号分隔）注入（ADR-012：公开仓零内部标识，
+# 配置数据化 env 两级回退——与 PR #61 平台配置同模式）。token 严格校验
+# [A-Za-z0-9_.-]+（进 regex 交替支，防注入），坏配置 fail-closed 抛错
+# 而非静默降级。缓存按 env 值键控：同进程 env 不变零重编译
+_SLUG_HOST_ENV = "FACTORY_SLUG_EXTRA_HOSTS"
+_slug_re_cache = (None, None)
+
+
+def _slug_re():
+    env = os.environ.get(_SLUG_HOST_ENV, "")
+    if _slug_re_cache[0] == env:
+        return _slug_re_cache[1]
+    hosts = "github\\.com|ssh\\.github\\.com"
+    if env.strip():
+        toks = [t.strip() for t in env.split(",") if t.strip()]
+        for t in toks:
+            if not re.fullmatch(r"[A-Za-z0-9_.-]+", t):
+                raise ValueError(
+                    f"{_SLUG_HOST_ENV} 含非法主机名: {t!r}"
+                    "（仅允许 [A-Za-z0-9_.-]）")
+        hosts += "|" + "|".join(re.escape(t) for t in toks)
+    cre = re.compile(
+        rf"^(?:[A-Za-z0-9_.-]+@)?(?:{hosts})(?::\d+)?[/:]"
+        r"(?P<slug>[^/]+/[^/]+?)(?:\.git)?/?$")
+    globals()["_slug_re_cache"] = (env, cre)
+    return cre
 _SLUG_VALID = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 
 
@@ -168,7 +192,7 @@ def extract_slug(urls):
     owner/repo 白名单双闸。GH_REPO 显式指定不经此函数。"""
     for u in urls:
         t = re.sub(r"^(?:ssh|git|https?)://", "", (u or "").strip())
-        m = _SLUG_RE.match(t)
+        m = _slug_re().match(t)
         if m and _SLUG_VALID.fullmatch(m.group("slug")):
             return m.group("slug")
     return ""
@@ -266,7 +290,7 @@ class GitHubAdapter:
     def auth_diagnose(self) -> str:
         """auth_ok 失败的留痕诊断：返回 gh auth status 的 stderr（非空时，否则 stdout），并去除首尾空白。
 
-        【2026-09-05 02:00 wop 6 仓瞬断事故】auth_ok 只回布尔，失败
+        【2026-09-05 02:00 6 仓瞬断事故（内部 SDK 仓）】auth_ok 只回布尔，失败
         stderr 被丢弃 → 事后无法回溯是 keyring/网络/过期哪种。dispatch
         preflight 失败路径调用，输出附着 dispatch 日志（同 bare 事故的
         诊断附着模式）。"""

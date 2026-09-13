@@ -31,3 +31,6 @@ node_modules/
 
 docs/design/architecture/
 **/.coverage*
+
+# 工厂链本地数据（ADR-012：公开中心仓的仓特定清单，永不入库）
+.factory/downstream.local.json

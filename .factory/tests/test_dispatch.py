@@ -221,15 +221,25 @@ class TestDispatchParsers:
             ["ssh://git@ssh.github.com:443/im47cn/awesome-rules.git"]
         ) == "im47cn/awesome-rules"
         assert extract_slug(["ssh://ssh.github.com/o/r.git"]) == "o/r"
-    def test_extract_slug_github_wop_bot_alias(self):
-        """~/.ssh/config 的 github-wop-bot Host 别名（wop-platform 托管
-        机器事实配置）：host 锚定须认别名——无 remote 重命名兜底（新
-        checkout 即用）。2026-09-01：origin 别名 URL 曾被拒 → dispatch
-        exit 2 停摆（与 ssh.github.com 同族回归）。"""
+    def test_extract_slug_extra_host_env(self, monkeypatch):
+        """ADR-012：bot ssh Host 别名是机器事实配置（~/.ssh/config），
+        经 FACTORY_SLUG_EXTRA_HOSTS 注入白名单（env 两级回退，与 PR #61
+        平台配置同模式）——公开仓零内部标识。2026-09-01 回归保真：别名
+        URL 未被认曾致 dispatch exit 2 停摆，故配置注入路径必须有测。"""
+        monkeypatch.setenv("FACTORY_SLUG_EXTRA_HOSTS", "ci-bot-host")
         assert extract_slug(
-            ["git@github-wop-bot:wop-platform/xx-go-sdk.git"]
-        ) == "wop-platform/xx-go-sdk"
-        assert extract_slug(["git@github-wop-bot.com:o/r.git"]) == ""
+            ["git@ci-bot-host:some-org/xx-go-sdk.git"]
+        ) == "some-org/xx-go-sdk"
+        # 未配置时同 host 被拒：主机锚定防伪装语义不因配置缺省放宽
+        monkeypatch.delenv("FACTORY_SLUG_EXTRA_HOSTS")
+        assert extract_slug(["git@ci-bot-host:some-org/xx-go-sdk.git"]) == ""
+        # 近似 host 不放宽（ci-bot-host.com 非 ehost.com）
+        monkeypatch.setenv("FACTORY_SLUG_EXTRA_HOSTS", "ehost.com")
+        assert extract_slug(["git@ehost.com.evil.io:o/r.git"]) == ""
+        # 非法 token（regex 注入面）fail-closed 抛错而非静默降级
+        monkeypatch.setenv("FACTORY_SLUG_EXTRA_HOSTS", "a(b")
+        with pytest.raises(ValueError):
+            extract_slug(["git@github.com:o/r.git"])
 
     def test_extract_slug_codeup_rejected(self):
         """Codeup（阿里云效）URL 不匹配 GitHub 锚定：未接入仓 fail-closed

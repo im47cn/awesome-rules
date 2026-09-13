@@ -30,7 +30,7 @@
 
 | 仓 | 托管 | .factory 入库位置(件数) | 锚点 | =锚/锚full | 本地改 vs 锚 | vs 上游HEAD/49 | 链活跃证据 | 追平提交数 | local.json 键数 |
 |---|---|---|---|---|---|---|---|---|---|
-| gtsp-xx-service | Codeup | 开发分支 origin/feature/20260812-v1(50) | 无 | – | – | 27 | locks 初始化(9-01),无 dispatch.log,ledger 0 条 | 0 | 11 |
+| gtsp-xx-service | Codeup | 开发分支 origin/feature/demo-v1(50) | 无 | – | – | 27 | locks 初始化(9-01),无 dispatch.log,ledger 0 条 | 0 | 11 |
 | gtsp-xx-gateway | Codeup | 开发分支 origin/fix/sourcery-review(56) | 04ee96d0(8-28) | 29/42 | 13 | 23 | ledger 2 条(8-28)+ leases/T-22/26 + metrics/auto-merge-unlocked;远端 factory/* 分支(sync-2be9f99、issue-T-26) | 1 | 11 |
 | xx-python-sdk | GitHub | origin/main(55,9-02) | 无 | – | – | 23 | dispatch.log 9-03 10:58 exit=0(1301 行) | 0 | 11 |
 | xx-java-sdk | GitHub | origin/main(57,9-02) | 20f6a632(8-31) | 41/42 | 1 | 21 | dispatch.log 9-03 exit=0 | 0 | 12(+docstring_gate_cmd) |
@@ -81,7 +81,7 @@
 **判定口径**(三维度):.factory 入库(main 或开发主线)+ 链运行证据 + 锚点/追平史。
 
 - 严口径真消费(A 类:三要素齐)= **6/10**:java、php、dotnet、go、python、typescript(python/ts 锚点缺失但 main 已合 + 链当日活跃,内容世代 20f6a632)。
-- 加 C 类开发线(gateway 链史 + KFPT 租约实证;service 初装)→ 宽口径 **8/10**。
+- 加 C 类开发线(gateway 链史 + T-N 租约实证;service 初装)→ 宽口径 **8/10**。
 - D 类滞后(skills,main 已合但 =锚 20/42)与 E 类未合(web-tools)各有 1 仓。
 - **6/10 ≥ 半数 → 任务书条款 6 路径成立:设计分发套件。** 同时数据否决了「无条件全面铺开」:
 

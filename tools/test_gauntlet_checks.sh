@@ -665,6 +665,24 @@ else
         bad "NC13 输出缺 P1/P3 报告: $(cat "$TMP/out13")"
     fi
 fi
+# NC13w（ADR-012）：内部项目名前缀 wop- 进 P1 禁词——内部 bot Host
+# 别名曾以 full 面驻留 hosting.py 而门不拦（2026-09-13 净化盲区实证）。
+cat >"$NC13/.factory/lib.py" <<'EOF'
+import json
+sys.path.insert(0, ".")
+remote = "git@wop-portal:o/r.git"  # 连字形态
+note = "wop 6 仓"  # 空格裸词形态（同族，审查实证曾漏）
+EOF
+git -C "$NC13" add .factory
+if "$PY" tools/check_factory_portability.py "$NC13" >"$TMP/out13w" 2>&1; then
+    bad "NC13w 期望 rc=1（P1 wop- 命中），实际放行"
+else
+    if grep -q 'P1 宿主专名' "$TMP/out13w"; then
+        ok "NC13w P1 拦内部前缀 wop-"
+    else
+        bad "NC13w 输出缺 P1: $(cat "$TMP/out13w")"
+    fi
+fi
 # P2 引擎旁路：chain.sh 直调 omp
 cat >>"$NC13/.factory/chain.sh" <<'EOF'
 omp -p "x" --no-session

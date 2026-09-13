@@ -61,7 +61,7 @@ upstream-pipeline:
             steps:
               - triggerPipeline: "<下游仓 契约编译流水线>"
                 # 分支映射必须走配置(上下游分支不保证同名), 映射表存流水线变量组:
-                #   BRANCH_MAP: feature/20260812-v1=feature_20260808_init,...
+                #   BRANCH_MAP: feature/demo-v1=feature_demo_init,...
 
 # ==================== 下游仓: 契约编译流水线 ====================
 # 独立最小流水线, 只验证"最新契约 SNAPSHOT 下我仍能编译+契约测试通过"
