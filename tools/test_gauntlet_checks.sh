@@ -1090,7 +1090,7 @@ fi
 
 # R9a 漏报：skills/ddl-guard 有 SKILL.md 但根枚举漏注册
 NC18A="$TMP/nc18a"; nc18_setup "$NC18A"
-sed -i '' "/'ddl-guard'/d" "$NC18A/commitlint.config.js"
+"$PY" -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); p.write_text("".join(x for x in p.read_text(encoding="utf-8").splitlines(True) if "ddl-guard" not in x), encoding="utf-8")' "$NC18A/commitlint.config.js"
 if "$PY" tools/check_doc_freshness.py "$NC18A" >"$TMP/o18a" 2>&1; then
     _rc18a=0
 else
