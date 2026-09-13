@@ -19,7 +19,6 @@ __pycache__/
 .idea/
 *.pdf
 target/
-**/.coverage
 
 # 黑盒工厂
 .factory/artifacts/
@@ -31,3 +30,4 @@ target/
 node_modules/
 
 docs/design/architecture/
+**/.coverage*

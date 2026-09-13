@@ -130,7 +130,7 @@ fi
 # 跳过（安装指引见层内提示；CI 侧仍会拦），装好即自动生效硬拦。
 echo "── lint-shellcheck"
 if command -v shellcheck >/dev/null 2>&1; then
-  if ! shellcheck tools/gauntlet.sh tools/must_not_match.sh \
+  if ! shellcheck tools/gauntlet.sh tools/must_not_match.sh tools/run_diff_cover.sh \
       tools/test_gauntlet_orchestration.sh tools/test_gauntlet_checks.sh \
       tools/test_spec_check.sh tools/test_pre-push-delete-guard.sh; then
     FAILED+=("lint-shellcheck")
