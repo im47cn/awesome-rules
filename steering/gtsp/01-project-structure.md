@@ -54,10 +54,12 @@ gtsp-{域}-domain/.../domain/
 
 ## 5. 轻量档（api+service 两模块）
 
-用**包分层**代替 Maven 模块分层，不强制模块依赖约束。service 模块内包结构：
+**模块命名家族例外**：服务名本身已含 `service` 语义时（如 `gtsp-xx-callback`、`gtsp-xx-service`），第二模块命名 `-core`（`gtsp-xx-callback-core`），避免 `-service` 后缀冗余；root 聚合器 packaging=pom 保持服务名。
+
+用**包分层**代替 Maven 模块分层，不强制模块依赖约束。第二模块（通常 `service`，命中上述家族例外时 `-core`）内包结构：
 
 ```
-gtsp-{域}-service/src/main/java/com/acme/{module}/
+gtsp-{域}-{service|core}/src/main/java/com/acme/{module}/
 ├── adapter/web/                            # Controller
 ├── application/{service,executor,assembler,handler,manager}
 ├── domain/{model/{entity,valueobject}, repository, service}

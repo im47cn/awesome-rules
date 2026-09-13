@@ -14,7 +14,7 @@ scenario: CR 清单/公共依赖速查
 **模块结构**
 
 - [ ]【强制】完整档：COLA 6 模块（`gtsp-{域}-{adapter/client/start/app/domain/infrastructure}`），依赖矩阵合规（`client`/`domain` 零内部依赖，pom.xml 编译期校验）
-- [ ]【强制】轻量档：api+service 两模块，service 内包分层（`adapter/application/domain/infrastructure` 作为包），靠 arch-guard 脚本守护依赖方向
+- [ ]【强制】轻量档：api+service 两模块（服务名已含 service 语义时第二模块用 `-core`），第二模块内包分层（`adapter/application/domain/infrastructure` 作为包），靠 arch-guard 脚本守护依赖方向
 - [ ]【强制】启动类在 `-start` 模块（完整档）或 `com.acme` 根包（轻量档），命名 `{Domain}Application`，标注 `@EnableCustomConfig`
 - [ ]【强制】依赖方向 `adapter → app → domain ← infrastructure`
 - [ ]【强制】Controller 不直接调用 Mapper 或 Repository
