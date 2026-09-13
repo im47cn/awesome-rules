@@ -15,7 +15,9 @@ module.exports = {
     ],
 
     // ── scope 建议在枚举内（warn，业务域靠 warn 放行，不阻断）─────
-    //    枚举须与 steering/git-conventions.md 保持一致
+    //    下游通用最小子集：仅业务域 + dependency，不随上游技能清单扩展；
+    //    上游完整枚举见 awesome-rules 根 commitlint.config.js（doc-freshness
+    //    R9 门禁守护上游三方一致，本件不参与比对）
     'scope-enum': [1, 'always', ['api', 'db', 'ui', 'ci', 'dependency']],
 
     // ── 主题行长度（git 经典 50/72 规则，对应规范"主题行 ≤50 字符"）──
