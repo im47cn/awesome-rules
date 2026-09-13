@@ -879,12 +879,15 @@ fi
 # scripts/run_tests.sh 的 lint-shellcheck 层文件清单镜像自 tools/gauntlet.sh
 # （权威清单），此前靠注释互指人工同步（2026-09-04 reviewer 建议）；本用例
 # 机械比对两处清单集合，gauntlet 侧增删文件而 run_tests 未同步即红。
-# 抽取口径：跳过注释行，从首处非注释 lint-shellcheck 行起，到「含
-# tools/*.sh 且无续行符」的清单尾行止，收集 tools/*.sh token。
+# 抽取口径：锚定 shellcheck 调用语句——非注释行含 `shellcheck tools/`
+# 即语句起点，到无续行符的语句尾行止，收集其间 tools/*.sh token。
+# 锚点用调用形态而非「lint-shellcheck」字样：2026-09-08 实证 doctor 的
+# FAIL 提示语含该字样，被旧锚点误判为清单起点致假红；run_tests 的段头
+# echo 同样只是段名，均非清单本身。
 _sc_list() {
-    awk '/lint-shellcheck/ && $0 !~ /^[ \t]*#/ {_in=1}
+    awk '/shellcheck tools\// && $0 !~ /^[ \t]*#/ {_in=1}
          _in && $0 !~ /^[ \t]*#/ { print
-               if ($0 ~ /tools\/[A-Za-z0-9_.\/-]+\.sh/ && $0 !~ /\\$/) exit }' "$1" \
+               if ($0 !~ /\\$/) exit }' "$1" \
       | grep -oE 'tools/[A-Za-z0-9_./-]+\.sh' | sort -u
 }
 _sc_g=$(_sc_list tools/gauntlet.sh)
@@ -906,16 +909,28 @@ else
     bad "NC16a 期望漂移被检出: gauntlet[$_sc_g] vs 篡改[$_sc_a]"
 fi
 
-# 边界：清单块内插注释（含 tools/*.sh 字样）不得截断抽取（防假红；
-# 注释行无续行符，未过滤会被误判为清单尾行）
+# 边界：清单语句内插注释（含 tools/*.sh 字样）不得截断抽取（防假红；
+# 注释行无续行符，未过滤会被误判为语句尾行。插入点随锚点改为调用行后）
 NC16B="$TMP/nc16b"; mkdir -p "$NC16B"
-awk '/^echo "── lint-shellcheck"$/ {print; print "  # 注释探针 tools/fake-note.sh"; next} {print}' \
+awk '/^  if ! shellcheck tools\/gauntlet.sh/ {print; print "  # 注释探针 tools/fake-note.sh"; next} {print}' \
     scripts/run_tests.sh >"$NC16B/run_tests.sh"
 _sc_b=$(_sc_list "$NC16B/run_tests.sh")
 if [ "$_sc_b" = "$_sc_g" ]; then
-    ok "NC16b 清单块内注释不截断（抽取仍全集）"
+    ok "NC16b 清单语句内注释不截断（抽取仍全集）"
 else
-    bad "NC16b 块内注释致截断: gauntlet[$_sc_g] vs 探针[$_sc_b]"
+    bad "NC16b 语句内注释致截断: gauntlet[$_sc_g] vs 探针[$_sc_b]"
+fi
+
+# 边界：含「lint-shellcheck」字样的 echo 提示语（doctor FAIL 消息形态）
+# 不作为抽取锚点（2026-09-08 实证假红根因：旧锚点按字样定位被误触发）
+NC16C="$TMP/nc16c"; mkdir -p "$NC16C"
+awk '/^    run_layer lint-shellcheck/ {print "  echo \"  FAIL shellcheck: 未安装（lint-shellcheck 探针）\" >&2"} {print}' \
+    tools/gauntlet.sh >"$NC16C/gauntlet.sh"
+_sc_c=$(_sc_list "$NC16C/gauntlet.sh")
+if [ "$_sc_c" = "$_sc_g" ]; then
+    ok "NC16c lint-shellcheck 提示语不误触清单抽取"
+else
+    bad "NC16c echo 探针致误判: gauntlet[$_sc_g] vs 探针[$_sc_c]"
 fi
 
 # ── NC17 tempdir-isolation 负控制：PR #137 泄漏断言原形必须被拦 ────────

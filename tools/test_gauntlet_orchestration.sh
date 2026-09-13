@@ -1,6 +1,7 @@
 #!/bin/sh
 # gauntlet.sh 编排自测：证明层运行器的 fail-closed 语义真实存在。
-# 覆盖 SPEC 场景：全绿通过 / 任一层失败整体失败 / 层清单缺失硬失败 / 不读陈旧产物。
+# 覆盖 SPEC 场景：全绿通过 / 任一层失败整体失败 / 层清单缺失硬失败 / 不读陈旧产物 /
+# doctor 自诊断（健康全 OK 且不改盘 / 坏解释器 FAIL 且汇总非零 / 未知模式硬失败）。
 set -e
 cd "$(dirname "$0")/.."
 G=tools/gauntlet.sh
@@ -67,6 +68,45 @@ if [ "$rc" -eq 0 ] && [ ! -e tools/.coverage ]; then
     ok "T4 启动清理陈旧 .coverage"
 else
     bad "T4 期望运行后 tools/.coverage 不存在，rc=$rc"
+fi
+
+# ── T5 doctor 模式：健康环境全 OK、退出 0、不清产物 ────────────────────
+touch tools/.coverage
+if sh "$G" doctor >"$TMP/d5out" 2>"$TMP/d5err"; then
+    drc=0
+else
+    drc=$?
+fi
+if [ "$drc" -eq 0 ] && grep -q 'OK   解释器' "$TMP/d5out" \
+    && grep -q 'OK   目录: scripts' "$TMP/d5out" && [ -e tools/.coverage ]; then
+    ok "T5 doctor 健康环境退出 0、逐项 OK 且不清产物"
+else
+    bad "T5 期望 rc=0+解释器/目录 OK+产物保留, 实际 rc=${drc}, 输出: $(cat "$TMP/d5out") $(cat "$TMP/d5err")"
+fi
+rm -f tools/.coverage
+
+# ── T6 doctor 负控制：坏解释器（GAUNTLET_PY 指向不存在路径）────────────
+if GAUNTLET_PY=$TMP/definitely-not-python sh "$G" doctor >"$TMP/d6out" 2>"$TMP/d6err"; then
+    drc=0
+else
+    drc=$?
+fi
+if [ "$drc" -ne 0 ] && grep -q 'FAIL 解释器' "$TMP/d6err" && grep -q '项异常' "$TMP/d6err"; then
+    ok "T6 doctor 坏解释器报 FAIL 并汇总退出非零"
+else
+    bad "T6 期望 rc!=0+FAIL 解释器+异常计数, 实际 rc=${drc}, stderr: $(cat "$TMP/d6err")"
+fi
+
+# ── T7 未知模式 fail-closed：不静默落回全量门禁 ────────────────────────
+if sh "$G" bogus-mode >"$TMP/d7out" 2>"$TMP/d7err"; then
+    drc=0
+else
+    drc=$?
+fi
+if [ "$drc" -eq 2 ] && grep -q '未知参数' "$TMP/d7err"; then
+    ok "T7 未知参数硬失败（exit 2）"
+else
+    bad "T7 期望 rc=2+未知参数提示, 实际 rc=${drc}, stderr: $(cat "$TMP/d7err")"
 fi
 
 # ── 汇总 ───────────────────────────────────────────────────────────────
