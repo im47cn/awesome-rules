@@ -73,10 +73,13 @@ def probe_file(p):
         "else:\n"
         "    runpy.run_path(str(f), run_name='gauntlet_probe')\n"
     )
-    r = subprocess.run(
-        [sys.executable, "-c", runner, str(p), str(pathlib.Path.cwd())],
-        capture_output=True, timeout=EXEC_TIMEOUT_S,
-    )
+    try:
+        r = subprocess.run(
+            [sys.executable, "-c", runner, str(p), str(pathlib.Path.cwd())],
+            capture_output=True, timeout=EXEC_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return f"{p} exec timeout (> {EXEC_TIMEOUT_S}s)"
     if r.returncode != 0:
         err = r.stderr.decode(errors="replace").strip().splitlines()
         detail = err[-1][:120] if err else f"exit {r.returncode}"

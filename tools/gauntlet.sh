@@ -82,8 +82,10 @@ skills/doc-gen/scripts/tests arch-hawkeye/scripts/tests'
 # 层 import 的实现根目录（Sourcery 2026-09-13 评审：原 LAYER_DIRS 顺延
 # 致 boundary_scanner.py 等实现文件不在探针面，tests 层收集期照样炸）+
 # tools 检查器。.factory 整树含 gitignored 工厂链 worktree，由探针脚本
-# 内特例收窄（顶层 + .factory/tests，见其 docstring）
-PY_SYNTAX_DIRS="$LAYER_DIRS
+# 内 FLAT_DIRS 特例收窄（.factory/skills/_shared 平面收集一层——独立审查
+# P0-1 实证：不传则 hosting.py/guard_lib.py 等 6 文件脱防，3.9 遇 PEP 604
+# 时 find_py 不拒候选、退化为 pytest 层晚爆）
+PY_SYNTAX_DIRS="$LAYER_DIRS .factory skills/_shared
 skills/impact-guard/scripts skills/skill-evo/scripts skills/doc-gen/scripts
 arch-hawkeye/scripts tools"
 
