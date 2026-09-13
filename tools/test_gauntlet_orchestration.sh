@@ -1,7 +1,8 @@
 #!/bin/sh
 # gauntlet.sh 编排自测：证明层运行器的 fail-closed 语义真实存在。
 # 覆盖 SPEC 场景：全绿通过 / 任一层失败整体失败 / 层清单缺失硬失败 / 不读陈旧产物 /
-# doctor 自诊断（健康全 OK 且不改盘 / 坏解释器 FAIL 且汇总非零 / 未知模式硬失败）。
+# doctor 自诊断（健康全 OK 且不改盘 / 坏解释器 FAIL 且汇总非零 / 未知模式硬失败 /
+# find_py 语法探针拒收过 import 桩但解析失败的假解释器）。
 set -e
 cd "$(dirname "$0")/.."
 G=tools/gauntlet.sh
@@ -107,6 +108,29 @@ if [ "$drc" -eq 2 ] && grep -q '未知参数' "$TMP/d7err"; then
     ok "T7 未知参数硬失败（exit 2）"
 else
     bad "T7 期望 rc=2+未知参数提示, 实际 rc=${drc}, stderr: $(cat "$TMP/d7err")"
+fi
+
+# ── T8 find_py 语法探针负控制：过 import 桩但探针失败的假解释器被拒 ────
+# 形态复刻 2026-09-09 实证盲区：解释器 import 自检绿（桩 -c 即过）但解析
+# 不动本仓源码（探针 - 调用失败）——必须被 doctor 报 FAIL，不得放行。
+mkdir -p "$TMP/fakebin"
+cat >"$TMP/fakebin/fakepy" <<'SHEOF'
+#!/bin/sh
+case "$1" in
+  -c) exit 0 ;;
+  *)  exit 1 ;;
+esac
+SHEOF
+chmod +x "$TMP/fakebin/fakepy"
+if GAUNTLET_PY="$TMP/fakebin/fakepy" sh "$G" doctor >"$TMP/d8out" 2>"$TMP/d8err"; then
+    drc=0
+else
+    drc=$?
+fi
+if [ "$drc" -ne 0 ] && grep -q 'FAIL 解释器' "$TMP/d8err" && grep -q '语法自检' "$TMP/d8err"; then
+    ok "T8 语法探针拒收过 import 桩但解析失败的假解释器"
+else
+    bad "T8 期望 rc!=0+FAIL 解释器+语法自检, 实际 rc=${drc}, stderr: $(cat "$TMP/d8err")"
 fi
 
 # ── 汇总 ───────────────────────────────────────────────────────────────
