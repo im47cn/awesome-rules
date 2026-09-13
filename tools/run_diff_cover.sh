@@ -24,8 +24,9 @@
 set -e
 ROOT=${1:-$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)}
 BASE=${DIFF_COVER_BASE:-origin/main}
-PY=${GAUNTLET_PY:-$(command -v python3)}
-trap 'rm -f .coverage.xml' EXIT
+# R4：命令替换须防 set -e 在下方 [ -n "$PY" ] 检查前被 python3 缺失触发
+# （实证：x=$(command -v nosuch) 在 set -e 下直接 rc=1 退出，违反 rc=2 契约）
+PY=${GAUNTLET_PY:-$(command -v python3 2>/dev/null || true)}
 
 # 同解释器 fail-closed 预检：console script 可能指向别的环境，不经 PATH 直调
 [ -n "$PY" ] || { echo "diff-cover: 无可用解释器" >&2; exit 2; }
@@ -34,6 +35,9 @@ if ! "$PY" -c 'import coverage, diff_cover' >/dev/null 2>&1; then
     exit 2
 fi
 cd "$ROOT" || { echo "diff-cover: 仓库目录不可达: ${ROOT}" >&2; exit 2; }
+# R5：trap 在 cd 成功后注册——cd 前退出时相对路径 rm 会作用到调用方 cwd，
+# 可能删掉非本次运行的 .coverage.xml；含 .coverage.tmp-plain 中途残留清理
+trap 'rm -f .coverage.xml .coverage.tmp-plain' EXIT
 
 # 汇总各套件产物：分跑形态 .coverage.<suite> combine 合并；平跑形态 .coverage
 # 单文件即最终产物（combine 输入不可与输出同名，单文件无需合并）；两种形态
@@ -49,7 +53,13 @@ if [ "$_plain" -eq 0 ] && [ -z "$_sfx" ]; then
 fi
 if [ -n "$_sfx" ]; then
     if [ "$_plain" -eq 1 ]; then
-        mv .coverage .coverage.tmp-plain && _sfx="$_sfx .coverage.tmp-plain"
+        # R3：AND 列表失败会被 set -e 吞掉（实证：静默继续而非 rc=1），
+        # 平跑产物被丢出 _sfx 后 combine 用不完整数据重写——显式转 rc=2
+        mv .coverage .coverage.tmp-plain || {
+            echo "diff-cover: 平跑产物改名失败（mv），fail-closed 拒判" >&2
+            exit 2
+        }
+        _sfx="$_sfx .coverage.tmp-plain"
     fi
     # shellcheck disable=SC2086  # $_sfx 是按空白分词的文件清单，正是意图
     if ! "$PY" -m coverage combine $_sfx 2>&1; then
