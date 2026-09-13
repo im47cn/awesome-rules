@@ -13,6 +13,7 @@ B. README 索引零漂移（README.md 内以链接登记的资产须与磁盘一
    1. skills/：每个含 README.md 或 SKILL.md 的技能目录须有 `skills/<name>/` 链接
    2. steering/*.md（直接子文件；gtsp/ 子目录走总入口不逐个校验）
    3. docs/design/*.md
+   4. docs/research/*.md（README 登记 + 模板契约：frontmatter 三键与必需章节）
 
 背景：README 索引靠人肉同步必然滞后（实测漏登记 4 处）；索引先于被索引文件
 推送造成远端死链（实测 2026-08-20 skills/skill-evo/README.md）。确定性校验，
@@ -104,8 +105,8 @@ def check_file(md: Path, root: Path) -> list:
                     continue
             if anchor and (not path_part or resolved.suffix.lower() == ".md"):
                 # 页内锚，或指向 md 的锚点：须命中实际标题
-                target_text = text if not path_part else resolved.read_text(
-                    encoding="utf-8", errors="replace")
+                target_text = resolved.read_text(
+                                                  encoding="utf-8", errors="replace") if path_part else text
                 if _slug(unquote(anchor)) not in _anchors_of(target_text):
                     issues.append(f"{md.relative_to(root)}:{lineno}: 锚点未命中 → {target}")
     return issues
@@ -123,6 +124,37 @@ def check_links(root: Path) -> list:
 
 
 # ── B. README 索引零漂移 ─────────────────────────────────────────────────────
+
+# docs/research/ 研究跟踪档案的模板契约（2026-09-13 建立）：第 7 份档案的
+# 合规面不靠作者模仿——frontmatter 三键 + 五个必需章节机械化校验。
+_RESEARCH_FM_KEYS = ("last-checked", "re-check-trigger", "depth")
+_RESEARCH_SECTIONS = ("一句话定位", "事实快照", "可借鉴点", "不适", "资源链接")
+
+
+def _research_contract(f: Path, root: Path) -> list:
+    """单份研究档案的模板契约校验，返回违约清单（空 = 通过）。"""
+    try:
+        text = f.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        return [f"{f.relative_to(root)}: 读取失败 {e}"]
+    issues = []
+    if fm := re.match(r"\A---\n(.*?)\n---", text, re.S):
+        issues.extend(
+            f"{f.relative_to(root)}: frontmatter 缺 {key}"
+            for key in _RESEARCH_FM_KEYS
+            if not re.search(f"^{re.escape(key)}:[ \t]*\S", fm[1], re.M)
+        )
+    else:
+        issues.append(f"{f.relative_to(root)}: 缺 frontmatter 三键"
+                      f"（{'/'.join(_RESEARCH_FM_KEYS)}）")
+    headings = {m.group(2) for m in _HEADING_RE.finditer(_strip_code(text))}
+    issues.extend(
+        f"{f.relative_to(root)}: 缺必需章节「{sec}」"
+        for sec in _RESEARCH_SECTIONS
+        if not any(h.startswith(sec) for h in headings)
+    )
+    return issues
+
 
 def check_readme_index(root: Path) -> list:
     """磁盘资产 ↔ README 登记一致性，返回漂移清单（空 = 通过）。"""
@@ -145,16 +177,27 @@ def check_readme_index(root: Path) -> list:
     # 2) steering/*.md 直接子文件（gtsp/ 子目录走总入口，不逐个校验）
     steering = root / "steering"
     if steering.is_dir():
-        for f in sorted(steering.glob("*.md")):
-            if f"steering/{f.name}" not in linked:
-                drift.append(f"规范未登记 README 索引：steering/{f.name}")
-
+        drift.extend(
+            f"规范未登记 README 索引：steering/{f.name}"
+            for f in sorted(steering.glob("*.md"))
+            if f"steering/{f.name}" not in linked
+        )
     # 3) docs/design/*.md
     design = root / "docs" / "design"
     if design.is_dir():
-        for f in sorted(design.glob("*.md")):
-            if f"docs/design/{f.name}" not in linked:
-                drift.append(f"设计文档未登记 README 索引：docs/design/{f.name}")
+        drift.extend(
+            f"设计文档未登记 README 索引：docs/design/{f.name}"
+            for f in sorted(design.glob("*.md"))
+            if f"docs/design/{f.name}" not in linked
+        )
+
+    # 4) docs/research/*.md：登记 + 模板契约（frontmatter 三键/必需章节）
+    research = root / "docs" / "research"
+    if research.is_dir():
+        for f in sorted(research.glob("*.md")):
+            if f"docs/research/{f.name}" not in linked:
+                drift.append(f"研究档案未登记 README 索引：docs/research/{f.name}")
+            drift.extend(_research_contract(f, root))
 
     return drift
 
@@ -171,22 +214,20 @@ def main() -> int:
         return 1
     failed = False
     n = len(mds)
-    links = [i for md in mds for i in check_file(md, root)]
-    if links:
+    if links := [i for md in mds for i in check_file(md, root)]:
         print(f"❌ 链接有效性：{len(links)} 处失效（扫描 {n} 个 .md）：")
         for i in links:
             print(f"  - {i}")
         failed = True
     else:
         print(f"✅ 链接有效性通过（{n} 个 .md，相对链接与锚点全部有效）")
-    drift = check_readme_index(root)
-    if drift:
+    if drift := check_readme_index(root):
         print(f"❌ README 索引零漂移：{len(drift)} 处：")
         for d in drift:
             print(f"  - {d}")
         failed = True
     else:
-        print("✅ README 索引与磁盘一致（skills/steering/design 全登记）")
+        print("✅ README 索引与磁盘一致（skills/steering/design/research 全登记）")
     return 1 if failed else 0
 
 

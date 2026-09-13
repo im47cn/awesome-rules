@@ -112,6 +112,19 @@ Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分�
 
 > 注：以上三图为 archify 生成的本地产物，位于 docs/design/architecture/（已列 .gitignore 不入库），本地重新生成即可查看。
 
+## 研究跟踪（docs/research/）
+
+外部项目的调研档案与借鉴登记：可借鉴点带验证状态与落地状态，事件驱动跟进（frontmatter 含 `re-check-trigger`，不设时间门禁）。新增调研按同目录模板建档并登记本表。
+
+| 项目 | 定位与借鉴要点 |
+| --- | --- |
+| [wemux](docs/research/wemux.md) | worker 优先执行的 Agent 协作平台：隔离 worktree 生命周期 / 配对安装 / 遥测白名单 / 许可切割（全部未裁决） |
+| [Rome](docs/research/rome.md) | 递归智能体 Agent OS：单一 strict schema 多关卡复用 / 路径逃逸防护 / 负控范式（代码级验证，清单门禁 ADR 候选） |
+| [Graft](docs/research/graft.md) | 文件型知识图谱上下文层：图谱即文件可审计，与 cbm 的 DB 图谱范式对照（未裁决） |
+| [hermes-agent-self-evolution](docs/research/hermes-agent-self-evolution.md) | session 挖掘 + 人工审核护栏 → 已落地 skill-evo |
+| [GEPA](docs/research/gepa.md) | Genetic-Pareto 反思进化引擎 → 已落地 skills/skill-evo/scripts/evo_gepa.py；v2/ICLR 2026 Oral 增量待裁决 |
+| [SkillOpt](docs/research/skillopt.md) | Sleep replay 确定性打分 + 反 Goodhart 门控 → 已落地 replay-eval |
+
 ## 安装
 
 本仓库已适配多种 AI 编程工具的插件格式，支持一行命令安装。详见 [插件安装指南](docs/ai-coding-tools-setup.md)。
