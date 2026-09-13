@@ -25,29 +25,12 @@ cd "$(dirname "$0")/.."
 # 即炸而 import 自检照样绿）。候选须在内存 compile 过门禁实跑面（探针面
 # 见 PY_SYNTAX_DIRS），失败 = 候选不可用，fail-closed 顺延下一候选。
 py_syntax_ok() {
+    # 探针实现：tools/py_syntax_probe.py（语法 compile + 隔离子进程执行
+    # 模块级代码——compile 只证解析，3.9 遇无 future import 的 PEP 604
+    # 注解 parse 过而 pytest 收集即炸，2026-09-09 实证 + Sourcery 2026-09-13
+    # 评审指出；负控制见 tools/test_gauntlet_orchestration.sh T9）
     # shellcheck disable=SC2086  # 探针目录按空白分词展开，正是意图
-    "$1" - $PY_SYNTAX_DIRS <<'PYEOF' >/dev/null 2>&1
-import pathlib, sys
-files = []
-for d in sys.argv[1:]:
-    files.extend(pathlib.Path(d).rglob("*.py"))
-# 门禁 import 链但不在层目录的执行面：.factory 顶层（factory-lib 等 5 文件，
-# factory-local-validity 层 import）与 skills/_shared（guard_lib，api/ddl
-# 检查器 import）——只 glob 一层不递归，与 .factory/tests 收窄同因（worktree）
-files.extend(pathlib.Path(".factory").glob("*.py"))
-files.extend(pathlib.Path("skills/_shared").glob("*.py"))
-bad = []
-for p in files:
-    if "__pycache__" in p.parts:
-        continue
-    try:
-        compile(p.read_bytes(), str(p), "exec")
-    except SyntaxError as e:
-        bad.append(f"{p}:{e.lineno}")
-if bad:
-    print("\n".join(bad))
-    sys.exit(1)
-PYEOF
+    "$1" tools/py_syntax_probe.py $PY_SYNTAX_DIRS >/dev/null 2>&1
 }
 
 find_py() {
@@ -94,9 +77,15 @@ skills/api-guard/scripts skills/ddl-guard/scripts skills/arch-guard/scripts
 skills/impact-guard/scripts/tests skills/skill-evo/scripts/tests
 skills/doc-gen/scripts/tests arch-hawkeye/scripts/tests'
 
-# 语法探针面 = 门禁实跑面：层清单 + tools 检查器（find_py 候选必须
-# compile 过这批源码，见 py_syntax_ok）
-PY_SYNTAX_DIRS="$LAYER_DIRS tools"
+# 语法探针面 = 门禁实跑面的导入闭包（find_py 候选必须过这批源码的
+# 语法+模块级执行，见 py_syntax_ok）：层清单（pytest 收集面）+ 各 tests
+# 层 import 的实现根目录（Sourcery 2026-09-13 评审：原 LAYER_DIRS 顺延
+# 致 boundary_scanner.py 等实现文件不在探针面，tests 层收集期照样炸）+
+# tools 检查器。.factory 整树含 gitignored 工厂链 worktree，由探针脚本
+# 内特例收窄（顶层 + .factory/tests，见其 docstring）
+PY_SYNTAX_DIRS="$LAYER_DIRS
+skills/impact-guard/scripts skills/skill-evo/scripts skills/doc-gen/scripts
+arch-hawkeye/scripts tools"
 
 # ── doctor 模式：环境自诊断，不跑层、不清产物 ───────────────────────────
 # 与门禁语义互补：门禁 fail-closed 首坏即断；doctor 逐项报全量再汇总，

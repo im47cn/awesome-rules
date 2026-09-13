@@ -2,7 +2,8 @@
 # gauntlet.sh 编排自测：证明层运行器的 fail-closed 语义真实存在。
 # 覆盖 SPEC 场景：全绿通过 / 任一层失败整体失败 / 层清单缺失硬失败 / 不读陈旧产物 /
 # doctor 自诊断（健康全 OK 且不改盘 / 坏解释器 FAIL 且汇总非零 / 未知模式硬失败 /
-# find_py 语法探针拒收过 import 桩但解析失败的假解释器）。
+# find_py 语法探针拒收过 import 桩但解析失败的假解释器 /
+# 语法探针执行期盲区：compile 过而模块级执行炸的文件被拦）。
 set -e
 cd "$(dirname "$0")/.."
 G=tools/gauntlet.sh
@@ -131,6 +132,26 @@ if [ "$drc" -ne 0 ] && grep -q 'FAIL 解释器' "$TMP/d8err" && grep -q '语法�
     ok "T8 语法探针拒收过 import 桩但解析失败的假解释器"
 else
     bad "T8 期望 rc!=0+FAIL 解释器+语法自检, 实际 rc=${drc}, stderr: $(cat "$TMP/d8err")"
+fi
+
+# ── T9 探针执行期盲区负控制：compile 过而模块级执行炸的文件被拦 ──────
+# 形态复刻 Sourcery 2026-09-13 评审盲区：PEP 604 注解等 parse 过、模块级
+# 执行才炸的代码（2026-09-09 3.9 实证形态）。用 raise 版本保证负控制在
+# 任意解释器版本上确定性触发（dict | None 仅 <3.10 执行期炸，不可移植）。
+mkdir -p "$TMP/t9"
+printf 'x: int = 1\nraise TypeError("probe exec negative control")\n' \
+    >"$TMP/t9/exec_fails.py"
+_pyt=$(command -v python3)
+if "$_pyt" "$(dirname "$G")/py_syntax_probe.py" "$TMP/t9" \
+    >"$TMP/d9out" 2>&1; then
+    drc=0
+else
+    drc=$?
+fi
+if [ "$drc" -ne 0 ] && grep -q 'exec_fails.py' "$TMP/d9out"; then
+    ok "T9 探针拦下 compile 过而执行炸的文件"
+else
+    bad "T9 期望 rc!=0+exec_fails.py 被点名, 实际 rc=${drc}, 输出: $(cat "$TMP/d9out")"
 fi
 
 # ── 汇总 ───────────────────────────────────────────────────────────────
