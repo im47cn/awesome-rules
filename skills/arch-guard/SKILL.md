@@ -66,7 +66,7 @@ text 输出在所有路径末尾投影「── 证据边界 ──」段——*
 
 ## 红线（易踩坑）
 
-- `project_package_prefix` 必须收紧到本项目业务包（如 `com.wanlianyida.gtsp.wop.gateway`），
+- `project_package_prefix` 必须收紧到本项目业务包（如 `com.example.gtsp.gateway`），
   禁止公司级全局前缀——全局前缀会把 fss-api 等契约类扫进分层规则产生误报
 - 修改 pom.xml 时 XML 注释内禁止出现 `--`（CLI 参数写进注释会破坏 XML 解析），改写为
   `mode archunit` 等无连字符措辞

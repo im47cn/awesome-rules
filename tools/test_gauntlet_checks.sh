@@ -665,6 +665,24 @@ else
         bad "NC13 输出缺 P1/P3 报告: $(cat "$TMP/out13")"
     fi
 fi
+# NC13w（ADR-012）：内部项目名前缀 wop- 进 P1 禁词——内部 bot Host
+# 别名曾以 full 面驻留 hosting.py 而门不拦（2026-09-13 净化盲区实证）。
+cat >"$NC13/.factory/lib.py" <<'EOF'
+import json
+sys.path.insert(0, ".")
+remote = "git@wop-portal:o/r.git"  # 连字形态
+note = "wop 6 仓"  # 空格裸词形态（同族，审查实证曾漏）
+EOF
+git -C "$NC13" add .factory
+if "$PY" tools/check_factory_portability.py "$NC13" >"$TMP/out13w" 2>&1; then
+    bad "NC13w 期望 rc=1（P1 wop- 命中），实际放行"
+else
+    if grep -q 'wop-portal' "$TMP/out13w" && grep -q 'wop 6 仓' "$TMP/out13w"; then
+        ok "NC13w P1 拦内部前缀 wop（连字+空格裸词两形态点名）"
+    else
+        bad "NC13w 输出未点名 wop 两形态: $(cat "$TMP/out13w")"
+    fi
+fi
 # P2 引擎旁路：chain.sh 直调 omp
 cat >>"$NC13/.factory/chain.sh" <<'EOF'
 omp -p "x" --no-session
@@ -1294,7 +1312,159 @@ else
     bad "NC19c 期望 rc=2, 实际 rc=${_rc19c}"
 fi
 
+# ── NC20 md-link-check 研究档案负控制：登记漂移/模板违约必须被拦 ────────
+# docs/research/ 跟踪档案契约：README 登记 + frontmatter 三键 + 五必需章节
+# （2026-09-13 reviewer 建议接线：人肉登记必滞后，与 skills/steering/design
+# 三面同构）。夹具 = 真 git 仓（tracked 面语义同 NC1）。
+nc20_setup() {
+    _d=$1
+    git init -q "$_d"
+    mkdir -p "$_d/docs/research"
+    {
+        echo '# T'
+        echo
+        echo '| 项目 |'
+        echo '| --- |'
+        echo '| [foo](docs/research/foo.md) |'
+    } >"$_d/README.md"
+    cat >"$_d/docs/research/foo.md" <<'EOF'
+---
+last-checked: 2026-09-13
+re-check-trigger: t
+depth: README 级
+---
 
+# foo
+
+## 一句话定位
+
+t
+
+## 事实快照（2026-09-13）
+
+- t
+
+## 可借鉴点
+
+t
+
+## 不适配点 / 否决
+
+t
+
+## 资源链接
+
+- t
+EOF
+    git -C "$_d" add -A
+}
+
+# 正控制：登记完备 + 模板合规 → rc=0
+NC20="$TMP/nc20"; nc20_setup "$NC20"
+if "$PY" scripts/md_link_check.py "$NC20" >"$TMP/out20" 2>&1; then
+    ok "NC20 干净 fixture 全绿（登记+模板契约无误报）"
+else
+    bad "NC20 干净 fixture 期望 rc=0: $(cat "$TMP/out20")"
+fi
+
+# 登记漂移：新增合规档案但不登记 README → rc=1 且指明未登记
+NC20A="$TMP/nc20a"; nc20_setup "$NC20A"
+sed 's/^# foo/# bar/' "$NC20A/docs/research/foo.md" >"$NC20A/docs/research/bar.md"
+git -C "$NC20A" add -A
+if "$PY" scripts/md_link_check.py "$NC20A" >"$TMP/out20a" 2>&1; then
+    _rc20a=0
+else
+    _rc20a=$?
+fi
+if [ "$_rc20a" -eq 1 ] && grep -q '研究档案未登记 README 索引：docs/research/bar.md' "$TMP/out20a"; then
+    ok "NC20a 未登记档案检出"
+else
+    bad "NC20a 期望 rc=1+未登记 bar.md, 实际 rc=${_rc20a}: $(cat "$TMP/out20a")"
+fi
+
+# 模板违约 1：frontmatter 缺 re-check-trigger 键
+NC20B="$TMP/nc20b"; nc20_setup "$NC20B"
+grep -v '^re-check-trigger:' "$NC20B/docs/research/foo.md" \
+    >"$NC20B/docs/research/foo.md.tmp" \
+    && mv "$NC20B/docs/research/foo.md.tmp" "$NC20B/docs/research/foo.md"
+git -C "$NC20B" add -A
+if "$PY" scripts/md_link_check.py "$NC20B" >"$TMP/out20b" 2>&1; then
+    _rc20b=0
+else
+    _rc20b=$?
+fi
+if [ "$_rc20b" -eq 1 ] && grep -q 'frontmatter 缺 re-check-trigger' "$TMP/out20b"; then
+    ok "NC20b frontmatter 缺键检出"
+else
+    bad "NC20b 期望 rc=1+缺 re-check-trigger, 实际 rc=${_rc20b}: $(cat "$TMP/out20b")"
+fi
+
+# 模板违约 2：缺「资源链接」章节（其余全合规，证明章节校验独立生效）
+NC20C="$TMP/nc20c"; nc20_setup "$NC20C"
+grep -v '^## 资源链接' "$NC20C/docs/research/foo.md" \
+    >"$NC20C/docs/research/foo.md.tmp" \
+    && mv "$NC20C/docs/research/foo.md.tmp" "$NC20C/docs/research/foo.md"
+git -C "$NC20C" add -A
+if "$PY" scripts/md_link_check.py "$NC20C" >"$TMP/out20c" 2>&1; then
+    _rc20c=0
+else
+    _rc20c=$?
+fi
+if [ "$_rc20c" -eq 1 ] && grep -q '缺必需章节「资源链接」' "$TMP/out20c"; then
+    ok "NC20c 缺必需章节检出"
+else
+    bad "NC20c 期望 rc=1+缺资源链接, 实际 rc=${_rc20c}: $(cat "$TMP/out20c")"
+fi
+
+# 模板违约 3：frontmatter 整块缺失（覆盖「缺 frontmatter 三键」汇总分支）
+NC20D="$TMP/nc20d"; nc20_setup "$NC20D"
+sed '1,5d' "$NC20D/docs/research/foo.md" >"$NC20D/docs/research/foo.md.tmp" \
+    && mv "$NC20D/docs/research/foo.md.tmp" "$NC20D/docs/research/foo.md"
+git -C "$NC20D" add -A
+if "$PY" scripts/md_link_check.py "$NC20D" >"$TMP/out20d" 2>&1; then
+    _rc20d=0
+else
+    _rc20d=$?
+fi
+if [ "$_rc20d" -eq 1 ] && grep -q '缺 frontmatter 三键' "$TMP/out20d"; then
+    ok "NC20d frontmatter 整块缺失检出"
+else
+    bad "NC20d 期望 rc=1+缺 frontmatter, 实际 rc=${_rc20d}: $(cat "$TMP/out20d")"
+fi
+
+# 模板违约 4：键在但值为空（空键架空保鲜契约，非空才放行）
+NC20E="$TMP/nc20e"; nc20_setup "$NC20E"
+sed 's/^re-check-trigger: t$/re-check-trigger:/' "$NC20E/docs/research/foo.md" \
+    >"$NC20E/docs/research/foo.md.tmp" \
+    && mv "$NC20E/docs/research/foo.md.tmp" "$NC20E/docs/research/foo.md"
+git -C "$NC20E" add -A
+if "$PY" scripts/md_link_check.py "$NC20E" >"$TMP/out20e" 2>&1; then
+    _rc20e=0
+else
+    _rc20e=$?
+fi
+if [ "$_rc20e" -eq 1 ] && grep -q 'frontmatter 缺 re-check-trigger' "$TMP/out20e"; then
+    ok "NC20e 空值键不算存在检出"
+else
+    bad "NC20e 期望 rc=1+缺 re-check-trigger, 实际 rc=${_rc20e}: $(cat "$TMP/out20e")"
+fi
+
+# 模板违约 5：前缀变体键（re-check-trigger-x 不得冒充 re-check-trigger）
+NC20F="$TMP/nc20f"; nc20_setup "$NC20F"
+sed 's/^re-check-trigger:/re-check-trigger-x:/' "$NC20F/docs/research/foo.md" \
+    >"$NC20F/docs/research/foo.md.tmp" \
+    && mv "$NC20F/docs/research/foo.md.tmp" "$NC20F/docs/research/foo.md"
+git -C "$NC20F" add -A
+if "$PY" scripts/md_link_check.py "$NC20F" >"$TMP/out20f" 2>&1; then
+    _rc20f=0
+else
+    _rc20f=$?
+fi
+if [ "$_rc20f" -eq 1 ] && grep -q 'frontmatter 缺 re-check-trigger' "$TMP/out20f"; then
+    ok "NC20f 前缀变体键不冒充检出"
+else
+    bad "NC20f 期望 rc=1+缺 re-check-trigger, 实际 rc=${_rc20f}: $(cat "$TMP/out20f")"
+fi
 # ── NC21 sourcery-gate 订阅到期降级 / issue 硬拦双向（2026-09-13 live 实证）──
 # 到期输出形态为补匹配而来（原预判词全不命中，闸按设计拦死直到补匹配）；
 # 反向盯防两级收紧：issue 形态优先硬拦，认证词同现不降级。

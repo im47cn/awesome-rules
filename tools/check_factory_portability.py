@@ -32,7 +32,10 @@ from pathlib import Path
 # 刻意不含 "skills/"：monorepo|skills 双布局识别是通用机制词（factory_lib
 # evidence_suites），非宿主绑定。误报的修复属于模式，不属于豁免清单。
 P1_PATTERN = re.compile(
-    r"awesome-rules|im47cn|gtsp-|fss-|etf-radar|steering/|run_tests")
+    r"awesome-rules|im47cn|gtsp-|fss-|etf-radar|steering/|run_tests"
+    # wop-（ADR-012 增补）：内部项目名前缀，2026-09-13 净化前曾以
+    # 内部 bot Host 别名曾以 full 面驻留 hosting.py 而门不拦——盲区实证
+    r"|wop[-\s]")
 
 # P2 词边界 + 任意空白/续行分隔：子串 "omp -p" 会被 `omp   -p`、
 # `omp \↵-p` 绕过（PR #71 Sourcery #3）。[\s\\]+ 同时覆盖行尾续行反斜杠。

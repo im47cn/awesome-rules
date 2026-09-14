@@ -329,7 +329,7 @@ class TestCodeupShapes:
         monkeypatch.setenv("FACTORY_SPACES_CONF", str(conf))
         monkeypatch.delenv("CODEUP_SPACE_ID", raising=False)
         ad = hosting.CodeupAdapter()
-        ad._remote = lambda: ("610b3c9d", "gtsp/open-platform/gtsp-wop-gateway")
+        ad._remote = lambda: ("610b3c9d", "gtsp/open-platform/gtsp-xx-gateway")
         assert ad._space_id() == "SID-1"
         ad._remote = lambda: ("610b3c9d", "plain-repo")
         with pytest.raises(hosting.HostingError) as e:
@@ -464,7 +464,7 @@ class TestCodeupMarkerModel:
         assert "降级空集" in capsys.readouterr().err
 
     def test_marker_label_prefix_only_returns_empty(self, monkeypatch):
-        """CodeRabbit wop-skills#14：标记评论恰为前缀/前缀+空白时切片为空，
+        """CodeRabbit xx-skills#14：标记评论恰为前缀/前缀+空白时切片为空，
         旧实现 splitlines()[0] 抛 IndexError（平台开放输入不可约束）——
         空标记按无标记处理，不越过 HostingError 边界。"""
         ad = self._ad(monkeypatch, {})
@@ -529,7 +529,7 @@ class TestCodeupWorkItemFace:
     WI_DESC = json.dumps({"htmlValue":
                            "<p>正文</p>\n<!-- factory:labels:v1: factory:accepted -->"},
                           ensure_ascii=False)
-    WI = {"result": {"id": "wid1", "serialNumber": "KFPT-18",
+    WI = {"result": {"id": "wid1", "serialNumber": "T-18",
                      "subject": "标题", "logicalStatus": "NORMAL",
                      "description": WI_DESC,
                      "labels": None},
@@ -549,10 +549,10 @@ class TestCodeupWorkItemFace:
                     return payload
             if path.endswith("/comments"):
                 return self.WI["_comments"]
-            if path.endswith("/workitems/KFPT-18") or path.endswith("/workitems/wid1"):
+            if path.endswith("/workitems/T-18") or path.endswith("/workitems/wid1"):
                 return self.WI["result"]
             if path.endswith("/workitems:search"):
-                return {"result": [self.WI["result"], {"id": "wid2", "serialNumber": "KFPT-19",
+                return {"result": [self.WI["result"], {"id": "wid2", "serialNumber": "T-19",
                               "subject": "旧", "logicalStatus": "FINISHED", "description": ""}]}
             raise hosting.HostingError(f"mock 未路由: {method} {path}")
 
@@ -562,8 +562,8 @@ class TestCodeupWorkItemFace:
     def test_issue_view_normalizes_and_strips_marker(self, monkeypatch):
         monkeypatch.setenv("CODEUP_ISSUE_LABELS", "description")
         ad = self._ad(monkeypatch)
-        n = ad.issue_view("KFPT-18")
-        assert n["number"] == "KFPT-18" and n["state"] == "open"
+        n = ad.issue_view("T-18")
+        assert n["number"] == "T-18" and n["state"] == "open"
         assert n["title"] == "标题"
         assert n["body"] == "正文"           # HTML 剥离 + 标记块剥离
         assert "factory:labels" not in n["body"]
@@ -572,14 +572,14 @@ class TestCodeupWorkItemFace:
 
     def test_issue_view_native_labels(self, monkeypatch):
         wi = {**self.WI["result"], "labels": ["factory:rejected"], "description": ""}
-        ad = self._ad(monkeypatch, routes={("GET", "/workitems/KFPT-16"): wi})
-        assert ad.issue_labels("KFPT-16") == ["factory:rejected"]
+        ad = self._ad(monkeypatch, routes={("GET", "/workitems/T-16"): wi})
+        assert ad.issue_labels("T-16") == ["factory:rejected"]
 
     def test_issue_list_paginates_filters_state_and_label(self, monkeypatch):
         monkeypatch.setenv("CODEUP_ISSUE_LABELS", "description")
         ad = self._ad(monkeypatch)
         out = ad.issue_list(state="open", label="factory:accepted", limit=10)
-        assert [i["number"] for i in out] == ["KFPT-18"]  # FINISHED 滤出+label 过滤
+        assert [i["number"] for i in out] == ["T-18"]  # FINISHED 滤出+label 过滤
         m, p, body, _q = ad.seen[0]
         assert (m, p.endswith("/workitems:search")) == ("POST", True)
         assert body["category"] == "Task" and body["spaceId"] == "sp1"  # category 必填（live）
@@ -594,15 +594,15 @@ class TestCodeupWorkItemFace:
 
     def test_issue_set_labels_native_put(self, monkeypatch):
         wi = {**self.WI["result"], "labels": ["keep"]}
-        ad = self._ad(monkeypatch, routes={("GET", "/workitems/KFPT-18"): wi})
-        ad.issue_set_labels("KFPT-18", add=["factory:triaging"], remove=["keep"])
+        ad = self._ad(monkeypatch, routes={("GET", "/workitems/T-18"): wi})
+        ad.issue_set_labels("T-18", add=["factory:triaging"], remove=["keep"])
         put = [s for s in ad.seen if s[0] == "PUT"][-1]
         assert put[2] == {"labels": ["factory:triaging"]}  # 排序去重
 
     def test_issue_set_labels_description_rw(self, monkeypatch):
         monkeypatch.setenv("CODEUP_ISSUE_LABELS", "description")
         ad = self._ad(monkeypatch)
-        ad.issue_set_labels("KFPT-18", add=["factory:in-progress"])
+        ad.issue_set_labels("T-18", add=["factory:in-progress"])
         put = [s for s in ad.seen if s[0] == "PUT"][-1]
         assert put[2]["formatType"] == "MARKDOWN"
         # 读-改-写保留原始载体格式（JSON 串不解包）:原 accepted 保留+新增
@@ -612,7 +612,7 @@ class TestCodeupWorkItemFace:
             '\n\n<!-- factory:labels:v1: factory:accepted factory:in-progress -->')
         # 移除唯一标签 = 块消失,原文保留
         ad2 = self._ad(monkeypatch)
-        ad2.issue_set_labels("KFPT-18", remove=["factory:accepted"])
+        ad2.issue_set_labels("T-18", remove=["factory:accepted"])
         put2 = [s for s in ad2.seen if s[0] == "PUT"][-1]
         assert put2[2]["description"] == '{"htmlValue": "<p>正文</p>\\n"}'
 
@@ -621,11 +621,11 @@ class TestCodeupWorkItemFace:
         ad = self._ad(monkeypatch, routes={
             ("GET", "/workitems/wid1/comments"): [
                 {"author": {"name": "x"}, "content": "<p>旧<!-- m1 --></p>"}]})
-        assert ad.issue_comment("KFPT-18", "回执", marker="m1") is True  # dedupe 命中
+        assert ad.issue_comment("T-18", "回执", marker="m1") is True  # dedupe 命中
         assert "dedupe" in capsys.readouterr().err
         posts = [s for s in ad.seen if s[0] == "POST"]
         assert not posts
-        ad.issue_comment("KFPT-18", "新评论")
+        ad.issue_comment("T-18", "新评论")
         posts = [s for s in ad.seen if s[0] == "POST"]
         assert posts[-1][1].endswith("/workitems/wid1/comments")  # serialNumber→id
         assert posts[-1][2]["contentType"] == "markdown"
@@ -663,13 +663,13 @@ class TestCodeupIssueCreate:
                     raise hosting.HostingError("codeup GET fields HTTP 404: x")
                 return fields if fields is not None else self.FIELDS
             # 【live 2026-08-26】create 响应只含 24-hex id（无 serialNumber/
-            # detailUrl）——KFPT-21 实测；详情回查才有可读编号
+            # detailUrl）——T-21 实测；详情回查才有可读编号
             if method == "POST" and path.endswith("/workitems"):
                 return create_resp or {"result": {"id": "wid123"}}
             if fail_detail:
                 raise hosting.HostingError("codeup GET detail HTTP 500: x")
-            return detail_resp or {"result": {"serialNumber": "KFPT-42",
-                                              "detailUrl": "https://x/KFPT-42"}}
+            return detail_resp or {"result": {"serialNumber": "T-42",
+                                              "detailUrl": "https://x/T-42"}}
 
         ad._req = fake_req
         return ad, calls
@@ -706,7 +706,7 @@ class TestCodeupIssueCreate:
         assert cfvs["6"] == "22"  # list=末档 option id（str）
         assert 1 not in cfvs and "1" not in cfvs  # NativeField 走本体
         assert 7 not in cfvs and "7" not in cfvs  # 非 required 不带
-        assert out == {"number": "KFPT-42", "url": "https://x/KFPT-42"}
+        assert out == {"number": "T-42", "url": "https://x/T-42"}
 
     def test_fields_fetch_failure_degrades_with_warning(self, monkeypatch, capsys):
         ad, calls = self._ad(monkeypatch, fail_fields=True)
@@ -714,7 +714,7 @@ class TestCodeupIssueCreate:
         assert "warn" in capsys.readouterr().err  # 降级可见不静默
         posts = [c for c in calls if c[0] == "POST" and c[1].endswith("/workitems")]
         assert posts and "customFieldValues" not in posts[-1][2]  # POST 仍发出
-        assert out["number"] == "KFPT-42"
+        assert out["number"] == "T-42"
 
     def test_create_returns_serial_via_detail_lookup(self, monkeypatch):
         """live 契约：create 响应仅 24-hex id；serialNumber 由详情回查取得。"""
@@ -723,7 +723,7 @@ class TestCodeupIssueCreate:
         gets = [(m, p) for m, p, _b in calls if m == "GET"]
         assert any(p.endswith("/workitems/wid123") for _m, p in gets), \
             "必须回查详情端点"
-        assert out == {"number": "KFPT-42", "url": "https://x/KFPT-42"}
+        assert out == {"number": "T-42", "url": "https://x/T-42"}
 
     def test_detail_lookup_failure_degrades_to_id(self, monkeypatch, capsys):
         """回查失败降级返回 id + stderr 告警（可读性损失可见，不阻断）。"""
@@ -736,10 +736,10 @@ class TestCodeupIssueCreate:
         """若平台未来在 create 响应补 serialNumber：有 id 仍回查（详情
         是 detailUrl 权威源）；无 id 才直取响应字段。"""
         ad, _calls = self._ad(
-            monkeypatch, create_resp={"result": {"serialNumber": "KFPT-9"}})
+            monkeypatch, create_resp={"result": {"serialNumber": "T-9"}})
         out = ad.issue_create("t", "b")
         # create 无 id → 不回查，直接响应字段
-        assert out["number"] == "KFPT-9"
+        assert out["number"] == "T-9"
 
 
 class TestCodeupEndpointFallback:

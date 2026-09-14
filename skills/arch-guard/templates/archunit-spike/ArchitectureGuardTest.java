@@ -16,7 +16,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.Architectures.layeredArchitecture;
 import static com.tngtech.archunit.library.freeze.FreezingArchRule.freeze;
 
-@AnalyzeClasses(packages = "com.wanlianyida.conttask")
+@AnalyzeClasses(packages = "com.example.taskapp")
 class ArchitectureGuardTest {
 
     // ── 1. 分层依赖方向（layer_aliases: interfaces → adapter 语义） ──────────
@@ -24,8 +24,8 @@ class ArchitectureGuardTest {
     // 规则：interfaces 可依赖 infrastructure；infrastructure 禁止反依赖 interfaces。
     @ArchTest
     static final ArchRule layering = freeze(layeredArchitecture().consideringOnlyDependenciesInLayers()
-            .layer("interfaces").definedBy("..conttask.interfaces..")
-            .layer("infrastructure").definedBy("..conttask.infrastructure..")
+            .layer("interfaces").definedBy("..taskapp.interfaces..")
+            .layer("infrastructure").definedBy("..taskapp.infrastructure..")
             .whereLayer("interfaces").mayNotBeAccessedByAnyLayer()
             .whereLayer("infrastructure").mayOnlyBeAccessedByLayers("interfaces"));
 
@@ -40,7 +40,7 @@ class ArchitectureGuardTest {
     // ── 3. 状态泄漏（adapter/infrastructure 禁止改写状态，对齐 _STATUS_WRITE_RE） ──
     @ArchTest
     static final ArchRule noStatusWriteFromInfrastructure = freeze(noClasses()
-            .that().resideInAnyPackage("..conttask.infrastructure..")
+            .that().resideInAnyPackage("..taskapp.infrastructure..")
             .should().callCodeUnitWhere(target(
                     nameMatching("(set|change|update|modify)\\w*(Status|State)")))
             .because("状态流转属领域知识，infrastructure 不得直接改写（01 §12/§17）"));
@@ -48,7 +48,7 @@ class ArchitectureGuardTest {
     // ── 4. 循环依赖（Tier 1 无此能力，ArchUnit 增量价值） ────────────────────
     @ArchTest
     static final ArchRule noCycles = freeze(slices()
-            .matching("com.wanlianyida.conttask.(**)")
+            .matching("com.example.taskapp.(**)")
             .should().beFreeOfCycles());
 
 }

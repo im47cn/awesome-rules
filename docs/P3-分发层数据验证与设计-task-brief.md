@@ -4,7 +4,7 @@
 
 # Target
 - 文件/符号(只读调研,不改):
-  - .factory/downstream.json(10 消费仓清单:gtsp-wop-service/gateway、wop-python/java/typescript/php/dotnet/go-sdk、wop-skills、wop-web-tools)
+  - .factory/downstream.json(10 消费仓清单:gtsp-xx-service/gateway、xx-python/java/typescript/php/dotnet/go-sdk、xx-skills、xx-web-tools)
   - tools/git/install.sh(分发安装入口;安装侧)
   - .factory/sync-from-upstream.sh、downstream-check.sh(消费侧同步/巡检链路)
   - .factory/cron-dispatch.sh(消费侧定时采纳通道)
@@ -20,7 +20,7 @@
 阶段一:数据验证(全部只读,产出量化结论)
 1. **真实拉取率**:对 downstream.json 10 仓逐个统计——① 当前 .factory/ 是否存在于工作树(git ls-tree HEAD -- .factory 计数);② .factory/ 相对上游最新版的滞后度(比较关键文件 hash 或文件数);③ cron-dispatch/launchd 采纳迹象(仓库内 .factory/locks、metrics 目录存在性,只读);④ 最近同步 commit 时间跨度
 2. **安装侧真实调用**:tools/git/install.sh 是否有消费侧调用证据(仓库内引用、README 提及、下游 clone 后手动跑无痕——只能证存在性);git log 查 install.sh 最近变更频率(投入活跃度代理)
-3. **上游-下游适配成本**:检查 .factory/factory-local.json 是否存在于下游仓(本地化外置的采纳证据)——抽查 2-3 个代表仓(一个 SDK、wop-skills、wop-web-tools)
+3. **上游-下游适配成本**:检查 .factory/factory-local.json 是否存在于下游仓(本地化外置的采纳证据)——抽查 2-3 个代表仓(一个 SDK、xx-skills、xx-web-tools)
 4. **平台假设清单**:shlock(macOS 专有)/osascript 通知/launchd cron——下游消费环境平台分布假设是否成立(从下游仓 CI runner 平台看:grep workflows runs-on)
 5. 输出:量化数据表(仓 × 采纳状态 × 滞后度 × 适配成本),标注哪些仓是真消费、哪些是登记未采纳
 
@@ -36,7 +36,7 @@
 - 平台假设(shlock/osascript)对分发目标环境的适配风险在文档中显式标注(ubuntu CI 已证实无 shlock——P1 PR #120 实测)
 
 # 强制条款(MUST,逐条照办,不得裁剪)
-1. 【禁止顺延】禁止以既有架构/所有权/历史原因为由顺延或降级 spec 条款;发现 spec 与现状冲突,必须上报(本任务数据阶段即实证层),不得自行包装成"设计取舍"。违反即失败。(教训:gtsp-wop-gateway 2026-08-28)
+1. 【禁止顺延】禁止以既有架构/所有权/历史原因为由顺延或降级 spec 条款;发现 spec 与现状冲突,必须上报(本任务数据阶段即实证层),不得自行包装成"设计取舍"。违反即失败。(教训:gtsp-xx-gateway 2026-08-28)
 2. 【条款完整性】设计文档每条款对应验收手段(后续 spec 化时转测试,Python `# spec:<ID>`);否定式条款(如"不实施"也是结论)必须有对应判据。(教训:D2 digest 无条件必填共存 31 绿测)
 3. 【覆盖率闭合】本任务无生产代码,覆盖率条款不适用;但数据结论必须终局复核(全部仓查完再下结论,中途样本不算数)。(教训:98.17% -> 97.62% 稀释回退)
 4. 【证据纪律】每条数据结论附来源(仓路径 + 命令 + 输出摘要);未直接观察的结论标 [INFERENCE];禁止编造工具输出。

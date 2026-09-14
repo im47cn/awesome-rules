@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Sourcery pre-push 硬闸（awesome-rules tools/git 分发，由 lefthook 调用）
-# opt-in 门禁：仅当仓库根存在 .sourcery.yaml（主动声明，同 wop-java-sdk gate 模式）才启用；
+# opt-in 门禁：仅当仓库根存在 .sourcery.yaml（主动声明，同 xx-java-sdk gate 模式）才启用；
 # push 文件含实测支持语言时跑 review --check（同 .sourcery.yaml 配置），有未解决 issue → 阻断 push。
 # fail-safe：未 opt-in / 未装 sourcery CLI 均跳过（不因环境缺失误伤）；CLI 在装
 # 但认证/订阅失效 → 显式降级跳过（防拦死一切 push 的砖化，见尾部分支注释）。

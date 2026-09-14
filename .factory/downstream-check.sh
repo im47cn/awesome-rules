@@ -2,7 +2,8 @@
 # downstream-check.sh — 中心仓对下游仓清单的集中巡检/追平。
 #
 # 定位：替代「逐仓手工追平」。中心仓是工具链主权方（三态分发）；
-# 本脚本读 .factory/downstream.json（skip 态清单，仓特定数据），对每个
+# 本脚本读下游仓清单（ADR-012：真实清单住 downstream.local.json，gitignored；
+# tracked downstream.json 仅空模板），对每个
 # 下游仓调**中心版** sync-from-upstream.sh——下游副本滞后/缺失也照常
 # 工作（鸡生蛋免疫）；巡检一律以中心仓 main 为锚（发布线，非工作分支）。
 #
@@ -16,12 +17,17 @@
 # 进程已死自动清锁重试一次（照抄 cron-dispatch 语义）。
 #
 # 首次移植的新仓不入本清单——先走 README「移植到其他仓库」四步，
-# 再由人工登记进 downstream.json。
+# 再由人工登记进 downstream.local.json（gitignored，ADR-012——勿写
+# tracked 模板，那正是 ADR-012 要杜绝的污染路径）。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CENTER="$(cd "$SCRIPT_DIR/.." && pwd)"
 MANIFEST="$SCRIPT_DIR/downstream.json"
+# ADR-012：真实清单住 downstream.local.json（gitignored 仓特定数据）；
+# tracked 模板仅文档占位，local 存在则优先
+LOCAL_MANIFEST="$SCRIPT_DIR/downstream.local.json"
+[ -f "$LOCAL_MANIFEST" ] && MANIFEST="$LOCAL_MANIFEST"
 SYNC="$SCRIPT_DIR/sync-from-upstream.sh"
 LOCK="$SCRIPT_DIR/locks/downstream-check.lock"
 OUT_FILE="$(mktemp "${TMPDIR:-/tmp}/.factory-downstream-check.XXXXXX")"
@@ -54,7 +60,9 @@ for r in rows:
     if not isinstance(r, dict) or not isinstance(r.get("path"), str) or not r["path"].strip():
         sys.exit(1)
     print(r["path"])' "$MANIFEST" 2>/dev/null)" \
-  || { echo "下游清单损坏（需非空 repos[].path）: $MANIFEST" >&2; exit 2; }
+  || { _hint="——真实清单写 .factory/downstream.local.json（gitignored，ADR-012）"
+     case "$MANIFEST" in *downstream.local.json) _hint="——修复或删除该 local 清单（它已在 ADR-012 载体位）";; esac
+     echo "下游清单损坏（需非空 repos[].path）: $MANIFEST $_hint" >&2; exit 2; }
 
 mkdir -p "$SCRIPT_DIR/locks"  # 净克隆首跑：gitignored 目录缺失时 shlock ENOENT 被误读为锁被持
 if ! /usr/bin/shlock -f "$LOCK" -p $$; then
