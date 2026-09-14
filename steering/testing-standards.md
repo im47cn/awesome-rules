@@ -28,6 +28,7 @@ inclusion: always
 
 - 多份工件必须同步的配置（如分片 yml 区间端点、datetime 界限、DDL 预建表集合）应纳入测试范围：编写一致性守护测试解析各端并断言对齐，任一漂移即 CI 失败，把人工多处同步的漂移风险固化为防回归护栏；注意此类守护只护「对齐」不护「过期」，时间上界仍需另行提前扩界。
 - 配置一致性守护测试：当同一约束散落在多处配置（如分片区间 yml、datetime 上下界限、DDL 预建表清单）时，应编写守护测试解析各方配置并断言一致，任一方漂移即测试失败，把配置漂移类风险固化为防回归护栏（参考 AccessLogShardingConsistencyTest 三方对齐模式）。
+- 多端一致性守护的断言形态须用**值集全等**（双向包含）而非单侧超集：单行齐备 N 值的超集断言在第 N+1 值只落部分文件时照样绿，跨文件漂移抓不住；升级为值集全等后，负测试三场景（新值只落一侧/单侧丢值/全部一致但未过门禁）应全部命中预期签名
 
 - 必须测：Service 业务逻辑、Util 工具方法、复杂算法、状态机/策略模式、异常处理器、网关过滤器链等正确性关键路径
 - 可选测：Controller（已有集成测试覆盖时）、简单 CRUD（无业务逻辑时）
@@ -116,10 +117,14 @@ inclusion: always
 ## Mock 边界
 
 - 进程内全链路验证优先通过组件的公共执行入口驱动真实调用链（如过滤器洋葱链 `filter(exchange, chain)`），不绕过入口手动调用 protected 分段方法（`doPre`/`doPost`）；核心业务逻辑（加解密、验签等）零 mock，仅替身最外层边界（如下游服务）
+- 替身必须经由被测的生产包装路径注入：替身直接调底层实现（如绕过 `transformBody` 的 `catch (RuntimeException)` 包装层），会让错误路径从未执行而覆盖率门禁全绿——生产侧异常被吞、响应静默交付截断体，只能靠独立语义验证捕获。覆盖率对「错误路径被错误 mock」零防御：绕过哪层包装，哪层行为就未被测试，mock 注入缝即测试的语义边界。
 - 第三方流式链式 API（如 hutool `HttpRequest.header(...)` 链）用 `RETURNS_SELF` 打桩可能失效返回 null，NPE 会落入被测代码的 catch 分支造成错误误判；流式链应逐环显式打桩（如 `when(req.header(any(), any())).thenReturn(req)`），个别用例未消费全部桩时用 `@MockitoSettings(strictness = LENIENT)` 或 `lenient()` 抑制 strict stubs 报错，而非删桩。
 
 - 对已打桩为 `thenThrow` 的 mock 重新打桩时，禁止再用 `when(mock.method()).thenReturn(...)` 语法——`when()` 内的方法调用会先触发旧桩直接抛异常，新桩永远建立不起来；必须改用 `doReturn(...).when(mock).method()` 形式（`doThrow`/`doAnswer` 同理）。
 - Mock 响应的形状必须对齐消费端适配逻辑的隐式契约（如根节点包装、字段映射、成功码判定），并以最终消费效果（渲染结果、路由注册、下游调用）验证 mock 有效性；不能只验证 mock 接口自身返回 200 且结构自洽，否则数据会被适配层静默丢弃而表现为「页面为空/路由缺失」
+- Mockito 连续调用的断言用单条 `verify(m, times(2))` 而非两行独立 verify：独立 verify 各要求「区间内恰好 1 次」，同参连续调用必报 wanted-1-but-2（InOrder 场景同理）
+- stub 的数据结构须与生产同语义：`Map.of()` 等不可变集合的 `get(null)` 直接抛 NPE，而生产 `Collectors.toMap`→HashMap 返回 null——stub 用错集合语义会让测试走错分支、误判生产缺陷
+- `@InjectMocks` 不做链式注入：被测对象持有的下游依赖对象须在 `@BeforeEach` 手工组装（必要时反射），不能指望 Mockito 递归注入
 
 - Mock 系统边界：Repository/Dao、HTTP 客户端、MQ、文件系统、外部 SDK
 - 禁止 Mock 领域对象：Entity、DTO、VO、值对象
@@ -127,6 +132,7 @@ inclusion: always
 
 ## 测试数据
 - 构造用于统计断言（相关系数、标准差等）的测试数据时，禁止使用零方差序列（如等差序列的逐期变化为常数）：统计量分母为 0 会返回 NaN，断言失真且易被误判为实现缺陷；夹具数据应先保证有实际波动
+- 断言集合的折叠结果而非「最后写入者胜」：大小写碰撞键在 HashMap/TreeMap 的迭代序不确定，断言特定迭代位置必然间歇性失败；改断言与顺序无关的折叠形态
 
 - 允许：常量 fixture（用户名、邮箱前缀等标识性数据）
 - 禁止：动态值（时间、随机 ID、自增主键）硬编码到断言中——用相对时间或 `assertNotNull()`
@@ -134,6 +140,7 @@ inclusion: always
 
 ## 前端
 - vitest 必须在前端工程目录内运行：`test.environment`（jsdom）等配置就近生效于 `vite.config.ts`，从仓库根/父目录运行会静默丢失 DOM 环境，造成整批用例 `document is not defined` 假失败；受 cwd 不稳定限制时用 `npm --prefix <前端目录> test` 显式定位
+- E2E `page.evaluate` 的执行 world 因框架/上下文而异：标准 Playwright/Puppeteer 默认在页面 main world 执行、可访问页面脚本全局（`addInitScript` 等页面环境注入同样落在 main world）；显式运行在隔离 world 的上下文（如浏览器扩展 content script）只能看到 DOM、拿不到页面全局。引用页面侧全局（密钥派生、内嵌状态等）前先确认执行 world；隔离 world 上下文中改用自包含解析（DOM 文本正则/`atob`）
 
 - 定位方式：统一使用 `data-testid`，禁止 CSS 选择器或 class
 - Mock：Mock API 调用，不 Mock 组件内部方法
@@ -154,8 +161,6 @@ inclusion: always
 - 构建信号以 Maven 实际编译/测试为准：LSP 在未启用 Lombok 注解处理器时对 builder/getter/setter 等生成成员的报错属于误报，不作为失败依据
 - 全量门禁失败时，先判定失败项属于本次变更还是 HEAD 既有（对 HEAD 版本重跑或核对本次未触碰的路径），归因后再决定修复策略，不默认揽责也不默认跳过
 - 既有 lint 告警按仓内惯例处置（如 shellcheck 逐条 `# shellcheck disable=SCxxxx` 指令并注明理由——字面 markdown 反引号属刻意单引号防展开），修复后复跑全量验证，不因"非本次引入"而留红
-- 全量门禁失败时，先判定失败项属于本次变更还是 HEAD 既有（对 HEAD 版本重跑或核对本次未触碰的路径），归因后再决定修复策略，不默认揽责也不默认跳过
-- 既有 lint 告警按仓内惯例处置（如 shellcheck 逐条 `# shellcheck disable=SCxxxx` 指令并注明理由——字面 markdown 反引号属刻意单引号防展开），修复后复跑全量验证，不因"非本次引入"而留红
 - 新增用例后核对通过数与编写的测试函数数一致：编辑事故可能静默吞掉整个测试函数（套件全绿但计数缩水是唯一暴露信号）
 - 门禁/CI 间歇性失败先定性再处置：单测隔离复现 + 在 main 上同跑判定是否本分支引入 → 全量套件复现 → 修复后满载压力连跑验证；定性为与变更无关的时序 flake 才可重试推送，禁止盲目重试掩盖根因
 
@@ -166,7 +171,6 @@ inclusion: always
 - 变更行覆盖率的本地自验须与门禁同口径：直接复用门禁工具（如 diff-cover）及其产物，不自写脚本旁路核算，避免实现差异（如 lcov `DA:行号,命中数` 未按逗号拆分）产出 100% 通过的假象
 
 - 本地 pre-commit/pre-push 门禁的 lint 与测试范围、口径必须与 CI 完全同口径或更宽，并随 CI 演进同步维护；任一侧范围缺失都会产生「本地绿、CI 红」的假信号，问题要到 CI 才暴露、浪费一轮流水线
-- 协议适配、渠道移植类迁移项目，应建设录制-回放-比对测试设施：golden 样本按「渠道×事件」版本化管理，作为迁移每批次准入门禁；样本比对不一致的批次不得进入灰度。
 
 - 基于覆盖率产物的增量门禁（diff-cover 等）复用本地 lcov/xml 文件：补充测试后必须重新生成覆盖率产物再提交，陈旧产物会把已覆盖代码误判为缺失导致门禁误拦
 - lint/工具自动改写（Sourcery、docstring 回填等）提交后复查两件事：① 覆盖率是否无解释下降——改写可能落入度量工具盲区（xx-python-sdk 2026-08-31：coverage.py 对 walrus+yield 生成器的 break 弧不记录，Sourcery 改写致 99.78%，最小探针隔离复现后回退 4 行恢复 100%）；② 行号锚定的配置（覆盖率白名单、报告定位）是否漂移——同日 docstring 插入使 2 条白名单行号漂移，失配告警当场拦截；结构性辅助提交与锚定配置不得盲过
@@ -174,6 +178,17 @@ inclusion: always
 - 全部测试必须通过
 - 覆盖率门禁与「覆盖率阈值」同口径：Java 以 JaCoCo 报告级计数执行全量（存量+新增）行/分支 ≥ 98% 红线（剔除生成代码后），增量 diff-cover 变更行 java ≥ 98% / 非 Java ≥ 90% 为补充检查；非 Java 核心业务 ≥ 98% 由 CR 把关
 - 测试总耗时不超过最近 main 分支全量运行的 120%
+
+### 工具链假绿形态【强制】
+
+> 原则：工具「全绿」先要证明检查真的发生了——检查文件数/生效目标数/度量维度对不上时，绿灯是噪声。每条附判别信号与验收口径。
+
+- **覆盖率 0% + 全部用例通过 = 仪器化失效**，不是真实覆盖不足。先修数据收集链路（collector 装配/驱动加载），不要按覆盖缺口清单补测试
+- **类型检查零文件绿灯**：solution 风格 tsconfig（`files: []` + references）下 `vue-tsc --noEmit` 不带 `-b` 时检查零文件，亚秒级完成即是信号。以「实际检查文件数」为验收口径
+- **工具配置与 CLI 双轨时配置静默缩窄**：Stryker 4.16 的 config `mutate` 键忽略 span 参数（仅 CLI 支持），封装 runner 会静默丢目标域。验收对账「生效变异目标数」而非配置文件写了什么
+- **覆盖率驱动与语言版本错配**：PHPUnit 12 移除了 phpdbg 驱动（报 "No code coverage driver available"），须改 pcov（仅行覆盖）或 xdebug（行+分支）；换驱动时核对度量维度是否随之缩水，缩水须同步调整门禁口径
+- **构建工具陈旧增量状态的海量假报错**：maven-compiler-plugin 陈旧增量可产出海量 Lombok 报错，`mvn clean test-compile` 重建后真实错误可能骤减。报错规模与变更规模失配时先 clean 归因再修
+- **IDE 错误桩 class 干扰测试**：`Unresolved compilation problems` 是 IntelliJ 编译出错时仍写入 `target/test-classes` 的错误桩特征（javac 不允许这种 class），跑测试前 clean；配套解析坑：surefire XML `<testsuite tests="0">` 可内含全部通过的 testcase，解析门禁以 testcase 计数为准而非 testsuite 属性
 
 ## 变异测试纪律
 
@@ -186,6 +201,9 @@ inclusion: always
 
 ## 自建关卡脚本的反作弊要求
 
+> 适用：自建门禁/检查脚本（变异测试 harness、grep 扫描、覆盖率门禁包装脚本、guard 检查脚本）。
+> 原则：一个只会放行的检查器不是门禁——每个检查器必须先证明自己**会失败**，才配拦截别人。
+
 - 用 `re.sub` 写回 JSON/代码产物时 replacement 必须走 `lambda m: s` 形式：re.sub 的 replacement 字符串层会解释 `\n`、`\g<1>` 等转义序列，`json.dumps` 产物里的 `\n` 两字符序列会被改写成裸换行直接破坏 JSON 合法性（2026-09 提案编辑事故实证，改 lambda 闭包后消失）。
 - mutations 注入运行期间不得并发执行其他门禁/检查：变异体临时落盘会污染并发进程读到的工作区视图（2026-08-28 实证：gauntlet 并发跑出 ddl_check.py 假红），须等 mutations 结束且确认变异全部恢复后串行重验
 
@@ -196,10 +214,6 @@ inclusion: always
 - 门禁/检查脚本的仓库扫描面用 `git ls-files`（tracked 面）枚举，禁止手工维护排除目录清单或顶层 `glob("*.sh")` 式枚举：手工清单与 .gitignore 脱节会把 gitignored 运行时产物当仓库内容扫出假阳性（曾炸穿 pre-push 门禁），顶层 glob 导致新增深层脚本从未入门；确需排除 tracked 的 vendored 内容时显式列出并在注释注明理由；输入目录非 git 仓库时 fail-closed 拒判，不得降级放行
 
 - 新门禁脚本交付验收除单测全绿外，须加一道 retrospective 复验：用促使其诞生的真实事故按当时事实重演跑门，门必须红并逐一点名当时靠人眼才发现的漏网文件（owner_check 落地即以此验收，--base 复现 4 条零派发改动）
-- **ast 解析的 SyntaxWarning 泄漏**：用 `ast.parse` 扫描 `.py` 的静态门须局部抑制 `SyntaxWarning`（被扫文件 docstring 的无效转义会泄成层输出噪音）；`SyntaxError` 仍正常上抛走 rc=2，不弱化 fail-closed。
-
-> 适用：自建门禁/检查脚本（变异测试 harness、grep 扫描、覆盖率门禁包装脚本、guard 检查脚本）。
-> 原则：一个只会放行的检查器不是门禁——每个检查器必须先证明自己**会失败**，才配拦截别人。
 
 ### 负控制【强制】
 - 缺陷修复附带的回归测试应做拦截力反向验证：先在未修复基线代码上运行新测试确认会失败（红），再在修复后运行确认通过（绿）；只验证过绿、未验证过红的测试不能作为修复拦截力证据

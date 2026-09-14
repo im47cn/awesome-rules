@@ -139,9 +139,9 @@ Refs #321
 
 - 多会话共享工作区：提交中断发现分支被切、暂存消失时，先 `git log -1 --stat` 核对并发提交内容；与自身改动一致则保留并仅补交剩余部分，不得重复落盘；不一致则披露后再动
 - 并发写入者防护：仓库存在后台脚本或其他会话共用主 worktree 时，checkout/merge 等操作可能落在被并发切走的分支上产生污染提交；长占用任务（处理 PR、解冲突）前先确认无并发进程在操作同一分支，必要时用独立 `git worktree add` 隔离执行
+- 多仓/多 worktree 环境下，所有 git 与文件操作显式定位目标仓（`git -C <repo>`、绝对路径或独立 worktree），前置 `cd` 不算定位——cd 之后、下一条命令之前，shell cwd 仍会被并行会话或工具静默重置，相对路径命令会落到别的仓
 
 - rebase/reset/换基线前先确认工作树干净（commit 或 stash 未提交编辑）：`git reset --hard` 会静默丢弃未提交修改，事后只能靠重读重写恢复
-- 并发写入者防护：仓库存在后台脚本或其他会话共用主 worktree 时，checkout/merge 等操作可能落在被并发切走的分支上产生污染提交；长占用任务（处理 PR、解冲突）前先确认无并发进程在操作同一分支，必要时用独立 `git worktree add` 隔离执行
 
 - 任何「本地 vs 远端」状态判断（领先/落后/待推送/是否需要 rebase）前先 `git fetch`：共享 main 且 CI/定时任务高频自动提交的仓库里，陈旧的本地 refs 会导致误判（实证：本地 refs 未刷新时误报「领先 3 个提交待推送」，fetch 后实为落后 11 个）
 - 工作开始时先切到 `main` 并 `git pull --ff-only` 同步基线（同步对象是 `main` 而非当前 feature 分支——后者只拉自身 upstream，`main` 基线仍可能过时；无 upstream 的新分支上该命令直接失败，需同步工作分支时须显式指定其 upstream）：长期不 pull 会在下次同步时积累大体积 diff（自动提交的数据文件尤甚），且整个工作过程基于过时状态
@@ -168,10 +168,10 @@ Refs #321
 
 - AI 创建 PR 后即停，合并决定权归人工：不得在创建后自行 `gh pr merge`——即使推送被分支保护拒绝转走 PR 流，也不延伸为自动合并（2026-08-24 PR #50/#51 教训：创建后 15 秒自行合并，人工审查窗口被绕过）
 - 触碰治理周界（guard PERIMETER，如 `.factory/`、`steering/`）的 PR 尤其不可自动合并：周界变更的人工审查是设计意图，不是流程仪式
-- AI 创建 PR 后即停，合并决定权归人工：不得在创建后自行 `gh pr merge`——即使推送被分支保护拒绝转走 PR 流，也不延伸为自动合并（2026-08-24 PR #50/#51 教训：创建后 15 秒自行合并，人工审查窗口被绕过）
-- 触碰治理周界（guard PERIMETER，如 `.factory/`、`steering/`）的 PR 尤其不可自动合并：周界变更的人工审查是设计意图，不是流程仪式
 
 - PR 内容引用其他未合并 PR 的符号/文件时用 stacked PR（base 指向被依赖分支）：被依赖 PR 合并后 GitHub 自动 retarget 到 main；直接 base=main 会引用悬空、CI 必红
+- 建 PR 前先查 open PR：同内容甚至同源 SHA 的 PR 可能已开着；正确动作是推送到既有 PR 分支触发其检查，而非造重复 PR
+- 分支保护 `code_scanning` 检查 BLOCKED 且 CodeQL 从未跑过该 PR head 时，用 update-branch（同步 main）制造 synchronize 事件触发 CodeQL 补跑，不要新建 PR 绕行
 - 禁止同内容直推 main：main 前进后 GitHub 会把指向该内容且已无差异的开放 PR 自动标记为 MERGED（指纹：mergedBy=null、无 review 记录），形成「未经批准合并」表象；分支保护须设置 required_approving_review_count ≥ 1。
 
 - 分支与远程出现内容等价但 hash 不同的提交（自动化链式重投/rebase 产物）时，先以 `git cherry` 判定等价，再以合并提交收敛并验证与目标树零差异（`git diff <目标> HEAD --stat` 为空），防止 hash 漂移累积。
