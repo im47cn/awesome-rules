@@ -63,6 +63,7 @@ inclusion: always
   禁用 GAV 形式——同坐标在多模块构建内被 aether reactor 命中当前模块自身产物（自比自），
   必须 `file.path` 直指重建 jar；③baseline jar 缺失时 japicmp 直接报错（fail-closed），
   见到 "path does not point to an existing file" 即先跑重建脚本，不要绕过。
+- Maven 配置继承坑（与上三坑同属静默恒绿形态）：子 pom 覆写插件配置用 `combine.self="override"` 会**整体替换**父 pom 的同名 `<configuration>` 块而非合并，父 pom 的 `breakBuildOn*` 等门禁标志随之丢失、门禁恒绿空转；覆写插件配置时把父 pom 需保留的门禁标志显式带上
 
 ### C：下游编译触发（跨仓）
 
@@ -84,11 +85,12 @@ inclusion: always
 
 | 场景 | 要求 |
 | --- | --- |
-| 兼容性变更（新增字段/方法） | 正常合入，japicmp 绿 |
+| 兼容性变更（新增字段/类新增方法） | 正常合入，japicmp 绿（**接口新增方法除外**，见下） |
 | 破坏性变更（删除/改签名 public 成员） | japicmp `<excludes>` 显式豁免 + MR 描述注明受影响下游 + 迁移说明 |
 | 契约对应的存储结构变更（如表拆分） | 发布顺序强制：先建表 → 迁数据 → 下游升级切换新接口 → 清理旧字段 |
 | 新增跨仓契约模块 | pom description 含"契约"；登记进下游触发配置 |
 - 契约变更的断裂可能被 SNAPSHOT 缓存静默掩盖：下游拉到新 SNAPSHOT 则编译失败，沿用本地 m2 旧缓存则编译通过但运行时反序列化错位、功能整体失效（实测：上游单方把契约返回类型 ResultMode 改为 ResponseMessage，下游网关零同步）。因此不得以「下游暂未编译报错」认定契约兼容，契约变更必须同批联动下游仓库或被门禁拦截。
+- **向接口新增方法对实现方是破坏性变更**（japicmp `METHOD_ADDED_TO_INTERFACE`）：上表「新增方法=兼容」只适用于具体类——接口一旦新增方法，所有下游实现类缺方法即编译断；此类变更按破坏性变更处理，豁免 `<excludes>` 须同时覆盖新增签名
 
 豁免记录每季度复盘一次：豁免后下游是否完成迁移、豁免是否可回收。
 
