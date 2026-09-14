@@ -34,3 +34,7 @@ docs/design/architecture/
 
 # 工厂链本地数据（ADR-012：公开中心仓的仓特定清单，永不入库）
 .factory/downstream.local.json
+
+# 回归度量产物与 remote-pi 本地会话数据（G5：运行时生成，不入库）
+.factory/metrics/
+.pi/
