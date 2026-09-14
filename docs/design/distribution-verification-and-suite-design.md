@@ -11,7 +11,7 @@
 对 `.factory/downstream.json` 登记的 10 个下游仓做只读实测(git ls-tree/ls-remote/日志与运行时产物巡检,零写入),得到三条核心结论:
 
 1. **真消费成立**:严口径(main 已合 + 锚点/追平史 + 链当日活跃)6/10,加 Codeup 开发线 2 仓为 8/10,≥ 半数 → 按任务书条款 6 **设计分发套件**,而非「不实施」或「单仓试点」。
-2. **滞后是普遍态而非例外**:全部仓落后上游 HEAD(full 面 49 件中追平 0–35 件,中位数约 23);ADR-011(9-01)新增的 7 件巡检面只有 wop-go-sdk 追平。分发套件设计的第一目标不是「发出去」,而是**漂移收敛与防再散**。
+2. **滞后是普遍态而非例外**:全部仓落后上游 HEAD(full 面 49 件中追平 0–35 件,中位数约 23);ADR-011(9-01)新增的 7 件巡检面只有 xx-go-sdk 追平。分发套件设计的第一目标不是「发出去」,而是**漂移收敛与防再散**。
 3. **schema 已分叉、平台假设已收窄**:下游 5 仓自扩 `docstring_gate_cmd` 键(上游模板无);`/usr/bin/shlock` 在 9 仓的 cron-dispatch.sh 硬编码(P1 PR #120 实测 ubuntu ENOENT)——C 阶段(上游 PR #120 已实测 ubuntu 无 shlock)把链搬进 CI 前必须先换锁。
 
 设计输出:intent/ 目录约定、REVIEW.md 配套、CI gate 模板注入方案、跨平台锁方案,条款化为 DIST-1..DIST-10,附验收矩阵雏形(条款 6 要求的结构,供后续 spec 化时逐条继承)。
@@ -30,30 +30,30 @@
 
 | 仓 | 托管 | .factory 入库位置(件数) | 锚点 | =锚/锚full | 本地改 vs 锚 | vs 上游HEAD/49 | 链活跃证据 | 追平提交数 | local.json 键数 |
 |---|---|---|---|---|---|---|---|---|---|
-| gtsp-wop-service | Codeup | 开发分支 origin/feature/20260812-open_platform_v1(50) | 无 | – | – | 27 | locks 初始化(9-01),无 dispatch.log,ledger 0 条 | 0 | 11 |
-| gtsp-wop-gateway | Codeup | 开发分支 origin/fix/sourcery-review(56) | 04ee96d0(8-28) | 29/42 | 13 | 23 | ledger 2 条(8-28)+ leases/KFPT-22/26 + metrics/auto-merge-unlocked;远端 factory/* 分支(sync-2be9f99、issue-KFPT-26) | 1 | 11 |
-| wop-python-sdk | GitHub | origin/main(55,9-02) | 无 | – | – | 23 | dispatch.log 9-03 10:58 exit=0(1301 行) | 0 | 11 |
-| wop-java-sdk | GitHub | origin/main(57,9-02) | 20f6a632(8-31) | 41/42 | 1 | 21 | dispatch.log 9-03 exit=0 | 0 | 12(+docstring_gate_cmd) |
-| wop-typescript-sdk | GitHub | origin/main(55,9-02) | 无 | – | – | 23 | dispatch.log 9-03 exit=0 | 4(手工形态) | 11 |
-| wop-php-sdk | GitHub | origin/main(61,9-03) | 20f6a632(8-31) | 29/42 | 13 | 23 | dispatch.log 9-03 exit=0 | 0 | 12(+docstring_gate_cmd) |
-| wop-dotnet-sdk | GitHub | origin/main(56,9-02) | 63301f27(9-01) | 43/43 | 0 | 27 | dispatch.log 9-03 exit=0;分支 factory/sync-63301f27 | 3 | 13(+docstring_gate_cmd+port_point) |
-| wop-skills | GitHub | origin/main(36,9-02) | 04ee96d0 + sync_debt 登记 | 20/42 | 7 | 14 | dispatch.log 9-03 exit=0 | 0 | 11 |
-| wop-web-tools | GitHub | main 无(0);移植分支 factor/install-blackbox-factory(50)未合并;工作树 `?? .factory/` 未跟踪 | 无 | – | – | 0 | dispatch.log 9-03 exit=0(本机未跟踪副本) | 0 | 13 |
-| wop-go-sdk | GitHub | origin/main(62,9-03) | 2be9f99d(9-02) | 47/47 | 0 | 35 | dispatch.log 9-03 exit=0 | 6(最近 `factory: 上游同步追平(2be9f99d4)` 9-02) | 13 |
+| gtsp-xx-service | Codeup | 开发分支 origin/feature/demo-v1(50) | 无 | – | – | 27 | locks 初始化(9-01),无 dispatch.log,ledger 0 条 | 0 | 11 |
+| gtsp-xx-gateway | Codeup | 开发分支 origin/fix/sourcery-review(56) | 04ee96d0(8-28) | 29/42 | 13 | 23 | ledger 2 条(8-28)+ leases/T-22/26 + metrics/auto-merge-unlocked;远端 factory/* 分支(sync-2be9f99、issue-T-26) | 1 | 11 |
+| xx-python-sdk | GitHub | origin/main(55,9-02) | 无 | – | – | 23 | dispatch.log 9-03 10:58 exit=0(1301 行) | 0 | 11 |
+| xx-java-sdk | GitHub | origin/main(57,9-02) | 20f6a632(8-31) | 41/42 | 1 | 21 | dispatch.log 9-03 exit=0 | 0 | 12(+docstring_gate_cmd) |
+| xx-typescript-sdk | GitHub | origin/main(55,9-02) | 无 | – | – | 23 | dispatch.log 9-03 exit=0 | 4(手工形态) | 11 |
+| xx-php-sdk | GitHub | origin/main(61,9-03) | 20f6a632(8-31) | 29/42 | 13 | 23 | dispatch.log 9-03 exit=0 | 0 | 12(+docstring_gate_cmd) |
+| xx-dotnet-sdk | GitHub | origin/main(56,9-02) | 63301f27(9-01) | 43/43 | 0 | 27 | dispatch.log 9-03 exit=0;分支 factory/sync-63301f27 | 3 | 13(+docstring_gate_cmd+port_point) |
+| xx-skills | GitHub | origin/main(36,9-02) | 04ee96d0 + sync_debt 登记 | 20/42 | 7 | 14 | dispatch.log 9-03 exit=0 | 0 | 11 |
+| xx-web-tools | GitHub | main 无(0);移植分支 factor/install-blackbox-factory(50)未合并;工作树 `?? .factory/` 未跟踪 | 无 | – | – | 0 | dispatch.log 9-03 exit=0(本机未跟踪副本) | 0 | 13 |
+| xx-go-sdk | GitHub | origin/main(62,9-03) | 2be9f99d(9-02) | 47/47 | 0 | 35 | dispatch.log 9-03 exit=0 | 6(最近 `factory: 上游同步追平(2be9f99d4)` 9-02) | 13 |
 
 注:锚点 full 数不同(42/43/47)因各锚点对应上游不同时期的 full 面大小;「vs 上游HEAD」是统一分母(49)的可比口径。逐仓复核命令与冻结 sha 见 §4.2;其中 php/dotnet 两行件数与 gateway/go 追平计数未能按当前 refs 复现,已标 [INFERENCE]。
 
 ### 1.3 逐仓量化细节(要点)
 
-- **wop-go-sdk(标杆形态)**:唯一 =锚点 47/47 且 0 本地改的仓;唯一带 `upstream` 字段新格式 lock + `blame_ignore: true`;唯一追平了 ADR-011 巡检面(downstream-check.sh 等)的仓;6 次追平提交呈自动化命名(`factory: 上游同步追平(<sha8>)`)(审计注:该 6 按当前 refs 任何 grep 口径至多得 3,且计数只增不减、非采集后演进可解释——不可机械复现,标 [INFERENCE],见 §4.2)。中心驱动追平(ADR-011 B 阶段)在它身上已闭环。
-- **wop-dotnet-sdk**:43/43 = 锚点、0 本地改、3 次追平、分支 factory/sync-63301f27 与 PR 流痕迹——自动化形态第二例,但锚点(9-01)后上游又演进 22 件未追。
-- **wop-java-sdk**:41/42,唯一本地改是 `tests/test_hosting.py`(hosting 适配演练残留);锚后 28 件演进未追。
-- **wop-php-sdk / gtsp-wop-gateway**:各 13 件本地改(factory_lib/feedback/guard/hosting/state + 7 个 tests;php 另含 cron-dispatch.sh)——下游深度定制(forge 适配 + docstring 门),是 full 面覆盖策略与下游演化冲突最尖锐的两仓。
-- **wop-python-sdk / wop-typescript-sdk**:无 upstream-lock(M2 未启用),内容停留在 20f6a632 世代([INFERENCE]:与 php 同批移植、追平口径一致 23/49);typescript 有 4 次手工追平提交,python 0。
-- **wop-skills(滞后最深)**:=锚 20/42,缺 `tests/` 15 件(conftest/gitenv/全部 test_*.py),即**测试面整体未移植**;7 件本地改含 `prompts/triage.md` 定制;`upstream-lock.json` 带 `sync_debt` 字段显式登记漂移债务——10 仓中唯一「下游自报债务」实例。
-- **gtsp-wop-service**:9-01 刚移植(3 commits),locks 目录已初始化但链未跑(dispatch.log 不存在,ledger 0 条);Codeup main 为 Initial commit 占位,治理资产在 feature 分支。
-- **gtsp-wop-gateway**:链史最丰富的 Codeup 仓——远端存在 factory/sync-2be9f99、factory/issue-KFPT-26、factory/hotfix-review-s1-s2-p1、feat/factory-forge 等分支,leases/ 下 KFPT-22/26 租约纪元,证明 Codeup 托管的 S2 链真实运行过(8-28 前后)。
-- **wop-web-tools(死亡谷形态)**:8-31 移植分支完成移植 + 门灵敏度重证(mutations 13/13,kill 11/11 = 100%),但 origin/main 无 .factory,移植分支至今未合并;当前工作树的 .factory 为未跟踪副本,链在本机照跑。**移植完成 ≠ 采纳完成**。
+- **xx-go-sdk(标杆形态)**:唯一 =锚点 47/47 且 0 本地改的仓;唯一带 `upstream` 字段新格式 lock + `blame_ignore: true`;唯一追平了 ADR-011 巡检面(downstream-check.sh 等)的仓;6 次追平提交呈自动化命名(`factory: 上游同步追平(<sha8>)`)(审计注:该 6 按当前 refs 任何 grep 口径至多得 3,且计数只增不减、非采集后演进可解释——不可机械复现,标 [INFERENCE],见 §4.2)。中心驱动追平(ADR-011 B 阶段)在它身上已闭环。
+- **xx-dotnet-sdk**:43/43 = 锚点、0 本地改、3 次追平、分支 factory/sync-63301f27 与 PR 流痕迹——自动化形态第二例,但锚点(9-01)后上游又演进 22 件未追。
+- **xx-java-sdk**:41/42,唯一本地改是 `tests/test_hosting.py`(hosting 适配演练残留);锚后 28 件演进未追。
+- **xx-php-sdk / gtsp-xx-gateway**:各 13 件本地改(factory_lib/feedback/guard/hosting/state + 7 个 tests;php 另含 cron-dispatch.sh)——下游深度定制(forge 适配 + docstring 门),是 full 面覆盖策略与下游演化冲突最尖锐的两仓。
+- **xx-python-sdk / xx-typescript-sdk**:无 upstream-lock(M2 未启用),内容停留在 20f6a632 世代([INFERENCE]:与 php 同批移植、追平口径一致 23/49);typescript 有 4 次手工追平提交,python 0。
+- **xx-skills(滞后最深)**:=锚 20/42,缺 `tests/` 15 件(conftest/gitenv/全部 test_*.py),即**测试面整体未移植**;7 件本地改含 `prompts/triage.md` 定制;`upstream-lock.json` 带 `sync_debt` 字段显式登记漂移债务——10 仓中唯一「下游自报债务」实例。
+- **gtsp-xx-service**:9-01 刚移植(3 commits),locks 目录已初始化但链未跑(dispatch.log 不存在,ledger 0 条);Codeup main 为 Initial commit 占位,治理资产在 feature 分支。
+- **gtsp-xx-gateway**:链史最丰富的 Codeup 仓——远端存在 factory/sync-2be9f99、factory/issue-T-26、factory/hotfix-review-s1-s2-p1、feat/factory-forge 等分支,leases/ 下 T-22/26 租约纪元,证明 Codeup 托管的 S2 链真实运行过(8-28 前后)。
+- **xx-web-tools(死亡谷形态)**:8-31 移植分支完成移植 + 门灵敏度重证(mutations 13/13,kill 11/11 = 100%),但 origin/main 无 .factory,移植分支至今未合并;当前工作树的 .factory 为未跟踪副本,链在本机照跑。**移植完成 ≠ 采纳完成**。
 
 ### 1.4 install.sh 调用证据
 
@@ -74,14 +74,14 @@
 | `/usr/bin/shlock` | cron-dispatch.sh L32/36(上游);downstream-check.sh L60/64 | **硬**:失败即 exit,静默退出或上抛 | 9 仓分发副本 git grep 命中(web-tools HEAD 无 .factory 不在列);另有 locks/ 目录 ENOENT 已修(PR#79) | macOS 本地链安全;**ubuntu CI 直接炸**(P1 PR #120 实测 ENOENT);C 阶段 composite action 的前置阻塞项 |
 | `/usr/bin/osascript` | cron-dispatch.sh L71(停摆通知);downstream-check.sh L137-138(巡检通知) | **软**:前者 `\|\| true` 兜底;后者 `FACTORY_NO_NOTIFY=1` + `command -v` 守卫 | 6 仓 cron-dispatch 命中 | Linux 上静默退化为文件标记/飞书聚合告警,不阻塞;可接受 |
 | launchd/LaunchAgent | 中心仓回归调度(ADR-004) | 不随 .factory 分发 | 10 仓 git grep 零命中 | 无(设计边界正确) |
-| CI runs-on | GitHub 8 仓 workflows | – | 8/8 含 ubuntu-latest;python/go 加 macos-latest;typescript 加 windows-latest;workflows **不调用** .factory 脚本(仅 wop-skills codeql.yml 注释提及) | 现状零冲突;C 阶段把 dispatch/downstream-check 搬进 ubuntu runner 时 shlock 必炸 |
+| CI runs-on | GitHub 8 仓 workflows | – | 8/8 含 ubuntu-latest;python/go 加 macos-latest;typescript 加 windows-latest;workflows **不调用** .factory 脚本(仅 xx-skills codeql.yml 注释提及) | 现状零冲突;C 阶段把 dispatch/downstream-check 搬进 ubuntu runner 时 shlock 必炸 |
 
 ### 1.7 数据结论:真消费判定与三大病
 
 **判定口径**(三维度):.factory 入库(main 或开发主线)+ 链运行证据 + 锚点/追平史。
 
 - 严口径真消费(A 类:三要素齐)= **6/10**:java、php、dotnet、go、python、typescript(python/ts 锚点缺失但 main 已合 + 链当日活跃,内容世代 20f6a632)。
-- 加 C 类开发线(gateway 链史 + KFPT 租约实证;service 初装)→ 宽口径 **8/10**。
+- 加 C 类开发线(gateway 链史 + T-N 租约实证;service 初装)→ 宽口径 **8/10**。
 - D 类滞后(skills,main 已合但 =锚 20/42)与 E 类未合(web-tools)各有 1 仓。
 - **6/10 ≥ 半数 → 任务书条款 6 路径成立:设计分发套件。** 同时数据否决了「无条件全面铺开」:
 
@@ -204,20 +204,20 @@
 
 | 仓 | 冻结复核 sha(平台期) | 件数 | vs49 | 追平(采集时) | 关键输出摘要 |
 |---|---|---|---|---|---|
-| gtsp-wop-service | `7ed324e`(9-03 10:22,dev 分支尖端) | 50 | 27 | 0 | locks/ 已建(9-01)、无 dispatch.log;ledger 0 行;键 11 |
-| gtsp-wop-gateway | `81a4d3c`(8-31,fix/sourcery-review 尖端未再动) | 56 | 23 | 1 [INFERENCE] | sync 链 `ad5f3f0`(8-26)@c798c943 → `d64d4f8`(8-28)`chore(factory): sync 上游 @04ee96d0（ADR-009 数据化）`;ledger 2 行;leases/ `issue:KFPT-22.epoch`、`issue:KFPT-26.epoch`;远端 factory 系分支 4(sync-2be9f99、issue-KFPT-26、hotfix-review-s1-s2-p1、feat/factory-forge);键 11;*表列 1 与 grep 口径不符:`--grep='sync 上游'` 于 81a4d3c 历史内 = 2(ad5f3f0、d64d4f8,均 ≤采集截止)——疑按锚点 04ee96d0 对应的 ADR-009 数据化单次计,口径敏感 |
-| wop-python-sdk | `8be4c9d`(9-02 13:05;平台期 9-01 23:06→9-03 01:41) | 55 | 23 | 0 | dispatch.log 第 1301 行 `── 2026-09-03 10:58:26 dispatch 结束（exit=0）`;键 11(现工作树 12,后续追平加 `port_point`) |
-| wop-java-sdk | `5abc8df`(9-02 23:27;平台期 9-02 15:39→9-03 01:37) | 57 | 21 | 0 | dispatch.log 9-03 exit=0;键 12(+docstring_gate_cmd) |
-| wop-typescript-sdk | `6885b89`(9-02 23:02;平台期 9-01 14:01→9-02 23:02) | 55 | 23 | 4(手工) | 追平判读基料(可复现):`git log 6885b89 --format='%h %ad %s' -- .factory` 枚举 8-31 八个触碰提交,「追平」语义内嵌于特性提交标题(4107d94 追平 Sourcery 回归闸、297c6e3 三方合并恢复+追平、9061d27 docstring 门含 .factory 追平等)而非独立 sync 消息——单一 grep 必欠计,故标「手工形态」;dispatch.log 9-03 exit=0;键 11(现 12) |
-| wop-php-sdk | [INFERENCE] | 61* | 23* | 0* | *表列组合(61/23/0)在本地历史(采集截止及其后 120 提交)无同组合 sha:61 件状态均始于 9-03 12:47 且 vs=35;截止时 origin/main 尖端 `6a066a9`(9-03 10:48)`factory: 上游同步追平（298e5ca）` 实测 63 件/48 一致——表列疑为锚点世代(`20f6a632`,8-31,29/42+13 本地改)混合快照,采信其锚点分解列;可核:该追平提交、dispatch.log 9-03 exit=0、键 12→现 11(键面后续演进) |
-| wop-dotnet-sdk | [INFERENCE] | 56* | 27* | 3 | *56/27 组合未能复现;可核邻点:`5bd39fc`(9-02 13:15)=56 件/21 一致、`fe2ee85`(9-03 01:56,≤截止)=61 件/35 一致;追平 3 与当前 `--all`=3 吻合(`8c60db7`(8-31)、`15557ab`(9-01)`factory: 上游同步追平（63301f27）`、合并流);分支 factory/sync-63301f27;键 13(+docstring_gate_cmd+port_point);dispatch.log 9-03 exit=0 |
-| wop-skills | `f5b23e4`(9-02 22:00;平台期 9-01 14:01→9-02 22:00) | 36 | 14 | 0 | dispatch.log 9-03 exit=0;键 11;sync_debt 登记为锁文件运行时内容,采集后经链运行清理 |
-| wop-web-tools | `ea301a7`(8-31 17:41,origin/main) | 0 | 0 | 0 | main `git ls-tree -r -- .factory` = 0;移植分支 `origin/factor/install-blackbox-factory` 树 50 件,尖端 `4721592`(8-31)`test(factory): 门灵敏度重证 — mutations 13/13 PASS，kill rate 11/11=100%`;工作树 `git status --porcelain -- .factory` = `?? .factory/`;dispatch.log 9-03 exit=0(本机未跟踪副本);键 13 |
-| wop-go-sdk | `5e5ad92`(9-03 07:55;平台期 9-03 01:55→19:29) | 62 | 35 | 6 [INFERENCE] | *当前 `--all`=3(main 2),表列 6 疑含采集后已清理的分支侧提交,不可再按 grep 复现;可核:`17af40f`(9-02)`factory: 上游同步追平（2be9f99d4）`;键 13(+docstring_gate_cmd+port_point);dispatch.log 9-03 exit=0 |
+| gtsp-xx-service | `7ed324e`(9-03 10:22,dev 分支尖端) | 50 | 27 | 0 | locks/ 已建(9-01)、无 dispatch.log;ledger 0 行;键 11 |
+| gtsp-xx-gateway | `81a4d3c`(8-31,fix/sourcery-review 尖端未再动) | 56 | 23 | 1 [INFERENCE] | sync 链 `ad5f3f0`(8-26)@c798c943 → `d64d4f8`(8-28)`chore(factory): sync 上游 @04ee96d0（ADR-009 数据化）`;ledger 2 行;leases/ `issue:T-22.epoch`、`issue:T-26.epoch`;远端 factory 系分支 4(sync-2be9f99、issue-T-26、hotfix-review-s1-s2-p1、feat/factory-forge);键 11;*表列 1 与 grep 口径不符:`--grep='sync 上游'` 于 81a4d3c 历史内 = 2(ad5f3f0、d64d4f8,均 ≤采集截止)——疑按锚点 04ee96d0 对应的 ADR-009 数据化单次计,口径敏感 |
+| xx-python-sdk | `8be4c9d`(9-02 13:05;平台期 9-01 23:06→9-03 01:41) | 55 | 23 | 0 | dispatch.log 第 1301 行 `── 2026-09-03 10:58:26 dispatch 结束（exit=0）`;键 11(现工作树 12,后续追平加 `port_point`) |
+| xx-java-sdk | `5abc8df`(9-02 23:27;平台期 9-02 15:39→9-03 01:37) | 57 | 21 | 0 | dispatch.log 9-03 exit=0;键 12(+docstring_gate_cmd) |
+| xx-typescript-sdk | `6885b89`(9-02 23:02;平台期 9-01 14:01→9-02 23:02) | 55 | 23 | 4(手工) | 追平判读基料(可复现):`git log 6885b89 --format='%h %ad %s' -- .factory` 枚举 8-31 八个触碰提交,「追平」语义内嵌于特性提交标题(4107d94 追平 Sourcery 回归闸、297c6e3 三方合并恢复+追平、9061d27 docstring 门含 .factory 追平等)而非独立 sync 消息——单一 grep 必欠计,故标「手工形态」;dispatch.log 9-03 exit=0;键 11(现 12) |
+| xx-php-sdk | [INFERENCE] | 61* | 23* | 0* | *表列组合(61/23/0)在本地历史(采集截止及其后 120 提交)无同组合 sha:61 件状态均始于 9-03 12:47 且 vs=35;截止时 origin/main 尖端 `6a066a9`(9-03 10:48)`factory: 上游同步追平（298e5ca）` 实测 63 件/48 一致——表列疑为锚点世代(`20f6a632`,8-31,29/42+13 本地改)混合快照,采信其锚点分解列;可核:该追平提交、dispatch.log 9-03 exit=0、键 12→现 11(键面后续演进) |
+| xx-dotnet-sdk | [INFERENCE] | 56* | 27* | 3 | *56/27 组合未能复现;可核邻点:`5bd39fc`(9-02 13:15)=56 件/21 一致、`fe2ee85`(9-03 01:56,≤截止)=61 件/35 一致;追平 3 与当前 `--all`=3 吻合(`8c60db7`(8-31)、`15557ab`(9-01)`factory: 上游同步追平（63301f27）`、合并流);分支 factory/sync-63301f27;键 13(+docstring_gate_cmd+port_point);dispatch.log 9-03 exit=0 |
+| xx-skills | `f5b23e4`(9-02 22:00;平台期 9-01 14:01→9-02 22:00) | 36 | 14 | 0 | dispatch.log 9-03 exit=0;键 11;sync_debt 登记为锁文件运行时内容,采集后经链运行清理 |
+| xx-web-tools | `ea301a7`(8-31 17:41,origin/main) | 0 | 0 | 0 | main `git ls-tree -r -- .factory` = 0;移植分支 `origin/factor/install-blackbox-factory` 树 50 件,尖端 `4721592`(8-31)`test(factory): 门灵敏度重证 — mutations 13/13 PASS，kill rate 11/11=100%`;工作树 `git status --porcelain -- .factory` = `?? .factory/`;dispatch.log 9-03 exit=0(本机未跟踪副本);键 13 |
+| xx-go-sdk | `5e5ad92`(9-03 07:55;平台期 9-03 01:55→19:29) | 62 | 35 | 6 [INFERENCE] | *当前 `--all`=3(main 2),表列 6 疑含采集后已清理的分支侧提交,不可再按 grep 复现;可核:`17af40f`(9-02)`factory: 上游同步追平（2be9f99d4）`;键 13(+docstring_gate_cmd+port_point);dispatch.log 9-03 exit=0 |
 
 ### 4.3 其他引用(均已核验存在)
 
-- 反哺闭环:上游 main `eb2246a fix(factory): feedback main 接线 files 字段(PR #86, wop-go-sdk 反哺)`、`c1d2788 Merge PR #88 feedback/multi-repo-20260831`(`git show -s` 可核)。
+- 反哺闭环:上游 main `eb2246a fix(factory): feedback main 接线 files 字段(PR #86, xx-go-sdk 反哺)`、`c1d2788 Merge PR #88 feedback/multi-repo-20260831`(`git show -s` 可核)。
 - install.sh 引用:gtsp 两仓 lefthook.yml 头注释 + commitmsg-check.sh:38(下游仓 `git grep` 可核);上游 install.sh 变更 8 commits(8-17→9-01,`git log --oneline -- tools/git/install.sh`)。
 - 平台原语行号:上游 cron-dispatch.sh L3/16/32/36/71、downstream-check.sh L15/59/60/64/137-138——采集时点行号,上游演进后以 `git grep -n -E 'shlock|osascript' <上游sha>` 复核;CI runs-on 见 §1.6(8/8 ubuntu-latest)。
 - 上游基准自洽:`7d96941` 与主仓 main `08e1611` 的 .factory 全树(64 件)path+blob 逐一相同——vs 值与基准选取无关。

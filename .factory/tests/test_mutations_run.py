@@ -410,7 +410,7 @@ class TestMainSmoke:
     """
 
     def test_main_only_nonexistent_id_config_error(self, monkeypatch, capsys):
-        """--only 含未知 id → 配置错误 rc 2（下游 wop-web-tools 反哺：过滤空
+        """--only 含未知 id → 配置错误 rc 2（下游 xx-web-tools 反哺：过滤空
         清单以 0 退出写戳 = 配置错误伪装成全量验证；rc 2 对齐 guard 用法错误
         语义。原 exit0 断言固化的正是此缺陷，已翻转）。"""
         monkeypatch.setattr(mut, "write_stamp", lambda *a, **k: None)  # 不动 evidence-stamp
@@ -421,7 +421,7 @@ class TestMainSmoke:
 
     def test_main_target_outside_repo_fails_config(self, monkeypatch, capsys, tmp_path):
         """target 越出 REPO_ROOT（`..` 与绝对路径）→ FAIL-config → rc 1
-        （下游 wop-web-tools 反哺：--defects 载外部 JSON 时 `..` 可指向仓外
+        （下游 xx-web-tools 反哺：--defects 载外部 JSON 时 `..` 可指向仓外
         文件注入+写回，进程非正常终止 = 注入残留落仓外）。"""
         for target in ("../escape-probe-918273", str(tmp_path / "outside-918273")):
             cfg = {"defects": [{
@@ -445,7 +445,7 @@ class TestMainSmoke:
 
     def test_write_stamp_glob_latest_evidence(self, tmp_path, monkeypatch):
         """write_stamp() 缺省取 mutations/ 目录最新 EVIDENCE-*.md（下游
-        wop-web-tools 反哺：静态默认文件名会过期，写戳引用不存在的留档 =
+        xx-web-tools 反哺：静态默认文件名会过期，写戳引用不存在的留档 =
         stamp 说谎）。显式 evidence 参数仍原样直写。"""
         (tmp_path / "EVIDENCE-2026-08-24.md").write_text("old", encoding="utf-8")
         (tmp_path / "EVIDENCE-2026-08-26.md").write_text("new", encoding="utf-8")

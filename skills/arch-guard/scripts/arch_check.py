@@ -173,8 +173,7 @@ def _deep_merge(base: dict, overrides: dict):
 def _build_layer_patterns(cfg: Dict) -> List[Tuple[str, re.Pattern]]:
     patterns = []
     for name, paths in cfg["layer_paths"].items():
-        for p in paths:
-            patterns.append((name, re.compile(re.escape(p))))
+        patterns.extend((name, re.compile(re.escape(p))) for p in paths)
     return patterns
 
 
@@ -183,25 +182,35 @@ def identify_layer(file_path: str, layer_patterns: List[Tuple[str, re.Pattern]],
     for name, pattern in layer_patterns:
         if pattern.search(file_path):
             return name
-    for alias, target in cfg["layer_aliases"].items():
-        if f"/{alias}/" in file_path:
-            return target
-    return None
+    return next(
+        (
+            target
+            for alias, target in cfg["layer_aliases"].items()
+            if f"/{alias}/" in file_path
+        ),
+        None,
+    )
 
 
 def _identify_module_layer(artifact_id: str, cfg: Dict) -> Optional[str]:
-    for suffix, layer in cfg["module_suffixes"].items():
-        if f"-{suffix}" in artifact_id or f"_{suffix}" in artifact_id or artifact_id.endswith(suffix):
-            return layer
-    return None
+    return next(
+        (
+            layer
+            for suffix, layer in cfg["module_suffixes"].items()
+            if f"-{suffix}" in artifact_id
+            or f"_{suffix}" in artifact_id
+            or artifact_id.endswith(suffix)
+        ),
+        None,
+    )
 
 
 def _identify_business_domain(artifact_id: str, pom_rel_path: str, cfg: Dict) -> Optional[str]:
     parts = pom_rel_path.replace("\\", "/").split("/")
     all_suffixes = set(cfg["module_suffixes"].keys())
-    exclude_dirs = {"src", "target", "build"}
     if len(parts) >= 2:
         candidate = parts[0]
+        exclude_dirs = {"src", "target", "build"}
         if candidate not in exclude_dirs and not any(
             candidate.endswith(f"-{s}") or candidate == s for s in all_suffixes
         ):
@@ -255,9 +264,7 @@ def _collect_poms(project_root: str) -> List[str]:
     pom_files = []
     for dirpath, dirnames, filenames in os.walk(project_root):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
-        for f in filenames:
-            if f == "pom.xml":
-                pom_files.append(os.path.join(dirpath, f))
+        pom_files.extend(os.path.join(dirpath, f) for f in filenames if f == "pom.xml")
     return pom_files
 
 
@@ -278,9 +285,7 @@ def _infer_layer_from_packages(pom_file: str, layer_patterns: List[Tuple[str, re
                 if d == name:
                     found_layers[name] += 1
 
-    if not found_layers:
-        return None
-    return max(found_layers, key=found_layers.get)
+    return max(found_layers, key=found_layers.get) if found_layers else None
 
 
 # ── Java 噪音剥离（注释/字符串/字符字面量，偏移保持） ──────────────────────
@@ -331,15 +336,18 @@ def _strip_java_noise(content: str) -> str:
             else:
                 out.append("\n" if c == "\n" else " "); i += 1
         else:  # _CHAR
-            if c == "\\":
+            if c == "'":
+                out.append(" ")
+                i += 1
+                state = _CODE
+            elif c == "\\":
                 out.append(" ")
                 if nxt:
                     out.append(" ")
                 i += 2
-            elif c == "'":
-                out.append(" "); i += 1; state = _CODE
             else:
-                out.append("\n" if c == "\n" else " "); i += 1
+                out.append("\n" if c == "\n" else " ")
+                i += 1
     return "".join(out)
 
 
@@ -608,16 +616,15 @@ def check_naming(file_path: str, source_layer: str, content: str,
             continue
 
         for suffix_re, expected_layers, severity, desc in _SUFFIX_RULES:
-            if suffix_re.search(class_name):
-                if source_layer not in expected_layers:
-                    line = content[:m.start()].count("\n") + 1
-                    allowed = "或".join(expected_layers)
-                    issues.append(Issue(
-                        file=file_path, line=line, severity=severity,
-                        rule="命名规范", rule_code=NAMING,
-                        description=f"{class_name}: {desc}，当前位置在 {source_layer} 层",
-                        suggestion=f"将 {class_name} 移动到 {allowed} 层对应包",
-                    ))
+            if suffix_re.search(class_name) and source_layer not in expected_layers:
+                line = content[:m.start()].count("\n") + 1
+                allowed = "或".join(expected_layers)
+                issues.append(Issue(
+                    file=file_path, line=line, severity=severity,
+                    rule="命名规范", rule_code=NAMING,
+                    description=f"{class_name}: {desc}，当前位置在 {source_layer} 层",
+                    suggestion=f"将 {class_name} 移动到 {allowed} 层对应包",
+                ))
     return issues
 
 
@@ -769,25 +776,29 @@ def check_maven_modules(project_root: str, pom_files: List[str],
                     ))
                 continue
 
-            if multi_domain and tgt_domain:
-                if target_layer != "client":
-                    issues.append(Issue(
-                        file=rel_pom, line=0, severity=Severity.MANDATORY,
-                        rule="跨域依赖", rule_code=CROSS_DOMAIN_DEP,
-                        description=f"跨域依赖仅允许通过 -client: {source_aid} ({src_domain} 域) → {dep_aid} ({tgt_domain} 域的 {target_layer} 层)",
-                        suggestion=f"改为引入 {tgt_domain}-client，或通过领域事件/MQ 异步解耦",
-                    ))
+            if multi_domain and tgt_domain and target_layer != "client":
+                issues.append(Issue(
+                    file=rel_pom, line=0, severity=Severity.MANDATORY,
+                    rule="跨域依赖", rule_code=CROSS_DOMAIN_DEP,
+                    description=f"跨域依赖仅允许通过 -client: {source_aid} ({src_domain} 域) → {dep_aid} ({tgt_domain} 域的 {target_layer} 层)",
+                    suggestion=f"改为引入 {tgt_domain}-client，或通过领域事件/MQ 异步解耦",
+                ))
 
         if source_layer == "domain":
             for dep_aid, dep_coord in deps:
-                for forbidden in cfg["domain_forbidden_pom"]:
-                    if dep_coord.startswith(forbidden):
-                        issues.append(Issue(
-                            file=rel_pom, line=0, severity=Severity.MANDATORY,
-                            rule="领域层纯净度(POM)", rule_code=DOMAIN_PURITY_POM,
-                            description=f"domain 模块禁止依赖框架: {dep_coord}",
-                            suggestion="domain 模块只能依赖 JDK + JPA 注解（jakarta.persistence），移除该依赖",
-                        ))
+                issues.extend(
+                    Issue(
+                        file=rel_pom,
+                        line=0,
+                        severity=Severity.MANDATORY,
+                        rule="领域层纯净度(POM)",
+                        rule_code=DOMAIN_PURITY_POM,
+                        description=f"domain 模块禁止依赖框架: {dep_coord}",
+                        suggestion="domain 模块只能依赖 JDK + JPA 注解（jakarta.persistence），移除该依赖",
+                    )
+                    for forbidden in cfg["domain_forbidden_pom"]
+                    if dep_coord.startswith(forbidden)
+                )
     return issues
 
 
@@ -828,9 +839,9 @@ def collect_java_files(project_root: str) -> List[str]:
     java_files = []
     for dirpath, dirnames, filenames in os.walk(project_root):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
-        for f in filenames:
-            if f.endswith(".java"):
-                java_files.append(os.path.join(dirpath, f))
+        java_files.extend(
+            os.path.join(dirpath, f) for f in filenames if f.endswith(".java")
+        )
     return java_files
 
 
@@ -876,7 +887,7 @@ def baseline_state(baseline_path: str) -> Tuple[str, set]:
         fps = set(data.get("fingerprints", []))
     except Exception:
         return "corrupt", set()
-    return ("empty", set()) if not fps else ("ok", fps)
+    return ("ok", fps) if fps else ("empty", set())
 
 
 def save_baseline(baseline_path: str, issues: List[Issue]):
@@ -979,8 +990,7 @@ def run(project_root: str, strict: bool = False, config_path: Optional[str] = No
     suppressed_count = 0
     retired_count = 0
     if baseline_path:
-        baseline_fps = load_baseline(baseline_path)
-        if baseline_fps:
+        if baseline_fps := load_baseline(baseline_path):
             current_fps = {_issue_fingerprint(i) for i in all_issues}
             all_issues, suppressed_count = filter_by_baseline(all_issues, baseline_fps)
             # 检查成功完成后收缩写回：本次未再现的存量视为已偿还
@@ -995,9 +1005,13 @@ def run(project_root: str, strict: bool = False, config_path: Optional[str] = No
             seen.add(key)
             deduped.append(i)
 
-    mandatory_count = sum(1 for i in deduped if i.severity == Severity.MANDATORY)
-    recommended_count = sum(1 for i in deduped if not strict and i.severity == Severity.RECOMMENDED)
-    structural_debt_count = sum(1 for i in deduped if i.severity == Severity.STRUCTURAL_DEBT)
+    mandatory_count = sum(i.severity == Severity.MANDATORY for i in deduped)
+    recommended_count = sum(
+        not strict and i.severity == Severity.RECOMMENDED for i in deduped
+    )
+    structural_debt_count = sum(
+        i.severity == Severity.STRUCTURAL_DEBT for i in deduped
+    )
 
     commit_sha, dirty = _commit_binding(project_root)
     stats = {
@@ -1031,11 +1045,13 @@ def format_text(issues: List[Issue], mandatory_count: int, recommended_count: in
 
     # 统计摘要
     if stats:
-        lines.append("## 统计\n")
-        lines.append(f"  检查 Java 文件: {stats['java_files_total']}"
-                     f"（识别分层: {stats['java_files_classified']}，"
-                     f"跳过: {stats['java_files_unclassified']}）")
-        lines.append(f"  检查 pom.xml: {stats['pom_files_total']}")
+        lines.extend(
+            (
+                "## 统计\n",
+                f"  检查 Java 文件: {stats['java_files_total']}（识别分层: {stats['java_files_classified']}，跳过: {stats['java_files_unclassified']}）",
+                f"  检查 pom.xml: {stats['pom_files_total']}",
+            )
+        )
         if stats.get("baseline_suppressed"):
             lines.append(f"  基线抑制存量违规: {stats['baseline_suppressed']}")
         if stats.get("baseline_retired"):
@@ -1064,9 +1080,9 @@ def format_text(issues: List[Issue], mandatory_count: int, recommended_count: in
 
     lines.append("## 摘要\n")
     for rule, items in sorted(by_rule.items()):
-        m = sum(1 for x in items if x.severity == Severity.MANDATORY)
-        r = sum(1 for x in items if x.severity == Severity.RECOMMENDED)
-        s = sum(1 for x in items if x.severity == Severity.STRUCTURAL_DEBT)
+        m = sum(x.severity == Severity.MANDATORY for x in items)
+        r = sum(x.severity == Severity.RECOMMENDED for x in items)
+        s = sum(x.severity == Severity.STRUCTURAL_DEBT for x in items)
         parts = []
         if m: parts.append(f"{m} 强制")
         if r: parts.append(f"{r} 推荐")
@@ -1084,8 +1100,12 @@ def format_text(issues: List[Issue], mandatory_count: int, recommended_count: in
         else:
             prefix = "🟡"
         loc = f":{issue.line}" if issue.line else ""
-        lines.append(f"{prefix} [{issue.rule}] {issue.file}{loc}")
-        lines.append(f"   {issue.description}")
+        lines.extend(
+            (
+                f"{prefix} [{issue.rule}] {issue.file}{loc}",
+                f"   {issue.description}",
+            )
+        )
         if issue.suggestion:
             lines.append(f"   → {issue.suggestion}")
         lines.append("")
@@ -1162,11 +1182,11 @@ def _build_receipt(issues: List[Issue], mandatory_count: int,
 def _boundary_footer(stats: Optional[Dict] = None) -> List[str]:
     """收据信封 boundary 的人读投影（format_text 末尾段）。"""
     s = stats or {}
-    lines = ["── 证据边界 ──"]
-    lines.append("  检查精度: Tier 1 文件级启发式（字符串匹配）；"
-                 "层间依赖方向需 Tier 2 知识图谱（--mode graph）")
-    lines.append("  未覆盖: 聚合设计、值对象不可变、应用服务业务逻辑、"
-                 "跨域事件解耦（人工判断）")
+    lines = [
+        "── 证据边界 ──",
+        "  检查精度: Tier 1 文件级启发式（字符串匹配）；层间依赖方向需 Tier 2 知识图谱（--mode graph）",
+        "  未覆盖: 聚合设计、值对象不可变、应用服务业务逻辑、跨域事件解耦（人工判断）",
+    ]
     if s.get("baseline_suppressed"):
         lines.append(f"  基线抑制: {s['baseline_suppressed']} 条存量违规未列出"
                      f"（ratchet 只缩不涨）")
@@ -1180,9 +1200,8 @@ def format_json(issues: List[Issue], mandatory_count: int, recommended_count: in
     callee_clusters: Dict[str, int] = defaultdict(int)
     _CALLEE_RE = re.compile(r"(:?import|[→]\s*)\s*([\w.]+)")
     for i in issues:
-        m = _CALLEE_RE.search(i.description)
-        if m:
-            callee_full = m.group(2)
+        if m := _CALLEE_RE.search(i.description):
+            callee_full = m[2]
             # 去掉项目包前缀和末段类名，保留中间包路径作为 cluster key
             parts = callee_full.split(".")
             if len(parts) >= 4:
@@ -1377,9 +1396,10 @@ _ARCH_LAYER_ORDER = ["adapter", "client", "application", "domain", "infrastructu
 
 def _archunit_layer_packages(cfg: Dict) -> Dict[str, List[str]]:
     """层名 → 包路径变体（canonical + alias），与 Tier 2 图查询同源。"""
-    layer_patterns: Dict[str, List[str]] = {}
-    for name, paths in cfg["layer_paths"].items():
-        layer_patterns[name] = [p.strip("/") for p in paths]
+    layer_patterns: Dict[str, List[str]] = {
+        name: [p.strip("/") for p in paths]
+        for name, paths in cfg["layer_paths"].items()
+    }
     for alias, target in cfg["layer_aliases"].items():
         if target not in layer_patterns:
             layer_patterns[target] = []
@@ -1403,9 +1423,10 @@ def _pkg_patterns_for_layers(layer_packages: Dict[str, List[str]],
 
 def _archunit_layer_packages(cfg: Dict) -> Dict[str, List[str]]:
     """层名 → 包路径变体（canonical + alias），与 Tier 2 图查询同源。"""
-    layer_patterns: Dict[str, List[str]] = {}
-    for name, paths in cfg["layer_paths"].items():
-        layer_patterns[name] = [p.strip("/") for p in paths]
+    layer_patterns: Dict[str, List[str]] = {
+        name: [p.strip("/") for p in paths]
+        for name, paths in cfg["layer_paths"].items()
+    }
     for alias, target in sorted(cfg["layer_aliases"].items()):
         if target not in layer_patterns:
             layer_patterns[target] = []
@@ -1442,10 +1463,13 @@ def _generate_archunit_layering(cfg: Dict, layer_packages: Dict) -> List[str]:
     for target in _ARCH_LAYER_ORDER:
         if target not in layer_packages:
             continue
-        accessors = [s for s in _ARCH_LAYER_ORDER
-                     if s != target and s in layer_packages
-                     and _DEPENDENCY_RULES.get(s, {}).get(target, False)]
-        if accessors:
+        if accessors := [
+            s
+            for s in _ARCH_LAYER_ORDER
+            if s != target
+            and s in layer_packages
+            and _DEPENDENCY_RULES.get(s, {}).get(target, False)
+        ]:
             allowed = ", ".join(f'"{a}"' for a in accessors)
             lines.append(f'            .whereLayer("{target}").mayOnlyBeAccessedByLayers({allowed})'
                          f' // {", ".join(accessors)} → {target}')
@@ -1489,14 +1513,18 @@ def _generate_archunit_naming(cfg: Dict, layer_packages: Dict) -> List[str]:
             continue
         pats = ", ".join(f'"{p}"' for p in _pkg_patterns_for_layers(layer_packages, list(allowed_layers)))
         sev = severity.value
-        lines.append(f"    // {message}")
-        lines.append("    @ArchTest")
-        lines.append(f"    static final ArchRule naming{idx:02d} = freeze(classes()")
-        lines.append(f"            .that().haveNameMatching(\"{_java_str(name_pat)}\")")
-        lines.append(f"            .and({exclude_lit})")
-        lines.append(f"            .should().resideInAnyPackage({pats})")
-        lines.append('            .because("[' + sev + '] ' + _java_str(message) + '"))')
-        lines.append("            .allowEmptyShould(true); // 项目无此后缀类时跳过（failOnEmptyShould 默认 true）")
+        lines.extend(
+            (
+                f"    // {message}",
+                "    @ArchTest",
+                f"    static final ArchRule naming{idx:02d} = freeze(classes()",
+                f'            .that().haveNameMatching(\"{_java_str(name_pat)}\")',
+                f"            .and({exclude_lit})",
+                f"            .should().resideInAnyPackage({pats})",
+                f'            .because("[{sev}] {_java_str(message)}"))',
+                "            .allowEmptyShould(true); // 项目无此后缀类时跳过（failOnEmptyShould 默认 true）",
+            )
+        )
     return lines
 
 
@@ -1589,7 +1617,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
 // 排除测试类：测试代码不参与架构分层判定（测试位于 ..domain.. 包下调用 infrastructure
-// 属正常测试行为，非架构违规——gtsp-wop-gateway 试点实测教训）
+// 属正常测试行为，非架构违规——gtsp-xx-gateway 试点实测教训）
 @AnalyzeClasses(packages = "{_java_str(prefix)}", importOptions = ImportOption.DoNotIncludeTests.class)
 class ArchitectureGuardTest {{
 
@@ -1701,7 +1729,7 @@ def print_archunit_mode(project_root: str, config_path: Optional[str] = None,
     guide = _generate_archunit_guide(cfg)
 
     if verify:
-        base = output_dir if output_dir else project_root
+        base = output_dir or project_root
         existing_test, existing_props = _find_generated_files(base)
         problems = []
         if existing_test is None:
@@ -1790,9 +1818,9 @@ def _do_init(project_root: str, output_path: str):
         fp.write("\n")
     print(f"已生成: {out}")
     print(f"  {inferred_msg}")
-    print(f"  layer_aliases 默认内置 interfaces→adapter，无需额外配置")
+    print("  layer_aliases 默认内置 interfaces→adapter，无需额外配置")
     if not prefix:
-        print(f"  ⚠️  建议手动设置 project_package_prefix 以消除第三方 import 误报风险")
+        print("  ⚠️  建议手动设置 project_package_prefix 以消除第三方 import 误报风险")
 
 
 def main():
@@ -1848,10 +1876,7 @@ def main():
         print(f"错误: 路径不存在或不是目录: {args.project_root}", file=sys.stderr)
         sys.exit(2)
 
-    # --refreeze 模式：执行完整检查，将当前全部违规重置进基线（唯一允许基线变大的路径）
-    # --update-baseline 为弃用别名（行为等价，仅打印迁移提示）
-    refreeze_path = args.refreeze or args.update_baseline
-    if refreeze_path:
+    if refreeze_path := args.refreeze or args.update_baseline:
         if args.update_baseline:
             print("⚠️  --update-baseline 已弃用，请改用 --refreeze（语义相同：用当前全部违规重置基线）",
                   file=sys.stderr)

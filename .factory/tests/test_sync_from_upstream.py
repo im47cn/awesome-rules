@@ -1,7 +1,7 @@
 """sync-from-upstream.sh 回归测试 —— 补齐缺失文件分支（脚本首测）。
 
 缺陷→测试映射:
-- 缺失父目录写入崩溃（wop-skills 2026-08-31 事故：tests/ 目录整缺，
+- 缺失父目录写入崩溃（xx-skills 2026-08-31 事故：tests/ 目录整缺，
   「本地缺失」补齐分支对不存在路径直接重定向 → No such file or directory，
   apply 中途崩、锚点未写）→ TestApplyMissingParentDir：mkdir -p 补齐
   + blob 落地 + mode 恢复 + 锚点写入 + rc=0

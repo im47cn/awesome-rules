@@ -26,7 +26,7 @@ inclusion: always
 
 同时满足以下条件的 Maven 模块即为本规范约束的**跨仓契约模块**：
 
-- 模块 pom 的 `<description>` 含"契约"字样（如 `gtsp-wop-service-api-gateway`：
+- 模块 pom 的 `<description>` 含"契约"字样（如 `gtsp-xx-service-api-gateway`：
   "开放平台-网关数据接口契约(网关各 Filter 配置数据...)"）；
 - 非聚合父模块（description 含"聚合"/"父模块"的不算——契约的载体是可被依赖的具体 jar 模块）；
 - 被其他仓库以 Maven 依赖消费（不论 SNAPSHOT 还是 release）。
@@ -77,7 +77,7 @@ inclusion: always
 
 - 下游"契约编译"是独立最小流水线：只编译 + 契约相关测试，分钟级；
 - 失败必须回写上游 MR（commit status / 评论），仅下游流水线红而上游无感知视为门禁失效；
-- **分支映射进配置**：上下游分支名不保证同名（如 `feature/20260812-open_platform_v1`
+- **分支映射进配置**：上下游分支名不保证同名（如 `feature/demo-v1`
   ↔ `feature_20260808_init`），映射表由流水线变量维护，禁止硬编码同名假设。
 
 ## 变更纪律

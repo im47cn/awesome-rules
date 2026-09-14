@@ -194,6 +194,28 @@ class TestPatrolResilience:
         assert "[错误] ../nope" in proc.stderr
         assert "[干净] ../dn-clean" in proc.stdout, "单仓失败不中断其余巡检"
 
+class TestADR012LocalManifest:
+    """ADR-012：真实清单住 downstream.local.json（gitignored），存在时
+    优先于 tracked 模板——公开中心仓零内部标识。"""
+
+    def test_local_manifest_precedence(self, fleet):
+        center, dn_clean, _, _ = fleet
+        (center / ".factory/downstream.local.json").write_text(
+            json.dumps({"repos": [{"path": "../dn-clean"}]},
+                       ensure_ascii=False, indent=2), encoding="utf-8")
+        proc = _patrol(center)
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "[干净] ../dn-clean" in proc.stdout
+
+    def test_empty_tracked_template_fail_closed_with_guidance(self, fleet):
+        center, _, _, _ = fleet
+        (center / ".factory/downstream.json").write_text(
+            json.dumps({"repos": []}), encoding="utf-8")
+        proc = _patrol(center)
+        assert proc.returncode == 2, proc.stdout + proc.stderr
+        assert "downstream.local.json" in proc.stderr
+
+
 class TestPR120ReviewRegressions:
     """PR #120 审查评论回归：mktemp 暂存泄漏——trap 晚于 mktemp 安装。"""
 
