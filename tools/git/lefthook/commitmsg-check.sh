@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # commit message 规范校验（awesome-rules tools/git 分发，由 lefthook 调用）
 # 用法: bash .lefthook/commitmsg-check.sh <msg-file>
-# 单一规则源: commitlint + 项目内 commitlint.config.cjs（旧版 .js 仅 ESM 项目提示迁移，issue #131）；缺 commitlint 时自动安装（一次性）。
+# 单一规则源: commitlint + 项目内 commitlint.config.{cjs,js,mjs,ts}（.mjs/.ts 非分发名、静默承认；旧版 .js 仅 ESM 项目提示迁移，issue #131）；缺 commitlint 时自动安装（一次性）。
 # 无 node/npm 时提示后放行 —— commit 钩子不阻塞环境问题，只拦规范违规。
 set -u
 MSG_FILE="${1:-}"
@@ -70,6 +70,10 @@ elif [ -f "$ROOT/commitlint.config.js" ]; then
     _esm=1
   fi
   [ "$_esm" -eq 1 ] && echo "⚠ [commitmsg] 检出旧版 commitlint.config.js（issue #131：ESM 项目会崩溃）；重跑 awesome-rules tools/git/install.sh --update 迁移 .cjs"
+elif [ -f "$ROOT/commitlint.config.mjs" ] || [ -f "$ROOT/commitlint.config.ts" ]; then
+  # 非分发名但合法（2026-09-14 增补）：commitlint ≥18 原生解析 .mjs（ESM）/ .ts（jiti），
+  # 守卫只验存在性，加载成败由 commitlint 自行裁决
+  :
 else
   echo "⚠ [commitmsg] 缺 commitlint.config.cjs，请跑 awesome-rules tools/git/install.sh；本次放行"
   exit 0
