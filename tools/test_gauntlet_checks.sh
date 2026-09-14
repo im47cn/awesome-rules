@@ -677,10 +677,10 @@ git -C "$NC13" add .factory
 if "$PY" tools/check_factory_portability.py "$NC13" >"$TMP/out13w" 2>&1; then
     bad "NC13w 期望 rc=1（P1 wop- 命中），实际放行"
 else
-    if grep -q 'P1 宿主专名' "$TMP/out13w"; then
-        ok "NC13w P1 拦内部前缀 wop-"
+    if grep -q 'wop-portal' "$TMP/out13w" && grep -q 'wop 6 仓' "$TMP/out13w"; then
+        ok "NC13w P1 拦内部前缀 wop（连字+空格裸词两形态点名）"
     else
-        bad "NC13w 输出缺 P1: $(cat "$TMP/out13w")"
+        bad "NC13w 输出未点名 wop 两形态: $(cat "$TMP/out13w")"
     fi
 fi
 # P2 引擎旁路：chain.sh 直调 omp
