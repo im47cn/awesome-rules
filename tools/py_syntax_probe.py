@@ -36,7 +36,10 @@ def collect_files(dirs):
     files = set()
     for d in dirs:
         p = pathlib.Path(d)
-        pattern = "*.py" if d in FLAT_DIRS else "**/*.py"
+        # 归一化后比对（"./.factory/"、".factory/" 均落平面收集——
+        # 串匹配漏判会让 .factory 整树递归扫进 gitignored worktree）
+        norm = p.as_posix().rstrip("/")
+        pattern = "*.py" if norm in FLAT_DIRS else "**/*.py"
         files.update(p.glob(pattern))
     return sorted(f for f in files if "__pycache__" not in f.parts)
 

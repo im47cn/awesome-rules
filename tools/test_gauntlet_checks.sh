@@ -1336,6 +1336,27 @@ else
     fi
 fi
 
+
+# NC21c 混合形态（issue 计数 + 认证词同现）：issue 优先硬拦，不降级——
+# 两级收紧的核心回归面（评审 R2 P2）
+cat >"$SGT/bin/sourcery" <<'SHEOF'
+#!/bin/sh
+echo "error: unauthorized token expired"
+echo "x.py:10: issue found"
+echo "2 issues found"
+exit 1
+SHEOF
+if (cd "$SGT" && PATH="$SGT/bin:$PATH" \
+        bash "$SGT_GATE" x.py) >"$TMP/out21c" 2>&1; then
+    bad "NC21c 混合形态（issue+认证词）应硬拦 rc!=0"
+else
+    if grep -q '存在未解决 issue' "$TMP/out21c"; then
+        ok "NC21c 混合形态硬拦（issue 优先于降级）"
+    else
+        bad "NC21c 拦截提示缺失: $(cat "$TMP/out21c")"
+    fi
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────
 if [ "$fails" -gt 0 ]; then
     echo "checker-self-test: $fails 项失败"
