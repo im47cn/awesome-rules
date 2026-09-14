@@ -20,15 +20,30 @@ cd "$(dirname "$0")/.."
 # 解释器解析（主路径与 doctor 共用，经 stdout 返回，无候选输出空串）：
 # GAUNTLET_PY 显式指定时同样做 import 自检，无效即空——不静默回退到
 # 其他候选（显式指定优先，fail-closed）。
+# 语法兼容探针：import 自检只证包在，不证解释器解析得动本仓源码
+# （2026-09-09 实证：3.9 遇无 future import 的 PEP 604 注解，pytest 收集
+# 即炸而 import 自检照样绿）。候选须在内存 compile 过门禁实跑面（探针面
+# 见 PY_SYNTAX_DIRS），失败 = 候选不可用，fail-closed 顺延下一候选。
+py_syntax_ok() {
+    # 探针实现：tools/py_syntax_probe.py（语法 compile + 隔离子进程执行
+    # 模块级代码——compile 只证解析，3.9 遇无 future import 的 PEP 604
+    # 注解 parse 过而 pytest 收集即炸，2026-09-09 实证 + Sourcery 2026-09-13
+    # 评审指出；负控制见 tools/test_gauntlet_orchestration.sh T9）
+    # shellcheck disable=SC2086  # 探针目录按空白分词展开，正是意图
+    "$1" tools/py_syntax_probe.py $PY_SYNTAX_DIRS >/dev/null 2>&1
+}
+
 find_py() {
     if [ -n "${GAUNTLET_PY:-}" ]; then
-        if "${GAUNTLET_PY}" -c 'import pytest, pytest_cov' >/dev/null 2>&1; then
+        if "${GAUNTLET_PY}" -c 'import pytest, pytest_cov' >/dev/null 2>&1 \
+            && py_syntax_ok "${GAUNTLET_PY}"; then
             echo "${GAUNTLET_PY}"
         fi
         return 0
     fi
     for _cand in "$(command -v python3)" /opt/homebrew/bin/python3; do
-        if [ -n "$_cand" ] && "$_cand" -c 'import pytest, pytest_cov' >/dev/null 2>&1; then
+        if [ -n "$_cand" ] && "$_cand" -c 'import pytest, pytest_cov' >/dev/null 2>&1 \
+            && py_syntax_ok "$_cand"; then
             echo "$_cand"
             return 0
         fi
@@ -55,12 +70,24 @@ require_dir() {
 }
 
 # 层清单目录：主路径 require_dir 与 doctor 逐项报告共用（单一事实源，
-# 两处引用防漂移——新增层目录只改这里）
-LAYER_DIRS='scripts .factory
+# 两处引用防漂移——新增层目录只改这里）；.factory 收窄为 .factory/tests
+# （pytest 层实跑面，整棵 .factory 含 gitignored 工厂链 worktree）
+LAYER_DIRS='scripts .factory/tests
 skills/api-guard/scripts skills/ddl-guard/scripts skills/arch-guard/scripts
 skills/impact-guard/scripts/tests skills/skill-evo/scripts/tests
 skills/doc-gen/scripts/tests arch-hawkeye/scripts/tests'
 
+# 语法探针面 = 门禁实跑面的导入闭包（find_py 候选必须过这批源码的
+# 语法+模块级执行，见 py_syntax_ok）：层清单（pytest 收集面）+ 各 tests
+# 层 import 的实现根目录（Sourcery 2026-09-13 评审：原 LAYER_DIRS 顺延
+# 致 boundary_scanner.py 等实现文件不在探针面，tests 层收集期照样炸）+
+# tools 检查器。.factory 整树含 gitignored 工厂链 worktree，由探针脚本
+# 内 FLAT_DIRS 特例收窄（.factory/skills/_shared 平面收集一层——独立审查
+# P0-1 实证：不传则 hosting.py/guard_lib.py 等 6 文件脱防，3.9 遇 PEP 604
+# 时 find_py 不拒候选、退化为 pytest 层晚爆）
+PY_SYNTAX_DIRS="$LAYER_DIRS .factory skills/_shared
+skills/impact-guard/scripts skills/skill-evo/scripts skills/doc-gen/scripts
+arch-hawkeye/scripts tools"
 
 # ── doctor 模式：环境自诊断，不跑层、不清产物 ───────────────────────────
 # 与门禁语义互补：门禁 fail-closed 首坏即断；doctor 逐项报全量再汇总，
@@ -73,7 +100,7 @@ doctor)
     if [ -n "$_py" ]; then
         echo "  OK   解释器: ${_py}（pytest+pytest_cov）"
     else
-        echo "  FAIL 解释器: ${GAUNTLET_PY:+GAUNTLET_PY=${GAUNTLET_PY} 未过 }import 自检，且无带 pytest+pytest_cov 的候选" >&2
+        echo "  FAIL 解释器: ${GAUNTLET_PY:+GAUNTLET_PY=${GAUNTLET_PY} 未过 }import/语法自检，且无过全部自检的候选" >&2
         _dfail=$((_dfail + 1))
     fi
     if command -v shellcheck >/dev/null 2>&1; then
@@ -171,11 +198,10 @@ else
     require_dir $LAYER_DIRS
 
     run_layer pytest-scripts "$PY" -m pytest scripts -q
-    # 收集面收窄到 tests/（issue #166）：整个 .factory 会扫进 .factory/worktrees/*
-    # 链工作树全仓副本（副本内 skills/*/tests 依赖各自 rootdir conftest，
-    # 在 .factory rootdir 下收集即 import 失败）→ rc=2 短路后续所有层。
-    # .factory 的 pytest 套件本就全在 tests/（scripts/run_tests.sh SUITES
-    # 同口径），窄面即对齐两处维护点。
+    # 范围 = .factory/tests（与 scripts/run_tests.sh 同口径）：此前扫整棵
+    # .factory，工厂链 worktree（.factory/worktrees/<issue>，gitignored 的
+    # 全仓检出）被卷入收集即炸（issue #166 实证：嵌套仓同名模块导入失败）。
+    # 已随 PR #167 落库（同型收窄），此处注释沿用 WIP 措辞——合并后语义一致。
     run_layer pytest-factory "$PY" -m pytest .factory/tests -q
     # 3 个带 --cov 的套件各写独立 COVERAGE_FILE（.coverage.<suite>）：既保各套件
     # 自身 --cov-fail-under 的独立评估面不被跨套件数据稀释（评审 F1），又供
