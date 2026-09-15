@@ -99,10 +99,10 @@ dir_covered() { # dir_covered <dirpath（已剥尾斜杠）>
 }
 
 # 事件分类：XY 双列均参与（暂存态 M /D /A 不落 other）；R 双端各自过 owned
-report_line() { # report_line "XY<TAB>new[<TAB>old]"
+report_line() { # report_line "XY<US>new[<US>old]"（US=\037，与 snapshot 对齐）
   local xy path old
-  xy=${1%%	*}; rest=${1#*	}
-  if [[ "$rest" == *$'\t'* ]]; then path=${rest%%	*}; old=${rest#*	}; else path=$rest; old=""; fi
+  xy=${1%%$'\037'*}; rest=${1#*$'\037'}
+  if [[ "$rest" == *$'\037'* ]]; then path=${rest%%$'\037'*}; old=${rest#*$'\037'}; else path=$rest; old=""; fi
   [ -n "$path" ] || return 0
   case "$xy" in
     '??')
