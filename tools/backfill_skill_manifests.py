@@ -26,11 +26,10 @@ def tracked_files(skill_dir: Path, repo_root: Path) -> list:
     files = []
     prefix = f"{skill_dir.relative_to(repo_root).as_posix()}/"
     for line in out.split("\0"):
-        if not line.startswith(prefix):
-            continue
-        rel = line[len(prefix):]
-        if rel != "SKILL.md":
-            files.append(rel)
+        if line.startswith(prefix):
+            rel = line[len(prefix):]
+            if rel != "SKILL.md":
+                files.append(rel)
     return sorted(files)
 
 

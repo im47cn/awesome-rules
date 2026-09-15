@@ -104,7 +104,10 @@ def parse_frontmatter(content: str) -> dict:
             continue
         if val.startswith("[") and val.endswith("]"):
             inner = val[1:-1].strip()
-            result[key] = [s.strip() for s in inner.split(",")] if inner else []
+            if inner:
+                result[key] = [s.strip() for s in inner.split(",")]
+            else:
+                result[key] = []
         elif val in (">", "|", ">-", "|-"):
             # 折叠/字面块：收集缩进续行（含块内空行）为多行字符串；
             # 「空行 + 后续非缩进 = 块结束」并入循环条件（守卫不进循环体）

@@ -356,7 +356,9 @@ def _steering_topic(path: Path) -> str | None:
     无 title 返回 None（调用方跳过该文件）。
     """
     title = frontmatter_lib.simple_fields(path.read_text(encoding="utf-8")).get("title")
-    return re.sub(r"(规范|标准)$", "", title) if title else None
+    if not title:
+        return None
+    return re.sub(r"(规范|标准)$", "", title)
 
 
 def rule_r7(root: Path, g: Gate) -> None:
