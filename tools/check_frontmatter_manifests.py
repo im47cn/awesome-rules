@@ -21,7 +21,10 @@ import frontmatter_lib  # noqa: E402
 
 
 def main(argv: list) -> int:
-    root = Path(argv[1]) if len(argv) > 1 else Path(".")
+    if len(argv) > 1:
+        root = Path(argv[1])
+    else:
+        root = Path(".")
     errors: list = []
 
     steering = sorted((root / "steering").glob("*.md"))

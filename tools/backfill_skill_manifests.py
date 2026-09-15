@@ -24,14 +24,13 @@ def tracked_files(skill_dir: Path, repo_root: Path) -> list:
         capture_output=True, check=True, cwd=repo_root,
     ).stdout.decode("utf-8")
     files = []
-    prefix = skill_dir.relative_to(repo_root).as_posix() + "/"
+    prefix = f"{skill_dir.relative_to(repo_root).as_posix()}/"
     for line in out.split("\0"):
         if not line.startswith(prefix):
             continue
         rel = line[len(prefix):]
-        if rel == "SKILL.md":
-            continue
-        files.append(rel)
+        if rel != "SKILL.md":
+            files.append(rel)
     return sorted(files)
 
 
@@ -75,10 +74,12 @@ def backfill(skill_md: Path, repo_root: Path) -> bool:
 
 
 def main(argv: list) -> int:
-    repo_root = Path(argv[1]).resolve() if len(argv) > 1 else Path(__file__).resolve().parent.parent
-    changed = 0
-    for skill_md in sorted((repo_root / "skills").glob("*/SKILL.md")):
-        changed += backfill(skill_md, repo_root)
+    if len(argv) > 1:
+        repo_root = Path(argv[1]).resolve()
+    else:
+        repo_root = Path(__file__).resolve().parent.parent
+    changed = sum(backfill(skill_md, repo_root)
+                  for skill_md in sorted((repo_root / "skills").glob("*/SKILL.md")))
     print(f"共更新 {changed} 个 SKILL.md")
     return 0
 

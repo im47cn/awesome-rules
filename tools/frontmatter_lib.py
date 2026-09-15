@@ -61,10 +61,7 @@ def simple_fields(content: str) -> dict:
     fm = split_frontmatter(content)
     if fm is None:
         return {}
-    fields: dict = {}
-    for m in _SCALAR_RE.finditer(fm):
-        fields[m.group(1)] = m.group(2).strip()
-    return fields
+    return {m[1]: m[2].strip() for m in _SCALAR_RE.finditer(fm)}
 
 
 def parse_frontmatter(content: str) -> dict:
@@ -93,7 +90,7 @@ def parse_frontmatter(content: str) -> dict:
                 f"frontmatter 子集外语法（第 {i + 1} 行）: {ln!r}——"
                 f"仅支持 key: value / 行内列表 / 块列表 / 折叠块"
             )
-        key, val = m.group(1), m.group(2).strip()
+        key, val = m[1], m[2].strip()
         if key in result:
             raise ValueError(f"frontmatter 重复键 {key!r}（静默取后值属拼写漂移，门禁显式拒绝）")
         if val == "":
@@ -109,12 +106,20 @@ def parse_frontmatter(content: str) -> dict:
             inner = val[1:-1].strip()
             result[key] = [s.strip() for s in inner.split(",")] if inner else []
         elif val in (">", "|", ">-", "|-"):
-            # 折叠/字面块：收集缩进续行（含块内空行）为多行字符串
+            # 折叠/字面块：收集缩进续行（含块内空行）为多行字符串；
+            # 「空行 + 后续非缩进 = 块结束」并入循环条件（守卫不进循环体）
             i += 1
             buf = []
-            while i < len(lines) and (lines[i].startswith("  ") or lines[i].strip() == ""):
-                if lines[i].strip() == "" and i + 1 < len(lines) and not lines[i + 1].startswith("  "):
-                    break  # 空行 + 后续非缩进 = 块结束
+
+            def _folded_more(idx: int) -> bool:
+                if idx >= len(lines):
+                    return False
+                if lines[idx].startswith("  "):
+                    return True
+                return (lines[idx].strip() == "" and idx + 1 < len(lines)
+                        and lines[idx + 1].startswith("  "))
+
+            while _folded_more(i):
                 buf.append(lines[i].strip())
                 i += 1
             result[key] = "\n".join(buf)
