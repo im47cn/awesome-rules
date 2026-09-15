@@ -72,6 +72,9 @@ import re
 import sys
 from pathlib import Path
 
+# frontmatter 解析单一事实源（本文件与 hooks/load-steering.sh 统一消费）
+import frontmatter_lib
+
 ALLOW_MARK = "<!-- doc-freshness:allow -->"
 
 _CN = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
@@ -348,16 +351,11 @@ def rule_r6(root: Path, g: Gate) -> None:
 def _steering_topic(path: Path) -> str | None:
     """steering 规范 frontmatter title → 主题词（去「规范/标准」尾缀）。
 
-    frontmatter 解析口径与 hooks/load-steering.sh 对齐（startswith('---')）。
+    解析口径统一到 tools/frontmatter_lib.py 单一事实源（2026-09 病灶修复：
+    本函数曾与 hooks/load-steering.sh 各持一份解析逻辑靠注释对齐）。
     无 title 返回 None（调用方跳过该文件）。
     """
-    content = path.read_text(encoding="utf-8")
-    title = None
-    if content.startswith("---"):
-        end = content.find("\n---", 3)
-        if end != -1:
-            if m := re.search(r"(?m)^title:\s*(.+)$", content[3:end]):
-                title = m[1].strip()
+    title = frontmatter_lib.simple_fields(path.read_text(encoding="utf-8")).get("title")
     return re.sub(r"(规范|标准)$", "", title) if title else None
 
 

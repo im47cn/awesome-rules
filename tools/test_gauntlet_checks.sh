@@ -1527,6 +1527,85 @@ else
     fi
 fi
 
+
+# ── NC22 frontmatter-manifests 负控制：M1/M2 违规必须被拦，合法树放行 ───
+# 覆盖：M1 缺 scenario / M2 files 断链 / M2 路径逃逸 / M2 files 缺键 + 正控制。
+# 夹具为最小仓库（steering 两族 + 两个 skill），不依赖真仓状态。
+nc22_setup() {
+    # POSIX sh 无 local（SC3043），夹具目录经唯一变量名传递
+    nc22_dir="$1"
+    rm -rf "$nc22_dir"; mkdir -p "$nc22_dir/steering/gtsp" "$nc22_dir/skills/foo" "$nc22_dir/skills/bar"
+    printf -- '---\ntitle: 通用规范\nscenario: 设计\n---\n# 通用\n' >"$nc22_dir/steering/a.md"
+    printf -- '---\ntitle: 分层\nscenario: 编码\n---\n# 分层\n' >"$nc22_dir/steering/gtsp/b.md"
+    printf 'echo ok\n' >"$nc22_dir/skills/foo/run.sh"
+    printf -- '---\nname: foo\nfiles:\n  - run.sh\n---\n# foo\n' >"$nc22_dir/skills/foo/SKILL.md"
+    printf -- '---\nname: bar\nfiles: []\n---\n# bar\n' >"$nc22_dir/skills/bar/SKILL.md"
+}
+
+# NC22a M1 steering 缺 scenario
+NC22A="$TMP/nc22a"; nc22_setup "$NC22A"
+printf -- '---\ntitle: 缺场景\n---\n# x\n' >"$NC22A/steering/a.md"
+if "$PY" tools/check_frontmatter_manifests.py "$NC22A" >"$TMP/o22a" 2>&1; then
+    _rc22a=0
+else
+    _rc22a=$?
+fi
+if [ "$_rc22a" -eq 1 ] && grep -q 'M1' "$TMP/o22a" && grep -q 'scenario' "$TMP/o22a"; then
+    ok "NC22a M1 steering 缺 scenario 检出"
+else
+    bad "NC22a 期望 rc=1+M1+scenario, 实际 rc=${_rc22a}: $(cat "$TMP/o22a")"
+fi
+
+# NC22b M2 files 断链
+NC22B="$TMP/nc22b"; nc22_setup "$NC22B"
+printf -- '---\nname: foo\nfiles:\n  - gone.sh\n---\n# foo\n' >"$NC22B/skills/foo/SKILL.md"
+if "$PY" tools/check_frontmatter_manifests.py "$NC22B" >"$TMP/o22b" 2>&1; then
+    _rc22b=0
+else
+    _rc22b=$?
+fi
+if [ "$_rc22b" -eq 1 ] && grep -q 'M2' "$TMP/o22b" && grep -q '断链' "$TMP/o22b"; then
+    ok "NC22b M2 files 断链检出"
+else
+    bad "NC22b 期望 rc=1+M2+断链, 实际 rc=${_rc22b}: $(cat "$TMP/o22b")"
+fi
+
+# NC22c M2 路径逃逸（绝对路径与 .. 各一）
+NC22C="$TMP/nc22c"; nc22_setup "$NC22C"
+printf -- '---\nname: foo\nfiles:\n  - /etc/passwd\n  - ../escape.txt\n---\n# foo\n' >"$NC22C/skills/foo/SKILL.md"
+if "$PY" tools/check_frontmatter_manifests.py "$NC22C" >"$TMP/o22c" 2>&1; then
+    _rc22c=0
+else
+    _rc22c=$?
+fi
+if [ "$_rc22c" -eq 1 ] && grep -q '绝对路径' "$TMP/o22c" && grep -q '逃逸' "$TMP/o22c"; then
+    ok "NC22c M2 路径围栏（绝对路径 + .. 逃逸）检出"
+else
+    bad "NC22c 期望 rc=1+绝对路径+逃逸, 实际 rc=${_rc22c}: $(cat "$TMP/o22c")"
+fi
+
+# NC22d M2 files 缺键（迁移旁路封堵：声明不可静默缺失）
+NC22D="$TMP/nc22d"; nc22_setup "$NC22D"
+printf -- '---\nname: foo\n---\n# foo\n' >"$NC22D/skills/foo/SKILL.md"
+if "$PY" tools/check_frontmatter_manifests.py "$NC22D" >"$TMP/o22d" 2>&1; then
+    _rc22d=0
+else
+    _rc22d=$?
+fi
+if [ "$_rc22d" -eq 1 ] && grep -q 'M2' "$TMP/o22d" && grep -q '缺少 files' "$TMP/o22d"; then
+    ok "NC22d M2 files 缺键检出（迁移旁路封堵）"
+else
+    bad "NC22d 期望 rc=1+M2+缺少 files, 实际 rc=${_rc22d}: $(cat "$TMP/o22d")"
+fi
+
+# NC22e 正控制：合法树（含显式空 files）放行
+NC22E="$TMP/nc22e"; nc22_setup "$NC22E"
+if "$PY" tools/check_frontmatter_manifests.py "$NC22E" >"$TMP/o22e" 2>&1; then
+    ok "NC22e 合法 frontmatter 树放行（含 files: [] 显式空）"
+else
+    bad "NC22e 期望 rc=0, 实际 rc=$?: $(cat "$TMP/o22e")"
+fi
+
 # ── 汇总 ───────────────────────────────────────────────────────────────
 if [ "$fails" -gt 0 ]; then
     echo "checker-self-test: $fails 项失败"

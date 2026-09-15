@@ -3,6 +3,11 @@
 # 索引内容从各规范文件 frontmatter 的 title / scenario 字段读取，
 # 新增规范文件只需带 frontmatter（title + scenario），无需改本脚本。
 # 分组约定：steering/*.md（直接子文件）= 通用设计规范；steering/gtsp/*.md = GTSP 工程规范。
+#
+# frontmatter 解析单一事实源为 tools/frontmatter_lib.py（2026-09 病灶修复：
+# 本脚本与 check_doc_freshness.py 曾各持一份解析逻辑靠注释纪律对齐）。
+# hook 走纯 stdlib 的 simple_fields 标量路径——M1 门禁保证 steering
+# title/scenario 恰为单行标量，该子集假设恒成立，无 PyYAML 依赖。
 
 # 定位 steering 目录：优先 CLAUDE_PLUGIN_ROOT，否则回退到脚本上级目录
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -12,6 +17,8 @@ python3 - "$STEERING_DIR" <<'PY'
 import sys, os, re, json
 
 steering = sys.argv[1]
+sys.path.insert(0, os.path.join(os.path.dirname(steering), 'tools'))
+import frontmatter_lib
 
 def parse_meta(path):
     """从 frontmatter 读取 title / scenario，缺失则回退到 H1 标题。
@@ -24,17 +31,9 @@ def parse_meta(path):
             content = f.read()
     except (OSError, UnicodeDecodeError):
         return os.path.basename(path), '—'
-    title = scenario = None
-    if content.startswith('---'):
-        end = content.find('\n---', 3)
-        if end != -1:
-            fm = content[3:end]
-            m = re.search(r'^title:\s*(.+)$', fm, re.M)
-            if m:
-                title = m.group(1).strip()
-            m = re.search(r'^scenario:\s*(.+)$', fm, re.M)
-            if m:
-                scenario = m.group(1).strip()
+    fields = frontmatter_lib.simple_fields(content)
+    title = fields.get('title') or None
+    scenario = fields.get('scenario') or None
     if not title:
         m = re.search(r'^#\s+(.+)$', content, re.M)
         title = m.group(1).strip() if m else os.path.basename(path)

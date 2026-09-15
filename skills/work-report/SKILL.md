@@ -6,6 +6,10 @@ description: >
   默认生成「对 leader」版。配置读取 ~/.config/ar/workspaces.toml，不存在则默认扫描 $HOME/sources。
   当用户提到：工作日报、周报、工作汇报、工作总结、本周工作、最近两周工作、最近做了什么、
   生成日报、跨仓库日报、standup、团队日报、团队产出、成员工作汇总时激活。
+files:
+  - README.md
+  - scripts/fetch-commits.sh
+  - workspaces.example.toml
 ---
 
 # 跨仓库工作日报生成 (work-report)

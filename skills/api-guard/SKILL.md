@@ -6,6 +6,20 @@ description: >
   审查Controller、业务接口审查、API合规检查。提供两类能力：
   (1) 按规范设计新 API，(2) 用脚本审查 Java Controller 中的业务接口合规性。
   仅检查业务接口通用规范（路径命名、动作收敛、禁止 path 传标识、时间注解），不检查对外 Open API 四段式规范。
+files:
+  - README.md
+  - api-manual-rules.md
+  - badcase/001-wrong-http-method-and-naming/expected.md
+  - badcase/001-wrong-http-method-and-naming/input/ExampleController.java
+  - badcase/001-wrong-http-method-and-naming/prompts.md
+  - badcase/002-jsonformat-shape-number/expected.md
+  - badcase/002-jsonformat-shape-number/input/src/main/java/com/example/order/client/dto/ExampleDTO.java
+  - badcase/002-jsonformat-shape-number/input/src/main/java/com/example/order/infrastructure/repository/po/ExamplePO.java
+  - badcase/002-jsonformat-shape-number/prompts.md
+  - scripts/api_check.py
+  - scripts/pytest.ini
+  - scripts/test_api_check.py
+  - test/test_controller.java
 ---
 
 # 业务接口规范设计与审查

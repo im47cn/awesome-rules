@@ -6,6 +6,34 @@ description: >
   改这个会影响谁、波及范围、blast radius、变更前评估、impact 分析、回归范围、改动的风险、
   这次改动会影响什么时激活。提供两类能力：(1) 提交前/改码前的影响预估，(2) PR/CI 的关键
   路径门禁（只拦直接高风险）。
+files:
+  - DESIGN.md
+  - README.md
+  - fixtures/ddd-sample/.impact-guard.json
+  - fixtures/ddd-sample/pom.xml
+  - fixtures/ddd-sample/src/main/java/com/acme/demo/Application.java
+  - fixtures/ddd-sample/src/main/java/com/acme/demo/adapter/listener/PayResultListener.java
+  - fixtures/ddd-sample/src/main/java/com/acme/demo/adapter/web/OrderController.java
+  - fixtures/ddd-sample/src/main/java/com/acme/demo/app/OrderCreateCmdExe.java
+  - fixtures/ddd-sample/src/main/java/com/acme/demo/client/PayClient.java
+  - fixtures/ddd-sample/src/main/java/com/acme/demo/client/dto/OrderCreateCO.java
+  - fixtures/ddd-sample/src/main/java/com/acme/demo/domain/order/OrderAgg.java
+  - fixtures/ddd-sample/src/main/java/com/acme/demo/domain/order/OrderRepository.java
+  - fixtures/ddd-sample/src/main/java/com/acme/demo/infra/mapper/OrderMapper.java
+  - fixtures/ddd-sample/src/main/java/com/acme/demo/infra/util/RedisUtil.java
+  - fixtures/ddd-sample/src/main/java/com/acme/demo/job/SyncJob.java
+  - scripts/_compat.py
+  - scripts/boundary_scanner.py
+  - scripts/change_extractor.py
+  - scripts/critical_ranker.py
+  - scripts/cross_service.py
+  - scripts/graph_tracer.py
+  - scripts/impact_check.py
+  - scripts/impact_scanner.py
+  - scripts/renderer.py
+  - scripts/tests/conftest.py
+  - scripts/tests/test_impact_guard.py
+  - scripts/tests/test_install_check.py
 ---
 
 # 变更影响分析 (impact-guard)
