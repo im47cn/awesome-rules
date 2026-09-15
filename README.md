@@ -14,6 +14,7 @@ awesome-rules/
 │   ├── review-report-standards.md     # 审查报告输出规范
 │   ├── cross-repo-contract-standards.md # 跨仓契约兼容性规范
 │   ├── frontend-standards.md          # 前端工程技术规范（Vue3 管理端）
+│   ├── api-contract-freeze-standards.md # API 契约冻结规范（先冻结再实现）
 │   └── gtsp/                          # GTSP 工程规范（Java/Spring Cloud，按维度拆分，含 DDD 架构）
 ├── skills/                            # AI Agent 技能
 │   ├── _shared/                       # guard 技能共享库（Severity/文件发现/报告骨架）
@@ -63,6 +64,7 @@ awesome-rules/
 | [审查报告输出规范](steering/review-report-standards.md) | 审查结论输出结构（guard 技能人工判断部分、CR 评审意见） |
 | [跨仓契约兼容性规范](steering/cross-repo-contract-standards.md) | 变更被其他仓库依赖的 API 模块/契约门禁（japicmp、下游编译触发） |
 | [前端工程技术规范（Vue3 管理端）](steering/frontend-standards.md) | Vue3 管理端工程标准：mock 联调门控、菜单下发路由、axios 工厂复用、可交互数据展示、变更验证，按【强制】【推荐】分级 |
+| [API 契约冻结规范](steering/api-contract-freeze-standards.md) | 新端点实现前契约逐字段冻结：method/path/请求参数名/响应信封/字段名未冻结禁止实现（mock 也不许先写），先冻结再实现 |
 
 ### GTSP 工程规范（`steering/gtsp/`，编码阶段）
 
