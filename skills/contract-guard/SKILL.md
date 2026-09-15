@@ -6,6 +6,11 @@ description: >
   接入跨仓契约门禁。提供两类能力：(1) 按规范为多仓协作项目设计/接入契约兼容性
   门禁（japicmp + 下游编译触发），(2) 用脚本检查本地契约模块变更并提示。
   规范正文见 steering/cross-repo-contract-standards.md。
+files:
+  - README.md
+  - scripts/check-contract.sh
+  - templates/japicmp-pom-snippet.xml
+  - templates/yunxiao-pipeline-contract.yaml
 ---
 
 # 跨仓契约兼容性设计与审查

@@ -1,6 +1,8 @@
 ---
 name: alibabacloud-devops
 description: 阿里云云效 DevOps 平台工具集（165+ 工具）。当用户提到以下任意意图时激活：云效、Yunxiao、Codeup、代码仓库、分支、合并请求、变更请求、流水线、CI/CD、运行部署、项目管理、工作项、需求、缺陷、任务、迭代、工时、制品、应用交付、部署单、发布流程、测试用例、测试计划。通过 mcporter CLI 按需调用，不在 Claude Code 中常驻注册。
+files:
+  - README.md
 ---
 
 # 阿里云云效 DevOps（mcporter 代理模式）

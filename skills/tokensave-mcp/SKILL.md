@@ -1,6 +1,8 @@
 ---
 name: tokensave-mcp
 description: tokensave 代码图谱专项能力（mcporter 代理模式）。当用户提到以下任意意图时激活：测试覆盖、覆盖率缺口、测试映射、死代码、无用函数、复杂度、god class、依赖矩阵、耦合分析、blame、重命名重构、rename 预览、影响面、session recall。仅覆盖 tokensave 独有专项能力；常规符号查找/调用链/架构概览走 codebase-memory-mcp（默认发现层），本技能不承接。通过 mcporter CLI 按需调用，不在 Claude Code 中常驻注册。
+files:
+  - README.md
 ---
 
 # tokensave 代码图谱（mcporter 代理模式）

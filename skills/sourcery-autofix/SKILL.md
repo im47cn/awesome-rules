@@ -6,6 +6,8 @@ description: >
   sourcery review --fix、sourcery gate 红叉、合并门禁拦截修复、review --check
   失败响应。提供：变更文件的修复循环（fix → 全量测试 → diff 人过目 →
   剩余项闭环）与 CI gate 失败的标准响应动作。
+files:
+  - README.md
 ---
 
 # Sourcery AI 审查自动修复
