@@ -15,7 +15,8 @@
 #                        未更新=LaunchAgent 断档 FAIL——两种死法都抓）
 #
 # 失败 → 开 issue：标题 [factory-regression] <date> 日回归失败：<首失败层>；
-#   已有 open 的标题含 [factory-regression] 的 issue → 只评论追加（幂等，
+#   已有 open 的标题含 [factory-regression] 的 issue → 按标签态路由（幂等，
+#   wake=移除留守的 in-progress 唤醒重派 / new=rejected 后另开 / append=评论追加；
 #   经 factory-lib issue_comment 收口出口，ADR-008 层级契约）。
 # 全绿 → 追加一行 JSON 到 .factory/metrics/daily-regression.jsonl。
 #
@@ -174,15 +175,57 @@ fi
 
 [ "$(${HOST} auth ok >/dev/null 2>&1; echo $?)" = 0 ] || { echo "托管平台不可用（hosting auth）" >&2; exit 2; }
 
-# 幂等：已有 open 的 [factory-regression] issue → 评论追加，不重复开
-EXISTING="$(${HOST} issue list --state open --limit 200 \
+# 幂等：已有 open 的 [factory-regression] issue → 按 routing 投递（见
+# factory_lib regression_routing：wake|new|append），不重复开
+EXISTING_JSON="$(${HOST} issue list --state open --limit 200 \
   | python3 -c '
 import json, sys
 for i in json.load(sys.stdin):
     if "[factory-regression]" in (i.get("title") or ""):
-        print(i["number"]); break')"
+        print(json.dumps(i)); break')" \
+  || { echo "hosting issue list 失败（网络/权限）" >&2; exit 2; }
+EXISTING="$(printf '%s' "$EXISTING_JSON" \
+  | python3 -c 'import json,sys
+s = sys.stdin.read()
+print(json.loads(s)["number"] if s.strip() else "")')"
 if [ -n "$EXISTING" ]; then
-  echo "── [$(ts)] 已有 open 回归 issue #${EXISTING}，评论追加本次结果"
+  # L2 滞留接线（2026-09-15 issue #165 实证）：in-progress 滞留 → 唤醒
+  # 重派；rejected → 开新容器；其余追加。决策纯函数化（含租约存活态
+  # 四路由），负控制见 .factory/tests/test_regression_routing.py
+  # 租约存活：PG 形态（SUPABASE_DB）租约在库中，本地不可判 → 保守
+  # unknown（不自动唤醒）；单写者形态经 factory_lib lease-fresh 判锁
+  # 文件存活（SIGKILL 残锁过期同判死）
+  LEASE_STATE=unknown
+  if [ -z "${SUPABASE_DB:-}" ]; then
+    if python3 "$FACTORY/factory_lib.py" lease-fresh \
+        "$FACTORY/locks/leases/issue:${EXISTING}.lock"; then
+      LEASE_STATE=alive
+    else
+      LEASE_STATE=dead
+    fi
+  fi
+  ROUTE="$(printf '%s' "$EXISTING_JSON" \
+    | python3 "$FACTORY/factory_lib.py" regression-routing "$LEASE_STATE" \
+    || { echo "regression-routing 失败" >&2; exit 2; })"
+  if [ "$ROUTE" = wake ]; then
+    echo "── [$(ts)] 回归 issue #${EXISTING} 滞留 in-progress（零改动轮留守/链早亡），唤醒重派"
+    ISSUE="$EXISTING" REPO="$REPO" bash -c '
+      source "${0}/factory-lib.sh"
+      issue_label_swap "factory:in-progress" ""
+    ' "$FACTORY" \
+      || echo "  [warn] 唤醒（移除 in-progress）失败，仍评论追加——人工处置" >&2
+    printf '\n> 唤醒：上一容器滞留 in-progress（无存活链租约），本次失败时已移除该标签，\n> 下轮 dispatch 将重新派发链修复本次结果。\n' >> "$BODY"
+  elif [ "$ROUTE" = live ]; then
+    echo "── [$(ts)] 回归 issue #${EXISTING} 链在途（in-progress + 租约存活/形态未知），不唤醒仅追加"
+  elif [ "$ROUTE" = new ]; then
+    echo "── [$(ts)] 回归 issue #${EXISTING} 已 rejected（人工判噪音），新失败开新容器"
+    printf '\n> 注：上一回归容器 #%s 已被人工 rejected，本 issue 为新失败另开。\n' "$EXISTING" >> "$BODY"
+    EXISTING=""
+  else
+    echo "── [$(ts)] 已有 open 回归 issue #${EXISTING}，评论追加本次结果"
+  fi
+fi
+if [ -n "$EXISTING" ]; then
   # 收口出口（ADR-008 层级契约）：sanitize（防日志回显 [factory:rejected] 标记
   # 钉死 issue）+ 租约围栏（无租约上下文时直通）都在 factory-lib 出口统一管
   ISSUE="$EXISTING" REPO="$REPO" bash -c '

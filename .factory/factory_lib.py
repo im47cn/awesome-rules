@@ -415,6 +415,42 @@ def rejected_reconcile(issues: list[dict]) -> list[dict]:
     return out
 
 
+def regression_routing(issue: dict, lease_alive: bool | None = None) -> str:
+    """已有 open 回归 issue 的标签态 → 失败结果投递路由（纯函数）。
+
+    L2 滞留接线（2026-09-15 issue #165 实证）：日回归失败复用 open 的
+    [factory-regression] issue 时只看标题不看标签态，失败结果会投进
+    派发器永久跳过的容器（in-progress 留守 / rejected 死信筒）。
+    路由规则（与 fix-issue.sh §7.5 留守语义、dispatch_liveness 第三死法
+    同一滞留判据：标签在而租约不活）：
+    - factory:in-progress 在标：
+      - lease_alive is False（滞留：零改动轮留守 / 链早亡）→ "wake"：
+        留守是防"已验证诉求"被重派，新失败 ≠ 同一诉求，移除
+        in-progress 唤醒重派（容器复用）；
+      - lease_alive 为 True（修复链在途）→ "live"：只评论追加不唤醒
+        ——剥掉存活链的 in-progress 会使 §7.5 留守对该轮失效（审查
+        major：同一概念两种判据的矛盾，2026-09-16 修复）；
+      - lease_alive 为 None（形态未知：PG 租约在库中 / 判定失败）→
+        "live"：保守不自动唤醒，人工处置（与 liveness 降级一致）。
+    - factory:rejected 在标 → "new"：人工已判噪音，新失败不得进人工
+      已拒容器，开新 issue 承载（旧容器不动，拒裁不推翻）；
+    - 其余（零标签待 triage / in-review / needs-human）→ "append"：
+      原样追加——in-review 有 PR 评审面、needs-human 本就等人看。
+    in-progress 与 rejected 互斥（状态机单请求原子换标），若数据异常
+    并存，wake/live 优先（可自动处置的路由优先）。
+    """
+    labels = set(issue.get("labels") or [])
+    # Sourcery 目标形态叠加：lift-return-into-if（return 提入分支）×
+    # assign-if-exp（if/else-return 化三元）——elif 链各分支直接 return、
+    # 内层用三元、无尾随语句（PR #192 门禁第四轮）
+    if "factory:in-progress" in labels:
+        return "wake" if lease_alive is False else "live"
+    elif "factory:rejected" in labels:
+        return "new"
+    else:
+        return "append"
+
+
 RECEIPT_CLOSURE_NOTE = (
     "> 处置协议：走人工 PR 修复本 issue 时，PR 描述请带 `Closes #<编号>`"
     "——合并即自动关闭，避免「已修未关」滞留（reject→人工路径的闭环盲区）。"
@@ -995,6 +1031,37 @@ def main(argv: list[str]) -> int:
         for r in rejected_reconcile(json.load(sys.stdin)):
             print(f"{r['number']}\t{r['human_comments_after_reject']}\t{r['title']}")
         return 0
+    if cmd == "regression-routing":
+        # regression-routing [alive|dead|unknown] < issue.json —— 日回归
+        # 失败投递路由（wake|live|new|append，见 regression_routing）；
+        # alive/dead/unknown = 滞留 issue 的租约存活态（调用方经
+        # lease-fresh 判定），缺省 unknown（保守不唤醒）
+        state = {"alive": True, "dead": False}.get(argv[2] if len(argv) > 2
+                                                   else "unknown")
+        print(regression_routing(json.loads(sys.stdin.read()), state))
+        return 0
+    if cmd == "lease-fresh":
+        # lease-fresh <lock-path> —— 单写者锁文件存活判定：内容第 5 字段
+        # = 租期秒（缺省回退 900），mtime+租期 > now = 活；文件缺失/
+        # 不可读/内容畸形 = 死（SIGKILL 残锁过期同判）。退出码 0=活 1=死
+        # 2=参数错。PG 形态（SUPABASE_DB）租约在库中，调用方不得用本
+        # 命令的输出断言死活（保守 unknown）。
+        lock = Path(argv[2])
+        try:
+            line = lock.read_text(encoding="utf-8").strip().splitlines()[0]
+        except (OSError, IndexError):
+            return 1
+        parts = line.split("|")
+        # 回退链对齐权威 _lease_sw_fresh（factory-lease.sh:118）：
+        # 第5字段缺 → FACTORY_LEASE_SECS env → 900
+        fallback = os.environ.get("FACTORY_LEASE_SECS", "900")
+        fallback = fallback if fallback.isdigit() else "900"
+        secs = parts[4] if len(parts) > 4 and parts[4].isdigit() else fallback
+        try:
+            mtime = lock.stat().st_mtime
+        except OSError:
+            return 1
+        return 0 if mtime + int(secs) > time.time() else 1
     if cmd == "sanitize":
         # sanitize <file>... —— 评论出口标记中和：原地写回（无变化则跳过，
         # 幂等）。issue_comment 发送前必经；详见 neutralize_marker

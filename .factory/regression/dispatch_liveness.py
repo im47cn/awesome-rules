@@ -11,6 +11,17 @@ hub 是多仓唯一调度入口，任一注册仓库的调度死法都是本层�
 2. 进程根本没跑（LaunchAgent 断档，历史实测 13h）：streak 计数文件
    <repo>/.factory/locks/dispatch-fail-streak 正常应随每轮（600s）被
    touch/重写；mtime 超过 FRESH_SECS 未更新 = 该仓库调度未运行，FAIL。
+3. GitHub 侧滞留（2026-09-15 issue #165 实证：零改动轮留守 in-progress
+   5 天不可见，新失败投进死信筒）：
+   a. open issue 挂 factory:in-progress 但 leases/issue:<n>.lock 不存在
+      ——链已收官/早亡，无存活租约（锁先于标签获取，标签在而锁不在
+      = 滞留，无阈值窗口）；
+   b. open issue 挂 factory:rejected 且 updatedAt 超过 --stale-days 无
+      人工跟进（拒裁回执评论会刷新 updatedAt，故 updatedAt ≥ 拒裁时刻）
+      ——dispatch 尾部 rejected-reconcile 对账只在本地日志，本层把
+      静默滞留升为回归 FAIL。
+   hosting 不可用（无凭据/离线/下游仓未配）→ note 跳过，不误报——
+   本地两层（stalled/streak）照常检查。
 
 不 FAIL 的合法状态（每仓独立判定）：
 - stalled/streak 均不存在：调度器未启用或从未失败——note 不 FAIL
@@ -18,15 +29,22 @@ hub 是多仓唯一调度入口，任一注册仓库的调度死法都是本层�
 - 注册表中的仓库缺 .factory/（未接入工厂的仓库误注册）：note 不 FAIL，
   提示从 repos.conf 移除——registry 是用户侧文件，本检查只读不写。
 
-用法: python3 dispatch_liveness.py [--fresh-secs 93600] [--repos PATH]
+用法: python3 dispatch_liveness.py [--fresh-secs 93600] [--stale-days 7]
+       [--repos PATH]
   --repos 默认 ~/.config/factory/repos.conf（hub 注册表，与
   ~/.config/factory/dispatch-all.sh 同源——单一注册表两处消费）。
   93600s = 26h：日回归节奏下，一轮正常 touch（600s）远远新鲜于阈值。
+  --stale-days 默认 7：rejected 滞留人工跟进宽限（日）——rejected 按设计
+  等人，宽限内不告警。
 退出码: 0=全部活/合法缺省 1=任一仓库死 2=参数/环境错误
 """
 from __future__ import annotations
 
 import argparse
+import datetime
+import json
+import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -48,6 +66,108 @@ def registry_repos(registry: Path) -> list[Path]:
             continue
         repos.append(Path(ln).expanduser())
     return repos
+
+
+def hosting_issues(factory: Path) -> list[dict] | None:
+    """hosting.py issue list → 归一化 issue 清单；不可用 → None（降级）。
+
+    只读单次可判定调用（ADR-008 平台抽象，无 gh 直调）。超时/无凭据/
+    非 JSON 都归 None：本检查的信条是"合法缺省不误报"，GitHub 侧层
+    降级时本地两层照常 FAIL 能力不受影响。
+    cwd=repo：hosting.py 的 slug 解析走 `git -C . remote`——必须在
+    目标仓自身目录下运行，否则 CWD 仓库劫持 slug（多仓混查同一仓）。
+    Codeup 后端工作项面未实装 → 报错归 None，同样降级 note。
+    """
+    factory = factory.resolve()
+    try:
+        r = subprocess.run(
+            [sys.executable, str(factory / "hosting.py"),
+             "issue", "list", "--state", "open", "--limit", "200"],
+            capture_output=True, text=True, timeout=90, cwd=str(factory.parent))
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    try:
+        return json.loads(r.stdout)
+    except json.JSONDecodeError:
+        return None
+
+
+def _gh_updated_age_secs(updated: str | None) -> float | None:
+    """gh updatedAt ISO8601 → 距今秒数；不可解析 → None（该检测跳过）。"""
+    if not updated:
+        return None
+    try:
+        dt = datetime.datetime.fromisoformat(updated.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return (datetime.datetime.now(datetime.timezone.utc) - dt).total_seconds()
+
+
+def _lease_lock_alive(lock: Path) -> bool:
+    """单写者锁文件存活：内容第 5 字段=租期秒（缺省 900），
+    mtime+租期 > now = 活；缺失/畸形/过期（SIGKILL 残锁）= 死。"""
+    # 回退链对齐权威 _lease_sw_fresh（factory-lease.sh:118）：
+    # 第5字段缺 → FACTORY_LEASE_SECS env → 900
+    fallback = os.environ.get("FACTORY_LEASE_SECS", "900")
+    fallback = int(fallback) if fallback.isdigit() else 900
+    try:
+        line = lock.read_text(encoding="utf-8").strip().splitlines()[0]
+        parts = line.split("|")
+        secs = int(parts[4]) if len(parts) > 4 and parts[4].isdigit() else fallback
+        return lock.stat().st_mtime + secs > time.time()
+    except (OSError, IndexError, ValueError):
+        return False
+
+
+def check_stalled_labels(repo: Path, stale_days: int, problems: list[str]) -> str:
+    """GitHub 侧滞留检查（第三死法）→ ok/note。FAIL 项追加 problems。
+
+    in-progress 滞留判据（锁先于标签获取、链存活期间持续持有）只在
+    单写者形态成立：PG 形态（SUPABASE_DB）租约在 factory_leases 表，
+    本地锁文件从不存在——该形态下 in-progress 检测整体降级 note
+    （否则每个存活链每天误报滞留，2026-09-16 审查 major）。
+    """
+    tag = repo.name
+    factory = repo / ".factory"
+    pg_mode = bool(os.environ.get("SUPABASE_DB"))
+    issues = hosting_issues(factory)
+    if issues is None:
+        print(f"note: [{tag}] hosting 不可用——GitHub 侧滞留检测跳过（本地层已查）")
+        return "note"
+    n_ok = 0
+    for it in issues:
+        labels = set(it.get("labels") or [])
+        n = it.get("number")
+        if "factory:in-progress" in labels:
+            if pg_mode:
+                # PG 形态租约在库，本地锁文件判据不适用——降级 note
+                continue
+            # 锁先于标签获取、链存活期间持续持有：标签在而锁不活 = 滞留
+            lock = factory / "locks" / "leases" / f"issue:{n}.lock"
+            if not _lease_lock_alive(lock):
+                problems.append(
+                    f"[{tag}] issue #{n} 滞留 factory:in-progress 无存活链租约"
+                    "（零改动轮留守或链早亡）——日回归失败会唤醒重派，"
+                    "其余滞留请人工裁决关闭")
+            else:
+                n_ok += 1
+        elif "factory:rejected" in labels:
+            age = _gh_updated_age_secs(it.get("updatedAt"))
+            if age is not None and age > stale_days * 86400:
+                problems.append(
+                    f"[{tag}] issue #{n} rejected 滞留 {age/86400:.1f}d 无人工跟进"
+                    f"（阈值 {stale_days}d）——dispatch 日志尾部对账有明细，"
+                    "请人工裁决处置")
+            else:
+                n_ok += 1
+    if pg_mode:
+        print(f"note: [{tag}] PG 租约形态——in-progress 滞留检测降级（租约在库，"
+              "本地判据不适用）；rejected 宽限检测照常")
+        return "note"
+    print(f"ok: [{tag}] GitHub 侧滞留检查：{len(issues)} open issue，{n_ok} 正常/宽限内")
+    return "ok"
 
 
 def check_repo(repo: Path, fresh_secs: int, problems: list[str]) -> str:
@@ -86,6 +206,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="dispatch 调度器活性检查（多仓：hub 注册表）")
     ap.add_argument("--fresh-secs", type=int, default=93600,
                     help="streak 文件新鲜度阈值秒（默认 93600=26h）")
+    ap.add_argument("--stale-days", type=int, default=7,
+                    help="rejected 滞留人工跟进宽限天数（默认 7）")
     ap.add_argument("--repos", default=str(DEFAULT_REGISTRY),
                     help="hub 注册表路径（默认 ~/.config/factory/repos.conf）")
     args = ap.parse_args()
@@ -101,6 +223,7 @@ def main() -> int:
     problems: list[str] = []
     for repo in repos:
         check_repo(repo, args.fresh_secs, problems)
+        check_stalled_labels(repo, args.stale_days, problems)
 
     if problems:
         for p in problems:
