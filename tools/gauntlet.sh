@@ -219,6 +219,9 @@ else
     run_layer plugin-versions "$PY" tools/check_plugin_versions.py
     # 实现↔文档一致性（数字/清单/指向漂移，R1-R9 语义见脚本头注释）
     run_layer doc-freshness "$PY" tools/check_doc_freshness.py
+    # frontmatter 清单门禁（M1 steering 必填 / M2 skills files 断链单向+围栏，
+    # 解析单一事实源 tools/frontmatter_lib.py，语义见 docs/design/skill-manifest-gate.md）
+    run_layer frontmatter-manifests "$PY" tools/check_frontmatter_manifests.py .
     run_layer md-link-check "$PY" scripts/md_link_check.py .
     # 变更行覆盖率门（steering/testing-standards.md「覆盖率门禁与『覆盖率阈值』
     # 同口径」「本地自验须与门禁同口径」两条的机械化落地）：增量 diff-cover

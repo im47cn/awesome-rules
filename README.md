@@ -13,6 +13,9 @@ awesome-rules/
 │   ├── testing-standards.md           # 测试规范
 │   ├── review-report-standards.md     # 审查报告输出规范
 │   ├── task-package-standards.md      # 任务包与派发守护规范
+│   ├── cross-repo-contract-standards.md # 跨仓契约兼容性规范
+│   ├── frontend-standards.md          # 前端工程技术规范（Vue3 管理端）
+│   ├── api-contract-freeze-standards.md # API 契约冻结规范（先冻结再实现）
 │   └── gtsp/                          # GTSP 工程规范（Java/Spring Cloud，按维度拆分，含 DDD 架构）
 ├── skills/                            # AI Agent 技能
 │   ├── _shared/                       # guard 技能共享库（Severity/文件发现/报告骨架）
@@ -62,6 +65,8 @@ awesome-rules/
 | [审查报告输出规范](steering/review-report-standards.md) | 审查结论输出结构（guard 技能人工判断部分、CR 评审意见） |
 | [跨仓契约兼容性规范](steering/cross-repo-contract-standards.md) | 变更被其他仓库依赖的 API 模块/契约门禁（japicmp、下游编译触发） |
 | [任务包与派发守护规范](steering/task-package-standards.md) | AI Agent 任务包五要素骨架与派发治理：L1 记录型 watcher / L2 事后异构审查分级守护 |
+| [前端工程技术规范（Vue3 管理端）](steering/frontend-standards.md) | Vue3 管理端工程标准：mock 联调门控、菜单下发路由、axios 工厂复用、可交互数据展示、变更验证，按【强制】【推荐】分级 |
+| [API 契约冻结规范](steering/api-contract-freeze-standards.md) | 新端点实现前契约逐字段冻结：method/path/请求参数名/响应信封/字段名未冻结禁止实现（mock 也不许先写），先冻结再实现 |
 
 ### GTSP 工程规范（`steering/gtsp/`，编码阶段）
 
@@ -104,6 +109,7 @@ Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分�
 | [guard 收据规范](docs/design/guard-receipt-spec.md) | 审查报告 receipt（收据）通用规范 |
 | [skill-evo 技术设计](docs/design/skill-evo-design.md) | Hermes 式会话经验进化闭环 + GEPA 引擎（含竞态修复记录，已实现） |
 | [skill-evo replay-eval 设计](docs/design/skill-evo-replay-eval.md) | 高频重复任务确定性打分评估集 → GEPA 进化信号源（对标 SkillOpt-Sleep replay，设计中） |
+| [skills 清单门禁设计](docs/design/skill-manifest-gate.md) | frontmatter 单一事实源 + M1/M2 清单门禁（断链单向 + 路径围栏，含 grilling 六项裁决，已落地） |
 | [Factory Harness 设计](docs/design/factory-harness-design.md) | L4 自举工厂：第一性原理推导、方案 B（omp headless）、治理锁与 mutation 门（S0 已落地） |
 | [Gauntlet 门禁入口 SPEC](docs/design/spec-2026-08-21-gauntlet-entry.md) | 单一门禁入口 tools/gauntlet.sh：层编排 fail-closed + 检查器负控制 + 手动变异冒烟 |
 | [Gauntlet 门禁入口 EVIDENCE](docs/design/evidence-2026-08-21-gauntlet-entry.md) | 15 层全绿（927 tests / 4/4 变异击杀）证据报告，含三次门拦真问题与 errexit 缺陷修复记录 |

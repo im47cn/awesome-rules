@@ -7,6 +7,29 @@ description: >
   同时搭车增量扫描 omp（oh-my-pi）会话与插件哑故障巡检。数据在 ~/.config/ar/skill-evo/。
   当用户提到：skill-evo、进化提案、审核提案、查看提案、应用提案、驳回提案、会话总结、
   经验沉淀、规范进化、插件巡检、插件加载失败、为什么 AI 又犯同样错误时激活。
+files:
+  - README.md
+  - config.example.toml
+  - scripts/evo.py
+  - scripts/evo_config.py
+  - scripts/evo_evolve.py
+  - scripts/evo_gepa.py
+  - scripts/evo_patrol.py
+  - scripts/evo_prompt.py
+  - scripts/evo_proposal.py
+  - scripts/evo_replay.py
+  - scripts/evo_session.py
+  - scripts/tests/conftest.py
+  - scripts/tests/pytest.ini
+  - scripts/tests/test_config.py
+  - scripts/tests/test_evo_cli.py
+  - scripts/tests/test_evolve.py
+  - scripts/tests/test_gepa.py
+  - scripts/tests/test_patrol.py
+  - scripts/tests/test_prompt.py
+  - scripts/tests/test_proposal.py
+  - scripts/tests/test_replay.py
+  - scripts/tests/test_session.py
 ---
 
 # 会话经验进化 (skill-evo)

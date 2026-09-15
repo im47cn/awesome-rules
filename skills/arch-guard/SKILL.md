@@ -5,6 +5,49 @@ description: >
   (2) 知识图谱深度审查（精确到 qualified_name 的层间逆向依赖证据链）。
   当用户提到：架构审查、架构检查、分层检查、包依赖检查、DDD 规范检查、架构守护、
   依赖方向、领域层纯净度、Maven 模块依赖时激活。
+files:
+  - .arch-guard.json
+  - README.md
+  - badcase/001-domain-imports-infrastructure/expected.md
+  - badcase/001-domain-imports-infrastructure/input/src/main/java/com/example/order/adapter/controller/OrderController.java
+  - badcase/001-domain-imports-infrastructure/input/src/main/java/com/example/order/application/executor/CreateOrderCmdExe.java
+  - badcase/001-domain-imports-infrastructure/input/src/main/java/com/example/order/domain/entity/OrderE.java
+  - badcase/001-domain-imports-infrastructure/input/src/main/java/com/example/order/domain/valueobject/OrderAmountV.java
+  - badcase/002-maven-module-violation/expected.md
+  - badcase/002-maven-module-violation/input/order-adapter/pom.xml
+  - badcase/002-maven-module-violation/input/order-app/pom.xml
+  - badcase/002-maven-module-violation/input/order-client/pom.xml
+  - badcase/002-maven-module-violation/input/order-domain/pom.xml
+  - badcase/002-maven-module-violation/input/order-infrastructure/pom.xml
+  - badcase/002-maven-module-violation/input/pom.xml
+  - badcase/003-cross-domain-violation/expected.md
+  - badcase/003-cross-domain-violation/input/logistics/logistics-app/pom.xml
+  - badcase/003-cross-domain-violation/input/logistics/logistics-client/pom.xml
+  - badcase/003-cross-domain-violation/input/logistics/logistics-domain/pom.xml
+  - badcase/003-cross-domain-violation/input/logistics/logistics-infrastructure/pom.xml
+  - badcase/003-cross-domain-violation/input/order/order-adapter/pom.xml
+  - badcase/003-cross-domain-violation/input/order/order-app/pom.xml
+  - badcase/003-cross-domain-violation/input/order/order-client/pom.xml
+  - badcase/003-cross-domain-violation/input/order/order-domain/pom.xml
+  - badcase/003-cross-domain-violation/input/order/order-infrastructure/pom.xml
+  - badcase/003-cross-domain-violation/input/order/order-start/pom.xml
+  - badcase/003-cross-domain-violation/input/pom.xml
+  - badcase/004-state-machine-violation/expected.md
+  - badcase/004-state-machine-violation/input/src/main/java/com/example/order/adapter/controller/OrderController.java
+  - badcase/004-state-machine-violation/input/src/main/java/com/example/order/domain/OrderStatus.java
+  - badcase/005-static-import-noise-suppression/expected.md
+  - badcase/005-static-import-noise-suppression/input/src/main/java/com/example/order/adapter/web/OrderController.java
+  - badcase/005-static-import-noise-suppression/input/src/main/java/com/example/order/domain/entity/OrderE.java
+  - badcase/005-static-import-noise-suppression/prompts.md
+  - scripts/arch_check.py
+  - scripts/pytest.ini
+  - scripts/tests/__init__.py
+  - scripts/tests/conftest.py
+  - scripts/tests/test_arch_archunit_gen.py
+  - scripts/tests/test_arch_baseline.py
+  - scripts/tests/test_arch_check.py
+  - templates/archunit-spike/ArchitectureGuardTest.java
+  - templates/archunit-spike/archunit.properties
 ---
 
 # DDD 架构分层守护

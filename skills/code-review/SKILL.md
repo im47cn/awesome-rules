@@ -8,6 +8,9 @@ description: >
   review 代码、代码评审、CR、帮我审一下这个分支、review since X、规范审查、
   规格对照、这个 MR 能不能合、可视化审查、画审查流程图或风险标注时序图
   时激活。支持 GitHub 与云效 Codeup 两种托管平台。
+files:
+  - README.md
+  - visual-output.md
 ---
 
 # 两轴代码审查 (code-review)

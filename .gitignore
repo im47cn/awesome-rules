@@ -35,9 +35,7 @@ docs/design/architecture/
 # 工厂链本地数据（ADR-012：公开中心仓的仓特定清单，永不入库）
 .factory/downstream.local.json
 
-# 定时回归流水线运行时指标（每日 03:01 由已跟踪的 .factory/regression/daily-regression.sh 产出；
-# 2026-09-15 晨间裁决：运行时产物，gitignore）
+# 回归度量产物与 remote-pi 本地会话数据（G5：运行时生成，不入库）
+# 2026-09-15 晨间裁决补充：.factory/metrics/ 为 daily-regression.sh 产物；.pi/ 含本机 remote-pi relay 基建配置
 .factory/metrics/
-
-# 本机 remote-pi relay 基建配置（agent 拓扑本地状态；2026-09-15 晨间裁决：不入库）
-.pi/remote-pi/
+.pi/
