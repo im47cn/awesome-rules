@@ -23,13 +23,9 @@ def tracked_files(skill_dir: Path, repo_root: Path) -> list:
         ["git", "ls-files", "-z", "--", str(skill_dir.relative_to(repo_root))],
         capture_output=True, check=True, cwd=repo_root,
     ).stdout.decode("utf-8")
-    files = []
     prefix = f"{skill_dir.relative_to(repo_root).as_posix()}/"
-    for line in out.split("\0"):
-        if line.startswith(prefix):
-            rel = line[len(prefix):]
-            if rel != "SKILL.md":
-                files.append(rel)
+    files = [rel for line in out.split("\0")
+             if line.startswith(prefix) and (rel := line[len(prefix):]) != "SKILL.md"]
     return sorted(files)
 
 
@@ -54,11 +50,11 @@ def backfill(skill_md: Path, repo_root: Path) -> bool:
     for ln in fm.splitlines():
         if ln.startswith("files:"):
             skipping = True
-            continue
-        if skipping and (ln.startswith("  ") or ln.strip() == ""):
-            continue
-        skipping = False
-        kept.append(ln)
+        elif skipping and (ln.startswith("  ") or ln.strip() == ""):
+            pass  # 旧 files 键及其紧随列表项，移除
+        else:
+            skipping = False
+            kept.append(ln)
     files = tracked_files(skill_md.parent, repo_root)
     new_fm = "\n".join(kept) + "\n" + render_files_block(files)
     start = content.index("---") + 3
@@ -73,10 +69,8 @@ def backfill(skill_md: Path, repo_root: Path) -> bool:
 
 
 def main(argv: list) -> int:
-    if len(argv) > 1:
-        repo_root = Path(argv[1]).resolve()
-    else:
-        repo_root = Path(__file__).resolve().parent.parent
+    default_root = Path(__file__).resolve().parent.parent
+    repo_root = Path(argv[1] if len(argv) > 1 else default_root).resolve()
     changed = sum(backfill(skill_md, repo_root)
                   for skill_md in sorted((repo_root / "skills").glob("*/SKILL.md")))
     print(f"共更新 {changed} 个 SKILL.md")
