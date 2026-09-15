@@ -125,10 +125,10 @@ mkdir "$REPO/中文外" && echo n > "$REPO/中文外/文档.md"
 mkdir "$REPO/带\"双引\"" && echo y > "$REPO/带\"双引\"/f.md"
 wait $WPID
 if grep -q '中文外' "$LOG" && grep -q '带\\"双引\\"' "$LOG" \
-   && python3 -c "
+   && python3 -c '
 import json,sys
-for l in open('$LOG'): json.loads(l)
-" 2>/dev/null; then
+for l in open(sys.argv[1]): json.loads(l)
+' "$LOG" 2>/dev/null; then
   ok "NC19g 中文/引号路径捕获且 JSON 合法"
 else
   bad "NC19g 日志非法或缺失：$(head -5 "$LOG")"
