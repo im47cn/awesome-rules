@@ -440,14 +440,11 @@ def regression_routing(issue: dict, lease_alive: bool | None = None) -> str:
     并存，wake/live 优先（可自动处置的路由优先）。
     """
     labels = set(issue.get("labels") or [])
-    # 分支全 return、无尾随语句：guard 尾码触发 reintroduce-else，条件
-    # 赋值/三元赋值触发 assign-if-exp，尾随聚合 return 触发
-    # lift-return-into-if——此形态三者皆不命中（Sourcery 门禁，PR #192）
+    # Sourcery 目标形态叠加：lift-return-into-if（return 提入分支）×
+    # assign-if-exp（if/else-return 化三元）——elif 链各分支直接 return、
+    # 内层用三元、无尾随语句（PR #192 门禁第四轮）
     if "factory:in-progress" in labels:
-        if lease_alive is False:
-            return "wake"
-        else:
-            return "live"
+        return "wake" if lease_alive is False else "live"
     elif "factory:rejected" in labels:
         return "new"
     else:
