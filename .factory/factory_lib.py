@@ -440,13 +440,16 @@ def regression_routing(issue: dict, lease_alive: bool | None = None) -> str:
     并存，wake/live 优先（可自动处置的路由优先）。
     """
     labels = set(issue.get("labels") or [])
+    # 单出口 + elif 链：guard-clause（if-return 后续代码）触发
+    # reintroduce-else，多行条件赋值触发 assign-if-exp——三元式条件
+    # 赋值恰为后者目标形态（Sourcery 门禁，PR #192）
     if "factory:in-progress" in labels:
-        if lease_alive is False:
-            return "wake"
-        return "live"
-    if "factory:rejected" in labels:
-        return "new"
-    return "append"
+        route = "wake" if lease_alive is False else "live"
+    elif "factory:rejected" in labels:
+        route = "new"
+    else:
+        route = "append"
+    return route
 
 
 RECEIPT_CLOSURE_NOTE = (
