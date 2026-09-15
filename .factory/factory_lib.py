@@ -441,7 +441,9 @@ def regression_routing(issue: dict, lease_alive: bool | None = None) -> str:
     """
     labels = set(issue.get("labels") or [])
     if "factory:in-progress" in labels:
-        return "wake" if lease_alive is False else "live"
+        if lease_alive is False:
+            return "wake"
+        return "live"
     if "factory:rejected" in labels:
         return "new"
     return "append"
