@@ -12,6 +12,7 @@ awesome-rules/
 │   ├── git-conventions.md             # Git 提交规范
 │   ├── testing-standards.md           # 测试规范
 │   ├── review-report-standards.md     # 审查报告输出规范
+│   ├── task-package-standards.md      # 任务包与派发守护规范
 │   └── gtsp/                          # GTSP 工程规范（Java/Spring Cloud，按维度拆分，含 DDD 架构）
 ├── skills/                            # AI Agent 技能
 │   ├── _shared/                       # guard 技能共享库（Severity/文件发现/报告骨架）
@@ -60,6 +61,7 @@ awesome-rules/
 | [测试规范](steering/testing-standards.md) | 测试编写与审查标准 |
 | [审查报告输出规范](steering/review-report-standards.md) | 审查结论输出结构（guard 技能人工判断部分、CR 评审意见） |
 | [跨仓契约兼容性规范](steering/cross-repo-contract-standards.md) | 变更被其他仓库依赖的 API 模块/契约门禁（japicmp、下游编译触发） |
+| [任务包与派发守护规范](steering/task-package-standards.md) | AI Agent 任务包五要素骨架与派发治理：L1 记录型 watcher / L2 事后异构审查分级守护 |
 
 ### GTSP 工程规范（`steering/gtsp/`，编码阶段）
 
