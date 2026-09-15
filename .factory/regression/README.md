@@ -23,6 +23,7 @@ bash .factory/regression/daily-regression.sh --dry-run  # 真跑三层，只打�
 | 1 | `badcase-strict` | `python3 scripts/badcase_runner.py --strict-exact` | `artifacts/regression/<date>/<time>/badcase-strict.log` |
 | 2 | `gauntlet` | `sh tools/gauntlet.sh` | `artifacts/regression/<date>/<time>/gauntlet.log` |
 | 3 | `doc-freshness` | `python3 tools/check_doc_freshness.py` | `artifacts/regression/<date>/<time>/doc-freshness.log` |
+| 4 | `dispatch-liveness` | `python3 .factory/regression/dispatch_liveness.py` | `artifacts/regression/<date>/<time>/dispatch-liveness.log` |
 
 日志目录 `.factory/artifacts/regression/<YYYY-MM-DD>/<HHMMSS>/` 由脚本自建，
 **每次运行独立目录、不覆盖**；`regression/latest` 符号链接始终指向最近一次
@@ -40,8 +41,11 @@ stdout/stderr 落 `.factory/artifacts/regression/launchd.log`。
   「写 issue → 工厂自动看见」路径：下一轮 hub kick（600s）triage 批次拾取
   → 裁决落标 → dispatch 派链修复。打 `factory:accepted` 会绕过 triage 裁决，
   打其他 `factory:*` 标签会永远不被拾取。
-- **幂等**：已有 open 的标题含 `[factory-regression]` 的 issue 时只
-  `gh issue comment` 追加本次结果，不重复开；该 issue 被关闭后，下次失败重开。
+- **幂等路由**：已有 open 的标题含 `[factory-regression]` 的 issue 时按
+  标签态路由（`factory_lib.py regression-routing`，ADR-013）：挂
+  `factory:in-progress`（零改动轮留守）→ 移除该标签唤醒重派；挂
+  `factory:rejected`（人工判噪音）→ 另开新 issue；其余 → 评论追加，
+  不重复开；该 issue 被关闭后，下次失败重开。
 - **全绿 → 记账**：追加一行
   `{"ts":…,"result":"pass","layers":{…}}` 到 `.factory/metrics/daily-regression.jsonl`。
 - **`--dry-run`**：三层真实执行、日志照落，但不执行任何 gh 写操作、

@@ -263,6 +263,9 @@ class GitHubAdapter:
     def _issue(d):
         return {"number": d.get("number"), "state": _GH_STATE.get(d.get("state"), "open"),
                 "title": d.get("title") or "", "body": d.get("body") or "",
+                # updatedAt ISO8601（缺省 None）：dispatch-liveness rejected
+                # 滞留阈值用；非 gh 后端无此字段则该项检测自动跳过
+                "updatedAt": d.get("updatedAt"),
                 "labels": [l["name"] for l in d.get("labels") or []],
                 "comments": [{"author": (c.get("author") or {}).get("login") or "",
                               "body": c.get("body") or ""}
@@ -312,7 +315,7 @@ class GitHubAdapter:
 
     def issue_list(self, state="open", label=None, limit=100,
                    comments=False, repo=None):
-        fields = "number,state,title,body,labels" + (",comments" if comments else "")
+        fields = "number,state,title,body,labels,updatedAt" + (",comments" if comments else "")
         args = ["issue", "list", "--state", state, "--limit", str(limit),
                 "--json", fields]
         if label:

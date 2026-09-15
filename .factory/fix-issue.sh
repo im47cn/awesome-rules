@@ -558,6 +558,20 @@ fi
 # in-progress 的 issue（见文件头 S2 注释），验证轮不再被重派。
 if [ "${DRY}" = 0 ] && [ -z "${COMMITS}" ]; then
   echo "[zero-diff] 本轮零仓内改动（纯验证轮，holdout 已 PASS）：不 push、不建 PR，exit 0 收官。"
+  # 终态可见性（2026-09-15 issue #165 实证）：留守 in-progress 在 GitHub 侧
+  # 无任何痕迹，人类看不见链已收官。终态评论补痕；幂等键防诈尸残窗重发。
+  # 评论失败仅告警——链已 PASS，可见性是透明度而非门。
+  cat > "${DIR}/zero-diff-receipt.md" <<RECEIPT
+零改动验证轮收官：链内全门 + holdout PASS，无代码改动，不建 PR。
+
+issue 保持 \`factory:accepted\` + \`factory:in-progress\` 留守防重派（§7.5）。
+若本 issue 为日回归容器（标题含 [factory-regression]），后续日回归失败时
+滞留态将被自动唤醒重派；其余 issue 的留守请人工裁决处置。
+若本诉求已满足，请人工确认后关闭本 issue。
+RECEIPT
+  issue_comment "${DIR}/zero-diff-receipt.md" \
+    "factory:receipt:issue-${ISSUE}:r${ROUND}-zero-diff" \
+    || echo "  [warn] 终态评论失败（${DIR}/zero-diff-receipt.md 留档），不影响收官" >&2
   exit 0
 fi
 # --- 8. 开 PR（S1 到此为止：merge 由人类决定，铁律 5） ---
