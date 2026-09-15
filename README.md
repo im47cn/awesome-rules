@@ -12,6 +12,7 @@ awesome-rules/
 │   ├── git-conventions.md             # Git 提交规范
 │   ├── testing-standards.md           # 测试规范
 │   ├── review-report-standards.md     # 审查报告输出规范
+│   ├── task-package-standards.md      # 任务包与派发守护规范
 │   ├── cross-repo-contract-standards.md # 跨仓契约兼容性规范
 │   ├── frontend-standards.md          # 前端工程技术规范（Vue3 管理端）
 │   ├── api-contract-freeze-standards.md # API 契约冻结规范（先冻结再实现）
@@ -63,6 +64,7 @@ awesome-rules/
 | [测试规范](steering/testing-standards.md) | 测试编写与审查标准 |
 | [审查报告输出规范](steering/review-report-standards.md) | 审查结论输出结构（guard 技能人工判断部分、CR 评审意见） |
 | [跨仓契约兼容性规范](steering/cross-repo-contract-standards.md) | 变更被其他仓库依赖的 API 模块/契约门禁（japicmp、下游编译触发） |
+| [任务包与派发守护规范](steering/task-package-standards.md) | AI Agent 任务包五要素骨架与派发治理：L1 记录型 watcher / L2 事后异构审查分级守护 |
 | [前端工程技术规范（Vue3 管理端）](steering/frontend-standards.md) | Vue3 管理端工程标准：mock 联调门控、菜单下发路由、axios 工厂复用、可交互数据展示、变更验证，按【强制】【推荐】分级 |
 | [API 契约冻结规范](steering/api-contract-freeze-standards.md) | 新端点实现前契约逐字段冻结：method/path/请求参数名/响应信封/字段名未冻结禁止实现（mock 也不许先写），先冻结再实现 |
 

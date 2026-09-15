@@ -20,6 +20,7 @@
     "steering/git-conventions.md",
     "steering/openapi-standards.md",
     "steering/review-report-standards.md",
+    "steering/task-package-standards.md",
     "steering/testing-standards.md",
     "steering/gtsp/README.md"
   ]
