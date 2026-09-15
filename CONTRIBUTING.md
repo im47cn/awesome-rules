@@ -87,6 +87,8 @@ steering/
 ├── git-conventions.md                # 通用：Git 提交规范
 ├── review-report-standards.md        # 通用：审查报告输出规范
 ├── cross-repo-contract-standards.md  # 通用：跨仓契约兼容性规范
+├── frontend-standards.md             # 通用：前端工程技术规范（Vue3 管理端）
+├── api-contract-freeze-standards.md  # 通用：API 契约冻结规范（先冻结再实现）
 └── gtsp/                             # GTSP 工程规范（Java/Spring Cloud，按维度拆分，含 DDD 架构）
     ├── README.md                     #   总入口
     └── 01-project-structure.md … 09-cr-checklist.md   #   各维度
