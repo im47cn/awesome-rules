@@ -4,6 +4,11 @@
 # 尾斜杠所有权前缀、-z 解析的 quotepath/rename、末行无换行清单、JSON 转义、
 # unborn HEAD 降级、参数校验、A 暂存态分类）。
 # 每案例独立临时仓（git init，不触主仓），watcher 以 --interval 1 后台运行。
+# 测试密封性（ADR-010）：hook 注入的 GIT_* 会劫持临时夹具仓的仓库发现；
+# 顶层剥除，子进程继承（同 test_gauntlet_checks.sh）。
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+      GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_NAMESPACE
+
 set -e
 cd "$(dirname "$0")/.."
 
