@@ -145,8 +145,11 @@ _sr_clean() {  # 0=干净 1=有 issue 2=CLI 异常
 SR_GATE_ON=0
 if [ "$MODE" = apply ] && command -v sourcery >/dev/null 2>&1; then
   SR_GATE_ON=1
+  # 版本口径提示（issue #104）：本地 CLI 版本与上游 CI pin 不一致时，
+  # 上游已清零的快照本地可报 issue——先排除口径差异再查真实回归
   _sr_clean && echo "Sourcery 回归闸基线: .factory 干净" \
-            || { echo "Sourcery 回归闸基线: .factory 已有 issue——先清零再追平（闸口径=PR gate）" >&2; exit 2; }
+            || { echo "Sourcery 回归闸基线: .factory 已有 issue——先清零再追平（闸口径=PR gate）。" \
+                 "若上游 CI 曾全绿：疑似本地 CLI 版本口径差异（本地 $(sourcery --version 2>/dev/null || echo '?') vs 上游 sourcery-review-gate.yml 的 pin），对齐版本后复跑再定" >&2; exit 2; }
 fi
 
 # 上游 mode+blob（git show 丢 mode，覆盖后须恢复执行位）
