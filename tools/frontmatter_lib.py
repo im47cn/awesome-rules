@@ -10,8 +10,11 @@ rome-os/rome 实证：校验链最薄弱环节正是"正则解析无 schema"—�
   - simple_fields：纯 stdlib 标量提取，供 SessionStart hook（无第三方依赖、
     单行 `key: value` 子集）。分叉被结构性封死：M1 校验保证 steering
     title/scenario 恰为单行标量，即 simple 路径的假设恒成立
-  - parse_frontmatter：完整 YAML 解析（PyYAML），供门禁检查器（须处理
-    `description: >` 折叠块与列表）。缺 PyYAML 时 fail-closed
+  - parse_frontmatter：门禁用的结构子集解析器（纯 stdlib）：标量 /
+    行内列表 / 块列表 / 折叠块（> 与 |）。子集外语法 raise（fail-closed）
+    而非静默猜测——这是 schema 校验的结构解析，不是无 schema 正则
+    （Rome 教训的正解）。零第三方依赖：CI runner 与 hook 环境均无须装包
+    （2026-09-15 实证：PR CI 无 PyYAML，import 即炸）
 
 schema 双层严格度（ADR-2）：声明字段严格（类型/必填/路径存在）；未知
 字段容忍但惰性——不剥离、不校验、不阻断。人写文档不被封闭 schema 绑架。
@@ -65,30 +68,61 @@ def simple_fields(content: str) -> dict:
 
 
 def parse_frontmatter(content: str) -> dict:
-    """完整 YAML 解析 frontmatter（依赖 PyYAML，缺失即抛错，不静默降级）。
+    """门禁用结构子集解析器（纯 stdlib，fail-closed）。
 
-    YAML 重复键在 safe_load 下静默取后值（最后一行覆盖前面的同名键，
-    拼写漂移即静默生效）——门禁语义要求显式拒绝而非静默容忍。
+    支持语法：`key: value` 标量 / `key: [a, b]` 行内列表 / `key:` +
+    `  - item` 块列表 / `key: >|>-|-` 折叠块（收集为多行字符串）。
+    子集外语法（嵌套结构、未知缩进、顶层裸文本）raise ValueError——
+    门禁要求可解析性显式成立，不静默猜测（YAML 重复键同样显式拒绝：
+    safe_load 语义是静默取后值，拼写漂移会静默生效）。
     """
     fm = split_frontmatter(content)
     if fm is None:
         return {}
-    seen: dict = {}
-    for m in re.finditer(r"(?m)^([A-Za-z0-9_-]+):", fm):
-        if m.group(1) in seen:
-            raise ValueError(f"frontmatter 重复键 {m.group(1)!r}（safe_load 静默取后值，门禁显式拒绝）")
-        seen[m.group(1)] = True
-    import yaml
-
-    try:
-        data = yaml.safe_load(fm)
-    except yaml.YAMLError as exc:  # pragma: no cover - 消息内容随 PyYAML 版本
-        raise ValueError(f"frontmatter YAML 解析失败: {exc}") from exc
-    if data is None:
-        return {}
-    if not isinstance(data, dict):
-        raise ValueError(f"frontmatter 顶层须为映射，实际: {type(data).__name__}")
-    return data
+    result: dict = {}
+    lines = fm.splitlines()
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        if not ln.strip() or ln.lstrip().startswith("#"):
+            i += 1
+            continue
+        m = re.match(r"^([A-Za-z0-9_-]+):\s*(.*)$", ln)
+        if not m:
+            raise ValueError(
+                f"frontmatter 子集外语法（第 {i + 1} 行）: {ln!r}——"
+                f"仅支持 key: value / 行内列表 / 块列表 / 折叠块"
+            )
+        key, val = m.group(1), m.group(2).strip()
+        if key in result:
+            raise ValueError(f"frontmatter 重复键 {key!r}（静默取后值属拼写漂移，门禁显式拒绝）")
+        if val == "":
+            # 块列表：紧随的 `  - item` 行
+            items = []
+            i += 1
+            while i < len(lines) and lines[i].startswith("  - "):
+                items.append(lines[i][4:].strip())
+                i += 1
+            result[key] = items
+            continue
+        if val.startswith("[") and val.endswith("]"):
+            inner = val[1:-1].strip()
+            result[key] = [s.strip() for s in inner.split(",")] if inner else []
+        elif val in (">", "|", ">-", "|-"):
+            # 折叠/字面块：收集缩进续行（含块内空行）为多行字符串
+            i += 1
+            buf = []
+            while i < len(lines) and (lines[i].startswith("  ") or lines[i].strip() == ""):
+                if lines[i].strip() == "" and i + 1 < len(lines) and not lines[i + 1].startswith("  "):
+                    break  # 空行 + 后续非缩进 = 块结束
+                buf.append(lines[i].strip())
+                i += 1
+            result[key] = "\n".join(buf)
+            continue  # i 已推进到块后首行，不得再走循环尾统一 +1
+        else:
+            result[key] = val.strip("'\"")
+        i += 1
+    return result
 
 
 # ── M1 steering 族：title/scenario 必填、单行、非空、不可重复 ────────────

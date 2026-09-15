@@ -61,11 +61,12 @@ PR 中可裁剪（门禁只查断链不查多声明，ADR-3），裁剪须在 PR
 | 路径 | 依赖 | 消费者 | 契约 |
 |---|---|---|---|
 | `simple_fields` | 纯 stdlib | SessionStart hook、doc-freshness R7b | 单行 `key: value` 标量子集 |
-| `parse_frontmatter` | PyYAML（fail-closed） | frontmatter-manifests 检查器 | 完整 YAML（折叠块/列表/重复键拒绝） |
+| `parse_frontmatter` | 纯 stdlib 结构子集解析器 | frontmatter-manifests 检查器 | 标量/行内列表/块列表/折叠块；子集外语法与重复键 fail-closed |
 
 M1 校验强制 steering title/scenario 为单行标量 ⇒ simple 路径的假设恒成立。
-hook 不引入第三方依赖（SessionStart 环境），检查器 fail-closed（缺 PyYAML
-报错而非静默降级）。
+两路径均零第三方依赖（SessionStart 与 CI runner 环境均无须装包；
+2026-09-15 PR CI 实证：runner 无 PyYAML，初版 import 即炸后收敛为
+自含结构子集解析器——schema 校验的结构解析，非无 schema 正则）。
 
 ## 门禁语义
 
