@@ -27,16 +27,6 @@ newrepo() {
   (cd "$REPO" && git add tracked.txt && git commit -qm base)
 }
 cleanup() { [ -n "${WPID:-}" ] && kill "$WPID" 2>/dev/null || true; [ -n "${REPO:-}" ] && rm -rf "$REPO" "$LOG" || true; return 0; }
-# 轮询等待事件出现（最长 ~8s）
-wait_event() { # wait_event <grep 模式>
-  i=0
-  while [ $i -lt 16 ]; do
-    grep -q "$1" "$LOG" 2>/dev/null && return 0
-    sleep 0.5; i=$((i + 1))
-  done
-  return 1
-}
-
 # ── NC19a 参数校验：非数字 interval → rc 1 ─────────────────────────────
 newrepo; LOG=$(mktemp)
 printf 'tests/\n' > "$REPO/own.txt"
@@ -58,7 +48,8 @@ fi
 if bash "$W" --dir /tmp --own /dev/null >/dev/null 2>&1; then
   bad "NC19c 非工作树应 rc 2"
 else
-  rc=$?; [ "$rc" = 2 ] && ok "NC19c 非工作树 → rc 2" || bad "NC19c rc=$rc 应为 2"
+  rc=$?
+  if [ "$rc" = 2 ]; then ok "NC19c 非工作树 → rc 2"; else bad "NC19c rc=$rc 应为 2"; fi
 fi
 
 # ── NC19d unborn HEAD：warn 降级 + 正常记录 + rc 0 ─────────────────────
@@ -67,8 +58,11 @@ git -C "$REPO" init -q
 printf 'a/\n' > "$REPO/own.txt"
 bash "$W" --dir "$REPO" --own "$REPO/own.txt" --interval 1 --max 2 > "$LOG" 2>&1
 rc=$?
-grep -q unborn_head "$LOG" && [ "$rc" = 0 ] \
-  && ok "NC19d unborn HEAD 降级运行 rc 0" || bad "NC19d rc=$rc 日志=$(cat "$LOG")"
+if grep -q unborn_head "$LOG" && [ "$rc" = 0 ]; then
+  ok "NC19d unborn HEAD 降级运行 rc 0"
+else
+  bad "NC19d rc=$rc 日志=$(cat "$LOG")"
+fi
 cleanup
 
 # ── NC19e owned 区静默：尾斜杠/无斜杠/末行无换行条目/rename 双端 owned ──
@@ -117,7 +111,7 @@ grep -q '"untracked_outside","path":"stray.md"' "$LOG" && n=$((n+1))
 grep -q '"modified_outside","path":"tracked.txt"' "$LOG" && n=$((n+1))
 grep -q '"deleted_outside","path":"tracked.txt"' "$LOG" && n=$((n+1))
 grep -q 'rename_outside.*ren.txt -> RENAMED.txt' "$LOG" && n=$((n+1))
-[ "$n" = 4 ] && ok "NC19f 四类越界事件全捕获" || bad "NC19f 仅 $n/4：$(grep outside "$LOG")"
+if [ "$n" = 4 ]; then ok "NC19f 四类越界事件全捕获"; else bad "NC19f 仅 $n/4：$(grep outside "$LOG")"; fi
 cleanup
 
 # ── NC19g 中文+引号路径：捕获 + 全行合法 JSON ──────────────────────────
@@ -166,8 +160,11 @@ WPID=$!
 sleep 1.5
 echo c > "$REPO/c.txt" && (cd "$REPO" && git add c.txt && git commit -qm c)
 rc=0; wait $WPID || rc=$?
-[ "$rc" = 3 ] && grep -q head_moved "$LOG" && ! grep -q '"killed"' "$LOG" \
-  && ok "NC19i head_moved → rc 3 无 kill" || bad "NC19i rc=$rc"
+if [ "$rc" = 3 ] && grep -q head_moved "$LOG" && ! grep -q '"killed"' "$LOG"; then
+  ok "NC19i head_moved → rc 3 无 kill"
+else
+  bad "NC19i rc=$rc"
+fi
 cleanup
 
 # ── NC19j staged add（A 暂存态）→ untracked_outside 且 code 保留 XY ────
@@ -178,8 +175,11 @@ WPID=$!
 sleep 1.5
 echo a > "$REPO/staged.md" && (cd "$REPO" && git add staged.md)
 wait $WPID
-grep -q '"untracked_outside","path":"staged.md","detail":"code=A ' "$LOG" \
-  && ok "NC19j A 暂存态归类新增" || bad "NC19j $(grep staged "$LOG")"
+if grep -q '"untracked_outside","path":"staged.md","detail":"code=A ' "$LOG"; then
+  ok "NC19j A 暂存态归类新增"
+else
+  bad "NC19j $(grep staged "$LOG")"
+fi
 cleanup
 
 echo
