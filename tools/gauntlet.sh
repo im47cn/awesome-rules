@@ -72,7 +72,7 @@ require_dir() {
 # 层清单目录：主路径 require_dir 与 doctor 逐项报告共用（单一事实源，
 # 两处引用防漂移——新增层目录只改这里）；.factory 收窄为 .factory/tests
 # （pytest 层实跑面，整棵 .factory 含 gitignored 工厂链 worktree）
-LAYER_DIRS='scripts .factory/tests
+LAYER_DIRS='scripts .factory/tests tools/tests
 skills/api-guard/scripts skills/ddl-guard/scripts skills/arch-guard/scripts
 skills/impact-guard/scripts/tests skills/skill-evo/scripts/tests
 skills/doc-gen/scripts/tests arch-hawkeye/scripts/tests'
