@@ -107,6 +107,7 @@ mcporter list yunxiao --schema && mcporter call yunxiao.<tool> key=value   # 秒
 
 - **Codeup PR（changeRequest）评论**：`POST /oapi/v1/codeup/organizations/{orgId}/repositories/{repoId}/changeRequests/{localId}/comments`，仓库级 changeRequests 端点会 404，须走组织级；请求体 `comment_type` 必填且仅 `GLOBAL_COMMENT` / `INLINE_COMMENT` 合法（无默认值），`resolved` 不可为 null 须显式传布尔；拉取评论列表用 `POST .../comments/list`（body：`{"patchSetBizIds":[],"commentType":"GLOBAL_COMMENT","state":"OPENED","resolved":<bool>}`，resolved 两态各拉一次取全集）；resolve 已有评论用 `PUT .../comments/{commentBizId}` + `{"resolved": true}`（列表返回的主键字段名是 `comment_biz_id`）。
 - **Codeup MR 列表**：组织级端点 `GET /oapi/v1/codeup/organizations/{org}/changeRequests`（**无** `/repositories` 段），URL query 传 `projectIds={repoId}` 过滤（POST/body 形态被拒）；摘要行无 status 字段，开合过滤交给服务端 `state` 参数。
+- **Codeup 仓库定位**（MCP 工具面）：`get_repository` 的 `repositoryId` 只接受**数字 ID** 或 URL 编码全路径（`org%2Fgroup%2Frepo`），短名或不带 org 的群组路径一律 404——正确入口是先 `list_repositories organizationId=<orgId> search=<关键词>` 拿数字 ID（实测 2026-09-16：gtsp-wop-callback → 7264847）；`get_change_request` 参数为 `organizationId + repositoryId(数字) + localId(MR号)`，详情字段 `state` 常为 null，实际状态看 `status`（UNDER_REVIEW/CLOSED）。
 - 默认端点 `openapi.aliyun.com` 为全球单节点，受限网络下 TLS 握手可能被静默丢弃；此时改用中心版端点 `openapi-rdc.aliyuncs.com`（`/oapi/v1/...` 路径一致，认证头同为 `x-yunxiao-token`），勿据此判定令牌失效或 API 不可用。公司网关对快速连续 TLS 握手偶发 RST（SSLEOFError）——握手失败=请求未发出，重试皆安全，建议 3 次退避。
 - `devops.cn-hangzhou.aliyuncs.com` RPC 网关（RAM 风格 Action 探测）不含 Codeup 模块，不要在此浪费探测。
 - 参数值含空格或特殊字符须加引号；布尔/数字按 API 要求的类型传。
