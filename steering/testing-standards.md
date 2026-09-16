@@ -136,6 +136,7 @@ inclusion: always
 
 - 允许：常量 fixture（用户名、邮箱前缀等标识性数据）
 - 禁止：动态值（时间、随机 ID、自增主键）硬编码到断言中——用相对时间或 `assertNotNull()`
+- 禁止：接口层（MockMvc/HTTP 断言）fixture 以 `null` 填充 DTO 时间与注解敏感字段【强制】——`@JsonFormat`/`@JsonProperty` 驱动的序列化路径只在字段非空时触发，`null` 填充等于整段绕过被测序列化形成假绿（例：2026-09-16 v2 detail 复测发现 `LocalDateTime` 遇 `XXX` 偏移模式必抛 `UnsupportedTemporalTypeException`，但 fixture 日期全 `null` 致单测长期绿、线上 500）。时间字段必须填构造的固定值，并对契约冻结的输出格式（如 ISO-8601 `+08:00` 带毫秒）做字面量断言；纯单元测试直接 new 序列化对象的可豁免
 - 集成测试：必须 `@Transactional` + `@Rollback`，每个用例自动回滚
 
 ## 前端
