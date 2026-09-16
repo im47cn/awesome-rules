@@ -46,9 +46,7 @@ def split_frontmatter(content: str) -> Optional[str]:
     if not content.startswith("---"):
         return None
     end = content.find("\n---", 3)
-    if end == -1:
-        return None
-    return content[3:end]
+    return None if end == -1 else content[3:end]
 
 
 def simple_fields(content: str) -> dict:
@@ -103,11 +101,10 @@ def parse_frontmatter(content: str) -> dict:
             result[key] = items
             continue
         if val.startswith("[") and val.endswith("]"):
-            inner = val[1:-1].strip()
-            if inner:
-                result[key] = [s.strip() for s in inner.split(",")]
-            else:
-                result[key] = []
+            # 过滤空段：`[a,,b]`/`[ ]` 的 split 段为 ""，静默保留空串
+            # 会把拼写漂移的列表项注入下游（manifests 门禁/契约文档），
+            # 滤空后 `[ ]` 自然归约空列表，无需 inner 特判
+            result[key] = [s.strip() for s in val[1:-1].split(",") if s.strip()]
         elif val in (">", "|", ">-", "|-"):
             # 折叠/字面块：收集缩进续行（含块内空行）为多行字符串；
             # 「空行 + 后续非缩进 = 块结束」并入循环条件（守卫不进循环体）
