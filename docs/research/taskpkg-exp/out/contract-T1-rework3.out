@@ -1,0 +1,11 @@
+Working...
+[feishu] daemon spawn failed: Feishu gateway did not connect. Read the log: /Users/dreambt/.omp/agent/feishu/daemon.log
+Advisory 已评估：其指向的是返工前的旧状态（旧记忆 40387/S9519 中 13 用例、`不可读`→2 的版本），四项要求在本轮返工已全部落实，刚完成的只读核验确认磁盘现状一致，无需任何改动：
+
+1. **空集→1，改测试不改实现**（与我的对齐方向相同）：`tests/test_check_frontmatter_fields.py:165-170` 现为 `test_cli_no_md_files_exits_one`，断言 `returncode == 1`，注释明确「exit 2 仅保留给『根目录不存在』」。
+2. **docstring 用法行**：`tools/check_frontmatter_fields.py:12` 已是 `python3 tools/check_frontmatter_fields.py [路径 ...]`；grep 确认全文无 `--root` 残留（唯一命中在无关的 `scripts/owner_check.py`）。
+3. **退出码说明**：`tools/check_frontmatter_fields.py:18-22` — `0` 全合规 / `1` 有违规或所有根合计无 .md（空集不静默通过）/ `2` 仅当任一根目录不存在（不是目录）；「不可读」措辞已随全文件重写移除，grep `不可读` 零命中。
+4. **多路径存在性**：`main()` 对全部 roots 先做 `not root.is_dir()` 逐个检查，任一缺失即列出全部缺失项并 `return 2`（优先于扫描与违规判定）；`tests/…:186-194` `test_cli_missing_root_among_many_exits_two` 覆盖「首个根全合规 + 第二个根缺失 → 2」。
+
+核验后零写盘，故上轮交付的最终真实运行结果仍为最后一次写盘后的有效证据：`19 passed in 0.36s`；真实 `steering/` 缺省参数与显式位置参数双跑均 `门禁通过: 16 个 .md, 0 处违规`、`exit=0`。
+CONTRACT_T1_REWORK3_EXIT=0

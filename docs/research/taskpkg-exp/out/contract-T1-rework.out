@@ -1,0 +1,286 @@
+Reading prompt from piped stdin (waiting for EOF; ctrl+c to abort)…
+Still starting after 10s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 20s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 30s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 40s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 50s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 60s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 70s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 80s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 90s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 100s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 110s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 120s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 130s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 140s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 150s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 160s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 170s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 180s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 190s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 200s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 210s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 220s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 230s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 240s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 250s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 260s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 270s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 280s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 290s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 300s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 310s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 320s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 330s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 340s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 350s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 360s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 370s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 380s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 390s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 400s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 410s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 420s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 430s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 440s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 450s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 460s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 470s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 480s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 490s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 500s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 510s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 520s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 530s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 540s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 550s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 560s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 570s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 580s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 590s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 600s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 610s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 620s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 630s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 640s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 650s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 660s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 670s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 680s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 690s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 700s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 710s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 720s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 730s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 740s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 750s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 760s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 770s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 780s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 790s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 800s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 810s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 820s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 830s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 840s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 850s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 860s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 870s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 880s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 890s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 900s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 910s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 920s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 930s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 940s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 950s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 960s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 970s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 980s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 990s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1000s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1010s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1020s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1030s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1040s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1050s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1060s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1070s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1080s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1090s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1100s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1110s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1120s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1130s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1140s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1150s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1160s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1170s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1180s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1190s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1200s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1210s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1220s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1230s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1240s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1250s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1260s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1270s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1280s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1290s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1300s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1310s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1320s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1330s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1340s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1350s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1360s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1370s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1380s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1390s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1400s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Still starting after 1410s — phase: readPipedInput
+  logs: /Users/dreambt/.omp/logs/omp.2026-09-13.95210.log · re-run with PI_DEBUG_STARTUP=1 for streaming phase markers
+Working...
+[feishu] daemon spawn failed: Feishu gateway did not connect. Read the log: /Users/dreambt/.omp/agent/feishu/daemon.log
+Deadline exceeded

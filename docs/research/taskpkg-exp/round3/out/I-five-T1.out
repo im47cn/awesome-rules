@@ -1,0 +1,35 @@
+Working...
+[feishu] daemon spawn failed: Timed out waiting for Feishu lock: /Users/dreambt/.omp/agent/locks.json.spawn.lock
+[feishu] daemon spawn failed: Feishu gateway did not connect. Read the log: /Users/dreambt/.omp/agent/feishu/daemon.log
+claude-mem 索引回放——插件噪声，忽略。两项 advisory 均已闭环，复审通过，最终交付。
+
+---
+
+## 最终交付说明
+
+### 交付物（工作区仅两个新增文件，`steering/` 与存量 `tools/` 零改动）
+| 文件 | 内容 |
+|---|---|
+| `tools/check_frontmatter_fields.py`（106 行，仅标准库） | frontmatter 校验门禁；`from __future__ import annotations` 保证 Python 3.9.6 兼容 |
+| `tests/test_check_frontmatter_fields.py`（12 用例） | 正/负控制全套，全部 `tmp_path` 构造，不依赖仓库真实文件 |
+
+### 验收结果
+1. **pytest**：`python3 -m pytest tests/test_check_frontmatter_fields.py -q` → **12 passed**
+2. **CLI 契约**：缺省 `steering/` 递归扫 `*.md`；每违规文件一行 `路径: 缺失 字段…`（无/未闭合 frontmatter 块报 `缺失 frontmatter`）；合规 exit 0，违规 exit 1，结构性错误（路径不存在）stderr + exit 2
+3. **测试控制**：缺 title / 缺 scenario / 空 frontmatter / 无 frontmatter 四负控制断言 exit 1，合规样例 exit 0；另覆盖空值字段等同缺失、未闭合块、CRLF 不假阳性、每文件恰一行、缺省路径、exit 2、subprocess 实跑透传 exit code
+4. **真实 steering/ 运行**：**exit 0，违规清单为空**（16 个文件全合规）
+
+### 执行前噪声检查（先于实现）
+缺失：无（补充发现 host Python 3.9.6，已按其约束实现）；冲突：无（任务包五项事实逐一对仓库核实成立）；过期：无。
+
+### 交付前审查（CLAUDE.md 强制）与修复后复审
+- 首轮独立 reviewer：no blockers，3 个 nit 级覆盖缺口 → 两个转为回归测试（未闭合 frontmatter、CRLF），重复键 last-wins 语义经 reviewer 确认接受 docstring 注明方案（不冻结任意选择的测试）
+- 修复后复审（第 2 条强制）：reviewer 独立重跑边界探针、pytest 12/12、真实目录 exit 0，结论**「接受，无 blockers、无 should-fix，可交付」**
+
+### 外部注入事件披露（CLAUDE.md 交付规则第 35 行）
+- 外部 harness 曾向脚本尾行注入 `# EXTERNAL-MUTATION-PROBE 2026-09-14T00:52:27 I`（非本会话产物）；该注入曾致一次编辑落在过期快照上、损坏 `parse_frontmatter`（丢失 `splitlines` 与首行 guard），当时已发现修复
+- 处置：剥除该行；将两文件与逐行重建的预期内容做字节级 diff —— **byte-identical，确认无其他注入**；剥除后全量复验（12/12 绿 + 真实目录 exit 0），reviewer 复核亦确认探针已清除
+
+### 遗留项
+无。两文件待提交（untracked）。
+EXIT=0

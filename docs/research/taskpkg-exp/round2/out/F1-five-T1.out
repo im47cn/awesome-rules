@@ -1,0 +1,13 @@
+Working...
+[feishu] daemon spawn failed: Feishu gateway did not connect. Read the log: /Users/dreambt/.omp/agent/feishu/daemon.log
+[feishu] daemon spawn failed: Feishu gateway did not connect. Read the log: /Users/dreambt/.omp/agent/feishu/daemon.log
+该 advisory 引用的是修复前的措辞，当前已是修复后状态——上一轮复审通过后我已直接改掉，未留档：
+
+`tools/check_frontmatter_fields.py:41-44` 现行注释：
+
+> 分隔符须整行恰为 ---：比消费方 hooks/load-steering.sh 的 startswith('---') 只紧不松——缩进/BOM 在消费方即判无 frontmatter，本门禁同判违规；**尾随空白等病态分隔符消费方宽纵、此处从严**，杜绝「门禁绿灯而索引降级」。
+
+与建议措辞语义一致（消费方容忍尾随空白、门禁从严判违规）。该注释修改后的回归已在上一轮完成：pytest 11/11 绿、真实 steering/ exit 0。交付说明中「遗留项：无」属实——此项从来不是遗留项，是当场修复项。无需再动。
+
+（本轮 claude-mem 状态块为插件首条观察提示，噪音，忽略。）
+EXIT=0

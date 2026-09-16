@@ -1,0 +1,24 @@
+# frontmatter 覆盖率报告
+
+- 扫描根目录：`steering`
+- 生成命令：`python3 tools/gen_frontmatter_report.py steering`
+- 汇总：16 个文件，合规 16，不合规 0
+
+| 文件路径 | title | scenario | 合规 |
+|---|---|---|---|
+| cross-repo-contract-standards.md | 跨仓契约兼容性规范 | 变更会被其他仓库依赖的 API 模块（api jar / Feign 契约 / DTO）、配置跨仓 CI 门禁 | ✅ |
+| database-design-specification.md | 数据库设计规范 | 设计表结构/编写 SQL | ✅ |
+| git-conventions.md | Git 提交规范 | 提交代码/创建分支/PR | ✅ |
+| gtsp/01-project-structure.md | 架构与分层 | 架构设计/业务域/模块档位/分层/CQRS/状态机/扩展点 | ✅ |
+| gtsp/02-naming.md | 命名规范 | 类后缀/方法/注入/常量类 | ✅ |
+| gtsp/03-api-feign.md | API 接口（Feign） | Feign/URL 版本/参数校验 | ✅ |
+| gtsp/04-database-mybatis.md | 数据库与 MyBatis-Plus | PO/Mapper/XML/分页插件 | ✅ |
+| gtsp/05-logging.md | 日志规范 | SLF4J+Log4j2/链路追踪 | ✅ |
+| gtsp/06-exception.md | 异常处理与统一返回 | ResultMode/BaseException/ErrorType | ✅ |
+| gtsp/07-config.md | 配置文件规范 | bootstrap/application.yml | ✅ |
+| gtsp/08-comments-deprecated.md | 注释与废弃标记 | Javadoc/@Deprecated | ✅ |
+| gtsp/09-cr-checklist.md | CR 检查清单与公共依赖 | CR 清单/公共依赖速查 | ✅ |
+| gtsp/README.md | GTSP 总入口 | GTSP 工程规范总索引 | ✅ |
+| openapi-standards.md | Open API 设计规范 | 设计/审查对外 Open API | ✅ |
+| review-report-standards.md | 审查报告输出规范 | 输出代码审查/DDL 审查/API 审查/架构审查结论，guard 技能的人工判断部分，CR 评审意见 | ✅ |
+| testing-standards.md | 测试规范 | 编写/审查测试代码 | ✅ |

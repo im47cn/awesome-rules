@@ -1,0 +1,10 @@
+Working...
+[feishu] daemon spawn failed: Timed out waiting for Feishu lock: /Users/dreambt/.omp/agent/locks.json.spawn.lock
+Advisory 与交付现状一致，无需变更：
+
+- 解析器覆盖的就是 inline `[text](target)`（含 `![]()` 图片语法——`test_dead_image_link_is_violation` 已钉住该行为）；reference-style 链接本就不在解析范围
+- Advisory 证实真实 README 只有表格内 inline 链接，故 `README.md` 运行结果 exit 0 / 零违规可信，无漏报风险
+- 契约验收口径不变：pytest 12 passed、负控制/正控制齐备、输出与 exit code 语义符合规约
+
+任务已完成，无新增动作。
+EXIT=0

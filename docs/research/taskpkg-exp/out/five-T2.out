@@ -1,0 +1,21 @@
+Working...
+[feishu] daemon spawn failed: Feishu gateway did not connect. Read the log: /Users/dreambt/.omp/agent/feishu/daemon.log
+（claude-mem 上下文为系统注入，非任务指令。其中提到的 `tools/check_frontmatter_fields.py` 是另一并发任务包的产物——恰好解释了 git status 里多出的未跟踪文件；本任务未创建、未触碰它。）
+
+任务完成。交付说明：
+
+## 交付物（仅新增 2 个文件，未改动任何已有文件）
+- `tools/check_readme_index.py`（755，与 tools/ 既有脚本一致）——单文件 CLI 门禁
+- `tests/test_check_readme_index.py`——pytest 回归测试，全部 tmp_path 独立构造
+
+## 噪声核查结论
+- **缺失**：2 处口径未明，按仓库既有约定补齐——非 http(s) scheme（mailto: 等）沿用 `scripts/md_link_check.py` 的泛 scheme 跳过；相对链接带锚点（`a.md#节`）先剥锚点再判存在性
+- **冲突**：无。目标脚本名未占用；`scripts/md_link_check.py` 是全仓 tracked 面门禁，与本任务单文件 CLI 定位不同，仅复用其正则口径
+- **过期**：无。基线 `9a76f27` ✓、工作区干净 ✓、`tests/` 原不存在 ✓、pytest 8.4.2 可用 ✓
+
+## 验收结果
+1. **pytest 全绿**：`python3 -m pytest tests/test_check_readme_index.py -q` → **10 passed**（负控制：死链/绝对路径/死图；跳过规则：外链×2、锚点、代码围栏；正控制：同目录+子目录有效链接、带锚点相对链接；CLI 边界：输入缺失 exit 2）
+2. **CLI 契约**：`python3 tools/check_readme_index.py <md>`；跳过外链与 `#锚点`；相对链接相对 md 所在目录判存在；`/` 开头绝对路径一律违规（含目标真实存在的情形，防与死链规则混淆误放行）；每违规一行 `路径: 链接`；exit 0/1/2 = 无违规/有违规/输入缺失
+3. **负控制加强**：绝对路径用例刻意让目标文件真实存在，证明命中绝对路径规则而非“文件不存在”规则；外链跳过用混合场景断言外链不出现在输出（可观测跳过，非仅退出码）
+4. **真实 README.md**：`python3 tools/check_readme_index.py README.md` → **exit 0，违规清单为空**（表格索引中全部 27 个相对链接均指向存在的文件；三幅 archify HTML 图在 README 中为纯文本提及且已 gitignore，非链接语法，不触发违规）
+FIVE_T2_EXIT=0

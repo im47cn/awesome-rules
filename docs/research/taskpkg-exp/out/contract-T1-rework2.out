@@ -1,0 +1,77 @@
+Working...
+[feishu] daemon spawn failed: Timed out waiting for Feishu lock: /Users/dreambt/.omp/agent/locks.json.spawn.lock
+交付完成。以下为交付说明与机械验收证据原文。
+
+## 交付物（契约内所有权文件，均新建）
+
+| 文件 | 内容 |
+|---|---|
+| `tools/check_frontmatter_fields.py` | CI 门禁：校验 steering/ 下全部 `.md` frontmatter 含**非空** `title` 与 `scenario`。行式状态机解析（非正则），缺字段/空值/缺失或未闭合 frontmatter 块分类报违规，路径字典序稳定输出。退出码：`0` 全合规 / `1` 有违规或空集 / `2` 根目录不存在 |
+| `tests/test_check_frontmatter_fields.py` | 13 个用例，全部基于 `tmp_path` 构造样例（不依赖真实 steering/ 文件），退出码经 subprocess 端到端验证 |
+
+反目标防护落点：`test_empty_and_whitespace_values_are_violations`（仅查字段存在不够）；`parse_frontmatter` 按 `partition(':')` 首冒号切分而非正则；`test_body_fields_do_not_count`（正文字段不算）。零第三方依赖（stdlib + pytest）。与 T2 `gen_frontmatter_report.py` 职责分离：它是覆盖率报告（只上报），本脚本是门禁（exit 1 阻断）；实现不合并，文件名无碰撞。
+
+## 机械验收命令与结果原文
+
+**1. 契约测试套件** — `python3 -m pytest tests/test_check_frontmatter_fields.py -v`
+```
+============================= test session starts ==============================
+platform darwin -- Python 3.9.6, pytest-8.4.2, pluggy-1.6.0
+collected 13 items
+
+tests/test_check_frontmatter_fields.py::test_parse_frontmatter_edges PASSED [  7%]
+tests/test_check_frontmatter_fields.py::test_compliant_file_has_no_violations PASSED [ 15%]
+tests/test_check_frontmatter_fields.py::test_missing_field_reported PASSED [ 23%]
+tests/test_check_frontmatter_fields.py::test_empty_and_whitespace_values_are_violations PASSED [ 30%]
+tests/test_check_frontmatter_fields.py::test_missing_or_unclosed_frontmatter PASSED [ 38%]
+tests/test_check_frontmatter_fields.py::test_body_fields_do_not_count PASSED [ 46%]
+tests/test_check_frontmatter_fields.py::test_non_utf8_file_reported PASSED [ 53%]
+tests/test_check_frontmatter_fields.py::test_cli_exit_0_when_compliant PASSED [ 61%]
+tests/test_check_frontmatter_fields.py::test_cli_exit_1_with_sorted_violation_listing PASSED [ 69%]
+tests/test_check_frontmatter_fields.py::test_cli_exit_1_when_no_markdown_files PASSED [ 76%]
+tests/test_check_frontmatter_fields.py::test_cli_exit_2_when_root_missing PASSED [ 84%]
+tests/test_check_frontmatter_fields.py::test_cli_output_deterministic_across_runs PASSED [ 92%]
+tests/test_check_frontmatter_fields.py::test_default_root_points_at_repo_steering PASSED [100%]
+
+============================== 13 passed in 0.16s ==============================
+```
+
+**2. 真实 steering/ 运行上报** — `python3 tools/check_frontmatter_fields.py; echo "exit=$?"`
+```
+PASS: 16 个 .md, 0 处违规
+exit=0
+```
+
+**3. 双运行确定性** — 连续两次运行比对
+```
+DETERMINISTIC: 两次运行输出一致
+PASS: 16 个 .md, 0 处违规
+```
+
+**4. shell 级负控制演示**（tmp 目录构造：空 `scenario` 值 + 无 frontmatter）
+```
+bad.md: 字段 'scenario' 为空
+nofm.md: 缺失或未闭合 frontmatter 块
+FAIL: 2 个 .md, 2 处违规
+exit=1
+```
+（tmp_path 负控制在套件内另由 `test_cli_exit_1_with_sorted_violation_listing`、`test_empty_and_whitespace_values_are_violations` 等覆盖）
+
+**5. 无交叉破坏** — `python3 -m pytest tests/ -q`（含 T2/T3 兄弟测试）
+```
+...........................                                              [100%]
+27 passed in 0.31s
+```
+
+**6. 工作区完整性终验** — `git status --porcelain`
+```
+?? docs/reports/
+?? tests/
+?? tools/check_frontmatter_fields.py
+?? tools/check_readme_index.py
+?? tools/gen_frontmatter_report.py
+```
+仅新增本契约两份交付物；兄弟任务产物（`docs/reports/`、`tests/` 下兄弟测试、`tools/check_readme_index.py`、`tools/gen_frontmatter_report.py`）原样未动，动工后无再次变异。
+
+契约目标、反目标、双层验收、文件所有权、零依赖约束全部满足；无未决事项。
+CONTRACT_T1_REWORK2_EXIT=0

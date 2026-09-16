@@ -1,0 +1,24 @@
+Working...
+[feishu] daemon spawn failed: Timed out waiting for Feishu lock: /Users/dreambt/.omp/agent/locks.json.spawn.lock
+勘误成立并已修正证据链。原 pattern `\\\]\(` 在 regex 语义下匹配「`\` `]` `(`」三字符序列，而链接正则的源码形态是 `\]\(`（`]` 与 `(` 之间隔一个 `\`）——结构性假阴性，连豁免文件这一正控制都不命中，该次调用本身即被证伪。
+
+## 证据勘误与重扫结果
+
+**作废**：原报告"`\](` 正则扫 tools/hooks/scripts/.github 均无"一句，依据为坏调用，不作为证据。结论本身不变（另有独立证据：名称 glob `**/*link*`/`**/*readme*`/`**/*index*check*`、tools/ 与 scripts/ 目录清单）。
+
+**重扫**（修正 pattern `\\\]\\\(|\]\(`，正控制命中 `scripts/md_link_check.py:42-43,132`，证明本次扫描有效）命中清单逐项归类：
+
+| 命中 | 归类 |
+|---|---|
+| `scripts/md_link_check.py:42-43,132` | 豁免文件本身（正控制，命中即扫描有效的证明） |
+| `tools/check_readme_index.py:34` | 本任务交付物 |
+| `tools/check_doc_freshness.py:271,300` | **解析 markdown 链接语法，但功能不同**：提取 `.py` 链接与「复用来源」链接做文档新鲜度比对，不做链接有效性门禁 → 按契约措辞（“功能完全相同”）不触发 falsifier；此边界判定提交人工终裁 |
+| `tools/spec_check.py:37` | 噪声：`['\"](` 字符类误配，非链接解析 |
+| `tools/test_gauntlet_checks.sh:25,45` | 豁免脚本的 shell 测试夹具，非独立校验器 |
+| `scripts/tests/test_md_link_check.py` | 豁免脚本的测试 |
+| `tools/git/README.md`、`scripts/ablate/results/raw/*.log` | 文档与实验日志数据，非脚本 |
+
+**修正后结论**：仓库内链接有效性校验器唯一，即被豁免的 `scripts/md_link_check.py`；无同功能脚本，falsifier 未触发。唯一需要人工知悉的边界是 `check_doc_freshness.py`（链接语法解析、用途不同）。
+
+差异范围声明不变：本任务差异仅 `tools/check_readme_index.py` + `tests/test_check_readme_index.py`；`tools/gen_frontmatter_report.py`、`docs/reports/frontmatter-coverage.md`、`tests/test_gen_frontmatter_report.py` 为外部产物，本次重扫亦未在其中发现链接校验逻辑。
+CONTRACT_T2_EXIT=0

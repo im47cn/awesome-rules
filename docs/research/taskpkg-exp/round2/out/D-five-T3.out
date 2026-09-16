@@ -1,0 +1,28 @@
+Working...
+[feishu] daemon spawn failed: Timed out waiting for Feishu lock: /Users/dreambt/.omp/agent/locks.json.spawn.lock
+[feishu] daemon spawn failed: Timed out waiting for Feishu lock: /Users/dreambt/.omp/agent/locks.json.spawn.lock
+claude-mem 上下文回放为环境噪声（系本任务起始时刻的历史观察，其“尚未修改任何文件”已过期），忽略。glob 实证已出，补全交付披露：
+
+## 工作区归属披露（修正版，glob + git status 实证）
+
+**本会话产物（3 个，交付范围）：**
+- `tools/gen_frontmatter_report.py`
+- `tests/test_gen_frontmatter_report.py`
+- `docs/reports/frontmatter-coverage.md`
+
+**并行/遗留落盘（4 个，非本会话产出，未触碰、不纳入交付）：**
+- `tools/check_frontmatter_fields.py`
+- `tools/check_readme_index.py`
+- `tests/test_check_frontmatter_fields.py`
+- `tests/test_check_readme_index.py`
+
+前次披露“2 个”不完整的原因：`git status --porcelain` 对未跟踪目录折叠为 `?? tests/`，掩蔽了目录内外来测试文件；glob 枚举后确认为 4 个，与 advisory 清单一致，无超出清单的其他文件。
+
+## 收口状态
+
+- **完整性**（上轮证据）：`pytest tests/test_gen_frontmatter_report.py -q` → 4 passed；`cmp /tmp/fm-run1.md docs/reports/frontmatter-coverage.md` → REPORT_INTACT。外来测试文件不进入我的验收命令（按文件名定向运行），互不干扰。
+- **所有权**：本会话 3 产物与外来 4 文件路径零交集，无写冲突。
+- **提交纪律**（若维护者后续要求提交）：仅按精确路径逐一 `git add tools/gen_frontmatter_report.py tests/test_gen_frontmatter_report.py docs/reports/frontmatter-coverage.md`，禁止 `git add tests/`、`git add tools/` 或 `-A`——否则会把并行会话的 4 个文件一并带入。本任务包未要求提交，未执行任何 git 写操作。
+
+其余交付结论（验收 5/5、reviewer 复审 PASS、遗留项：空白 title 跨行误捕需与 `hooks/load-steering.sh` 协同修）维持不变。
+EXIT=0

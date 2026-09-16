@@ -1,0 +1,5 @@
+Working...
+[feishu] daemon spawn failed: Timed out waiting for Feishu lock: /Users/dreambt/.omp/agent/locks.json.spawn.lock
+[feishu] daemon spawn failed: Feishu gateway did not connect. Read the log: /Users/dreambt/.omp/agent/feishu/daemon.log
+claude-mem 提示为环境噪声，忽略。提交已更新为 c24632d。按 CLAUDE.md「修复后复审」要求，将修正回传 reviewer 复审：
+EXIT=0

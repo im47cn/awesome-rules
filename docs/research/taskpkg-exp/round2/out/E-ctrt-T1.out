@@ -1,0 +1,51 @@
+Working...
+[feishu] daemon spawn failed: Timed out waiting for Feishu lock: /Users/dreambt/.omp/agent/locks.json.spawn.lock
+claude-mem 状态消息为噪音，忽略。advisory 已处置完毕，最终口径如下。
+
+## 机械验收·最终版（三件套同批执行于最后一次写盘之后，输出原文）
+
+**1. pytest 全绿**
+
+```
+$ python3 -m pytest tests/test_check_frontmatter_fields.py -q
+.....................................                                    [100%]
+37 passed in 0.65s
+```
+
+**2. 真实 steering/ 运行（仅上报）**
+
+```
+$ python3 tools/check_frontmatter_fields.py; echo "exit=$?"
+exit=0
+```
+
+16 个 .md 全合规，违规清单为空。
+
+**3. 正负控制（mktemp 独立构造，fmctl3 批次）**
+
+```
+$ python3 tools/check_frontmatter_fields.py /var/folders/zn/w06grcb53sl3spdn751tgsx80000gn/T/fmctl3-t4qvnz9m/neg_no_title
+/var/folders/zn/w06grcb53sl3spdn751tgsx80000gn/T/fmctl3-t4qvnz9m/neg_no_title/a.md: missing title
+[neg_no_title] exit code = 1
+------------------------------------------------------------
+$ python3 tools/check_frontmatter_fields.py /var/folders/zn/w06grcb53sl3spdn751tgsx80000gn/T/fmctl3-t4qvnz9m/neg_no_scenario
+/var/folders/zn/w06grcb53sl3spdn751tgsx80000gn/T/fmctl3-t4qvnz9m/neg_no_scenario/a.md: missing scenario
+[neg_no_scenario] exit code = 1
+------------------------------------------------------------
+$ python3 tools/check_frontmatter_fields.py /var/folders/zn/w06grcb53sl3spdn751tgsx80000gn/T/fmctl3-t4qvnz9m/neg_empty_fm
+/var/folders/zn/w06grcb53sl3spdn751tgsx80000gn/T/fmctl3-t4qvnz9m/neg_empty_fm/a.md: missing title, scenario
+[neg_empty_fm] exit code = 1
+------------------------------------------------------------
+$ python3 tools/check_frontmatter_fields.py /var/folders/zn/w06grcb53sl3spdn751tgsx80000gn/T/fmctl3-t4qvnz9m/neg_no_fm
+/var/folders/zn/w06grcb53sl3spdn751tgsx80000gn/T/fmctl3-t4qvnz9m/neg_no_fm/a.md: missing title, scenario
+[neg_no_fm] exit code = 1
+------------------------------------------------------------
+$ python3 tools/check_frontmatter_fields.py /var/folders/zn/w06grcb53sl3spdn751tgsx80000gn/T/fmctl3-t4qvnz9m/pos_ok
+[pos_ok] exit code = 0
+------------------------------------------------------------
+```
+
+四次负控均 exit 1 且缺失字段文案正确，正控 exit 0。三批证据结论一致（fmctl2 与 fmctl3 输出逐字相同），佐证脚本行为稳定。
+
+对 advisory 的两点说明已在前一条消息给出：其“证据早于最后写盘”的前提与实际时间线不符（原报告引用的已是写盘后批次）；本次重跑仅为消除批次歧义。交付内容不变：`tools/check_frontmatter_fields.py`、`tests/test_check_frontmatter_fields.py`（37 测试），卡点无，触发器未命中。
+EXIT=0

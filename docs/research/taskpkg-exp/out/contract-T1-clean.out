@@ -1,0 +1,40 @@
+Working...
+[feishu] daemon spawn failed: Feishu gateway did not connect. Read the log: /Users/dreambt/.omp/agent/feishu/daemon.log
+Advisory 处理完毕（claude-mem 通知非任务输入，已忽略）。收尾报告：
+
+## Advisory 裁量结果
+
+| # | 内容 | 裁定 | 处置 |
+|---|------|------|------|
+| 1 | line 154 全角冒号 | **过期**——本会话早前已修 | 无需动作；上方复现输出 `bad.md: 缺失 scenario` 证实现为 ASCII `: ` |
+| 2 | `q.parts` 含目标自身及祖先 → 显式隐藏目标假绿 | **属实**，已复现：`.drafts/`（含违规文件）显式传入 → exit 0 | 修复 |
+| 3 | BOM 测试缺 `\ufeff` | **过期**——本会话早前已修（line 129 已含） | 无需动作 |
+
+## 修复内容（advisory 2）
+
+`tools/check_frontmatter_fields.py` `collect_files`：过滤条件由 `q.parts` 改为 `q.relative_to(target).parts`——只按目标以下的相对路径跳过隐藏段。效果：
+
+- 显式传入的隐藏目标（`.drafts/`）及其祖先不再被自筛 → 正常扫描
+- 目标内隐藏子目录（`.git` 类）仍跳过（原语义保留），docstring 已同步细化
+
+新增回归测试 `test_cli_hidden_dir_handling`（双侧断言：显式隐藏目标必扫出违规 exit 1；目标内隐藏子目录跳过不产生假阴性）。
+
+## 重验原文
+
+```
+$ python3 -m pytest tests/test_check_frontmatter_fields.py -q
+31 passed in 0.58s
+
+$ ... check_frontmatter_fields.py "$D/.drafts"   # 修复前 exit=0（假绿）
+/.../tmp.Nwj7Lnhm5c/.drafts/bad.md: 缺失 scenario
+explicit-hidden exit=1
+
+$ ... check_frontmatter_fields.py "$D/docs"      # .gitstub/ 跳过、ok.md 合规
+hidden-subdir exit=0
+
+$ python3 tools/check_frontmatter_fields.py      # 仓库真实面
+repo steering exit=0
+```
+
+负/正控制（缺 title、缺 scenario、空 frontmatter、无 frontmatter → exit 1；合规 → exit 0）在 31 个用例中持续覆盖，未受本修复影响。终态 `git status` 仍仅 `?? tests/` 与 `?? tools/check_frontmatter_fields.py`，文件所有权合规。
+CONTRACT_T1_CLEAN_EXIT=0

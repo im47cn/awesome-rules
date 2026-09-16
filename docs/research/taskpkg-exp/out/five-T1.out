@@ -1,0 +1,36 @@
+Working...
+[feishu] daemon spawn failed: Timed out waiting for Feishu lock: /Users/dreambt/.omp/agent/locks.json.spawn.lock
+[feishu] daemon spawn failed: Feishu gateway did not connect. Read the log: /Users/dreambt/.omp/agent/feishu/daemon.log
+任务全部完成（6/6），交付说明如下。
+
+# 交付说明：steering frontmatter 字段校验脚本
+
+## 交付物（均为新增，未动任何现有文件）
+- `tools/check_frontmatter_fields.py` — 门禁脚本，755 可执行，纯标准库，Python 3.9.6 实测兼容
+- `tests/test_check_frontmatter_fields.py` — CLI 契约测试，16 用例
+
+## 验收对照
+1. **pytest 全绿**：`python3 -m pytest tests/test_check_frontmatter_fields.py -q` → **16 passed**（终版代码）
+2. **CLI 契约**：`python3 tools/check_frontmatter_fields.py [路径...]`，缺省 `steering/`；目录递归 `*.md`（覆盖 `gtsp/`），显式文件原样检查；每违规文件一行 `路径: 缺失字段: title, scenario`；全合规 exit 0、有违规 exit 1；另设 exit 2 fail-closed（路径不存在 / 扫描遇错 / 文件不可读·非 UTF-8 / 输入面为空）
+3. **负控制**：缺 title、缺 scenario、空 frontmatter、无 frontmatter 四形态全部 `tmp_path` 独立构造、断言 exit 1 **且**断言输出点名正确字段；正控制合规样例（含 `gtsp/` 式嵌套布局）exit 0
+4. **真实 steering/ 运行**：缺省与显式多路径两种形式均 **exit code 0，违规清单为空**——16 个 .md 的 title/scenario 全部非空合规
+
+## 审查处置（CLAUDE.md 交付前审查，reviewer 子代理全文审查）
+| 发现 | 处置 |
+|---|---|
+| 🔴1 `\s*` 跨行吞值假放行：`title:` 空值后跟 `scenario:` 行时下一行整行被吞作 title 值（reviewer 实证旧代码 rc=0 放行） | 改同行正则 `^field:[ \t]*(.*)$` + 回归测试（修复前红、修复后绿）；比 hook 收紧但保持单向蕴含：门禁放行 ⇒ hook 同行读到同一非空值 |
+| 🟠2 空值负控制只测了块末行位置（唯一有判别力的盲区钉住） | 补两条非末行空值用例（title/scenario 各一） |
+| 🟡3 `rglob` 静默吞 PermissionError 缩扫描面（Tripwire 强制条款违反） | `os.walk(onerror=...)` 显式收集扫描错误 → exit 2 + root 环境门测试 |
+| 🟡4 非 UTF-8 → exit 2 分支零覆盖 | 补 `write_bytes(b"\xff\xfebad")` 用例 |
+| 🟡5 闭合 `---` 后字段不计入 / CRLF 放行 / 缺省路径契约均无测试钉 | 补三条用例（缺省路径用 tmp 假仓库根验证，不依赖真实目录） |
+
+**显式遗留（不处理）**：`collect` 以 `SystemExit(2)` 逃逸而 `main` 标注 `-> int` 的注解语义微瑕——与 argparse 自身 SystemExit 惯例一致，退出码与消息正确，reviewer 亦未列为问题项。
+
+## 噪声检查结论（执行前已完成）
+- **缺失**：任务包未定义 frontmatter 解析语义 → 以实际消费者 `hooks/load-steering.sh::parse_meta` 为口径基准（块判定同源；字段取值经审查后收紧为同行，理由见上）
+- **冲突**：CLAUDE.md L33 建议新检查接线 `check_doc_freshness.py`/gauntlet vs 任务包禁改 tools/ 已有脚本 → 任务包优先，交付独立脚本
+- **过期**：无——16 个 .md、基线 `9a76f27`、干净工作区、tests/ 缺席，逐项实证成立
+
+## 工作区披露
+`git status` 含非本会话产物，均未触碰：`tools/check_readme_index.py` + `tests/test_check_readme_index.py`（并行任务包 S9505 交付，其记录已确认识别本会话文件属另一任务包）、`tools/gen_frontmatter_report.py`、`docs/reports/`（来源未明的并行产物）。共享 `tests/` 目录整跑 `pytest tests/ -q` → **32 passed**，两套件无交叉破坏。
+FIVE_T1_EXIT=0

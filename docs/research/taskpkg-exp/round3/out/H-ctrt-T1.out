@@ -1,0 +1,32 @@
+Working...
+[feishu] daemon spawn failed: Feishu gateway did not connect. Read the log: /Users/dreambt/.omp/agent/feishu/daemon.log
+advisory 的 grep 结论已过时——改动在其发出前已落盘（编辑响应 #C05B），本轮用最新读取 + 全量测试名 grep + pytest 复跑三方核实：
+
+**1. 改名已生效**（`tests/test_check_frontmatter_fields.py` #C05B，第 230–239 行）：
+```python
+def test_case_different_duplicate_keys_are_distinct():
+    # 大写 Title 与小写 title 是两个不同的键;小写 title 存在即合规
+    text = "---\nTitle: 大写不算\ntitle: t\nscenario: s\n---\n"
+    assert cff.missing_fields(text) == []
+
+def test_extra_fields_do_not_satisfy_required_ones():
+    # 仅有 description 而无 title:无关字段不能顶替必填字段
+    text = "---\ndescription: 某描述\nscenario: s\n---\n"
+    assert cff.missing_fields(text) == ["title"]
+```
+
+**2. 原名语义已由真实用例钉住**：新 `test_extra_fields_do_not_satisfy_required_ones` 断言“有 description、无 title → `['title']`”，名实相符；原大小写键场景归入新名下的测试。
+
+**3. pytest 复跑**（编辑落盘之后运行）：
+```
+$ python3 -m pytest tests/test_check_frontmatter_fields.py -q
+..........................                                          [100%]
+26 passed in 0.22s
+EXIT=0
+```
+26 = 原 25 + 新增 1，与文件现状一致。
+
+**撤销原交付的遗留段**：`test_extra_fields_do_not_satisfy_required_ones` 名实不符问题已消除，无已知遗留。全套件 26 个测试名逐一核对（CLI 层 10 + 解析层 16），无其他名实偏差。
+
+交付终态：两所有权文件、26 测试全绿、CLI exit 语义 0/1/2、真实 steering/ exit 0、卡点无。
+EXIT=0

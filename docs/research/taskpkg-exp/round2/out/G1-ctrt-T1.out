@@ -1,0 +1,6 @@
+Working...
+[feishu] daemon spawn failed: Timed out waiting for Feishu lock: /Users/dreambt/.omp/agent/locks.json.spawn.lock
+已满足——无需更改。该修复已在上次写入时应用：第 14 行包含 `assert _spec is not None and _spec.loader is not None`，紧接在第 15–16 行的 `module_from_spec(_spec)` / `_spec.loader.exec_module(cff)` 之前。该 `assert` 将两个 `Optional` 类型收窄，以满足 Pyright 的 `reportArgumentType` 和 `reportOptionalMemberAccess` 检查，且不改变运行时行为（`spec_from_file_location` 在这里绝不会对真实文件路径返回 `None`）。
+
+交付物保持不变，且所有验收证据依然有效：26/26 个 `pytest` 测试通过，CLI 正向控制 `exit 0`，四个负向控制 `exit 1`，实际 `steering/` 扫描 `exit 0`（16/16 合规）。
+EXIT=0
