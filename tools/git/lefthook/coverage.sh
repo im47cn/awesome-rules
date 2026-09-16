@@ -239,8 +239,15 @@ if [ "$HAS_TS" = 1 ]; then
         cd "$d" || exit 1
         echo "[cov] ▶ $d: vitest run --coverage + diff-cover (≥${FAIL_UNDER_TS}%)"
         npx vitest run --coverage || exit 1
+        # 无 lcov 二分定位：provider 缺失 vs reporter 缺 lcov（vitest≥5 默认 reporter 不含 lcov，
+        # provider 已装照样空转——gtsp-wop-developer 实证：装了 coverage-v8 门禁仍静默放行）
         [ -f coverage/lcov.info ] || {
-          echo "[cov] $d 未见 coverage/lcov.info (需 @vitest/coverage-v8), 跳过 diff-cover"; exit 0; }
+          if [ ! -e node_modules/@vitest/coverage-v8 ]; then
+            echo "[cov] $d 缺 @vitest/coverage-v8, 跳过 diff-cover (启用: pnpm/npm add -D @vitest/coverage-v8)"
+          else
+            echo "[cov] $d provider 已装仍无 lcov: vitest≥5 默认 reporter 不含 lcov, 需在 vite.config.ts test.coverage.reporter 显式加 'lcov', 跳过 diff-cover"
+          fi
+          exit 0; }
         dc coverage/lcov.info --compare-branch="$COMPARE" --fail-under="$FAIL_UNDER_TS"
       ) || fail=1
     fi
