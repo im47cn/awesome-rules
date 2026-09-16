@@ -1,0 +1,14 @@
+Working...
+[feishu] daemon spawn failed: Timed out waiting for Feishu lock: /Users/dreambt/.omp/agent/locks.json.spawn.lock
+claude-mem 状态消息，忽略。
+
+核实结果（`wc -l -c` 原文）：`tools/gen_frontmatter_report.py` 实为 **135 行 / 4452 字节**。我交付说明中写的“112 行”是错误数字，予以更正；advisory 引用的 3896 是写入工具按字符数的报告值（文件含约 278 个 CJK 字符，UTF-8 下 3896 字符 → 4452 字节），行数以 135 为准。
+
+## 状态修正（执行方追加）
+
+```
+- 更正：交付说明中 tools/gen_frontmatter_report.py 行数 "112 行" 有误，实测 135 行 / 4452 字节（wc -l -c 原文）；测试文件 127 行 / 5606 字节，报告 27 行 / 1905 字节
+```
+
+三份交付物自身无需任何改动；此前全部机械验收证据（pytest 6/6、双次运行 diff 为空、16 文件路径逐一比对）不受影响。上一轮 advisory（死断言）经查亦不成立——该行在首轮修复中已删除，当前文件 `grep 'if False|:missing'` 无匹配。
+CONTRACT_T3_EXIT=0

@@ -1,0 +1,18 @@
+Working...
+[feishu] daemon spawn failed: Feishu gateway did not connect. Read the log: /Users/dreambt/.omp/agent/feishu/daemon.log
+[feishu] daemon spawn failed: Feishu gateway did not connect. Read the log: /Users/dreambt/.omp/agent/feishu/daemon.log
+claude-mem 提示为噪声。复审闭环已补齐，交付更新如下。
+
+## 交付说明（终版增量）
+
+### 强制条款闭环（CLAUDE.md L54 修复后复审）
+GateReviewer 复核结论：**P3 finding 确认关闭**，证据三条——
+1. `rglob` 已加 `is_file()` 过滤，注释对齐 hook 口径，显式文件分支不受影响
+2. 回归测试 `test_directory_named_like_md_is_ignored` 修前必失败（IsADirectoryError 假阳性）、修后通过，是真实回归防御
+3. Reviewer 独立重跑：pytest 13/13 绿；其原始复现场景（`*.md` 同名目录 + 合规文件混合参数）重跑 exit 0，无假阳性；无新问题
+
+### 归属披露（更新）
+上一轮以来工作区新增第 3 个非本会话路径：`docs/reports/`（并行会话运行其 `gen_frontmatter_report.py` 的产物）。当前 `git status` 共 5 个未跟踪路径，其中仅 `tools/check_frontmatter_fields.py` 与 `tests/` 为本任务交付物。staged 区为空——未做任何提交/收编；如需提交将只显式 add 这两个目标文件，绝不目录级 `git add tools/`。
+
+其余验收结论不变：pytest 13/13 绿；真实 `steering/` 缺省运行 exit 0、违规清单空；四态负控制 + 正控制齐备；`steering/` 与既有工具零改动。
+EXIT=0

@@ -39,3 +39,4 @@ docs/design/architecture/
 # 2026-09-15 晨间裁决补充：.factory/metrics/ 为 daily-regression.sh 产物；.pi/ 含本机 remote-pi relay 基建配置
 .factory/metrics/
 .pi/
+docs/research/taskpkg-exp/probe-*/

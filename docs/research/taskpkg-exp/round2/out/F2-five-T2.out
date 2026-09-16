@@ -1,0 +1,36 @@
+Working...
+[feishu] daemon spawn failed: Timed out waiting for Feishu lock: /Users/dreambt/.omp/agent/locks.json.spawn.lock
+交付完成。所有验收项均已验证。
+
+## 噪声检查（执行前复核）
+
+- **缺失**：无关键缺失。一处语义模糊——违规输出 `路径: 链接` 中「路径」未指明是 md 路径还是目标路径；因链接字段本身即目标，取 md 文件路径（更有定位价值），测试按此锚定。
+- **冲突**：无。目标/证据/约束/验收四节自洽。
+- **过期**：无。基线 commit `9a76f27`、工作区干净、README 索引表相对链接、参考脚本 `scripts/md_link_check.py` 与 `tools/check_doc_freshness.py` 存在、`tests/` 不存在——全部实证成立。
+
+## 交付物（仅新增 2 个文件，`git status` 确认无已有文件改动）
+
+**`tools/check_readme_index.py`**（纯标准库：`re`/`sys`/`pathlib`/`urllib.parse`）
+- 链接正则与 `scripts/md_link_check.py` 同口径：`[text](target)` 与 `![alt](target)`，逐行匹配
+- 跳过 `http(s)://`（大小写不敏感）与纯锚点 `#...`；`/` 开头绝对路径直接记违规；其余目标相对 md 所在目录解析（URL 解码、剥离 `#锚点`），不存在记违规
+- 每违规一行 `路径: 链接`；无违规 exit 0，有违规 exit 1；参数错误/文件不可读 exit 2（fail-closed，不与检查结果混淆）
+
+**`tests/test_check_readme_index.py`**（7 个用例，全部 `tmp_path` 独立构造，零仓库依赖）
+
+| 用例 | 防线 |
+|---|---|
+| `test_dead_relative_link_fails` | 死链 → exit 1，精确断言违规行 |
+| `test_absolute_path_link_fails` | 绝对路径 → exit 1（目标 `/etc/hosts` 真实存在，证明违规源于绝对性而非缺失） |
+| `test_external_links_skipped` | http/HTTP 外链不报 → exit 0 |
+| `test_pure_anchor_skipped` | 锚点不报 → exit 0 |
+| `test_valid_relative_link_passes` | 有效相对链接 → exit 0 |
+| `test_anchor_on_existing_target_passes` | `file.md#锚点` 只验文件存在，锚点不参与判定 |
+| `test_mixed_reports_only_broken_in_document_order` | 混合场景：跳过项不掩盖违规，仅报 2 个坏链且按文档序 |
+
+## 验收结果
+
+1. `python3 -m pytest tests/test_check_readme_index.py -q` → **7 passed in 0.15s** 全绿
+2. CLI 行为符合规格（上述规则，已被测试逐条锚定）
+3. 负控制（死链、绝对路径各 1 个 exit 1 用例）、跳过规则（外链、锚点各 ≥1 用例）、正控制（有效相对链接 exit 0）齐备，均用 tmp_path 构造
+4. 真实 README.md 运行：`python3 tools/check_readme_index.py README.md` → **exit 0，违规清单为空**（README 索引表 30 个相对链接全部解析有效）
+EXIT=0

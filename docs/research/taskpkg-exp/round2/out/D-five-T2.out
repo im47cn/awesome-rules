@@ -1,0 +1,18 @@
+Working...
+[feishu] daemon spawn failed: Timed out waiting for Feishu lock: /Users/dreambt/.omp/agent/locks.json.spawn.lock
+三条 advisory 已逐条核实，终验通过。处置如下：
+
+**1. main() 双重调用（concern）——过期观察，交付前已修复。** 当前实现 [tools/check_readme_index.py#8C09] 63-66 行：单次 `violations = find_violations(md)` → 打印 → `return 1 if violations else 0`，无 `__doc__` 残句。advisory 描述的是我首版 write 中的缺陷，我在同一轮内已发现并修复。
+
+**2. 复用 md_link_check 风格（nit）——已满足，无需改动。** `_LINK_RE` 与 `scripts/md_link_check.py` 逐字同款（正则旁注释声明来源）；代码围栏剥离是**有意不做**——任务规则面更窄（仅验收 4 条），脚本头注释已明确「不做锚点命中与代码围栏剥离」，未搬运任何漂移检查逻辑。
+
+**3. 外部出现的外来文件（concern）——已隔离，声明如下。** `tools/check_frontmatter_fields.py`、`tools/gen_frontmatter_report.py` 非本任务创建：任务初始 `ls tools/` 与 `git status` 均无它们，系会话中途外部出现，来源不明。未读取、未修改、不认领。本次交付物**仅**：
+
+- `tools/check_readme_index.py`
+- `tests/test_check_readme_index.py`（含新建 `tests/` 目录）
+
+**终验记录（刚刚执行）**：
+- `python3 -m pytest tests/test_check_readme_index.py -q` → **11 passed**，exit 0
+- `python3 tools/check_readme_index.py README.md` → **exit 0，违规清单为空**（解析面 32 链接、0 跳过、32 相对链接全部存在，非空匹配假阴性已排除）
+- `git status` → 仅 4 个未跟踪新增物（上述 2 个交付物 + 2 个外来文件），零已有文件改动
+EXIT=0

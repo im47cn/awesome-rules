@@ -1,0 +1,23 @@
+Working...
+[feishu] daemon spawn failed: Timed out waiting for Feishu lock: /Users/dreambt/.omp/agent/locks.json.spawn.lock
+两条 advisory 均已核对，结论如下：
+
+**Advisory 1（main() 重复行 154-155 → IndentationError）：过期信息，当前文件无此问题。** 该状态是我会话早期两次编辑之间的瞬态——当时编辑回显已暴露（154-155 残留 8 空格缩进行），随即用 `PUT 154.=155:` 删除。刚刚重读 `tools/gen_frontmatter_report.py:144-166` 确认：151-153 行是唯一的 mkdir/write_text 块，154 行为空行，无重复。另附机器证据：
+
+```
+$ python3 -c "import ast; ast.parse(open('tools/gen_frontmatter_report.py').read()); print('parse OK')"
+parse OK
+```
+
+且该脚本此后已成功执行 3 次 CLI（产出报告），有 IndentationError 的文件无法 import，更不可能运行——advisory 描述的是已修复的中间态，非现状。
+
+**Advisory 2（证据时序：pytest 需在最后一次写盘之后）：实际已满足，且刚又补跑一次。** 交付引用的 `9 passed in 0.02s` 来自最终证据链，链内顺序为 CLI 写盘（15:59，最后一次写盘）→ diff → pytest，即 pytest 本就在最后一次写盘之后（交付引用的正是 0.02s 这次，非更早的 0.03s）。为消除歧义，刚刚（此后无任何写盘）又重跑：
+
+```
+$ python3 -m pytest tests/test_gen_frontmatter_report.py -q
+.........                                                                [100%]
+9 passed in 0.02s
+```
+
+磁盘三文件（15:57 脚本、15:59 测试与报告）自最终验证后未被触碰，`git status --porcelain` 仍仅显示三个所有权路径。前一条关于 `write_md` 被打的 advisory 同样是过期信息——上一轮已重读确认 `write_md` 完整（`path.write_text` 在 60 行）、`scan_dir` 仅一处且含 `mkdir`。无需任何代码改动，交付状态不变。
+EXIT=0

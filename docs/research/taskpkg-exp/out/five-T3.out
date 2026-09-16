@@ -1,0 +1,18 @@
+Working...
+[feishu] daemon spawn failed: Timed out waiting for Feishu lock: /Users/dreambt/.omp/agent/locks.json.spawn.lock
+[feishu] daemon spawn failed: Timed out waiting for Feishu lock: /Users/dreambt/.omp/agent/locks.json.spawn.lock
+状态收口——两条 advisory 的处置与最终事实：
+
+**Advisory 1（正则锁行）**：已满足。修复在本会话早前由负控制测试 `test_whitespace_only_title_counts_as_missing` 失败驱动完成，grep 证实落盘状态即 `\^title:[ \t]*(.+)\$` / `\^scenario:[ \t]*(.+)\$`（tools/gen_frontmatter_report.py:34-35），pytest 7/7 全绿。**交付补充说明（遵 advisory，不修补 hook）**：`hooks/load-steering.sh` 的 `parse_meta` 仍保留同款 `\s*` 吞行缺陷——空白-only 的 `title:` 行会把下一行（通常是 `scenario: …`）整行误读为标题并注入 SessionStart 索引；本报告生成器有意与其分叉（锁行 + 按缺失计 ❌），模块 docstring 已声明。hook 修复归属仓库维护者，不在本任务范围。
+
+**Advisory 2（外来文件处置）**：已满足。兄弟会话（S9505，同树并行）的 4 个外来文件已确认、未触碰、未认领：`tools/check_frontmatter_fields.py`、`tools/check_readme_index.py`、`tests/test_check_frontmatter_fields.py`、`tests/test_check_readme_index.py`。本会话 reviewer 派发时已显式将其划出审查范围（「不得读取评审它们」）。advisory 前提「tests/ 只含你的测试文件」与事实不符——实测含 3 个文件，但验收命令 `python3 -m pytest tests/test_gen_frontmatter_report.py -q` 显式指向本会话文件，不受共存影响（7/7 通过）。
+
+**本会话最终所有权快照**（git status + ls 实证）：
+
+| 归属 | 文件 |
+|---|---|
+| 本会话（报告生成器任务包） | `tools/gen_frontmatter_report.py`、`tests/test_gen_frontmatter_report.py`、`docs/reports/frontmatter-coverage.md` |
+| 并行会话 S9505（残留，不动） | `tools/check_frontmatter_fields.py`、`tools/check_readme_index.py`、`tests/test_check_frontmatter_fields.py`、`tests/test_check_readme_index.py` |
+
+任务包五项验收此前已逐一给出证据（pytest 7/7、CLI 契约、两次运行 byte-identical、tmp_path 负控制 3 行断言、真实 steering/ 覆盖 16 文件）；交付前审查闭环：reviewer overall=correct → P2 修复并复审确认「已解决，未引入新问题」→ P3（APFS 大小写绕过自吞排除）列显式遗留。无未竟工作。
+FIVE_T3_EXIT=0

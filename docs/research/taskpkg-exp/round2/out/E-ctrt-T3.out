@@ -1,0 +1,50 @@
+Working...
+[feishu] daemon spawn failed: Timed out waiting for Feishu lock: /Users/dreambt/.omp/agent/locks.json.spawn.lock
+任务完成。交付说明如下。
+
+## 交付物（契约所有权三文件，均已写入并验证）
+
+| 文件 | 内容 |
+|---|---|
+| `tools/gen_frontmatter_report.py` | 报告生成脚本：递归扫描 `.md`，解析 `---` frontmatter，POSIX 路径字符串排序，`|` 转义为 `\|`，输出到 `docs/reports/frontmatter-coverage.md`（相对 cwd） |
+| `tests/test_gen_frontmatter_report.py` | 6 个行为测试：负控制三样例、排序规格钉死、双次运行字节一致、未闭合 frontmatter、竖线转义、真实 steering 全覆盖 |
+| `docs/reports/frontmatter-coverage.md` | 真实运行产物：16 行数据，`共 16 个文件：16 ✅ / 0 ❌` |
+
+## 机械验收证据（最后一次写盘之后真实运行）
+
+**1. pytest 全绿** — `python3 -m pytest tests/test_gen_frontmatter_report.py -q`：
+```
+......                                                                   [100%]
+6 passed in 0.20s
+```
+
+**2. CLI 双次运行 + diff 为空** — `diff /tmp/run1.md docs/reports/frontmatter-coverage.md; echo $?`（两次 `python3 tools/gen_frontmatter_report.py` 之间）：
+```
+报告已写入 docs/reports/frontmatter-coverage.md（扫描根目录：steering）
+报告已写入 docs/reports/frontmatter-coverage.md（扫描根目录：steering）
+DIFF_EMPTY_EXIT=0
+```
+`diff` 无任何输出、退出码 0。报告无时间戳、排序显式 `key=as_posix()`（不依赖 `os.listdir` 顺序）。
+
+**3. 覆盖数** — `grep -c '^| steering' docs/reports/frontmatter-coverage.md` → `16`（含 `gtsp/` 子目录 10 个；`rglob` 递归，无漏扫）。
+
+**4. 负控制**（`test_negative_control_three_samples`，tmp_path 独立构造合规/缺 title/无 frontmatter 三文件）：断言 3 行数据、`❌ 缺 title` 出现在缺 title 行、`❌ 缺 title、scenario` 出现在无 frontmatter 行。另有未闭合定界符样例测试。
+
+## 状态（写协议追加）
+
+- 起点：全新任务；基线 main commit 9a76f27；契约所有权三文件起点不存在（已核实）
+- ✅ 前提核验：steering/ 存在，`.md` 恰 16 个；pytest 8.4.2 可用
+- ✅ 脚本 + 测试写入；pytest 6/6 绿
+- ✅ 真实运行产物生成，双次 diff 空，16/16 行
+- 当前卡点：无
+
+## 豁免事件披露
+
+- 执行期间工作区出现并行任务产物 `tools/check_readme_index.py`（非本契约所有权文件，未读取未改动）——设计内并行，不触发中止
+- 本执行方额外产生的路径：`tools/`、`tests/`、`docs/reports/` 目录本身（契约明示“目录可新建”）
+
+## 人工验收提请
+
+- 负控制三样例确为 tmp_path 独立构造（非仓库文件）
+- 排序钉死用例：`b-.md` 先于 `b/c.md`（`'-'(0x2D) < '/'(0x2F)`，与 Path 元组排序相反）；转义用例验证 `\|` 且列结构仍为 4 列（结构竖线恰 5 个）
+EXIT=0

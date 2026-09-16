@@ -1,0 +1,24 @@
+Working...
+[feishu] daemon spawn failed: Feishu gateway did not connect. Read the log: /Users/dreambt/.omp/agent/feishu/daemon.log
+Advisory 已核验（非采信即信——两轮实测 + PyYAML 交叉验证），成立，且我原第 7 条的影响方向判断有误，予以更正并升级。以下为对原清单的增补更正，其余 1–6、8、9、10 条维持不变：
+
+---
+
+**更正原第 7 条 → 升级为 🟠，并扩充为两类缺陷（`tools/check_frontmatter_fields.py:33,36`）**
+
+围栏判断 `.strip() == "---"` 的问题比"接受前导空白开栏（偏漏报）"更严重——**闭合侧的同样写法会把 body 内缩进的 `---` 误当 closer，提前截断 frontmatter，对合法 YAML 产生误拒**，与第 1 条（冒号前空格）同属"合法输入被门禁误拒"类别：
+
+- **7a 🟠 缩进 `---` 被误认 closer → frontmatter 截断 → 假阳性**。实测三例：
+  - `'---\ntitle: |\n  ---\nscenario: s\n---\n'` → `split_frontmatter` 返回 `['title: |']` → 报 **title、scenario 双缺失**。PyYAML 基准：合法，`{'title': '---\n', 'scenario': 's'}`；
+  - `'---\ntitle: a\n  ---\nscenario: s\n---\n'` → body 截为 `['title: a']` → 报 **scenario 缺失**。PyYAML：合法，`title: 'a ---'`（缩进 `---` 是纯文本续行内容，列 0 才是文档边界）；
+  - 深缩进变体 `title: |\n  x\n   ---\n...` → body 截为 `['title: |', '  x']` → 报 scenario 缺失。
+  
+  触发场景现实：steering 文档的 scenario/title 用块标量写 markdown 内容、内含 `---`（水平分隔线）是常见写法，整篇被误判双缺失。
+- **7b 🟡 开栏接受前导空白**（原第 7 条内容，维持）：`"  ---"` 首行被认作 frontmatter 开始，偏离顶格规范，方向偏漏报。
+
+**修复方向认可并已验证可组合**：closer 改为列 0 判定——`lines[idx].rstrip() == "---"`（rstrip 只去尾随空白，前导空白不再匹配），开栏同理 `lines[0].rstrip() != "---"`。逐行走查三例修复后行为：body 分别为 `["title: |", "  ---", "scenario: s"]` / `["title: a", "  ---", "scenario: s"]` / `["title: |", "  x", "   ---", "scenario: s"]`——块标量分支将缩进 `---` 收入 parts（title 得 `"---"` / `"x ---"` 非空），skip 循环将纯续行 `  ---` 跳过，scenario 均正常解析 → 三例均 `[]`。与现有 `_scalar_value` 块标量/跳行逻辑无冲突，改动最小。列 0 `---` 在合法 YAML 中本就是文档边界，块内容不可能含列 0 `---`，修复后无残留边界。
+
+**对原第 10 条（测试覆盖缺口）追加**：无"块标量/续行内含缩进 `---`"用例（会暴露 7a）；建议随修复补 `title: |\n  ---\n...` 与纯续行 `  ---` 两个正例。
+
+**更新后清单计数**：🔴 0 / 🟠 2（第 1 条、7a）/ 🟡 9。
+EXIT=0
