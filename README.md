@@ -132,7 +132,7 @@ Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分�
 | [hermes-agent-self-evolution](docs/research/hermes-agent-self-evolution.md) | session 挖掘 + 人工审核护栏 → 已落地 skill-evo |
 | [GEPA](docs/research/gepa.md) | Genetic-Pareto 反思进化引擎 → 已落地 skills/skill-evo/scripts/evo_gepa.py；v2/ICLR 2026 Oral 增量待裁决 |
 | [SkillOpt](docs/research/skillopt.md) | Sleep replay 确定性打分 + 反 Goodhart 门控 → 已落地 replay-eval |
-| [任务包模板对照实验](docs/research/taskpkg-ab-experiment.md) | FIVE vs CONTRACT 四轮预注册实验：胜负在升级触发器特异性不在要素清单；拦截型守护证伪 → L1/L2/L3 分层防御（全部实证，已落地规范包） |
+| [任务包模板对照实验](docs/research/taskpkg-ab-experiment.md) | FIVE vs CONTRACT 四轮预注册实验：触发器特异性消误报（R2），但纸面触发器对静默侵犯无执行力（R3，有条款臂漏报）→ 守护机械化，L1/L2/L3 分层防御（已落地规范包） |
 
 ## 安装
 

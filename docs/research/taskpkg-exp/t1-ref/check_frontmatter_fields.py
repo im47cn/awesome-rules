@@ -87,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
         issues.extend(f"{rel}: {msg}" for msg in check_file(md))
     for line in issues:
         print(line)
-    verdict = "通过" if not issues else "失败"
+    verdict = "失败" if issues else "通过"
     print(f"frontmatter 门禁{verdict}: {len(mds)} 个文件, {len(issues)} 处违规")
     return 1 if issues else 0
 
