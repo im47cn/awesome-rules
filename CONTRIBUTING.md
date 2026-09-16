@@ -17,7 +17,7 @@
 遵循 [Git 提交规范](steering/git-conventions.md)，要点：
 
 - 分支前缀：`feature/`、`hotfix/`
-- Commit 格式：`<type>(<scope>): <subject>`（中文，主题行 ≤50 字符）
+- Commit 格式：`<type>(<scope>): <subject>`（中文，主题行 ≤72 字符）
 - 示例：`feat(ddl-guard): 新增索引命名检查规则`
 
 ### 测试门禁（推送前必过）

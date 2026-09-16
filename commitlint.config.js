@@ -24,9 +24,11 @@ module.exports = {
       'arch-hawkeye', 'tools', 'scripts', 'docs', 'deps', 'release', 'dependency',  // 工程
     ]],
 
-    // ── 主题行长度（git 经典 50/72 规则，对应规范"主题行 ≤50 字符"）──
-    'subject-max-length': [2, 'always', 50],
-    'header-max-length': [2, 'always', 72],
+    // ── 行长度（放宽：50/72 对 CJK 主题过紧，2026-09-16 评审实践裁定 72/100）──
+    'subject-max-length': [2, 'always', 72],
+    'header-max-length': [2, 'always', 100],
+    // body 单行：config-conventional 默认 100，中文长句/URL 易触线，放宽至 200
+    'body-max-line-length': [2, 'always', 200],
 
     // ── 关闭英文大小写规则（中文 subject 不适用）──────────────────
     'subject-case': [0],
