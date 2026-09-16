@@ -114,7 +114,7 @@ npm run release       # 正式执行：bump 版本 + 更新 CHANGELOG.md + 打 t
 三份配置单一对齐 `steering/git-conventions.md`，是规范的「可执行镜像」：
 
 - `~/.gitmessage` —— commit 模板（装主目录 + 全局 `commit.template`，所有仓库/IDEA 一次识别）
-- `commitlint.config.cjs` —— type/scope 枚举、主题行 ≤50 字符、breaking 标记（事后校验）
+- `commitlint.config.cjs` —— type/scope 枚举、主题行 ≤100 字符、breaking 标记（事后校验）
 - `lefthook.yml` —— hook 编排（commit-msg → 规范校验；pre-commit/pre-push → 覆盖率红线），入库随 clone 共享
 - `.lefthook/commitmsg-check.sh` —— commit 规范校验（缺 commitlint 自动 `npm install -g`；无 node 提示后放行，装 node 后首次提交自动补装）
 - `.lefthook/coverage.sh` —— 覆盖率红线（增量 diff-cover：变更行 java ≥98% / python・ts ≥90%；java 全量：JaCoCo 报告级行/分支 ≥98%，light/full 双模式；python/node/java；缺 diff-cover 自动安装，见「覆盖率红线依赖」），入库随 clone 共享

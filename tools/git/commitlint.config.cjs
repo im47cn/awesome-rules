@@ -20,9 +20,12 @@ module.exports = {
     //    R9 门禁守护上游三方一致，本件不参与比对）
     'scope-enum': [1, 'always', ['api', 'db', 'ui', 'ci', 'dependency']],
 
-    // ── 主题行长度（git 经典 50/72 规则，对应规范"主题行 ≤50 字符"）──
-    'subject-max-length': [2, 'always', 50],
-    'header-max-length': [2, 'always', 72],
+    // ── 行长度（2026-09-16 数据驱动校准：6 仓 1353 提交实测，拦截率 ≤5% 红线，
+    //    按 P99+幸存者偏差余量取整；旧 50/72/100 对 CJK 过紧已废）──
+    'subject-max-length': [2, 'always', 100],
+    'header-max-length': [2, 'always', 150],
+    // body 单行：config-conventional 默认 100，中文长句/URL 易触线；实测 max 204
+    'body-max-line-length': [2, 'always', 300],
 
     // ── 关闭英文大小写规则（中文 subject 不适用）──────────────────
     'subject-case': [0],
