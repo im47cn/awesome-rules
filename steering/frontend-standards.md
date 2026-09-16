@@ -46,6 +46,22 @@ funcType / funcName / actionName / url / funcOption），由前端按 parentId �
 通过 ≠ 真实链路通过。MR !5 用 8 条同构 mock 菜单（1 根 + 7 子）验证了菜单下发
 全链路。
 
+### 【强制】mock 禁止宽容解析——请求侧按冻结契约严格消费
+
+mock 侧解析请求参数时，不得接受契约冻结文本之外的形态（未知字段、已废弃字段、
+前端私设嵌套结构）：宽容 = 让 mock 自成第二契约事实源，与真实后端分叉。真实后
+端对未知请求字段普遍静默忽略（Jackson 默认关闭 FAIL_ON_UNKNOWN），被忽略的字
+段在 mock 里"生效"、在真实链路里"蒸发"，走查在 mock 模式必然全绿。废弃形态应
+显式抛错（`throw new Error('契约冻结为 X，Y 已废')`），让漂移在 mock 侧红灯而
+不是在生产现场红灯。
+
+**为什么**：gtsp-wop-developer 门户 batchRetry 曾用前端私设嵌套 `timeWindow`
+发请求（契约 E 冻结为扁平 `timeFrom`/`timeTo`）：mock 按嵌套形态解析照常过滤，
+真实 callback 服务静默忽略 → 条件模式批量重试时间窗失效、重推范围放大
+（2026-09-16 四仓对账实证：同窗口扁平形态 60104 无匹配 vs 嵌套形态 matched=1）。
+修复时 mock 侧同步加 `assertNoLegacyTimeWindow` 抛错守卫 + 契约锁定测试运行时
+对抗用例（4e9bb7c）。
+
 ### 【推荐】mock 端点路径与真实网关一致
 
 便于本地 `curl` 对比 mock 与真实响应差异，也便于切换验证（关 mock 后同一 URL
