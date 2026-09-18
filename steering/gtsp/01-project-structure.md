@@ -50,7 +50,7 @@ gtsp-{域}-domain/.../domain/
 | domain | `gtsp-{域}-domain` | 领域层（实体/值对象/DomainService/Repository/ExtPt） |
 | infrastructure | `gtsp-{域}-infrastructure` | 基础设施层（PO/Mapper/RepositoryImpl/Ext） |
 
-> 所有服务继承 `com.acme:gtsp-parent:2.0.0-SNAPSHOT`，公共依赖版本在父 POM 统一管理，子模块禁止硬编码版本号。跨域复用的业务模型（DTO/值对象）放 `gtsp-common-model`；公共框架类（`ResponseMessage`/`PagingInfo`/`ResultMode` 等）由 `fss-common` 提供（见 [06](06-exception.md)）。
+> 所有服务继承 `com.acme:gtsp-parent:2.0.0-SNAPSHOT`，公共依赖版本在父 POM 统一管理，子模块禁止硬编码版本号。跨域复用的业务模型（DTO/值对象）放 `gtsp-common-model`；公共框架类（`ResultMode`/`BaseException`/`ErrorType`）由 `fss-common` 提供，统一信封 `ResponseMessage`/`PagingInfo` 实际由 `cis-base-model`（`com.wanlianyida.cis.model`）供给（2026-09-18 javap 实证修正，见 [06](06-exception.md) 与 [09](09-cr-checklist.md) §2）。
 
 ## 5. 轻量档（api+service 两模块）
 

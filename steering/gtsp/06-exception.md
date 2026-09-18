@@ -9,7 +9,7 @@ scenario: ResultMode/BaseException/ErrorType
 
 ## 1. 统一返回格式
 
-返回类型按模块裁决：client 模块（Feign 接口）统一 `ResponseMessage<T>`；adapter 模块（Controller）统一 `ResultMode<T>`（由 `fss-common` 提供）。禁止裸返回业务对象。
+返回类型按模块裁决：client 模块（Feign 接口）统一 `ResponseMessage<T>`（由 `cis-base-model` 提供）；adapter 模块（Controller）统一 `ResultMode<T>`（由 `fss-common` 提供）。禁止裸返回业务对象。
 
 `ResultMode<T>` 主要字段：`model`（业务数据）、`total`（分页总数）、`succeed`、`errMsg`、`message`、`errCode`。常用静态方法：`success(data)`、`successPageList(list, total)`、`fail(code, msg)`。对外 Open API 响应体结构（含 `details`/`timestamp`/`traceId`，见 [`../openapi-standards.md`](../openapi-standards.md)）与内部 `ResultMode` 不同，两者映射由 API 网关完成，业务层无需关心。
 
