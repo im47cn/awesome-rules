@@ -74,7 +74,7 @@ scenario: CR 清单/公共依赖速查
 | 场景 | 依赖 | 说明 |
 | --- | --- | --- |
 | 公共框架 | `fss-common` | ResultMode、BaseException、ErrorType、`entity.PagingInfo`（**不含 ResponseMessage/ExceptionEnum**——2026-09-18 javap 实证，见下行 cis-base-model） |
-| 统一信封 | `cis-base-model` | `com.wanlianyida.cis.model.ResponseMessage`（succeed/code/message/model/total）、`cis.model.PagingInfo`（filterModel/currentPage/pageLength；与 fss-common 同形并存，仓内既有约定以本构件为准） |
+| 统一信封 | `cis-base-model` | `com.wanlianyida.cis.model.ResponseMessage`（succeed/code/message/model/total）、`com.wanlianyida.cis.model.PagingInfo`（filterModel/currentPage/pageLength；与 fss-common 同形并存，仓内既有约定以本构件为准） |
 | ORM | `mybatis-plus-boot-starter` | BaseMapper、Wrappers、PaginationInnerInterceptor |
 | 连接池 | `druid-spring-boot-starter` | 数据库连接池 |
 | 链路追踪 | `wlyd-trace-context-spring-boot-starter` | traceId 注入、Log4j2 默认配置 |
