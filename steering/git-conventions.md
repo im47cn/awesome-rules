@@ -39,7 +39,7 @@ inclusion: always
 | --- | --- |
 | 业务域 | `api`、`db`、`ui`、`ci` |
 | 技能 | `skills/`（指针行——各技能 scope 由根配置的 scope 枚举自动包含，无需手工登记） |
-| 工程 | `dependency`、`tools`、`scripts`、`docs`、`deps`、`release`、`arch-hawkeye` |
+| 工程 | `dependency`、`tools`、`scripts`、`docs`、`deps`、`release`、`arch-hawkeye`、`task-package` |
 
 新增技能时追加到根 `commitlint.config.js` 的 `scope-enum`（分发件 `tools/git/commitlint.config.cjs` 为下游通用子集，不要求同步）。
 

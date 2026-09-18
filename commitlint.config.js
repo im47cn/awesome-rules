@@ -21,7 +21,7 @@ module.exports = {
     'scope-enum': [1, 'always', [
       'api', 'db', 'ui', 'ci',          // 业务域
       'alibabacloud-devops', 'api-guard', 'arch-guard', 'code-review', 'contract-guard', 'ddl-guard', 'doc-gen', 'impact-guard', 'skill-evo', 'sourcery-autofix', 'tokensave-mcp', 'work-report',  // 技能
-      'arch-hawkeye', 'tools', 'scripts', 'docs', 'deps', 'release', 'dependency',  // 工程
+      'arch-hawkeye', 'tools', 'scripts', 'docs', 'deps', 'release', 'dependency', 'task-package',  // 工程
     ]],
 
     // ── 行长度（2026-09-16 数据驱动校准：6 仓 1353 提交实测，拦截率 ≤5% 红线，
