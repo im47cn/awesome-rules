@@ -236,7 +236,8 @@ if [ "$HAS_JAVA" = 1 ]; then
             exit 1
           fi
           if [ $((bm + bc)) -gt 0 ]; then
-            bp=$(awk "BEGIN{printf \"%.1f\", 100*$bc/($bme+$bc)}")
+            # 预算吃满 missed 且 covered=0 时分母为 0, awk 会打出空串——显式置 100.0
+            if [ $((bme + bc)) -eq 0 ]; then bp="100.0"; else bp=$(awk "BEGIN{printf \"%.1f\", 100*$bc/($bme+$bc)}"); fi
             if [ $((bc * 100)) -lt $((FAIL_UNDER_JAVA * ($bme + bc))) ]; then
               echo "✗ [cov] $d 全量分支覆盖 ${bp}%（实 missed $bm, 预算扣除后 ${bme}）< ${FAIL_UNDER_JAVA}%（存量+新增红线）"
               exit 1
