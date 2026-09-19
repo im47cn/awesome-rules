@@ -181,7 +181,7 @@ if [ "$HAS_JAVA" = 1 ]; then
         esac
         case "$jver" in
           *[!0-9.-]*)
-            echo "[cov] ⚠ $d jacoco 版本「$jver」非数字字面量, 跳过版本校验（确保运行时 ≥0.8.2）"
+            echo "[cov] ⚠ $d jacoco 版本「${jver}」非数字字面量, 跳过版本校验（确保运行时 ≥0.8.2）"
             jver=
             ;;
         esac
@@ -222,7 +222,7 @@ if [ "$HAS_JAVA" = 1 ]; then
             led_l=$((10#$led_l)); led_b=$((10#$led_b))
             [ "$led_l" -lt "$BUDGET_LINE_MISSED" ] && BUDGET_LINE_MISSED=$led_l
             [ "$led_b" -lt "$BUDGET_BRANCH_MISSED" ] && BUDGET_BRANCH_MISSED=$led_b
-            echo "[cov] $d 豁免预算生效: 行 ≤$BUDGET_LINE_MISSED / 分支 ≤$BUDGET_BRANCH_MISSED（min(申报, 台账 LEDGER_TOTAL 行$led_l/分支$led_b), 逐项条目归 CR 审查）"
+            echo "[cov] $d 豁免预算生效: 行 ≤$BUDGET_LINE_MISSED / 分支 ≤${BUDGET_BRANCH_MISSED}（min(申报, 台账 LEDGER_TOTAL 行$led_l/分支$led_b), 逐项条目归 CR 审查）"
           fi
         fi
         lme=$(( lm > BUDGET_LINE_MISSED ? lm - BUDGET_LINE_MISSED : 0 ))
@@ -232,13 +232,13 @@ if [ "$HAS_JAVA" = 1 ]; then
         else
           lp=$(awk "BEGIN{printf \"%.1f\", 100*$lc/($lme+$lc)}")
           if [ $((lc * 100)) -lt $((FAIL_UNDER_JAVA * ($lme + lc))) ]; then
-            echo "✗ [cov] $d 全量行覆盖 ${lp}%（实 missed $lm, 预算扣除后 $lme）< ${FAIL_UNDER_JAVA}%（存量+新增红线, 补测或按排除实践豁免后重跑）"
+            echo "✗ [cov] $d 全量行覆盖 ${lp}%（实 missed $lm, 预算扣除后 ${lme}）< ${FAIL_UNDER_JAVA}%（存量+新增红线, 补测或按排除实践豁免后重跑）"
             exit 1
           fi
           if [ $((bm + bc)) -gt 0 ]; then
             bp=$(awk "BEGIN{printf \"%.1f\", 100*$bc/($bme+$bc)}")
             if [ $((bc * 100)) -lt $((FAIL_UNDER_JAVA * ($bme + bc))) ]; then
-              echo "✗ [cov] $d 全量分支覆盖 ${bp}%（实 missed $bm, 预算扣除后 $bme）< ${FAIL_UNDER_JAVA}%（存量+新增红线）"
+              echo "✗ [cov] $d 全量分支覆盖 ${bp}%（实 missed $bm, 预算扣除后 ${bme}）< ${FAIL_UNDER_JAVA}%（存量+新增红线）"
               exit 1
             fi
           else
