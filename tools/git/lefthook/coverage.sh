@@ -199,24 +199,36 @@ if [ "$HAS_JAVA" = 1 ]; then
         [ -n "$xmls" ] || { echo "[cov] $d 未生成任何 jacoco.xml, 跳过"; exit 0; }
         # 全量红线（存量+新增）: 汇总报告级 LINE/BRANCH 计数（生成代码剔除由 JaCoCo ≥0.8.2 注解过滤保证）
         read -r lm lc bm bc <<<"$(jacoco_totals $xmls)"
+        # 豁免预算（可选）: .lefthook/coverage-budget.env 提供 BUDGET_LINE_MISSED / BUDGET_BRANCH_MISSED
+        # （纯数字）。语义: 报告级 missed 扣除预算后须仍达红线——预算是棘轮上限而非目标, 任何新增
+        # 未覆盖分支/行即爆红; 预算逐项台账（类:行 + 不可达理由/债务 TODO, CR 审查口径）放
+        # .lefthook/coverage-exemptions.md, 台账与预算数不一致时以更严者为准。无该文件则零预算。
+        BL=0; BB=0
+        budget_f="$d/.lefthook/coverage-budget.env"
+        if [ -f "$budget_f" ]; then
+          eval "$(grep -E '^(BUDGET_LINE_MISSED|BUDGET_BRANCH_MISSED)=[0-9]+$' "$budget_f")"
+          echo "[cov] $d 豁免预算生效: 行 ≤${BUDGET_LINE_MISSED:-0} / 分支 ≤${BUDGET_BRANCH_MISSED:-0}（台账: .lefthook/coverage-exemptions.md）"
+        fi
+        lme=$(( lm > BUDGET_LINE_MISSED ? lm - BUDGET_LINE_MISSED : 0 ))
+        bme=$(( bm > BUDGET_BRANCH_MISSED ? bm - BUDGET_BRANCH_MISSED : 0 ))
         if [ $((lm + lc)) -eq 0 ]; then
           echo "[cov] $d jacoco 报告无 LINE 计数, 跳过全量红线"
         else
-          lp=$(awk "BEGIN{printf \"%.1f\", 100*$lc/($lm+$lc)}")
-          if [ $((lc * 100)) -lt $((FAIL_UNDER_JAVA * (lm + lc))) ]; then
-            echo "✗ [cov] $d 全量行覆盖 ${lp}% < ${FAIL_UNDER_JAVA}%（存量+新增红线, 补测或按排除实践豁免后重跑）"
+          lp=$(awk "BEGIN{printf \"%.1f\", 100*$lc/($lme+$lc)}")
+          if [ $((lc * 100)) -lt $((FAIL_UNDER_JAVA * ($lme + lc))) ]; then
+            echo "✗ [cov] $d 全量行覆盖 ${lp}%（实 missed $lm, 预算扣除后 $lme）< ${FAIL_UNDER_JAVA}%（存量+新增红线, 补测或按排除实践豁免后重跑）"
             exit 1
           fi
           if [ $((bm + bc)) -gt 0 ]; then
-            bp=$(awk "BEGIN{printf \"%.1f\", 100*$bc/($bm+$bc)}")
-            if [ $((bc * 100)) -lt $((FAIL_UNDER_JAVA * (bm + bc))) ]; then
-              echo "✗ [cov] $d 全量分支覆盖 ${bp}% < ${FAIL_UNDER_JAVA}%（存量+新增红线）"
+            bp=$(awk "BEGIN{printf \"%.1f\", 100*$bc/($bme+$bc)}")
+            if [ $((bc * 100)) -lt $((FAIL_UNDER_JAVA * ($bme + bc))) ]; then
+              echo "✗ [cov] $d 全量分支覆盖 ${bp}%（实 missed $bm, 预算扣除后 $bme）< ${FAIL_UNDER_JAVA}%（存量+新增红线）"
               exit 1
             fi
           else
             bp="n/a"
           fi
-          echo "[cov] ✓ $d 全量行覆盖 ${lp}% / 分支 ${bp}% ≥ ${FAIL_UNDER_JAVA}%"
+          echo "[cov] ✓ $d 全量行覆盖 ${lp}% / 分支 ${bp}% ≥ ${FAIL_UNDER_JAVA}%（含预算扣除: 行 -${BUDGET_LINE_MISSED:-0} 分支 -${BUDGET_BRANCH_MISSED:-0}）"
         fi
         # 增量补充检查（变更行）: 不替代上面的全量红线
         dc $xmls --compare-branch="$COMPARE" --fail-under="$FAIL_UNDER_JAVA"
