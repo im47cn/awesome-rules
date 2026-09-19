@@ -228,7 +228,7 @@ if [ "$HAS_JAVA" = 1 ]; then
           else
             bp="n/a"
           fi
-          echo "[cov] ✓ $d 全量行覆盖 ${lp}% / 分支 ${bp}% ≥ ${FAIL_UNDER_JAVA}%（含预算扣除: 行 -${BUDGET_LINE_MISSED:-0} 分支 -${BUDGET_BRANCH_MISSED:-0}）"
+          echo "[cov] ✓ $d 全量行覆盖 ${lp}% / 分支 ${bp}% ≥ ${FAIL_UNDER_JAVA}%（原始 missed 行 ${lm}/分支 ${bm}；预算扣除 行-${BUDGET_LINE_MISSED:-0}/分支-${BUDGET_BRANCH_MISSED:-0}，% 为扣除后生效口径，原始数以台账为准）"
         fi
         # 增量补充检查（变更行）: 不替代上面的全量红线
         dc $xmls --compare-branch="$COMPARE" --fail-under="$FAIL_UNDER_JAVA"
