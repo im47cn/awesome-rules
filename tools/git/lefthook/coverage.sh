@@ -202,12 +202,28 @@ if [ "$HAS_JAVA" = 1 ]; then
         # 豁免预算（可选）: .lefthook/coverage-budget.env 提供 BUDGET_LINE_MISSED / BUDGET_BRANCH_MISSED
         # （纯数字）。语义: 报告级 missed 扣除预算后须仍达红线——预算是棘轮上限而非目标, 任何新增
         # 未覆盖分支/行即爆红; 预算逐项台账（类:行 + 不可达理由/债务 TODO, CR 审查口径）放
-        # .lefthook/coverage-exemptions.md, 台账与预算数不一致时以更严者为准。无该文件则零预算。
-        BL=0; BB=0
+        # .lefthook/coverage-exemptions.md, 生效预算 = min(预算, 台账 LEDGER_TOTAL 申报行), 预算>0
+        # 而台账缺失/无申报行 → 拒绝（fail-closed）。无预算文件则零预算。
+        BUDGET_LINE_MISSED=0; BUDGET_BRANCH_MISSED=0  # 预置零: 阻断继承同名环境变量绕过
         budget_f="$d/.lefthook/coverage-budget.env"
         if [ -f "$budget_f" ]; then
           eval "$(grep -E '^(BUDGET_LINE_MISSED|BUDGET_BRANCH_MISSED)=[0-9]+$' "$budget_f")"
-          echo "[cov] $d 豁免预算生效: 行 ≤${BUDGET_LINE_MISSED:-0} / 分支 ≤${BUDGET_BRANCH_MISSED:-0}（台账: .lefthook/coverage-exemptions.md）"
+          # 前导零十进制化: 08/09 在算术展开按八进制解析会语法错误中止
+          BUDGET_LINE_MISSED=$((10#${BUDGET_LINE_MISSED:-0})); BUDGET_BRANCH_MISSED=$((10#${BUDGET_BRANCH_MISSED:-0}))
+          if [ "$BUDGET_LINE_MISSED" -gt 0 ] || [ "$BUDGET_BRANCH_MISSED" -gt 0 ]; then
+            ledger_f="$d/.lefthook/coverage-exemptions.md"
+            led=$(grep -m1 -E '^LEDGER_TOTAL: *line=[0-9]+ +branch=[0-9]+' "$ledger_f" 2>/dev/null || true)
+            if [ -z "$led" ]; then
+              echo "✗ [cov] $d 预算>0 但台账缺失或无 'LEDGER_TOTAL: line=N branch=M' 申报行（$ledger_f, fail-closed）"
+              exit 1
+            fi
+            led_l=${led##*line=}; led_l=${led_l%% *}
+            led_b=${led##*branch=}
+            led_l=$((10#$led_l)); led_b=$((10#$led_b))
+            [ "$led_l" -lt "$BUDGET_LINE_MISSED" ] && BUDGET_LINE_MISSED=$led_l
+            [ "$led_b" -lt "$BUDGET_BRANCH_MISSED" ] && BUDGET_BRANCH_MISSED=$led_b
+            echo "[cov] $d 豁免预算生效: 行 ≤$BUDGET_LINE_MISSED / 分支 ≤$BUDGET_BRANCH_MISSED（min(申报, 台账 LEDGER_TOTAL 行$led_l/分支$led_b), 逐项条目归 CR 审查）"
+          fi
         fi
         lme=$(( lm > BUDGET_LINE_MISSED ? lm - BUDGET_LINE_MISSED : 0 ))
         bme=$(( bm > BUDGET_BRANCH_MISSED ? bm - BUDGET_BRANCH_MISSED : 0 ))
