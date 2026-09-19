@@ -57,6 +57,7 @@ inclusion: always
 1. 代码是生成的？→ 用注解机制（Generated），一劳永逸
 2. 整类无逻辑纯装配？→ pom excludes，模式尽量窄
 3. 有逻辑但暂不测？→ diff-cover 豁免 + 显式 TODO 债务标记，还清即移除豁免
+4. 结构性不可达分支（逐行推理有调用链证据，如前置校验保证非空、Servlet 规范恒非 null、枚举穷举）？→ 豁免预算台账：`.lefthook/coverage-exemptions.md` 逐项记录「类:行 + 不可达理由 + falsifier（何种新调用方/输入会推翻）」，`.lefthook/coverage-budget.env` 声明预算数（tools/git 分发 coverage.sh full 模式扣除后过红线）；预算是棘轮上限非目标，台账须含 `LEDGER_TOTAL: line=N branch=M` 申报行（与逐项合计一致），coverage.sh 生效预算 = min(预算, LEDGER_TOTAL)，预算 > 0 而无台账/申报行直接拒绝（fail-closed），每项须 CR 背书
 
 ### 卫生要求
 
