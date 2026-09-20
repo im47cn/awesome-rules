@@ -89,14 +89,12 @@ def extract_endpoints(content: str, file_path: str):
 
     # 类级 @RequestMapping
     class_mapping = ""
-    cm = re.search(r"class\s+\w+[^{]*?\{", content)
-    if cm:
+    if cm := re.search(r"class\s+\w+[^{]*?\{", content):
         before_class = content[: cm.start()]
-        rm = re.search(
+        if rm := re.search(
             r'@RequestMapping\s*\(\s*(?:value\s*=\s*)?"([^"]+)"', before_class
-        )
-        if rm:
-            class_mapping = rm.group(1)
+        ):
+            class_mapping = rm[1]
 
     # 方法级映射注解
     mapping_pattern = re.compile(
@@ -112,9 +110,9 @@ def extract_endpoints(content: str, file_path: str):
         if re.match(r"\s*(?:public\s+|abstract\s+)*class\s", after_match):
             continue
 
-        ann_type = m.group(1)
-        path = m.group(2)
-        extra = m.group(3)
+        ann_type = m[1]
+        path = m[2]
+        extra = m[3]
 
         http_method = {
             "GetMapping": "GET",
@@ -127,22 +125,21 @@ def extract_endpoints(content: str, file_path: str):
 
         # @RequestMapping 的 method
         if ann_type == "RequestMapping":
-            mm = re.search(r"method\s*=\s*(\w+\.\w+)", extra)
-            if mm:
-                method_name = mm.group(1).split(".")[-1].upper()
+            if mm := re.search(r"method\s*=\s*(\w+\.\w+)", extra):
+                method_name = mm[1].split(".")[-1].upper()
                 if method_name in ("GET", "POST", "PUT", "DELETE", "PATCH"):
                     http_method = method_name
 
-        full_path = (class_mapping or "") + path
+        full_path = f"{class_mapping}{path}"
         if not full_path.startswith("/"):
-            full_path = "/" + full_path
+            full_path = f"/{full_path}"
 
         line = content[: m.start()].count("\n") + 1
 
         # 提取方法名
         after = content[m.end():]
         method_m = re.search(r"\w+\s+(\w+)\s*\(", after)
-        method_name = method_m.group(1) if method_m else "(匿名)"
+        method_name = method_m[1] if method_m else "(匿名)"
 
         endpoints.append(ApiEndpoint(
             http_method=http_method,
@@ -335,7 +332,37 @@ def find_contract_files(path: str) -> list:
 def _extract_class_name(content: str) -> str:
     """提取首个类名，用于 Issue.endpoint 定位。"""
     m = re.search(r"\bclass\s+(\w+)", content)
-    return m.group(1) if m else "(类级)"
+    return m[1] if m else "(类级)"
+
+
+# 09-cr-checklist「API 与 Controller」：@RequestMapping(method=...) 须改用具体映射注解。
+# extract_endpoints 的正则要求带引号路径，@RequestMapping(method = POST)（无路径）
+# 不产生端点，故本检查为文件级，且必须在 check_file 的无端点早退之前挂载。
+REQUEST_MAPPING_METHOD_RE = re.compile(
+    r'@RequestMapping\s*\([^)]*\bmethod\b\s*=',
+    re.DOTALL,
+)
+
+
+def check_mapping_annotation(file_path: str, content: str) -> list:
+    """检查 Controller 映射注解风格（09-cr-checklist API 与 Controller）：
+
+    - 禁止 @RequestMapping(method=...)，须用 @PostMapping/@GetMapping 等具体注解
+    - content 须已过 strip_java_comments（内部再剥离一次，幂等，支持直接传入原文）
+    """
+    issues = []
+    clean = strip_java_comments(content)
+    class_name = _extract_class_name(clean)
+    for m in REQUEST_MAPPING_METHOD_RE.finditer(clean):
+        line = clean[:m.start()].count("\n") + 1
+        issues.append(Issue(
+            file=file_path, endpoint=class_name, http_method="",
+            severity=Severity.MANDATORY, rule="映射注解",
+            location=f"{file_path}:{line}",
+            description="@RequestMapping(method=...) 应改用 @PostMapping/@GetMapping 等具体注解",
+            suggestion="使用 @PostMapping/@GetMapping/@PutMapping/@DeleteMapping 明确 HTTP 语义",
+        ))
+    return issues
 
 
 def check_file(file_path: str) -> list:
@@ -354,6 +381,9 @@ def check_file(file_path: str) -> list:
         return issues
 
     content = strip_java_comments(content)
+    # 文件级映射注解检查：@RequestMapping(method=...) 无路径时 extract_endpoints
+    # 不产生端点，须在无端点早退之前执行
+    issues.extend(check_mapping_annotation(file_path, content))
     endpoints = extract_endpoints(content, file_path)
 
     if not endpoints:
@@ -435,9 +465,11 @@ def format_report_text(file_path: str, issues: list) -> str:
     ]
 
     for issue in issues:
-        lines.append(f"  [{issue.severity.value}] {issue.rule}")
-        lines.append(f"    端点: {issue.http_method} {issue.endpoint}")
-        lines.append(f"    问题: {issue.description}")
+        lines.extend([
+            f"  [{issue.severity.value}] {issue.rule}",
+            f"    端点: {issue.http_method} {issue.endpoint}",
+            f"    问题: {issue.description}",
+        ])
         if issue.suggestion:
             lines.append(f"    建议: {issue.suggestion}")
         lines.append("")
@@ -450,8 +482,8 @@ def format_report_json(file_path: str, issues: list) -> str:
         "file": file_path,
         "summary": {
             "total": len(issues),
-            "mandatory": sum(1 for i in issues if i.severity == Severity.MANDATORY),
-            "recommended": sum(1 for i in issues if i.severity == Severity.RECOMMENDED),
+            "mandatory": sum(i.severity == Severity.MANDATORY for i in issues),
+            "recommended": sum(i.severity == Severity.RECOMMENDED for i in issues),
         },
         "issues": [
             {

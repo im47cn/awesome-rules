@@ -115,7 +115,7 @@ def test_dependency_direction_skips_third_party():
         "src/main/java/com/example/order/domain/entity/OrderE.java",
         "domain", content, patterns, cfg)
     client_issue = [i for i in issues if "client" in i.description.lower()]
-    assert len(client_issue) == 0
+    assert not client_issue
 
 
 def test_dependency_direction_allows_valid():
@@ -840,7 +840,7 @@ def test_load_config_deep_merge(tmp_path):
 def test_parse_artifact_id_from_parent(tmp_path):
     pom = tmp_path / "pom.xml"
     pom.write_text(
-        _POM_HEADER + '<parent><artifactId>parent-aid</artifactId></parent></project>',
+        f"{_POM_HEADER}<parent><artifactId>parent-aid</artifactId></parent></project>",
         encoding="utf-8")
     assert arch_check._parse_artifact_id(str(pom)) == "parent-aid"
 
@@ -857,10 +857,10 @@ def test_parse_module_dependencies_malformed(tmp_path):
 
 def test_collect_poms_skips_target(tmp_path):
     """SKIP_DIRS 中的 target 目录应被跳过。"""
-    (tmp_path / "pom.xml").write_text(_POM_HEADER + '</project>', encoding="utf-8")
+    (tmp_path / "pom.xml").write_text(f"{_POM_HEADER}</project>", encoding="utf-8")
     target = tmp_path / "target"
     target.mkdir()
-    (target / "pom.xml").write_text(_POM_HEADER + '</project>', encoding="utf-8")
+    (target / "pom.xml").write_text(f"{_POM_HEADER}</project>", encoding="utf-8")
     assert len(arch_check._collect_poms(str(tmp_path))) == 1
 
 
@@ -892,7 +892,7 @@ def test_infer_layer_from_packages(tmp_path):
     pkg.mkdir(parents=True)
     (pkg / "Foo.java").write_text("// x", encoding="utf-8")
     pom = module / "pom.xml"
-    pom.write_text(_POM_HEADER + '<artifactId>m</artifactId></project>', encoding="utf-8")
+    pom.write_text(f"{_POM_HEADER}<artifactId>m</artifactId></project>", encoding="utf-8")
     assert arch_check._infer_layer_from_packages(str(pom), patterns, cfg) == "adapter"
 
 
@@ -902,7 +902,7 @@ def test_infer_layer_from_packages_no_src(tmp_path):
     module = tmp_path / "m2"
     module.mkdir()
     pom = module / "pom.xml"
-    pom.write_text(_POM_HEADER + '<artifactId>m2</artifactId></project>', encoding="utf-8")
+    pom.write_text(f"{_POM_HEADER}<artifactId>m2</artifactId></project>", encoding="utf-8")
     assert arch_check._infer_layer_from_packages(str(pom), patterns, cfg) is None
 
 
@@ -1068,7 +1068,7 @@ def test_run_cross_domain_violation_003():
 def test_run_single_module_warning(tmp_path):
     """单模块项目触发 Maven 编译期隔离缺失警告。"""
     (tmp_path / "pom.xml").write_text(
-        _POM_HEADER + '<artifactId>order-app</artifactId></project>', encoding="utf-8")
+        f"{_POM_HEADER}<artifactId>order-app</artifactId></project>", encoding="utf-8")
     issues, m, r, stats = arch_check.run(str(tmp_path))
     assert any("单模块" in w for w in stats["warnings"])
 
@@ -1132,7 +1132,7 @@ def test_main_graph_mode_exit0(monkeypatch, capsys):
 
 def test_main_init_creates_config(tmp_path, monkeypatch):
     (tmp_path / "pom.xml").write_text(
-        _POM_HEADER + '<groupId>com.example</groupId></project>', encoding="utf-8")
+        f"{_POM_HEADER}<groupId>com.example</groupId></project>", encoding="utf-8")
     monkeypatch.setattr(sys, "argv", ["arch_check.py", str(tmp_path), "--init"])
     with pytest.raises(SystemExit) as exc:
         arch_check.main()
@@ -1404,7 +1404,7 @@ def test_check_file_commented_import_not_extracted(tmp_path):
         "public class OrderE {}\n", encoding="utf-8")
     cfg = _cfg()
     issues, _, _ = arch_check.check_file(str(f), str(tmp_path), _patterns(cfg), cfg)
-    assert not any(i.rule_code == arch_check.DOMAIN_PURITY for i in issues)
+    assert all(i.rule_code != arch_check.DOMAIN_PURITY for i in issues)
 
 
 def test_run_static_import_badcase_005():
@@ -1418,3 +1418,98 @@ def test_run_static_import_badcase_005():
     assert arch_check.STATE_FIELD_LEAKAGE in codes
     # 通配结构性债务恰好 1 条：依赖方向检查统一报告，purity 不双报
     assert stats["structural_debt_count"] == 1
+
+
+# ── 注入注解 / 控制台输出检查（09-cr-checklist 命名与方法 / 日志与异常） ──
+
+def test_injection_annotation_catches_autowired():
+    """@Autowired 注入被拦：MANDATORY、rule_code、行号定位。"""
+    content = (
+        "public class OrderService {\n"
+        "    @Autowired\n"
+        "    private OrderMapper orderMapper;\n"
+        "}\n"
+    )
+    issues = arch_check.check_injection_annotation("a.java", content)
+    assert len(issues) == 1
+    assert issues[0].severity == arch_check.Severity.MANDATORY
+    assert issues[0].rule_code == arch_check.INJECTION_ANNOTATION
+    assert issues[0].line == 2
+
+
+def test_injection_annotation_allows_resource():
+    """规范写法 @Resource 零误报。"""
+    content = (
+        "public class OrderService {\n"
+        "    @Resource\n"
+        "    private OrderMapper orderMapper;\n"
+        "}\n"
+    )
+    assert arch_check.check_injection_annotation("a.java", content) == []
+
+
+def test_console_output_catches_system_out_and_err():
+    """System.out.println / System.err.print 被拦，行号逐一对应。"""
+    content = (
+        "class A {\n"
+        "    void f() {\n"
+        "        System.out.println(\"x\");\n"
+        "        System.err.print ( \"y\" );\n"
+        "    }\n"
+        "}\n"
+    )
+    issues = arch_check.check_console_output("a.java", content)
+    assert len(issues) == 2
+    assert all(i.rule_code == arch_check.CONSOLE_OUTPUT for i in issues)
+    assert all(i.severity == arch_check.Severity.MANDATORY for i in issues)
+    assert [i.line for i in issues] == [3, 4]
+
+
+def test_console_output_allows_logger_and_env():
+    """log.info 与 System.getenv 等非输出调用零误报。"""
+    content = (
+        "class A {\n"
+        "    void f() {\n"
+        "        log.info(\"{}\", System.getenv(\"HOME\"));\n"
+        "    }\n"
+        "}\n"
+    )
+    assert arch_check.check_console_output("a.java", content) == []
+
+
+def test_check_file_mounts_injection_and_console_checks(tmp_path):
+    """挂载验证：application 层 Service 的 @Autowired + System.out 经 check_file 均被捕获。"""
+    src = tmp_path / "src/main/java/com/example/application/service"
+    src.mkdir(parents=True)
+    f = src / "OrderAppService.java"
+    f.write_text(
+        "package com.example.application.service;\n"
+        "public class OrderAppService {\n"
+        "    @Autowired\n"
+        "    private Object dep;\n"
+        "    void f() { System.out.println(\"x\"); }\n"
+        "}\n", encoding="utf-8")
+    cfg = _cfg()
+    issues, classified, layer = arch_check.check_file(str(f), str(tmp_path),
+                                                      _patterns(cfg), cfg)
+    assert classified is True and layer == "application"
+    codes = {i.rule_code for i in issues}
+    assert arch_check.INJECTION_ANNOTATION in codes
+    assert arch_check.CONSOLE_OUTPUT in codes
+
+
+def test_check_file_injection_console_ignores_comments_and_strings(tmp_path):
+    """负控制：注释/字符串里的 @Autowired 与 System.out 不触发（噪音剥离免疫）。"""
+    src = tmp_path / "src/main/java/com/example/domain/entity"
+    src.mkdir(parents=True)
+    f = src / "OrderE.java"
+    f.write_text(
+        "package com.example.domain.entity;\n"
+        "public class OrderE {\n"
+        "    // @Autowired 见注释\n"
+        '    String s = "System.out.println(x)";\n'
+        "}\n", encoding="utf-8")
+    cfg = _cfg()
+    issues, _, _ = arch_check.check_file(str(f), str(tmp_path), _patterns(cfg), cfg)
+    assert all(i.rule_code not in (arch_check.INJECTION_ANNOTATION,
+                                   arch_check.CONSOLE_OUTPUT) for i in issues)

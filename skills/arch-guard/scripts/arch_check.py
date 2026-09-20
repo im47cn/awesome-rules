@@ -107,6 +107,8 @@ MAVEN_MODULE_DEP = "MAVEN_MODULE_DEP"
 CROSS_DOMAIN_DEP = "CROSS_DOMAIN_DEP"
 STATE_MACHINE       = "STATE_MACHINE"
 STATE_FIELD_LEAKAGE = "STATE_FIELD_LEAKAGE"
+INJECTION_ANNOTATION = "INJECTION_ANNOTATION"
+CONSOLE_OUTPUT        = "CONSOLE_OUTPUT"
 
 
 class Severity(Enum):
@@ -801,6 +803,52 @@ def check_maven_modules(project_root: str, pom_files: List[str],
                 )
     return issues
 
+# ── 检查: 注入注解与控制台输出（09-cr-checklist 跨层通用规范） ──────────
+
+# 依赖注入：规范要求 @Resource（JSR-250），@Autowired 禁用（09 §命名与方法）
+_AUTOWIRED_RE = re.compile(r"@Autowired\b")
+# 控制台输出：日志须经 @Slf4j + Log4j2 统一采集，System.out/err 禁用（09 §日志与异常）
+_CONSOLE_OUTPUT_RE = re.compile(r"\bSystem\s*\.\s*(?:out|err)\s*\.\s*\w+\s*\(")
+
+
+def check_injection_annotation(file_path: str, content: str) -> List[Issue]:
+    """检测依赖注入使用 @Autowired（09-cr-checklist 命名与方法）。
+
+    规范要求 @Resource（JSR-250，按名称注入）；@Autowired 按类型匹配，
+    多实现场景易歧义且 API 耦合 Spring。作用于任意分层 Java 文件，
+    content 须为 _strip_java_noise 产物（注释/字符串已剥离，天然免疫假阳性）。
+    """
+    issues: List[Issue] = []
+    for m in _AUTOWIRED_RE.finditer(content):
+        line = content[:m.start()].count("\n") + 1
+        issues.append(Issue(
+            file=file_path, line=line, severity=Severity.MANDATORY,
+            rule="依赖注入", rule_code=INJECTION_ANNOTATION,
+            description="依赖注入使用 @Autowired，规范要求 @Resource",
+            suggestion="改用 @Resource（JSR-250）注入，不耦合 Spring API",
+        ))
+    return issues
+
+
+def check_console_output(file_path: str, content: str) -> List[Issue]:
+    """检测控制台输出 System.out/System.err 调用（09-cr-checklist 日志与异常）。
+
+    日志须经 @Slf4j + Log4j2 统一格式（含 traceId）采集，控制台输出
+    不进日志链路。作用于任意分层 Java 文件，content 须为 _strip_java_noise
+    产物（字符串参数被剥离，但调用表达式本身保留，仍可命中）。
+    """
+    issues: List[Issue] = []
+    for m in _CONSOLE_OUTPUT_RE.finditer(content):
+        line = content[:m.start()].count("\n") + 1
+        call = m.group(0).rstrip("(").strip()
+        issues.append(Issue(
+            file=file_path, line=line, severity=Severity.MANDATORY,
+            rule="控制台输出", rule_code=CONSOLE_OUTPUT,
+            description=f"使用 {call}() 控制台输出，规范要求 @Slf4j + Log4j2 日志",
+            suggestion="删除控制台输出，改用 @Slf4j 日志（log.info/warn/error，占位符 {}）",
+        ))
+    return issues
+
 
 # ── Java 文件收集与检查调度 ───────────────────────────────────────────────
 
@@ -832,6 +880,9 @@ def check_file(file_path: str, project_root: str,
     issues.extend(check_naming(rel_path, layer, content, cfg))
     issues.extend(check_adapter_isolation(rel_path, content, layer_patterns, cfg) if layer == "adapter" else [])
     issues.extend(check_state_field_leakage(rel_path, layer, content, cfg) if layer in ("adapter", "infrastructure") else [])
+    # 09-cr-checklist 跨层通用规范：注入注解、控制台输出（各层一律拦截）
+    issues.extend(check_injection_annotation(rel_path, content))
+    issues.extend(check_console_output(rel_path, content))
     return issues, True, layer
 
 

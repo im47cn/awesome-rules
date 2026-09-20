@@ -939,6 +939,84 @@ class TestReadmeRuleSync(unittest.TestCase):
         )
 
 
+# ── 映射注解检查（09-cr-checklist API 与 Controller） ─────────────────────
+
+class TestCheckMappingAnnotation(unittest.TestCase):
+    """@RequestMapping(method=...) 须改用 @PostMapping/@GetMapping 等具体注解。"""
+
+    def test_request_mapping_with_method_flagged(self):
+        """方法级 @RequestMapping(value=..., method=...) 被拦：MANDATORY、定位行号。"""
+        content = (
+            'public class OrderController {\n'
+            '    @RequestMapping(value = "/order/create", method = RequestMethod.POST)\n'
+            '    public String create() { return ""; }\n'
+            '}\n'
+        )
+        issues = api_check.check_mapping_annotation("OrderController.java", content)
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].severity, Severity.MANDATORY)
+        self.assertEqual(issues[0].rule, "映射注解")
+        self.assertEqual(issues[0].endpoint, "OrderController")
+        self.assertEqual(issues[0].location, "OrderController.java:2")
+
+    def test_class_level_and_method_array_flagged(self):
+        """类级无路径 @RequestMapping(method=...) 与 method 数组形态都拦截。"""
+        content = (
+            '@RequestMapping(method = RequestMethod.GET)\n'
+            'public class OrderController {\n'
+            '    @RequestMapping(value = "/order/query",\n'
+            '        method = {RequestMethod.GET, RequestMethod.POST})\n'
+            '    public String query() { return ""; }\n'
+            '}\n'
+        )
+        issues = api_check.check_mapping_annotation("OrderController.java", content)
+        self.assertEqual([i.location.rsplit(":", 1)[-1] for i in issues], ["1", "3"])
+
+    def test_concrete_annotations_pass(self):
+        """@PostMapping/@GetMapping 与无 method 参数的类级 @RequestMapping 零误报。"""
+        content = (
+            '@RequestMapping("/api/order")\n'
+            'public class OrderController {\n'
+            '    @PostMapping("/create")\n'
+            '    public String create() { return ""; }\n'
+            '    @GetMapping("/query")\n'
+            '    public String query() { return ""; }\n'
+            '}\n'
+        )
+        self.assertEqual(api_check.check_mapping_annotation("OrderController.java", content), [])
+
+    def test_commented_request_mapping_not_flagged(self):
+        """注释里的 @RequestMapping(method=...) 不触发（注释剥离免疫）。"""
+        content = (
+            'public class OrderController {\n'
+            '    // @RequestMapping(value = "/x", method = RequestMethod.POST)\n'
+            '    @PostMapping("/create")\n'
+            '    public String create() { return ""; }\n'
+            '}\n'
+        )
+        self.assertEqual(api_check.check_mapping_annotation("OrderController.java", content), [])
+
+    def test_check_file_flags_pathless_request_mapping(self):
+        """挂载验证：无路径 @RequestMapping(method=POST) 不产生端点，仍被文件级检查拦截。"""
+        import tempfile
+        d = tempfile.mkdtemp()
+        p = os.path.join(d, "OrderController.java")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(
+                'public class OrderController {\n'
+                '    @RequestMapping(method = RequestMethod.POST)\n'
+                '    public String create() { return ""; }\n'
+                '}\n'
+            )
+        try:
+            issues = api_check.check_file(p)
+        finally:
+            os.unlink(p)
+            os.rmdir(d)
+        self.assertTrue(any(i.rule == "映射注解" for i in issues),
+                        f"无端点早退吞掉了映射注解问题: {issues!r}")
+
+
 # ── 运行 ──────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
