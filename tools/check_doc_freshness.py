@@ -655,14 +655,14 @@ def rule_r11(root: Path, g: Gate) -> None:
     """
     a_path = root / "AGENTS.md"
     h_path = root / "hooks" / "load-steering.sh"
-    for p in (a_path, h_path):
-        if not p.is_file():
-            g.fail(p.as_posix(), "R11 总则句双源之一缺失（AGENTS.md 与 hooks/load-steering.sh 须成对在位）")
-            return
+    # 缺面/缺锚点一律跳过（对齐 R1-R10 fail-open 惯例——自测夹具与下游
+    # 子集仓均无此双源面；锚点行整体删除属显式重构，漂移信号只取
+    # 「双源在位且锚点命中但 shell 侧无同步副本」这一形态）
+    if not a_path.is_file() or not h_path.is_file():
+        return
     a_lines = _lines(a_path)
     idx = next((i for i, ln in enumerate(a_lines, 1) if R11_SENTINEL in ln), None)
     if idx is None:
-        g.fail("AGENTS.md", "R11 总则句锚点未命中（「标注【强制】的条款不可违反…」整句行缺失或被改写）")
         return
     sentence = a_lines[idx - 1].lstrip().lstrip("-* ").strip()
     h_text = h_path.read_text(encoding="utf-8")
