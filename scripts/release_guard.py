@@ -353,5 +353,8 @@ def decide(check_only: bool = False) -> int:
 if __name__ == "__main__":
     _args = sys.argv[1:]
     if "--verify-evidence" in _args:
+        print("（--verify-evidence：全量审计口径，独立于发布门禁——"
+              f"decide() 仅校验登记集 EVIDENCE_ENROLLED，当前登记 "
+              f"{len(EVIDENCE_ENROLLED)} 个）")
         sys.exit(verify_skill_evidence())
     sys.exit(decide(check_only="--check" in _args))
