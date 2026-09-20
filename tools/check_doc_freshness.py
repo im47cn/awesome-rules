@@ -43,6 +43,9 @@
      command 名 ⊇ tools/git/lefthook.yml pre-push: commands 键全集
      （行内按分隔符切 token 与命令名取交集，容忍多余措辞；加/删闸
      不更新注记即漂移；yml 或 README 任一缺失则整条跳过）
+  R10 根钩子文档覆盖：CONTRIBUTING.md 钩子条目 ⊇ lefthook.yml 顶层
+     hook 段名（只查 ⊆，多写不罚；来源 2026-09-20 审计 D-01/D-07——
+     pre-commit 双门曾在全部钩子文档缺位且无同步防线）
   R9 commitlint scope 枚举一致性：root commitlint.config.js 为权威，
      a. 其 scope-enum ⊇ 全部含 SKILL.md 的技能目录名；b. steering/
      git-conventions.md scope 表与权威枚举双向对齐（技能由指针行覆盖）；
@@ -356,9 +359,7 @@ def _steering_topic(path: Path) -> str | None:
     无 title 返回 None（调用方跳过该文件）。
     """
     title = frontmatter_lib.simple_fields(path.read_text(encoding="utf-8")).get("title")
-    if not title:
-        return None
-    return re.sub(r"(规范|标准)$", "", title)
+    return re.sub(r"(规范|标准)$", "", title) if title else None
 
 
 def rule_r7(root: Path, g: Gate) -> None:
@@ -484,6 +485,36 @@ def rule_r8(root: Path, g: Gate) -> None:
                    f"R8 执行模型注记缺 pre-push command {name}（lefthook.yml pre-push 共 {len(set(commands))} 闸）")
 
 
+def rule_r10(root: Path, g: Gate) -> None:
+    """R10 根钩子文档覆盖：lefthook.yml 顶层 hook 段名 ⊆ CONTRIBUTING.md 钩子条目。
+
+    事实侧取根 lefthook.yml 顶层段名（commit-msg / pre-commit / pre-push …），
+    陈述侧取 CONTRIBUTING.md 中 `- **<name>**` 形式的钩子条目；只查 ⊆（文档
+    多写不罚）。来源：2026-09-20 审计 D-01/D-07——pre-commit 两道门禁曾在
+    所有钩子文档中缺位，且无同步防线拦截该漂移。
+    """
+    yml = root / "lefthook.yml"
+    contrib = root / "CONTRIBUTING.md"
+    if not yml.is_file() or not contrib.is_file():
+        return  # 无根 hook 配置即无覆盖面
+    hooks: list[str] = []
+    for ln in _lines(yml):
+        if ln.lstrip().startswith("#"):
+            continue
+        if m := re.match(r"^([A-Za-z0-9][\w-]*):", ln):
+            hooks.append(m[1])
+    if not hooks:
+        return
+    documented: set[str] = set()
+    for ln in _lines(contrib):
+        if m := re.match(r"-\s+\*\*([\w-]+)\*\*", ln):
+            documented.add(m[1])
+    for name in hooks:
+        if name not in documented:
+            g.fail("CONTRIBUTING.md:1",
+                   f"R10 钩子条目缺 {name}（lefthook.yml 顶层 hook 共 {len(hooks)} 段）")
+
+
 def _scope_enum(path: Path) -> tuple[set[str], int] | None:
     """commitlint 配置 → scope-enum 值集合 + 声明行号；结构异常返回 None。
 
@@ -606,7 +637,7 @@ def _source_line(root: Path, where: str) -> str | None:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="实现↔文档一致性门禁（R1-R9）")
+    ap = argparse.ArgumentParser(description="实现↔文档一致性门禁（R1-R10）")
     ap.add_argument("root", nargs="?", default=".",
                     help="仓库根（默认当前目录）")
     ap.add_argument("--allow", action="append", default=[], metavar="REGEX",
@@ -641,6 +672,7 @@ def main() -> int:
     rule_r7(root, g)
     rule_r8(root, g)
     rule_r9(root, g)
+    rule_r10(root, g)
 
     fails: list[str] = []
     infos: list[str] = []
