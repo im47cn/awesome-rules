@@ -21,5 +21,6 @@
 | [ADR-012](./ADR-012-local-data-externalization.md) | 2026-09-13 | 公开中心仓的本地数据外置（downstream.local.json + slug 主机白名单 env 化） |
 | [ADR-013](./ADR-013-stall-visibility.md) | 2026-09-16 | 滞留可见性接线（regression-routing + dispatch-liveness 第三死法） |
 | [ADR-015](./ADR-015-rejection-receipt.md) | 2026-09-20 | #207 拒绝回执缺失：标签假阴性和解 + 回执存在性断言 |
+| [ADR-016](./ADR-016-parallel-test-gate.md) | 2026-09-20 | 并行测试门工厂化（段 fan-out 下沉 factory_lib，随 full 面分发） |
 
 ADR-014 缺号：squash 合并历史事实，编号不回填。

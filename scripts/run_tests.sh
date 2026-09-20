@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
-# 全量测试门禁 — 逐套件运行 pytest
+# 全量测试门禁 — 并行门（工厂编排，ADR-016）+ 串行尾段
 #
 # 各套件有独立 rootdir（pytest.ini / conftest.py 注入 sys.path），不能用一次
 # pytest 跑完，故按目录循环。部分套件 pytest.ini 带覆盖率 addopts（--cov），
 # 本机未装 pytest-cov 时会被拦，门禁统一覆盖为空 addopts——覆盖率由专职
 # 命令负责，门禁只管测试通过与否。
 #
-# 并行模型（perf/tests-gate-parallel）：8 套件 + badcase + lease-sql 共 10 段
-# 一次 fan-out 后台并发（串行合计 ≈64s），日志各落 mktemp 私有文件，wait
-# 全部完成后按原段序回放——输出形态与串行版一致，壁钟压到最长段
-#（.factory/tests 串行 ≈43s；长段再叠加 pytest-xdist -n auto 段内并行，
-# 2026-09-20 实测 .factory 43s→11s、ddl-guard 11s→6.6s，秒级段 spawn
-# 开销倒挂保持串行，见 XDIST_ARGS / XDIST_LONG）。秒级尾段（plugin_lock/
-# doc_freshness/lint-shellcheck）不并行：无收益，且 lint-shellcheck 层的
-# 文件清单被 NC16 镜像锁按文本抽取（tools/test_gauntlet_checks.sh），
-# 保持原序原形态以保其解析与负控制语义。
+# 并行模型（ADR-016，源 perf/tests-gate-parallel）：8 套件 + badcase +
+# lease-sql 共 10 段的 fan-out 编排已下沉工厂并行门（.factory/factory_lib.py
+# parallel-gate 子命令；段清单/长段白名单数据化 factory-local.json
+# parallel_gate.segments，intra:auto = 段内并行档）。本脚本退为组合方：跑
+# 并行门 → 回收失败段 tag → 串行尾段 → 末尾一次聚合裁决（一次运行全量
+# 暴露失败清单）。历史实测（PR #212）：串行合计 ≈64s，fan-out 后壁钟
+# ≈14s；长段叠加段内并行（.factory/tests 43s→11s、ddl-guard 11s→6.6s），
+# 秒级段 spawn 开销倒挂保持串行；段日志失败保留/成功即删由编排器自管。
+# 秒级尾段（plugin_lock/doc_freshness/lint-shellcheck）不并行：无收益，
+# 且 lint-shellcheck 层的文件清单被 NC16 镜像锁按文本抽取
+#（tools/test_gauntlet_checks.sh），保持原序原形态以保其解析与负控制语义。
 #
 # 并行安全（审计 2026-09-04）：各 pytest 段临时文件均唯一命名
 # （mkdtemp / NamedTemporaryFile）；skill-evo 固定 /tmp/ar-skill-evo-prompt.md
@@ -29,101 +31,44 @@
 # 用法:
 #   bash scripts/run_tests.sh            # 测试 + 安装入口 blob 锁定校验
 #   bash scripts/run_tests.sh --no-lock  # 仅测试
-set -u -o pipefail  # pipefail：badcase | tail 管道下保留 runner 真实退出码
+set -u -o pipefail  # pipefail：段内管道已随编排下沉 runner（shell 段自带 bash -o pipefail）；防御性保留
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT" || exit 1
 PY="${PYTHON:-python3}"
 
-# pytest-xdist（软依赖，缺席即长段段内降级串行——同 lint-shellcheck 层
-# 先例；安装 pip install pytest-xdist）。-n auto = 逻辑核数 worker，仅施于
-# 长段白名单 XDIST_LONG：8 段一次 fan-out 已跨套件并发，段段裸 -n auto
-# 会 N×核数进程踩踏，秒级段纯倒挂（api-guard 0.32s→0.56s 实测）。
-XDIST_ARGS=""
-if "$PY" -c 'import xdist' >/dev/null 2>&1; then
-  XDIST_ARGS="-n auto"
-else
-  echo "ℹ️ 未装 pytest-xdist：长段段内串行降级（pip install pytest-xdist 提速）"
-fi
-
-# 测试套件目录（有 tests/ 子目录用之，否则收集目录本身）
-SUITES=(
-  "skills/api-guard/scripts"
-  "skills/arch-guard/scripts"
-  "skills/ddl-guard/scripts"
-  "skills/doc-gen/scripts"
-  "skills/impact-guard/scripts"
-  "skills/skill-evo/scripts"
-  "arch-hawkeye/scripts"
-  ".factory/tests"
-)
-
-# ── 并行段：8 套件 + badcase + lease-sql ────────────────────────────────
+# ── 并行段：8 套件 + badcase + lease-sql（编排=工厂并行门，ADR-016）───
+# 段清单登记处：factory-local.json 的 parallel_gate.segments（长段以
+# intra:"auto" 白名单段内并行；shell 段自带 pipefail）。编排器职责：段间
+# fan-out、按段序回放、段日志失败保留（成功即删）、失败 tag 逐行落
+# --failed-tags 文件（每行尾带 \n，供 read -r 逐行回收）。PY 经 PYTHON
+# env 传递（编排器内 $PY 词替换）。
 FAILED=()  # 先于 trap 注册（set -u 下 trap 引用 ${#FAILED[@]}，提前退出不 unbound）
-LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ar-run-tests.XXXXXX")"
-# 失败保留证据（2026-09-05 bg_9 教训：tests ✗ 44.88s 段日志被无条件删，
-# 手动串行复现即绿 → 只能归因瞬态。失败时保留 LOG_DIR 供定位失败段）。
+rc=0  # 先于 trap 注册：trap 串内 rc=$? 对 shellcheck 静态不可见（SC2154 消音，同上先例）
 trap 'rc=$?; if [ $rc -ne 0 ] || [ "${#FAILED[@]}" -gt 0 ]; then
-  echo "❌ run_tests 失败 (rc=$rc)——段日志保留: $LOG_DIR" >&2
-else
-  rm -rf "$LOG_DIR"
+  echo "❌ run_tests 失败 (rc=$rc)" >&2
 fi' EXIT
 
-PAR_HEADERS=()  # 段头（与串行版逐字一致）
-PAR_TAGS=()     # 失败聚合标签
-PAR_LOGS=()     # 段日志私有文件
-PAR_PIDS=()     # 后台段进程
-
-par_launch() {  # par_launch <段头> <失败标签> <命令串，"\$1" 为 PY 占位>
-  local log="$LOG_DIR/seg-$(( ${#PAR_PIDS[@]} + 1 )).log"
-  PAR_HEADERS+=("$1")
-  PAR_TAGS+=("$2")
-  PAR_LOGS+=("$log")
-  # -o pipefail：段内管道（badcase | tail）保留真实退出码。
-  # PY 经位置参数 $1 传入、不拼入命令串：撇号路径不再炸语法，调用方可控
-  # 的 PYTHON 也不会被重解析为 shell 源码（PR #139 review：注入面）。
-  bash -o pipefail -c "$3" _ "$PY" >"$log" 2>&1 &
-  PAR_PIDS+=("$!")
-}
-
-# 长段白名单（段内 >5s 实测）：.factory/tests 43s→11s（3.8×）、
-# ddl-guard 10.9s→6.3s（1.7×）。
-XDIST_LONG=" .factory/tests skills/ddl-guard/scripts "
-for suite in "${SUITES[@]}"; do
-  target="tests"
-  [ -d "$suite/tests" ] || target="."
-  extra=""
-  if [ -n "$XDIST_ARGS" ]; then
-    case "$XDIST_LONG" in *" $suite "*) extra=" $XDIST_ARGS" ;; esac
-  fi
-  par_launch "── pytest $suite" "$suite" \
-    "cd '$suite' && \"\$1\" -m pytest '$target' -o addopts='' -q$extra"
-done
-par_launch "── badcase" "badcase" "\"\$1\" scripts/badcase_runner.py | tail -3"
-par_launch "── lease-sql(非PG段)" "lease-sql" \
-  "LEASE_SKIP_PG=1 bash .factory/tests/test-lease-sql.sh"
-
-# 两轮：先全量 wait 收状态，再按段序回放——早段日志不抢跑（全部段
-# 真正结束后才 cat），失败聚合仍在回放时按段序进行。
-PAR_STATUS=()
-for pid in "${PAR_PIDS[@]}"; do
-  if wait "$pid"; then
-    PAR_STATUS+=(0)
-  else
-    PAR_STATUS+=(1)
-  fi
-done
-
-i=0
-for header in "${PAR_HEADERS[@]}"; do
-  echo "$header"
-  if [ "${PAR_STATUS[$i]}" -ne 0 ]; then
-    FAILED+=("${PAR_TAGS[$i]}")
-  fi
-  cat "${PAR_LOGS[$i]}"
-  echo
-  i=$((i + 1))
-done
+if ! FAILED_TAGS="$(mktemp "${TMPDIR:-/tmp}/ar-run-tags.XXXXXX")"; then
+  echo "❌ 无法创建并行门失败标签文件（mktemp）" >&2
+  exit 2
+fi
+PAR_RC=0
+"$PY" .factory/factory_lib.py parallel-gate --failed-tags "$FAILED_TAGS" || PAR_RC=$?
+if [ "$PAR_RC" -eq 2 ]; then
+  rm -f "$FAILED_TAGS"
+  echo "❌ 并行门配置错误（fail-closed，不产出裁决）" >&2
+  exit 2
+fi
+if [ "$PAR_RC" -ne 0 ]; then
+  # 并行门已按段序回放段日志并打印 ❌ 失败段与段日志保留路径；此处仅
+  # 回收失败 tag 进 FAILED，串行尾段照跑后末尾统一裁决——与迁移前行为
+  # 一致：一次运行全量暴露失败清单，不分批。
+  while IFS= read -r t; do
+    [ -n "$t" ] && FAILED+=("$t")
+  done < "$FAILED_TAGS"
+fi
+rm -f "$FAILED_TAGS"
 
 # ── 串行尾段（秒级，不并行；lint-shellcheck 受 NC16 文本镜像锁约束）───
 
@@ -173,4 +118,4 @@ if [ "${#FAILED[@]}" -gt 0 ]; then
   echo "❌ 门禁失败: ${FAILED[*]}" >&2
   exit 1
 fi
-echo "✅ 全量测试门禁通过（${#SUITES[@]} 个套件 + badcase + lease非PG段）"
+echo "✅ 全量测试门禁通过（8 个套件 + badcase + lease非PG段）"

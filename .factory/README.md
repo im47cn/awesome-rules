@@ -23,11 +23,12 @@
 | `state.py` + `tests/`（含 test_state.py） | 状态机权威（TRANSITIONS 唯一 spec）与全套测试 |
 | `feedback.py` + `feedback-upstream.sh` | 本仓工厂改进反哺上游（决策零 LLM，AI 仅适配内容；上游指针 = factory-local.json，ADR-009） |
 | `breaker.sh` | R4 成本熔断门（fix-issue/dispatch/cron-dispatch/triage-batch 四入口共用接线点，透传 factory_lib breaker 码） |
-| `factory-lib.sh` + `factory_lib.py` | 链副作用共享库（issue 评论唯一出口/拒绝单一动作/租约围栏钩位）+ python 工具箱（timeout 分级预算/breaker/回执解析 + dispatch 进程编排：并发槽/收割/硬锁，ADR-005）。`omp_node()` 是 omp CLI 唯一执行点（ADR-009 引擎收口）——换引擎只改此函数 |
-| `factory-local.json` | 工厂本地化配置（M4 + ADR-009）：perimeter/reject_guidance（guard 判据）+ repo_identity/reading_scopes/review_basis/final_gate_cmd/docstring_gate_cmd（可选门，缺省不启用）/pr_review_skills（prompt 仓库参数与门命令）+ upstream_repo/upstream_path/feedback_branch_prefix（反哺上游指针）——链脚本与 prompts 零本地化的全部数据载体；改后须重跑 mutations 重证 |
+| `factory-lib.sh` + `factory_lib.py` | 链副作用共享库（issue 评论唯一出口/拒绝单一动作/租约围栏钩位）+ python 工具箱（timeout 分级预算/breaker/回执解析 + dispatch 进程编排：并发槽/收割/硬锁，ADR-005 + parallel-gate 并行测试门编排：段 fan-out/保守档段内并行/失败日志保留，ADR-016）。`omp_node()` 是 omp CLI 唯一执行点（ADR-009 引擎收口）——换引擎只改此函数 |
+| `factory-local.json` | 工厂本地化配置（M4 + ADR-009）：perimeter/reject_guidance（guard 判据）+ repo_identity/reading_scopes/review_basis/final_gate_cmd/docstring_gate_cmd（可选门，缺省不启用）/parallel_gate（并行测试门段清单，ADR-016）/pr_review_skills（prompt 仓库参数与门命令）+ upstream_repo/upstream_path/feedback_branch_prefix（反哺上游指针）——链脚本与 prompts 零本地化的全部数据载体；改后须重跑 mutations 重证 |
 | `upstream-sync-check.sh` | M2 上游同步检查（dispatch 轮末）：full 漂移→确定性 PR 流；local 漂移→needs-human issue；无凭据降级仅报告 |
 | `sync-from-upstream.sh` + `DISTRIBUTION.json` | M1 上游同步：三态分发清单（full/local/skip）+ 下游拉取（--check 门禁/--apply 追平+锚点）；B1（ADR-011）`--repo` 中心驱动 + `--commit` 单提交落库 + blame-ignore 滞后一条 |
 | `downstream-check.sh` + `downstream.local.json` | B2 中心集中巡检（ADR-011）：10 仓清单（gitignored 本地数据，ADR-012——tracked `downstream.json` 仅空模板）；`--check` 逐仓漂移检查 + `--apply-commit` 漂移仓单提交追平；一律 `--anchor main` 跑中心版脚本；漂移 osascript 通知（`FACTORY_NO_NOTIFY=1` 关断） |
+
 
 ## 前置条件
 - `omp` CLI（AI 节点引擎；每节点独立进程 = 物理级 fresh context）
@@ -265,7 +266,49 @@ mutations 时序约束：**全绿证明必须在工作树干净时做**（相对
 误读为全绿。正确流程：提交/贮藏 → `run.py` 全绿（stamp 随之刷新）→
 再依据证据推进。周界变更（factory-local.json 的 perimeter）后必跑：
 stamp 指纹绑定会宣告旧证据过期（M4，设计 §11.3）。
+
+## 并行测试门（ADR-016：段间 fan-out + 段内保守并行）
+
+`factory-local.json` 可选键 `parallel_gate`——全量门禁的独立段并行执行。
+缺键=未采用（零行为变化）；存在但损坏=fail-closed 报错（ADR-016）：
+
+```json
+"parallel_gate": {
+  "workers": 0,
+  "segments": [
+    {"tag": "api", "argv": ["$PY", "-m", "pytest", "tests/", "-q"]},
+    {"tag": "lint", "shell": "\"$1\" scripts/lint.sh | tail -5"},
+    {"tag": "java", "argv": ["mvn", "test"], "intra": "auto", "stack": "maven"}
+  ]
+}
 ```
+
+- `workers`：0=不限并发（缺省），>0=并发上限；段缺省 cwd=仓库根
+- argv 的 `$PY` 词执行期替换为解释器（env PYTHON 或 python3）；shell 段
+  以 `bash -o pipefail` 执行、`$1`=解释器（管道真码透传）
+- 失败语义：不短路，全段跑完统一裁决；失败段日志保留（独立临时目录 +
+  回放 stdout），成功即整体清理
+- 段内并行 `intra:"auto"` 逐段 opt-in，只注保守档参数（模块/fork/worker
+  级分发）：pytest `-n auto`（需 xdist）、maven `-T 1C -DforkCount=1C
+  -DreuseForks=true`、gradle `--parallel`、jest `--maxWorkers=50%`；
+  vitest/go/cargo 默认已并行零附加；phpunit/dotnet 保持串行。顺序敏感
+  段不设 intra（缺省 off）
+
+三种用法：
+
+```bash
+# A. 门禁直连（final_gate_cmd 直指编排器，零宿主胶水）
+python3 .factory/factory_lib.py parallel-gate
+
+# B. 宿主脚本组合（run_tests.sh 模式）：回收失败 tag → 串行尾段 → 统一裁决
+python3 .factory/factory_lib.py parallel-gate --failed-tags "$FAILED_TAGS"
+while IFS= read -r t; do FAILED+=("$t"); done < "$FAILED_TAGS"
+
+# C. 本地提速：手动跑，失败清单落盘自取
+python3 .factory/factory_lib.py parallel-gate --failed-tags /tmp/failed.txt
+```
+
+退出码：0=全绿，1=有失败段，2=门自身错误（fail-closed）。
 
 ## 移植到其他仓库（ADR-009 后：一份配置 + 两条命令）
 

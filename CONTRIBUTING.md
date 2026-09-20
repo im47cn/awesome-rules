@@ -46,7 +46,7 @@ npm test                   # bash scripts/run_tests.sh
 
 - Python 基线为 **3.9**（macOS 系统 Python 即此版本），脚本不得使用 3.10+
   的运行时语法（`X | Y` 类型注解须配 `from __future__ import annotations`）
-- 新增测试套件时，在 `scripts/run_tests.sh` 的 `SUITES` 中登记
+- 新增测试套件时，在 `.factory/factory-local.json` 的 `parallel_gate.segments` 中登记段（套件 cwd/argv 形态；先读并遵守 `steering/testing-standards.md` 的并行测试门纪律）——`"intra": "auto"` 仅当段内测试无顺序依赖、共享状态或资源冲突时才可设置，不以耗时为准；编排见 `.factory/factory_lib.py` parallel-gate，ADR-016）
 - 个别测试套件配置了覆盖率门禁（如 `skills/arch-guard/scripts/pytest.ini` 的
   `--cov-fail-under`），运行前需安装测试依赖：`pip3 install pytest pytest-cov`，
   否则 pytest 会以 `unrecognized arguments: --cov` 拒绝启动

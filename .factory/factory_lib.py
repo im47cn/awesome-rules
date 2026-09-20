@@ -29,6 +29,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -346,6 +347,100 @@ def docstring_gate_cmd() -> str | None:
     if "\n" in v or "\r" in v:
         raise RuntimeError("docstring_gate_cmd 禁含换行（read -r -a 只取首行，shlex 多行拆词，两侧 argv 分歧）")
     return v
+
+_PARALLEL_STACKS = frozenset({
+    "pytest", "maven", "gradle", "jest", "vitest", "go", "cargo", "phpunit", "dotnet",
+})
+_PARALLEL_SEGMENT_KEYS = frozenset({"tag", "name", "argv", "shell", "cwd", "intra", "stack"})
+
+
+def parallel_gate_cfg() -> dict | None:
+    """并行测试门配置（可选键 parallel_gate，缺省不启用；ADR-016）。
+
+    与 docstring_gate_cmd 同为**可选键**范式：键缺失 → None（本仓未采用
+    并行门，零行为变化）；键存在 → 严格校验，损坏即 RuntimeError
+    （fail-closed：可选 ≠ 静默降级为旧串行门——门是裁决路径，配置坏了
+    必须炸，不能悄悄不并行或漏跑段）。schema 拒绝未知键：本键的失效
+    形态是「静默慢」（拼错 intra/segments 导致能力没开、段没跑），与
+    final_gate_cmd 的禁引号约束同理，宁可误伤不可漏拦。
+
+    结构：{"workers": int≥0（0=不限并发，缺省 0）, "segments": [
+      {"tag": 唯一标识（禁换行——宿主脚本按行回收失败段清单）,
+       "name": 显示头（缺省=tag）, "argv": [词...] XOR "shell": "命令串",
+       "cwd": 段工作目录（相对仓根，缺省=仓根）,
+       "intra": "off"|"auto"（段内并行档，缺省 off——顺序敏感测试所在
+       段保持串行，auto 是逐段显式 opt-in）,
+       "stack": 显式测试栈（缺省按段 cwd 构建文件探测）}]}。
+    argv 词 "$PY" 在执行期替换为解释器（env PYTHON 或 python3，逐字
+    保留宿主仓门禁脚本的 PY 语义）；shell 段以 bash -o pipefail 执行，
+    $1 = 解释器占位。
+    """
+    if "parallel_gate" not in _LOCAL_CFG:
+        return None
+    raw = _LOCAL_CFG["parallel_gate"]
+    try:
+        if not isinstance(raw, dict):
+            raise ValueError("parallel_gate 须为对象")
+        if unknown := set(raw) - {"segments", "workers"}:
+            raise ValueError(f"未知顶层键: {sorted(unknown)}")
+        segs_raw = raw.get("segments")
+        if not isinstance(segs_raw, list) or not segs_raw:
+            raise ValueError("segments 须为非空数组")
+        seen: set[str] = set()
+        segs: list[dict] = []
+        for s in segs_raw:
+            if not isinstance(s, dict):
+                raise ValueError("段须为对象")
+            tag = s.get("tag")
+            if not isinstance(tag, str) or not tag.strip():
+                raise ValueError("段缺 tag（非空字符串，失败聚合标识）")
+            if "\n" in tag or "\r" in tag:
+                raise ValueError(f"段 tag 禁换行（失败清单按行回收）: {tag}")
+            if tag in seen:
+                raise ValueError(f"段 tag 重复: {tag}")
+            seen.add(tag)
+            if bad_keys := set(s) - _PARALLEL_SEGMENT_KEYS:
+                raise ValueError(f"段 {tag} 未知键: {sorted(bad_keys)}")
+            # 二选一按「键存在」判（PR #220 评论）：{"argv": [], "shell":
+            # "x"} 若按值判会双双通过 XOR，空 argv 落到 spawn 期才炸
+            has_argv = "argv" in s
+            has_shell = "shell" in s
+            if has_argv == has_shell:
+                raise ValueError(f"段 {tag}: argv（词数组）与 shell（命令串）二选一")
+            if has_argv and (
+                not isinstance(s["argv"], list)
+                or not s["argv"]
+                or not all(isinstance(w, str) and w for w in s["argv"])
+            ):
+                raise ValueError(f"段 {tag}: argv 词须为非空字符串")
+            if has_shell and (
+                not isinstance(s["shell"], str) or not s["shell"].strip()
+            ):
+                raise ValueError(f"段 {tag}: shell 须为非空字符串")
+            intra = s.get("intra", "off")
+            if intra not in ("off", "auto"):
+                raise ValueError(f"段 {tag}: intra 取值 off|auto（得到 {intra!r}）")
+            stack = s.get("stack")
+            if stack is not None and stack not in _PARALLEL_STACKS:
+                raise ValueError(f"段 {tag}: 未知 stack {stack!r}（合法: {sorted(_PARALLEL_STACKS)}）")
+            norm = {"tag": tag, "name": s.get("name") or tag, "intra": intra}
+            if "argv" in s:
+                norm["argv"] = s["argv"]
+            if "shell" in s:
+                norm["shell"] = s["shell"]
+            if "cwd" in s:
+                if not isinstance(s["cwd"], str) or not s["cwd"].strip():
+                    raise ValueError(f"段 {tag}: cwd 须为非空字符串")
+                norm["cwd"] = s["cwd"]
+            if stack is not None:
+                norm["stack"] = stack
+            segs.append(norm)
+        workers = raw.get("workers", 0)
+        if not isinstance(workers, int) or isinstance(workers, bool) or workers < 0:
+            raise ValueError("workers 须为 ≥0 整数（0=不限并发）")
+        return {"workers": workers, "segments": segs}
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError(f"factory-local.json parallel_gate 不可用（fail-closed）: {exc}") from exc
 
 
 def repo_vars_text() -> str:
@@ -1077,6 +1172,239 @@ def dispatch_main(args: list[str]) -> int:
         release_dispatch_lock(lock_dir)
 
 
+# ═════════════════════════════════════════════════════════════════════
+# 并行测试门编排（ADR-016：自宿主仓门禁脚本下沉，能力随 full 面分发）
+#
+# 动机与 ADR-005 同型：段 fan-out（后台任务表/两轮 wait/按序回放/失败
+# 聚合/日志保留）长期驻留宿主仓的 bash 门禁脚本，能力无法到达下游
+# java/php/dotnet/go 等多语言仓。下沉本模块后：编排一次实现，
+# DISTRIBUTION full 面零新增文件即达全部下游；段清单/并发上限/段内
+# 并行档 = 数据（factory-local.json parallel_gate 可选键，缺省不启用
+# ——未采用下游零行为变化）；语言适配表 = 代码（保守档：fork 级分发，
+# 无进程内线程交错）。bash 边角语义类缺陷（wait 落空/管道吞码/trap
+# 吞错，ADR-002 记账）在新消费方结构上不可表达。
+# ═════════════════════════════════════════════════════════════════════
+
+
+def detect_stack(root: Path) -> str | None:
+    """构建文件探测 → 测试栈 id（best-effort；段配置 stack 显式指定优先）。
+
+    覆盖 full 面下游语言谱系（java/gradle/go/rust/php/dotnet/js/
+    python），构建系统标记优先于包管理器标记，多语言混合目录取第一
+    命中。未命中 → None：段内并行档自动降级串行并提示（见
+    intra_parallel_args），不猜。
+    """
+    if (root / "pom.xml").is_file() or (root / "mvnw").is_file():
+        return "maven"
+    for m in ("build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"):
+        if (root / m).is_file():
+            return "gradle"
+    if (root / "go.mod").is_file():
+        return "go"
+    if (root / "Cargo.toml").is_file():
+        return "cargo"
+    for m in ("phpunit.xml", "phpunit.xml.dist"):
+        if (root / m).is_file():
+            return "phpunit"
+    if any(root.glob("*.csproj")) or any(root.glob("*.sln")):
+        return "dotnet"
+    pkg = root / "package.json"
+    if pkg.is_file():
+        try:
+            d = json.loads(pkg.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            d = {}
+        deps = {*(d.get("dependencies") or {}), *(d.get("devDependencies") or {})}
+        test_cmd = str((d.get("scripts") or {}).get("test") or "")
+        if "vitest" in deps or "vitest" in test_cmd:
+            return "vitest"
+        if "jest" in deps or "jest" in test_cmd:
+            return "jest"
+    if (root / "pytest.ini").is_file() or (root / "conftest.py").is_file():
+        return "pytest"
+    pyproject = root / "pyproject.toml"
+    if pyproject.is_file() and "[tool.pytest" in pyproject.read_text(
+            encoding="utf-8", errors="replace"):
+        return "pytest"
+    return None
+
+
+def _xdist_available(py: str) -> bool:
+    """pytest-xdist 软依赖探测（缺席 → 段内串行 + ℹ️ 提示，不炸门）。"""
+    return subprocess.run([py, "-c", "import xdist"], capture_output=True).returncode == 0
+
+
+def intra_parallel_args(stack: str | None, py: str) -> tuple[list[str], str | None]:
+    """测试栈 → 段内并行 argv 后缀 + 观测提示行（保守档，ADR-016）。
+
+    保守档原则：只注入「模块级/fork 级分发」参数——测试类分布到并行
+    单元、单元内保持串行；不注入进程内线程交错类参数（如 Maven
+    -Dparallel=methods 这类顺序敏感放大器）。框架默认已并行的栈零附加
+    参数（诚实声明，不重复计功）；无保守参数可注的栈同样声明而非
+    硬凑。顺序敏感测试所在段的逃生舱 = 段级 intra:off（显式回退串行）。
+    """
+    if stack == "pytest":
+        if _xdist_available(py):
+            return ["-n", "auto"], None
+        return [], "未装 pytest-xdist：pytest 段内串行降级（pip install pytest-xdist 提速）"
+    if stack == "maven":
+        # -T 1C 模块级并行；forkCount=1C 测试类跨 fork 分发 +
+        # reuseForks 复用 JVM——类内方法仍串行（Surefire 保守档）
+        return ["-T", "1C", "-DforkCount=1C", "-DreuseForks=true"], None
+    if stack == "gradle":
+        # 任务级并行。测试 fork 并行（maxParallelForks）是构建脚本面，
+        # CLI 无保守注入点——需要时在仓内 build 配置
+        return ["--parallel"], None
+    if stack == "jest":
+        return ["--maxWorkers=50%"], None
+    if stack in ("vitest", "go", "cargo"):
+        return [], f"{stack} 默认已并行（进程/包/线程池内建），无附加参数"
+    if stack in ("phpunit", "dotnet"):
+        return [], f"{stack} 无 CLI 保守并行参数（paratest / xunit.runner.json 属仓面配置），段内串行"
+    return [], "未识别测试栈：段内串行（段配置 stack 显式指定可启用并行档）"
+
+
+# 中断清理限宽：SIGTERM 后最多等这么久，仍存活的段进程组 SIGKILL 收尾
+_TERM_GRACE_SECS = 5.0
+
+
+def _kill_group(pgid: int, sig: int) -> None:
+    """向段进程组发信号；组已消失（已退出/已收割）则静默——清理不放大异常。"""
+    try:
+        os.killpg(pgid, sig)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+def _seg_log_path(log_dir: Path, i: int, tag: str) -> Path:
+    """段日志路径：序号前缀保回放序可读；tag 清洗禁路径分隔符。"""
+    return log_dir / f"{i:02d}-{tag.replace('/', '__')}.log"
+
+
+def run_parallel_gate(
+    repo_root: Path | None = None,
+    cfg: dict | None = None,
+    failed_tags_path: str | None = None,
+) -> int:
+    """执行并行测试门：段 fan-out + 可选有界并发 + 按配置序回放。
+
+    返回 0=全绿 / 1=段失败 / 2=配置错误（fail-closed，不产出裁决）。
+    段日志私有化于 tempfile.mkdtemp（尊重 TMPDIR）：全绿即删；失败保留
+    并打印路径（事后取证语义对齐宿主仓门禁脚本的段日志保留）。回放
+    序=配置段序、与完成序解耦——输出 diff 稳定，先完成的段不抢跑。
+    失败段 tag 逐行写 failed_tags_path（供宿主脚本聚合串行段失败后一次
+    裁决；无失败=空文件）。workers=0 不限并发（缺省），>0 有界槽位
+    轮转（CI 资源受限仓的节流面）。段独立进程组（start_new_session）
+    执行；中断（BaseException）按组收尸：SIGTERM → 限宽等待 → SIGKILL
+    → 收割直接子进程，段日志保留取证，原始异常照抛（PR #220 评论）。
+    """
+    root = Path(repo_root) if repo_root is not None else Path(__file__).resolve().parent.parent
+    if cfg is None:
+        # 损坏配置 RuntimeError 在此转 rc 2（PR #220 评论）：宿主脚本仅
+        # 对 2 走 fail-closed 立即终止，traceback（rc 1）会漏进普通段
+        # 失败路径
+        try:
+            cfg = parallel_gate_cfg()
+        except RuntimeError as exc:
+            print(exc, file=sys.stderr)
+            return 2
+    if cfg is None:
+        print("未配置 parallel_gate（可选键缺失），无并行门可执行", file=sys.stderr)
+        return 2
+    py = os.environ.get("PYTHON") or "python3"
+
+    # 执行前预算：cwd 存在性 + intra 档解析 + 注记去重（原子性：任何段
+    # 配置错误在 spawn 前拦截，不产生半跑状态——对齐 fail-closed 范式）
+    suffixes: list[list[str]] = []
+    notes: list[str] = []
+    for seg in cfg["segments"]:
+        cwd = root / seg.get("cwd", ".")
+        if not cwd.is_dir():
+            print(f"段 {seg['tag']}: cwd 不存在: {cwd}", file=sys.stderr)
+            return 2
+        if "argv" in seg and seg.get("intra", "off") == "auto":
+            suffix, note = intra_parallel_args(seg.get("stack") or detect_stack(cwd), py)
+            suffixes.append(suffix)
+            if note and note not in notes:
+                notes.append(note)
+        else:
+            suffixes.append([])
+    for n in notes:
+        print(f"ℹ️ {n}")
+
+    segs = cfg["segments"]
+    log_dir = Path(tempfile.mkdtemp(prefix="factory-parallel-gate."))
+    rcs: list[int | None] = [None] * len(segs)
+    failed: list[str] = []
+    running: list[tuple[int, subprocess.Popen]] = []   # try 外可见：异常清理要收它
+    try:
+        pending = list(range(len(segs)))
+        workers = cfg["workers"]
+        while pending or running:
+            while pending and (workers == 0 or len(running) < workers):
+                i = pending.pop(0)
+                seg = segs[i]
+                if "argv" in seg:
+                    words = [py if w == "$PY" else w for w in seg["argv"]] + suffixes[i]
+                else:
+                    # shell 段：bash -c 名义参数 "_" 占 $0、解释器进 $1
+                    # （宿主脚本 $PY 占位约定的等价面）；pipefail 保管道
+                    # 段退出码真实（吞码缺陷类，ADR-002 记账）
+                    words = ["bash", "-o", "pipefail", "-c", seg["shell"], "_", py]
+                # 独立进程组（会话组长，pgid=pid）：中断清理 killpg 收整组，
+                # 段的测试后代（xdist worker 等）不残留为孤儿
+                with open(_seg_log_path(log_dir, i, seg["tag"]), "wb") as log_fh:
+                    running.append((i, subprocess.Popen(
+                        words, cwd=str(root / seg.get("cwd", ".")),
+                        stdout=log_fh, stderr=subprocess.STDOUT,
+                        start_new_session=True)))
+            still: list[tuple[int, subprocess.Popen]] = []
+            for i, p in running:
+                if (rc := p.poll()) is None:
+                    still.append((i, p))
+                else:
+                    rcs[i] = rc
+            running = still
+            if running:
+                time.sleep(0.05)
+
+        for i, seg in enumerate(segs):
+            print(f"── {seg.get('name') or seg['tag']}")
+            text = _seg_log_path(log_dir, i, seg["tag"]).read_text(
+                encoding="utf-8", errors="replace")
+            sys.stdout.write(text if not text or text.endswith("\n") else text + "\n")
+            print()
+            if rcs[i] != 0:
+                failed.append(seg["tag"])
+    except BaseException:
+        # 中断（KeyboardInterrupt/信号）也要让取证路径可观测，不留哑尸体：
+        # 逐组 SIGTERM → 限宽等待 → SIGKILL → 收割直接子进程。限宽窗内的
+        # 二次中断与超时同路（升级 SIGKILL），清理异常不外抛、不覆盖原始异常
+        print(f"⚠️ 并行门中断，段日志保留: {log_dir}", file=sys.stderr)
+        for _i, p in running:
+            _kill_group(p.pid, signal.SIGTERM)
+        deadline = time.monotonic() + _TERM_GRACE_SECS
+        for _i, p in running:
+            try:
+                p.wait(timeout=max(0.0, deadline - time.monotonic()))
+            except BaseException:   # TimeoutExpired 与限宽窗内二次中断同路：升级收割
+                _kill_group(p.pid, signal.SIGKILL)
+                try:
+                    p.wait()
+                except OSError:
+                    pass
+        raise
+    if failed_tags_path is not None:
+        Path(failed_tags_path).write_text(
+            "".join(f"{t}\n" for t in failed), encoding="utf-8")
+    if failed:
+        print(f"❌ 失败段: {' '.join(failed)}")
+        print(f"❌ 段日志保留: {log_dir}", file=sys.stderr)
+        return 1
+    shutil.rmtree(log_dir, ignore_errors=True)
+    print(f"✅ 并行段 {len(segs)}/{len(segs)} 全绿")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
         print(__doc__, file=sys.stderr)
@@ -1195,6 +1523,25 @@ def main(argv: list[str]) -> int:
         if (v := docstring_gate_cmd()) is not None:
             print(v)
         return 0
+    if cmd == "parallel-gate":
+        # parallel-gate [--failed-tags <path>] —— 并行测试门（ADR-016 段
+        # fan-out + 段内并行档；parallel_gate 可选键缺失 → exit 2
+        # fail-closed 不产出裁决；--failed-tags 供宿主脚本聚合失败段
+        # tag、追加串行段失败后一次裁决，无失败=空文件）
+        ftp: str | None = None
+        rest = argv[2:]
+        j = 0
+        while j < len(rest):
+            if rest[j] == "--failed-tags":
+                if j + 1 >= len(rest):
+                    print("parallel-gate: --failed-tags 缺路径参数", file=sys.stderr)
+                    return 2
+                ftp = rest[j + 1]
+                j += 2
+            else:
+                print(f"parallel-gate: 未知参数 {rest[j]!r}", file=sys.stderr)
+                return 2
+        return run_parallel_gate(failed_tags_path=ftp)
     if cmd == "local-str":
         # local-str <key> —— 单字符串键输出（feedback-upstream 上游指针等；ADR-009）
         print(_local_str(argv[2]))
