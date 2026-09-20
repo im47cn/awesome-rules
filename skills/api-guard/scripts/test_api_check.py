@@ -788,6 +788,12 @@ class TestExceptionBranches(unittest.TestCase):
         self.assertEqual(len(issues), 1)
         self.assertEqual(issues[0].rule, "文件读取错误")
 
+    def test_check_mapper_xml_file_read_error(self):
+        with patch("builtins.open", side_effect=OSError("boom")):
+            issues = api_check.check_mapper_xml_file("X.xml")
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].rule, "文件读取错误")
+
 
 # ── 文件发现边界 ──────────────────────────────────────────────────────────
 
@@ -1015,6 +1021,224 @@ class TestCheckMappingAnnotation(unittest.TestCase):
             os.rmdir(d)
         self.assertTrue(any(i.rule == "映射注解" for i in issues),
                         f"无端点早退吞掉了映射注解问题: {issues!r}")
+
+
+# ── Mapper XML 软删过滤（09-cr-checklist M061） ────────────────────────────
+
+
+class TestCheckDelFlagFilter(unittest.TestCase):
+    """<select> 含 del_flag 列而 WHERE 无 del_flag=0 判定即报；识别不了的形态跳过。"""
+
+    def test_missing_filter_flagged(self):
+        """负控制：SQL 文本含 del_flag、WHERE 无 del_flag=0 → MANDATORY 命中。"""
+        xml = (
+            '<mapper namespace="com.acme.user.UserMapper">\n'
+            '  <select id="listByStatus" resultType="UserPO">\n'
+            '    SELECT id, name, del_flag\n'
+            '    FROM t_user\n'
+            '    WHERE status = #{status}\n'
+            '  </select>\n'
+            '</mapper>\n'
+        )
+        issues = api_check.check_del_flag_filter("UserMapper.xml", xml)
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].rule, "软删过滤")
+        self.assertEqual(issues[0].severity, Severity.MANDATORY)
+        self.assertEqual(issues[0].endpoint, "listByStatus")
+        self.assertEqual(issues[0].location, "UserMapper.xml:2")
+        self.assertIn("del_flag", issues[0].description)
+
+    def test_compliant_filter_passes(self):
+        """正控制：WHERE 带 del_flag = 0（含别名前缀/无空白形态）零报告。"""
+        xml = (
+            '<mapper namespace="com.acme.user.UserMapper">\n'
+            '  <select id="listByStatus" resultType="UserPO">\n'
+            '    SELECT id, name, del_flag\n'
+            '    FROM t_user t\n'
+            '    WHERE t.status = #{status} AND t.del_flag=0\n'
+            '  </select>\n'
+            '</mapper>\n'
+        )
+        self.assertEqual(api_check.check_del_flag_filter("UserMapper.xml", xml), [])
+
+    def test_no_del_flag_text_skipped(self):
+        """fail-open：SQL 文本不含 del_flag（无列证据）不罚。"""
+        xml = (
+            '<mapper namespace="com.acme.user.UserMapper">\n'
+            '  <select id="listByStatus" resultType="UserPO">\n'
+            '    SELECT id, name FROM t_user WHERE status = 1\n'
+            '  </select>\n'
+            '</mapper>\n'
+        )
+        self.assertEqual(api_check.check_del_flag_filter("UserMapper.xml", xml), [])
+
+    def test_no_where_clause_flagged(self):
+        """无 WHERE 子句且 select 列含 del_flag → 命中。"""
+        xml = (
+            '<mapper namespace="com.acme.user.UserMapper">\n'
+            '  <select id="listAll" resultType="UserPO">\n'
+            '    SELECT id, del_flag FROM t_user\n'
+            '  </select>\n'
+            '</mapper>\n'
+        )
+        issues = api_check.check_del_flag_filter("UserMapper.xml", xml)
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].rule, "软删过滤")
+
+    def test_dynamic_where_tag_with_filter_passes(self):
+        """<where> 动态标签 + <if> 内的 del_flag = 0 判定识别为已过滤。"""
+        xml = (
+            '<mapper namespace="com.acme.user.UserMapper">\n'
+            '  <select id="pageUsers" resultType="UserPO">\n'
+            '    SELECT id, del_flag FROM t_user\n'
+            '    <where>\n'
+            '      <if test="status != null">AND status = #{status}</if>\n'
+            '      AND del_flag = 0\n'
+            '    </where>\n'
+            '  </select>\n'
+            '</mapper>\n'
+        )
+        self.assertEqual(api_check.check_del_flag_filter("UserMapper.xml", xml), [])
+
+    def test_cdata_and_uppercase_recognized(self):
+        """CDATA 包裹与大写 WHERE/DEL_FLAG = 0 同样识别为已过滤。"""
+        xml = (
+            '<mapper namespace="com.acme.user.UserMapper">\n'
+            '  <select id="getById" resultType="UserPO">\n'
+            '    <![CDATA[\n'
+            '    SELECT id, del_flag FROM t_user WHERE id = #{id} AND DEL_FLAG = 0\n'
+            '    ]]>\n'
+            '  </select>\n'
+            '</mapper>\n'
+        )
+        self.assertEqual(api_check.check_del_flag_filter("UserMapper.xml", xml), [])
+
+    def test_include_fragment_skipped(self):
+        """fail-open：<include refid> 的 WHERE 可能在 <sql> 片段中，跳过不罚。"""
+        xml = (
+            '<mapper namespace="com.acme.user.UserMapper">\n'
+            '  <sql id="base_where">WHERE del_flag = 0</sql>\n'
+            '  <select id="listAll" resultType="UserPO">\n'
+            '    SELECT id, name, del_flag FROM t_user\n'
+            '    <include refid="base_where"/>\n'
+            '  </select>\n'
+            '</mapper>\n'
+        )
+        self.assertEqual(api_check.check_del_flag_filter("UserMapper.xml", xml), [])
+
+    def test_update_statement_not_checked(self):
+        """仅查 <select>：<update> 置 del_flag=1 的软删写路径不在本检查面。"""
+        xml = (
+            '<mapper namespace="com.acme.user.UserMapper">\n'
+            '  <update id="markDeleted">\n'
+            '    UPDATE t_user SET del_flag = 1 WHERE id = #{id}\n'
+            '  </update>\n'
+            '</mapper>\n'
+        )
+        self.assertEqual(api_check.check_del_flag_filter("UserMapper.xml", xml), [])
+
+    def test_second_statement_line_number_and_id(self):
+        """行号锚定各自 <select> 起始行、endpoint 取语句 id。"""
+        xml = (
+            '<mapper namespace="com.acme.user.UserMapper">\n'
+            '  <select id="ok">\n'
+            '    SELECT id, del_flag FROM t_user WHERE a = 1 AND del_flag = 0\n'
+            '  </select>\n'
+            '  <select id="bad">\n'
+            '    SELECT id, del_flag FROM t_user WHERE a = 1\n'
+            '  </select>\n'
+            '</mapper>\n'
+        )
+        issues = api_check.check_del_flag_filter("UserMapper.xml", xml)
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].endpoint, "bad")
+        self.assertEqual(issues[0].location, "UserMapper.xml:5")
+
+
+class TestMapperXmlDiscovery(unittest.TestCase):
+    """Mapper XML 文件发现：目录扫描只认 mapper 路径段，调用方直传不限位置。"""
+
+    def _tmpdir(self):
+        import tempfile
+        return tempfile.mkdtemp()
+
+    def test_dir_walk_mapper_segment_only(self):
+        """目录扫描只收 mapper/ 路径段下的 .xml，pom.xml 等其余忽略。"""
+        d = self._tmpdir()
+        mapper_dir = os.path.join(d, "resources", "mapper")
+        os.makedirs(mapper_dir)
+        for rel in ("resources/mapper/UserMapper.xml", "resources/pom.xml", "other.xml"):
+            p = os.path.join(d, *rel.split("/"))
+            with open(p, "w", encoding="utf-8") as f:
+                f.write("<mapper namespace=\"x\"/>\n")
+        found = api_check.find_mapper_xml_files(d)
+        self.assertEqual(found, [os.path.join(mapper_dir, "UserMapper.xml")])
+
+    def test_single_file_any_location(self):
+        """调用方直接传入的 .xml 不限位置（形态判定留给检查层 fail-open）。"""
+        d = self._tmpdir()
+        p = os.path.join(d, "UserMapper.xml")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write("<mapper namespace=\"x\"/>\n")
+        self.assertEqual(api_check.find_mapper_xml_files(p), [p])
+
+    def test_non_xml_ignored(self):
+        """非 .xml 文件不进管线。"""
+        d = self._tmpdir()
+        p = os.path.join(d, "Foo.java")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write("public class Foo {}\n")
+        self.assertEqual(api_check.find_mapper_xml_files(p), [])
+
+
+class TestMapperXmlPipeline(unittest.TestCase):
+    """main() 端到端：仅含 Mapper XML 的目录走完整发现→检查→报告链路。"""
+
+    VIOLATION = (
+        '<mapper namespace="com.acme.user.UserMapper">\n'
+        '  <select id="listByStatus" resultType="UserPO">\n'
+        '    SELECT id, name, del_flag FROM t_user WHERE status = #{status}\n'
+        '  </select>\n'
+        '</mapper>\n'
+    )
+    COMPLIANT = (
+        '<mapper namespace="com.acme.user.UserMapper">\n'
+        '  <select id="listByStatus" resultType="UserPO">\n'
+        '    SELECT id, name, del_flag FROM t_user WHERE status = #{status} AND del_flag = 0\n'
+        '  </select>\n'
+        '</mapper>\n'
+    )
+
+    def _run_main(self, argv):
+        import io
+        import tempfile
+        from contextlib import redirect_stdout, redirect_stderr
+        d = tempfile.mkdtemp()
+        mapper_dir = os.path.join(d, "resources", "mapper")
+        os.makedirs(mapper_dir)
+        with open(os.path.join(mapper_dir, "UserMapper.xml"), "w", encoding="utf-8") as f:
+            f.write(argv)
+        old = sys.argv
+        sys.argv = ["api_check.py", d]
+        buf = io.StringIO()
+        try:
+            with redirect_stdout(buf), redirect_stderr(buf):
+                code = api_check.main()
+        finally:
+            sys.argv = old
+        return code, buf.getvalue()
+
+    def test_main_flags_violation_exit_one(self):
+        """违规 Mapper XML 目录：退出码 1，报告含软删过滤问题。"""
+        code, out = self._run_main(self.VIOLATION)
+        self.assertEqual(code, 1)
+        self.assertIn("软删过滤", out)
+
+    def test_main_compliant_exit_zero(self):
+        """合规 Mapper XML（WHERE 带 del_flag = 0）：退出码 0 零误报。"""
+        code, out = self._run_main(self.COMPLIANT)
+        self.assertEqual(code, 0)
+        self.assertNotIn("软删过滤", out)
 
 
 # ── 运行 ──────────────────────────────────────────────────────────────────

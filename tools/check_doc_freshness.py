@@ -53,6 +53,10 @@
      定位（有意最小子集，不要求全集；2026-09-08 狩猎实证三方漂移后
      收敛的口径，同日独立审查 Y4 补子集性校验）；表 token 形态契约
      与解析失败 fail-closed 语义见 rule_r9 注释
+  R11 总则句双源一致：AGENTS.md「标注【强制】的条款不可违反…」整句
+     须原样出现在 hooks/load-steering.sh 文本中（钩子在生成上下文的
+     Python 字符串里硬编码了第二份副本，任一侧修订未同步即漂移；
+     比较前两侧做转义形态还原，规避 shell/python 引号转义差异）
 
 豁免（误报控制，两条稳定通道）：
   --allow REGEX（可重复）：正则 search 命中证据行（[级别] 文件:行 →
@@ -70,6 +74,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import sys
@@ -101,6 +106,9 @@ R5_CHECKOUT_RE = re.compile(r"git\s+checkout\s+-b\s+factory/issue")
 R8_SPLIT_RE = re.compile(r"[\s/、，,`*（）()：:。；;]+")
 
 DEF_TEST_RE = re.compile(r"(?m)^\s*(?:async\s+)?def\s+test_")
+
+# R11 总则句锚点：AGENTS.md 使用原则下的强度总则句（hooks 侧硬编码第二份副本）
+R11_SENTINEL = "标注【强制】的条款不可违反"
 
 
 def _cn_to_int(s: str) -> int | None:
@@ -636,8 +644,53 @@ def _source_line(root: Path, where: str) -> str | None:
     return ln[idx] if 0 <= idx < len(ln) else None
 
 
+def rule_r11(root: Path, g: Gate) -> None:
+    """R11 总则句双源一致：AGENTS.md 总则句须原样出现在 hooks/load-steering.sh。
+
+    hooks/load-steering.sh 在生成上下文的 Python 字符串里硬编码了
+    AGENTS.md 总则句的第二份副本（2026-09-20 审计 D-09），改动任一侧
+    未同步即漂移。比较做转义形态规范化：AGENTS.md 侧剥行首列表符取
+    整句；shell 侧提取全部 Python 字符串字面量、ast.literal_eval 还原
+    转义后做子串匹配（字面量解码失败的兜底退回原文子串），均不中才 FAIL。
+    """
+    a_path = root / "AGENTS.md"
+    h_path = root / "hooks" / "load-steering.sh"
+    for p in (a_path, h_path):
+        if not p.is_file():
+            g.fail(p.as_posix(), "R11 总则句双源之一缺失（AGENTS.md 与 hooks/load-steering.sh 须成对在位）")
+            return
+    a_lines = _lines(a_path)
+    idx = next((i for i, ln in enumerate(a_lines, 1) if R11_SENTINEL in ln), None)
+    if idx is None:
+        g.fail("AGENTS.md", "R11 总则句锚点未命中（「标注【强制】的条款不可违反…」整句行缺失或被改写）")
+        return
+    sentence = a_lines[idx - 1].lstrip().lstrip("-* ").strip()
+    h_text = h_path.read_text(encoding="utf-8")
+    decoded = []
+    for m in re.finditer(r'"(?:[^"\\\n]|\\.)*"', h_text):
+        try:
+            v = ast.literal_eval(m.group(0))
+        except (ValueError, SyntaxError):
+            continue
+        if isinstance(v, str):
+            decoded.append(v)
+    for m in re.finditer(r"'(?:[^'\\\n]|\\.)*'", h_text):
+        try:
+            v = ast.literal_eval(m.group(0))
+        except (ValueError, SyntaxError):
+            continue
+        if isinstance(v, str):
+            decoded.append(v)
+    if sentence in h_text or any(sentence in s for s in decoded):
+        return
+    h_lines = h_text.splitlines()
+    h_idx = next((i for i, ln in enumerate(h_lines, 1) if R11_SENTINEL in ln), None)
+    where = f"hooks/load-steering.sh:{h_idx}" if h_idx else "hooks/load-steering.sh"
+    g.fail(where, f"R11 总则句与 AGENTS.md:{idx} 不一致（双源硬编码，修订须两侧同步）")
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description="实现↔文档一致性门禁（R1-R10）")
+    ap = argparse.ArgumentParser(description="实现↔文档一致性门禁（R1-R11）")
     ap.add_argument("root", nargs="?", default=".",
                     help="仓库根（默认当前目录）")
     ap.add_argument("--allow", action="append", default=[], metavar="REGEX",
@@ -673,6 +726,7 @@ def main() -> int:
     rule_r8(root, g)
     rule_r9(root, g)
     rule_r10(root, g)
+    rule_r11(root, g)
 
     fails: list[str] = []
     infos: list[str] = []

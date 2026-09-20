@@ -23,7 +23,7 @@ scenario: CR 清单/公共依赖速查
 
 - [ ]【强制】领域类（实体/值对象）**无后缀**，用业务名；其他类后缀与职责对应（Inter/Controller/AppService/Repository/RepositoryImpl/Mapper/PO/DTO/Command/Query/ExtPt/Ext）（已接线：arch_check.check_naming；领域类业务命名人工）
 - [ ]【强制】adapter 包用 `web`（非 `facade`）（人工）
-- [ ]【强制】方法命名分层：应用层用业务语义或 `create/remove/modify/get/page`，基础设施层用 `insert/update/delete/queryPage/queryList/queryDetail`（人工）
+- [ ]【强制】方法命名分层：应用层用业务语义或 `create/remove/modify/get/page/list/count`，基础设施层用 `insert/update/delete/queryPage/queryList/queryDetail`（人工）
 - [ ]【强制】常量类使用 `final class` + private 构造方法，不使用 `interface`（人工）
 - [ ]【强制】依赖注入使用 `@Resource`，不使用 `@Autowired`（已接线：arch_check.check_injection_annotation）
 
@@ -50,7 +50,7 @@ scenario: CR 清单/公共依赖速查
 - [ ]【强制】非数据库字段标注 `@TableField(exist = false)`（人工）
 - [ ]【强制】PO 无日期格式化注解，DTO 用 `@JsonFormat` 输出 ISO 8601 带时区（`timezone = "+08:00"`，与 openapi-standards 一致）（已接线：api_check.check_time_annotation；DTO pattern/timezone 口径人工）
 - [ ]【强制】Mapper 继承 `BaseMapper<PO>`，分页拦截器配置 `DbType.MYSQL`（人工）
-- [ ]【强制】Mapper XML 在 `resources/mapper/` 下，namespace 与接口全限定名一致，查询带 `del_flag = 0`（人工）
+- [ ]【强制】Mapper XML 在 `resources/mapper/` 下，namespace 与接口全限定名一致，查询带 `del_flag = 0`（del_flag 过滤已接线：api_check.check_del_flag_filter；XML 位置与 namespace 一致性人工）
 
 **日志与异常**
 

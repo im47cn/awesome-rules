@@ -3,7 +3,7 @@
 业务接口规范检查脚本
 检查 Java 项目中业务 Controller（@RestController）的 API 定义是否符合规范。
 
-仅覆盖业务接口通用规则（路径命名、禁止 path 传标识、时间注解），
+仅覆盖业务接口通用规则（路径命名、禁止 path 传标识、时间注解、Mapper XML 软删过滤），
 不检查对外 Open API 四段式规范（四段式请见 steering/openapi-standards.md）。
 
 用法:
@@ -60,6 +60,17 @@ JSONFORMAT_NUMBER_RE = re.compile(
     re.DOTALL,
 )
 JSONFORMAT_ANY_RE = re.compile(r'@JsonFormat')
+# Mapper XML 软删过滤（09-cr-checklist M061 / 04-database §4）：
+# <select> 语句体含 del_flag 列（SQL 文本证据）而 WHERE 无 del_flag=0 判定
+MAPPER_SELECT_RE = re.compile(r"(<select\b[^>]*>)(.*?)</select>",
+                              re.DOTALL | re.IGNORECASE)
+# 过滤判定容忍别名前缀（t.del_flag）与任意空白
+DEL_FLAG_FILTER_RE = re.compile(r"\bdel_flag\s*=\s*0\b", re.IGNORECASE)
+WHERE_KEYWORD_RE = re.compile(r"\bwhere\b", re.IGNORECASE)
+XML_TAG_RE = re.compile(r"<[^>]+>")
+XML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+# MyBatis <where> 动态标签视同 where 子句起点
+MAPPER_WHERE_TAG_RE = re.compile(r"<where\b[^>]*>", re.IGNORECASE)
 
 
 # ── Java 文件解析 ────────────────────────────────────────────────────────
@@ -445,6 +456,85 @@ def check_contract_file(file_path: str) -> list:
     return issues
 
 
+# ── Mapper XML 软删过滤（09-cr-checklist M061）───────────────────────────
+
+
+def check_del_flag_filter(file_path: str, content: str) -> list:
+    """检查 Mapper XML <select> 语句软删过滤（09-cr-checklist「数据库与实体」）：
+
+    - 表含 del_flag 列（以 SQL 文本含 del_flag 为证据）而 WHERE 无
+      del_flag=0 判定 → 报告（04-database §4「查询带 del_flag = 0」）
+    - 形态识别从宽（fail-open）：无 del_flag 文本证据、语句体含
+      <include>（WHERE 可能在 <sql> 片段中，本脚本不解析引用）等
+      识别不了的形态一律跳过不罚，命中即报
+    """
+    issues = []
+    for m in MAPPER_SELECT_RE.finditer(content):
+        body = m.group(2)
+        if "<include" in body.lower():
+            continue
+        # 规范化：剥 CDATA 包裹与 XML 注释；<where> 标签换写 where 关键字，
+        # 其余动态标签（<if>/<choose>/…）剥离只留内部 SQL 文本
+        sql = body.replace("<![CDATA[", " ").replace("]]>", " ")
+        sql = XML_COMMENT_RE.sub(" ", sql)
+        sql = MAPPER_WHERE_TAG_RE.sub(" where ", sql)
+        sql = XML_TAG_RE.sub(" ", sql)
+        if "del_flag" not in sql.lower():
+            continue
+        where_m = WHERE_KEYWORD_RE.search(sql)
+        if where_m and DEL_FLAG_FILTER_RE.search(sql[where_m.start():]):
+            continue
+        line = content[: m.start()].count("\n") + 1
+        id_m = re.search(r'\bid\s*=\s*"([^"]+)"', m.group(1))
+        issues.append(Issue(
+            file=file_path, endpoint=id_m[1] if id_m else "(select)",
+            http_method="", severity=Severity.MANDATORY, rule="软删过滤",
+            location=f"{file_path}:{line}",
+            description="<select> 含 del_flag 列但 WHERE 无 del_flag=0 判定（09-cr-checklist M061）",
+            suggestion="WHERE 子句补 del_flag = 0 软删过滤（04-database §4）",
+        ))
+    return issues
+
+
+def find_mapper_xml_files(path: str) -> list:
+    """查找 Mapper XML 文件（resources/mapper/ 目录下的 .xml；
+    调用方直接传入的 .xml 不限位置，形态判定留给检查层 fail-open）。"""
+    xml_files = []
+
+    if os.path.isfile(path):
+        if path.endswith(".xml"):
+            xml_files = [path]
+    elif os.path.isdir(path):
+        for dirpath, dirnames, filenames in os.walk(path):
+            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+            for fn in filenames:
+                if not fn.endswith(".xml"):
+                    continue
+                full = os.path.join(dirpath, fn)
+                # 只认 mapper 路径段下的 XML；其余 .xml（pom.xml 等）不在本检查面
+                if "mapper" in Path(full).parts:
+                    xml_files.append(full)
+
+    return xml_files
+
+
+def check_mapper_xml_file(file_path: str) -> list:
+    """检查单个 Mapper XML 文件的软删过滤。"""
+    issues = []
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except (UnicodeDecodeError, OSError) as e:
+        issues.append(Issue(
+            file=file_path, endpoint="(文件级)", http_method="",
+            severity=Severity.MANDATORY, rule="文件读取错误",
+            location=file_path, description=str(e),
+        ))
+        return issues
+    issues.extend(check_del_flag_filter(file_path, content))
+    return issues
+
+
 # ── 报告格式 ─────────────────────────────────────────────────────────────
 
 
@@ -505,7 +595,7 @@ def format_report_json(file_path: str, issues: list) -> str:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="业务接口规范检查脚本 - 检查 Java Controller 的路径命名与 path 变量"
+        description="业务接口规范检查脚本 - 检查 Java Controller 路径命名/path 变量与 Mapper XML 软删过滤"
     )
     parser.add_argument("path", nargs="?", default=".", help="文件或项目目录路径（默认当前目录）")
     parser.add_argument("--format", choices=["text", "json"], default="text", help="输出格式")
@@ -513,13 +603,15 @@ def main():
 
     ctrl_files = find_controller_files(args.path)
     contract_files = find_contract_files(args.path)
+    mapper_files = find_mapper_xml_files(args.path)
 
-    if not ctrl_files and not contract_files:
-        print(f"未找到 Controller 或契约对象(DTO/PO/Command/Query)文件: {args.path}", file=sys.stderr)
+    if not ctrl_files and not contract_files and not mapper_files:
+        print(f"未找到 Controller、契约对象(DTO/PO/Command/Query)或 Mapper XML 文件: {args.path}", file=sys.stderr)
         return 2
 
     all_targets = [(f, check_file) for f in ctrl_files]
     all_targets += [(f, check_contract_file) for f in contract_files]
+    all_targets += [(f, check_mapper_xml_file) for f in mapper_files]
     return run_gate(
         all_targets, args.format, format_report_text, format_report_json,
     )
