@@ -1307,9 +1307,9 @@ def run_parallel_gate(
         except RuntimeError as exc:
             print(exc, file=sys.stderr)
             return 2
-        if cfg is None:
-            print("未配置 parallel_gate（可选键缺失），无并行门可执行", file=sys.stderr)
-            return 2
+    if cfg is None:
+        print("未配置 parallel_gate（可选键缺失），无并行门可执行", file=sys.stderr)
+        return 2
     py = os.environ.get("PYTHON") or "python3"
 
     # 执行前预算：cwd 存在性 + intra 档解析 + 注记去重（原子性：任何段
