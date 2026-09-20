@@ -9,7 +9,9 @@
 # 并行模型（perf/tests-gate-parallel）：8 套件 + badcase + lease-sql 共 10 段
 # 一次 fan-out 后台并发（串行合计 ≈64s），日志各落 mktemp 私有文件，wait
 # 全部完成后按原段序回放——输出形态与串行版一致，壁钟压到最长段
-# （.factory/tests ≈43s）。秒级尾段（plugin_lock/md_link_check/
+#（.factory/tests 串行 ≈43s；长段再叠加 pytest-xdist -n auto 段内并行，
+# 2026-09-20 实测 .factory 43s→11s、ddl-guard 11s→6.6s，秒级段 spawn
+# 开销倒挂保持串行，见 XDIST_ARGS / XDIST_LONG）。秒级尾段（plugin_lock/
 # doc_freshness/lint-shellcheck）不并行：无收益，且 lint-shellcheck 层的
 # 文件清单被 NC16 镜像锁按文本抽取（tools/test_gauntlet_checks.sh），
 # 保持原序原形态以保其解析与负控制语义。
@@ -19,6 +21,10 @@
 # 仅 skill-evo 段读写；.factory 泄漏断言已注入私有 TMPDIR（PR #137）；
 # lease-sql 固定 /tmp/pgfactory-lease-test 与端口 55432，段内独占——单实例
 # 内并行安全，但禁止两个本脚本实例并发运行（固定路径/端口会互撞）。
+# 段内 xdist 并行复检（2026-09-20）：worker 间无共享固定路径/端口；唯一
+# 竞态 run_gate 的 pgid 文件握手（负载下 bash 启动可晚于超时杀组、文件
+# 永不落盘）已改 Popen 派生侧捕获（test_mutations_run._capture_gate_pgid）；
+# skill-evo dry-run 固定路径仅单测试内写读（test_evo_cli 唯一触达者）。
 #
 # 用法:
 #   bash scripts/run_tests.sh            # 测试 + 安装入口 blob 锁定校验
@@ -28,6 +34,17 @@ set -u -o pipefail  # pipefail：badcase | tail 管道下保留 runner 真实退
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT" || exit 1
 PY="${PYTHON:-python3}"
+
+# pytest-xdist（软依赖，缺席即长段段内降级串行——同 lint-shellcheck 层
+# 先例；安装 pip install pytest-xdist）。-n auto = 逻辑核数 worker，仅施于
+# 长段白名单 XDIST_LONG：8 段一次 fan-out 已跨套件并发，段段裸 -n auto
+# 会 N×核数进程踩踏，秒级段纯倒挂（api-guard 0.32s→0.56s 实测）。
+XDIST_ARGS=""
+if "$PY" -c 'import xdist' >/dev/null 2>&1; then
+  XDIST_ARGS="-n auto"
+else
+  echo "ℹ️ 未装 pytest-xdist：长段段内串行降级（pip install pytest-xdist 提速）"
+fi
 
 # 测试套件目录（有 tests/ 子目录用之，否则收集目录本身）
 SUITES=(
@@ -69,11 +86,18 @@ par_launch() {  # par_launch <段头> <失败标签> <命令串，"\$1" 为 PY �
   PAR_PIDS+=("$!")
 }
 
+# 长段白名单（段内 >5s 实测）：.factory/tests 43s→11s（3.8×）、
+# ddl-guard 10.9s→6.3s（1.7×）。
+XDIST_LONG=" .factory/tests skills/ddl-guard/scripts "
 for suite in "${SUITES[@]}"; do
   target="tests"
   [ -d "$suite/tests" ] || target="."
+  extra=""
+  if [ -n "$XDIST_ARGS" ]; then
+    case "$XDIST_LONG" in *" $suite "*) extra=" $XDIST_ARGS" ;; esac
+  fi
   par_launch "── pytest $suite" "$suite" \
-    "cd '$suite' && \"\$1\" -m pytest '$target' -o addopts='' -q"
+    "cd '$suite' && \"\$1\" -m pytest '$target' -o addopts='' -q$extra"
 done
 par_launch "── badcase" "badcase" "\"\$1\" scripts/badcase_runner.py | tail -3"
 par_launch "── lease-sql(非PG段)" "lease-sql" \

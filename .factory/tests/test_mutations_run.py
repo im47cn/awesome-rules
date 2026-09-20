@@ -120,26 +120,42 @@ def _assert_group_dead(pgid: int, *, timeout: float = 10.0) -> None:
     pytest.fail(f"进程组 {pgid} 在 {timeout}s 后未消失（仍有成员）")
 
 def _slow_gate(tmp_path):
-    """夹具门：自报 pgid、派生 sleep 孙进程后挂起。"""
-    pgid_file = tmp_path / "pgid"
+    """夹具门：派生 sleep 孙进程后挂起（组内有真活成员，只杀 leader
+    会留孤儿，断言才有杀组语义面）。"""
     gate = tmp_path / "slow_gate.sh"
-    gate.write_text(
-        f"#!/bin/bash\necho $$ > {pgid_file}\nsleep 60 &\nwait\n",
-        encoding="utf-8")
+    gate.write_text("#!/bin/bash\nsleep 60 &\nwait\n", encoding="utf-8")
     gate.chmod(0o755)
-    return pgid_file, gate
+    return gate
+
+
+def _capture_gate_pgid(monkeypatch):
+    """从派生侧捕获门的 pgid：start_new_session 下 pgid == Popen pid
+    （run.py 同一不变式）。刻意不做门内 echo $$ > 文件握手——xdist 多
+    worker 负载下 bash 启动可晚于 1s 超时杀组，文件永不落盘（2026-09-20
+    实证 FileNotFoundError）。"""
+    real_popen = mut.subprocess.Popen
+    captured = []
+
+    def _popen(*args, **kwargs):
+        proc = real_popen(*args, **kwargs)
+        captured.append(proc.pid)
+        return proc
+
+    monkeypatch.setattr(mut.subprocess, "Popen", _popen)
+    return captured
+
 
 def test_timeout_kills_process_group(tmp_path, monkeypatch):
     """超时杀整个进程组（PR #33 审查）：只杀 bash 直子会留孤儿继续读
-    注入中的 target，还原窗口被污染。夹具门自报 pgid（start_new_session
-    下 == 自身 pid）、派生 sleep 孙进程后挂起；断言超时后整组无存活。"""
-    import time as _time
-    pgid_file, gate = _slow_gate(tmp_path)
+    注入中的 target，还原窗口被污染。夹具门派生 sleep 孙进程后挂起；
+    断言超时后整组无存活（pgid 取自 Popen 派生侧，见 _capture_gate_pgid）。"""
+    gate = _slow_gate(tmp_path)
+    pgids = _capture_gate_pgid(monkeypatch)
     monkeypatch.setattr(mut, "FINAL_GATE", [str(gate)])
     monkeypatch.setattr(mut, "TESTS_TIMEOUT", 1)
-    t0 = _time.monotonic()
     assert mut.run_gate("tests", "whatever") is None
-    _assert_group_dead(int(pgid_file.read_text().strip()))
+    _assert_group_dead(pgids[0])
+
 
 
 def test_timeout_sigkill_eperm_tolerated(tmp_path, monkeypatch):
@@ -149,7 +165,8 @@ def test_timeout_sigkill_eperm_tolerated(tmp_path, monkeypatch):
     import errno
     import os
     import signal
-    pgid_file, gate = _slow_gate(tmp_path)
+    gate = _slow_gate(tmp_path)
+    pgids = _capture_gate_pgid(monkeypatch)
     real_killpg = os.killpg
 
     def killpg_then_eperm(pgid, sig):
@@ -161,7 +178,7 @@ def test_timeout_sigkill_eperm_tolerated(tmp_path, monkeypatch):
     monkeypatch.setattr(mut, "FINAL_GATE", [str(gate)])
     monkeypatch.setattr(mut, "TESTS_TIMEOUT", 1)
     assert mut.run_gate("tests", "whatever") is None
-    _assert_group_dead(int(pgid_file.read_text().strip()))
+    _assert_group_dead(pgids[0])
 
 
 def test_probe_tolerates_macos_zombie_window(monkeypatch):
