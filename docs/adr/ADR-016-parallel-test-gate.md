@@ -1,7 +1,8 @@
 # ADR-016 · 2026-09-20 · 并行测试门工厂化（段 fan-out 下沉 factory_lib，随 full 面分发）
 
-**背景**：PR #212 把宿主仓全量门禁 43s→14s（段间 fan-out + pytest-xdist
-长段白名单），但能力以 bash 原语困在 scripts/run_tests.sh：DISTRIBUTION
+**背景**：PR #212 把宿主仓全量门禁 43s→14s（#139 段间 fan-out 先把串行
+64s 压到 43s，#212 再叠加 pytest-xdist 长段白名单至 14s），但能力以 bash
+原语困在 scripts/run_tests.sh：DISTRIBUTION
 full 面的 ~10 个下游仓照旧串行门禁，且 ADR-002 的证据类（shell 进程原语
 边角语义）正是并行编排的高发缺陷区。诉求：并行测试门赋能到每个使用工厂
 的项目，并支持多语言栈（Java 等）的段内并行。
