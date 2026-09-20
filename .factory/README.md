@@ -28,7 +28,6 @@
 | `upstream-sync-check.sh` | M2 上游同步检查（dispatch 轮末）：full 漂移→确定性 PR 流；local 漂移→needs-human issue；无凭据降级仅报告 |
 | `sync-from-upstream.sh` + `DISTRIBUTION.json` | M1 上游同步：三态分发清单（full/local/skip）+ 下游拉取（--check 门禁/--apply 追平+锚点）；B1（ADR-011）`--repo` 中心驱动 + `--commit` 单提交落库 + blame-ignore 滞后一条 |
 | `downstream-check.sh` + `downstream.local.json` | B2 中心集中巡检（ADR-011）：10 仓清单（gitignored 本地数据，ADR-012——tracked `downstream.json` 仅空模板）；`--check` 逐仓漂移检查 + `--apply-commit` 漂移仓单提交追平；一律 `--anchor main` 跑中心版脚本；漂移 osascript 通知（`FACTORY_NO_NOTIFY=1` 关断） |
-| `decisions.md` | 工厂决策记录（ADR-001~011：租约仲裁/A3 记账/单写者降级/周回归/dispatch 下沉/触发器计数口径/forge 平台适配/托管平台抽象层/本地化数据化/测试 git 密封/下游追平巡检）；进程管理类缺陷须在此记账（ADR-002，合并前自愈不计数，ADR-006） |
 
 ## 前置条件
 - `omp` CLI（AI 节点引擎；每节点独立进程 = 物理级 fresh context）
