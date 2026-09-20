@@ -89,14 +89,13 @@ def extract_endpoints(content: str, file_path: str):
 
     # 类级 @RequestMapping
     class_mapping = ""
-    cm = re.search(r"class\s+\w+[^{]*?\{", content)
-    if cm:
+    if cm := re.search(r"class\s+\w+[^{]*?\{", content):
         before_class = content[: cm.start()]
         rm = re.search(
             r'@RequestMapping\s*\(\s*(?:value\s*=\s*)?"([^"]+)"', before_class
         )
         if rm:
-            class_mapping = rm.group(1)
+            class_mapping = rm[1]
 
     # 方法级映射注解
     mapping_pattern = re.compile(
@@ -112,9 +111,9 @@ def extract_endpoints(content: str, file_path: str):
         if re.match(r"\s*(?:public\s+|abstract\s+)*class\s", after_match):
             continue
 
-        ann_type = m.group(1)
-        path = m.group(2)
-        extra = m.group(3)
+        ann_type = m[1]
+        path = m[2]
+        extra = m[3]
 
         http_method = {
             "GetMapping": "GET",
@@ -129,20 +128,20 @@ def extract_endpoints(content: str, file_path: str):
         if ann_type == "RequestMapping":
             mm = re.search(r"method\s*=\s*(\w+\.\w+)", extra)
             if mm:
-                method_name = mm.group(1).split(".")[-1].upper()
+                method_name = mm[1].split(".")[-1].upper()
                 if method_name in ("GET", "POST", "PUT", "DELETE", "PATCH"):
                     http_method = method_name
 
-        full_path = (class_mapping or "") + path
+        full_path = f"{class_mapping}{path}"
         if not full_path.startswith("/"):
-            full_path = "/" + full_path
+            full_path = f"/{full_path}"
 
         line = content[: m.start()].count("\n") + 1
 
         # 提取方法名
         after = content[m.end():]
         method_m = re.search(r"\w+\s+(\w+)\s*\(", after)
-        method_name = method_m.group(1) if method_m else "(匿名)"
+        method_name = method_m[1] if method_m else "(匿名)"
 
         endpoints.append(ApiEndpoint(
             http_method=http_method,
@@ -335,7 +334,7 @@ def find_contract_files(path: str) -> list:
 def _extract_class_name(content: str) -> str:
     """提取首个类名，用于 Issue.endpoint 定位。"""
     m = re.search(r"\bclass\s+(\w+)", content)
-    return m.group(1) if m else "(类级)"
+    return m[1] if m else "(类级)"
 
 
 # 09-cr-checklist「API 与 Controller」：@RequestMapping(method=...) 须改用具体映射注解。
@@ -468,9 +467,11 @@ def format_report_text(file_path: str, issues: list) -> str:
     ]
 
     for issue in issues:
-        lines.append(f"  [{issue.severity.value}] {issue.rule}")
-        lines.append(f"    端点: {issue.http_method} {issue.endpoint}")
-        lines.append(f"    问题: {issue.description}")
+        lines.extend([
+            f"  [{issue.severity.value}] {issue.rule}",
+            f"    端点: {issue.http_method} {issue.endpoint}",
+            f"    问题: {issue.description}",
+        ])
         if issue.suggestion:
             lines.append(f"    建议: {issue.suggestion}")
         lines.append("")
@@ -483,8 +484,8 @@ def format_report_json(file_path: str, issues: list) -> str:
         "file": file_path,
         "summary": {
             "total": len(issues),
-            "mandatory": sum(1 for i in issues if i.severity == Severity.MANDATORY),
-            "recommended": sum(1 for i in issues if i.severity == Severity.RECOMMENDED),
+            "mandatory": sum(i.severity == Severity.MANDATORY for i in issues),
+            "recommended": sum(i.severity == Severity.RECOMMENDED for i in issues),
         },
         "issues": [
             {

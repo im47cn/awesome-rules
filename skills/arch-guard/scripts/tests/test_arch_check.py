@@ -115,7 +115,7 @@ def test_dependency_direction_skips_third_party():
         "src/main/java/com/example/order/domain/entity/OrderE.java",
         "domain", content, patterns, cfg)
     client_issue = [i for i in issues if "client" in i.description.lower()]
-    assert len(client_issue) == 0
+    assert not client_issue
 
 
 def test_dependency_direction_allows_valid():
@@ -840,7 +840,7 @@ def test_load_config_deep_merge(tmp_path):
 def test_parse_artifact_id_from_parent(tmp_path):
     pom = tmp_path / "pom.xml"
     pom.write_text(
-        _POM_HEADER + '<parent><artifactId>parent-aid</artifactId></parent></project>',
+        f"{_POM_HEADER}<parent><artifactId>parent-aid</artifactId></parent></project>",
         encoding="utf-8")
     assert arch_check._parse_artifact_id(str(pom)) == "parent-aid"
 
@@ -857,10 +857,10 @@ def test_parse_module_dependencies_malformed(tmp_path):
 
 def test_collect_poms_skips_target(tmp_path):
     """SKIP_DIRS 中的 target 目录应被跳过。"""
-    (tmp_path / "pom.xml").write_text(_POM_HEADER + '</project>', encoding="utf-8")
+    (tmp_path / "pom.xml").write_text(f"{_POM_HEADER}</project>", encoding="utf-8")
     target = tmp_path / "target"
     target.mkdir()
-    (target / "pom.xml").write_text(_POM_HEADER + '</project>', encoding="utf-8")
+    (target / "pom.xml").write_text(f"{_POM_HEADER}</project>", encoding="utf-8")
     assert len(arch_check._collect_poms(str(tmp_path))) == 1
 
 
@@ -892,7 +892,7 @@ def test_infer_layer_from_packages(tmp_path):
     pkg.mkdir(parents=True)
     (pkg / "Foo.java").write_text("// x", encoding="utf-8")
     pom = module / "pom.xml"
-    pom.write_text(_POM_HEADER + '<artifactId>m</artifactId></project>', encoding="utf-8")
+    pom.write_text(f"{_POM_HEADER}<artifactId>m</artifactId></project>", encoding="utf-8")
     assert arch_check._infer_layer_from_packages(str(pom), patterns, cfg) == "adapter"
 
 
@@ -902,7 +902,7 @@ def test_infer_layer_from_packages_no_src(tmp_path):
     module = tmp_path / "m2"
     module.mkdir()
     pom = module / "pom.xml"
-    pom.write_text(_POM_HEADER + '<artifactId>m2</artifactId></project>', encoding="utf-8")
+    pom.write_text(f"{_POM_HEADER}<artifactId>m2</artifactId></project>", encoding="utf-8")
     assert arch_check._infer_layer_from_packages(str(pom), patterns, cfg) is None
 
 
@@ -1068,7 +1068,7 @@ def test_run_cross_domain_violation_003():
 def test_run_single_module_warning(tmp_path):
     """单模块项目触发 Maven 编译期隔离缺失警告。"""
     (tmp_path / "pom.xml").write_text(
-        _POM_HEADER + '<artifactId>order-app</artifactId></project>', encoding="utf-8")
+        f"{_POM_HEADER}<artifactId>order-app</artifactId></project>", encoding="utf-8")
     issues, m, r, stats = arch_check.run(str(tmp_path))
     assert any("单模块" in w for w in stats["warnings"])
 
@@ -1132,7 +1132,7 @@ def test_main_graph_mode_exit0(monkeypatch, capsys):
 
 def test_main_init_creates_config(tmp_path, monkeypatch):
     (tmp_path / "pom.xml").write_text(
-        _POM_HEADER + '<groupId>com.example</groupId></project>', encoding="utf-8")
+        f"{_POM_HEADER}<groupId>com.example</groupId></project>", encoding="utf-8")
     monkeypatch.setattr(sys, "argv", ["arch_check.py", str(tmp_path), "--init"])
     with pytest.raises(SystemExit) as exc:
         arch_check.main()
@@ -1404,7 +1404,7 @@ def test_check_file_commented_import_not_extracted(tmp_path):
         "public class OrderE {}\n", encoding="utf-8")
     cfg = _cfg()
     issues, _, _ = arch_check.check_file(str(f), str(tmp_path), _patterns(cfg), cfg)
-    assert not any(i.rule_code == arch_check.DOMAIN_PURITY for i in issues)
+    assert all(i.rule_code != arch_check.DOMAIN_PURITY for i in issues)
 
 
 def test_run_static_import_badcase_005():
@@ -1511,5 +1511,5 @@ def test_check_file_injection_console_ignores_comments_and_strings(tmp_path):
         "}\n", encoding="utf-8")
     cfg = _cfg()
     issues, _, _ = arch_check.check_file(str(f), str(tmp_path), _patterns(cfg), cfg)
-    assert not any(i.rule_code in (arch_check.INJECTION_ANNOTATION,
+    assert all(i.rule_code not in (arch_check.INJECTION_ANNOTATION,
                                    arch_check.CONSOLE_OUTPUT) for i in issues)
