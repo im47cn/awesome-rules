@@ -38,7 +38,7 @@ method + path、没列字段名，不算冻结。任一项缺失 → 禁止动�
 
 ✅ 契约文档冻结：POST /api/callback/subscribe
 ✅   请求 { subscribeUrl, channel }
-✅   响应信封 { code, message, data }
+✅   响应信封 { code, message, data }（信封字段以目标端点后端实际契约为准，此处仅占位示意）
 ✅   data { subscriptionId, callbackUrl, status }
 ✅ → 再写 mock / src/api，字段名从契约照抄
 ```

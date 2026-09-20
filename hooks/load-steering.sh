@@ -12,6 +12,9 @@
 # 定位 steering 目录：优先 CLAUDE_PLUGIN_ROOT，否则回退到脚本上级目录
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 STEERING_DIR="${CLAUDE_PLUGIN_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}/steering"
+# python3 缺失/CLT 授权失效时放行退出，避免 rc=127 裸崩致 SessionStart 注入整体失败
+# （守卫范式对齐 on-session-end.sh:9）
+command -v python3 >/dev/null 2>&1 || { echo "load-steering: python3 不可用，跳过规范索引注入" >&2; exit 0; }
 
 python3 - "$STEERING_DIR" <<'PY'
 import sys, os, re, json

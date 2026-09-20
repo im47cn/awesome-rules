@@ -99,6 +99,8 @@ python3 scripts/arch_check.py --mode graph
 | Adapter 隔离 | adapter 层禁止直接 import 领域实体/值对象 |
 | 状态泄漏 | adapter/infrastructure 层禁止直接改写状态（setStatus/changeStatus 等） |
 | 状态机治理 | 有状态枚举但未引入状态机框架（Spring/Cola）→ 推荐级提醒 |
+| 依赖注入注解 | 任意分层 Java 禁用 @Autowired，须用 @Resource（JSR-250 按名称注入，对齐 09-cr-checklist） |
+| 控制台输出 | 任意分层 Java 禁用 System.out/System.err，日志须经 @Slf4j + Log4j2（对齐 09-cr-checklist） |
 
 ## 需人工补充的规则
 
@@ -117,4 +119,4 @@ python3 scripts/arch_check.py --mode graph
 - 检查脚本：[`scripts/arch_check.py`](scripts/arch_check.py)
 - 单元测试：[`scripts/tests/test_arch_check.py`](scripts/tests/test_arch_check.py)（`pytest skills/arch-guard/scripts/tests -q`）
 - 架构规范：[`steering/gtsp/01-project-structure.md`](../../steering/gtsp/01-project-structure.md)
-- 审查样例：[`badcase/`](badcase/)（5 组场景）
+- 审查样例：[`badcase/`](badcase/)（场景清单见 `ls badcase/`）

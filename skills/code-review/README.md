@@ -57,7 +57,7 @@
 ## 检查覆盖
 
 - Standards 轴：仓库书面标准（AGENTS.md / CONTRIBUTING / .editorconfig /
-  steering）+ Fowler 坏味道基线 12 条（判断性，仓库标准覆盖基线）
+  steering）+ Fowler 坏味道基线（判断性，仓库标准覆盖基线；条目清单见 SKILL.md 基线节）
 - Spec 轴：规格断言逐条核对、scope creep、实现疑点（单位/语义静默变化/默认值漂移）
 - 聚合：分轴呈现不合并排序、跨轴不选唯一赢家、事实断言抽验
 - 可视化输出（默认）：跨层链路 mermaid 时序图、风险 Note 定位、
