@@ -141,6 +141,9 @@ bash .factory/regression/daily-regression.sh --dry-run  # 日回归预演（真�
   中和失败 fail-closed 不发送。新增链评论点必须走它。
 - **拒绝 = 单一动作 `issue_reject()`**（factory-lib.sh）：落标
   （→ factory:rejected）与判据回执评论一次收口，链/批次两入口共用。
+  落标失败先复核远端标签态（#207 事故：gh 假阴性——变更已落而客户端
+  报非零）：factory:rejected 在列即按已落定继续回执，确证缺失才中止
+  ——两半动作不因传输层假阴性脱节（ADR-015）。
   历史教训：两入口曾各自只做一半——链路发回执不落标、批次落标不发回执
   （#59 二次拒绝静默），动作散落必然被漏做一半。
 - **hosting 仅传输层**（ADR-008）：`hosting.py` 是 issue 评论/标签副作用
@@ -186,7 +189,7 @@ bash .factory/regression/daily-regression.sh --dry-run  # 日回归预演（真�
   （`issue_label_swap` / `issue_comment` / `issue_label`，PR#34 后全量覆盖）
   在发送前校验 epoch（`lease_guard`）——被夺/吊销的诈尸链在出口被拒；
   fence 校验与 GitHub 写之间的秒级残窗由回执幂等键
-  （`factory:receipt:issue-N:rR`，`issue_comment` 查重跳过）兜底。
+  （`factory:receipt:issue-N:rR`（批次 rbatch），`issue_comment` 查重跳过）兜底。
 
 双态铁律：`SUPABASE_DB` 已设但 psql 不可达 = 配置错误，fail-closed 链终止
 （exit 4），绝不降级——把配置错误伪装成单写者形态等于重新打开多写者竞态。

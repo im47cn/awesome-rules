@@ -82,6 +82,65 @@ class TestParseAgentJson:
         d = parse_agent_json(text, self.VERDICTS)
         assert d["verdict"] == "PASS"
 
+    def test_parse_duplicated_json_blobs(self):
+        """#207 首次尝试实证崩形：裁决 JSON 被整段重复（Extra data:
+        char 429）。旧贪心兜底从首个左花括号拼到末个右花括号再
+        json.loads 必炸；逐偏移 raw_decode 取首个完整对象。"""
+        blob = '{"verdict": "reject", "reasons": ["判据b: 不通过"]}'
+        d = parse_agent_json(blob + blob, {"accept", "reject"})
+        assert d["verdict"] == "reject"
+
+    def test_parse_trailing_prose_with_braces(self):
+        """裸 JSON 后跟含花括号尾文（fence 丢失形态）——旧贪心兜底
+        同样把尾文花括号拼进来；逐偏移扫描在首个合法对象处停。"""
+        text = ('{"verdict": "FAIL", "evidence": "x"}\n'
+                '附注：详见 {附录A} 与 {附录B}')
+        assert parse_agent_json(text, self.VERDICTS)["verdict"] == "FAIL"
+
+    def test_parse_fence_priority_over_earlier_bare(self):
+        """fence 内对象优先于正文更早出现的裸对象——fence 是 LLM
+        显式结构化输出信号（#207 重写后保序语义锚）。"""
+        text = ('{"verdict": "PASS", "evidence": "正文里的裸对象"}\n'
+                '```json\n{"verdict": "FAIL", "evidence": "fence 裁决"}\n```')
+        assert parse_agent_json(text, self.VERDICTS)["verdict"] == "FAIL"
+
+    def test_parse_nested_verdict_not_accepted(self):
+        """PR #211 Sourcery 评论1：外层 verdict 非法时，嵌套对象携带的
+        合法 verdict 不具裁决资格——顶层 fail-closed 契约（防坏裁决借
+        evidence/元数据嵌套混入链），整对象跳过后 ValueError。"""
+        text = '{"verdict": "MAYBE", "evidence": {"verdict": "reject"}}'
+        with pytest.raises(ValueError, match="verdict"):
+            parse_agent_json(text, {"accept", "reject"})
+
+    def test_parse_disallowed_outer_then_valid_sibling_recovers(self):
+        """坏 verdict 顶层对象被整体跳过后继续扫后续顶层——多对象恢复
+        不因嵌套封堵回退（重复块恢复的邻接形态）。"""
+        text = '{"verdict": "MAYBE"} {"verdict": "reject"}'
+        assert parse_agent_json(text, {"accept", "reject"})["verdict"] == "reject"
+
+    def test_parse_all_fences_scanned_before_bare(self):
+        """PR #211 CodeRabbit 评论1：fence 优先 = 穷尽全部 fence。首个
+        fence 裁决非法时，正文更早出现的合法裸对象不得抢先后位合法
+        fence——fence 是更强的结构化输出信号，优先级须穷尽兑现。"""
+        text = ('{"verdict": "PASS", "evidence": "正文裸对象"}\n'
+                '```json\n{"verdict": "MAYBE"}\n```\n'
+                '```json\n{"verdict": "FAIL", "evidence": "后位 fence"}\n```')
+        assert parse_agent_json(text, self.VERDICTS)["verdict"] == "FAIL"
+
+    def test_parse_unclosed_outer_nested_verdict_rejected(self):
+        """PR #211 CodeRabbit 评论2：外层对象未闭合时，解码失败不得
+        落到嵌套 `{` 接受其 verdict——坏对象按字符串感知平衡范围整体
+        跳过（未闭合则跳到输入末尾），fail-closed。"""
+        text = '{"verdict": "MAYBE", "evidence": {"verdict": "reject"}'
+        with pytest.raises(ValueError, match="verdict"):
+            parse_agent_json(text, {"accept", "reject"})
+
+    def test_parse_failed_prose_brace_skips_balanced_range(self):
+        """解码失败的散文花括号按平衡范围跳过（未闭合吞到末尾的对偶
+        边界）：`{附录A}` 平衡闭合后，其后合法顶层对象仍可恢复。"""
+        text = '附注 {附录A}\n{"verdict": "FAIL", "evidence": "x"}'
+        assert parse_agent_json(text, self.VERDICTS)["verdict"] == "FAIL"
+
 
 class TestEvidenceSuites:
     def test_skills_change_yields_suite(self):

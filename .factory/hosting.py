@@ -332,7 +332,18 @@ class GitHubAdapter:
             return True
         r = self._gh(args, repo)
         if r.returncode != 0:
-            raise HostingError(f"issue #{n} 标签设置失败: {r.stderr.strip()[:200]}")
+            # 假阴性和解（#207 实证：gh 非零但服务端已应用标签——
+            # "mutation landed + client reported failure"）：失败路径重读
+            # 远端标签态，目标已达成即幂等成功，裁决不被传输层误报否决；
+            # 复核不可用/目标未达成 → 原 fail-closed 错误透传。
+            try:
+                labels = set(self.issue_labels(n, repo))
+            except HostingError:
+                labels = None
+            if labels is None or not set(add) <= labels or set(remove) & labels:
+                raise HostingError(
+                    f"issue #{n} 标签设置失败: {r.stderr.strip()[:200]}")
+            return True
         return True
 
     def issue_comment(self, n, body, marker=None, repo=None):
@@ -382,7 +393,18 @@ class GitHubAdapter:
             return True
         r = self._gh(args, repo)
         if r.returncode != 0:
-            raise HostingError(f"pr #{p} 标签设置失败: {r.stderr.strip()[:200]}")
+            # 假阴性和解：同 issue_set_labels（#207 实证类）——pr view
+            # 重读标签态复核，目标已达成即幂等成功；复核不可用/未达成
+            # → 原 fail-closed 错误透传。
+            try:
+                d = self._gh_json(["pr", "view", str(p), "--json", "labels"], repo)
+                labels = {l.get("name") for l in d.get("labels") or []}
+            except HostingError:
+                labels = None
+            if labels is None or not set(add) <= labels or set(remove) & labels:
+                raise HostingError(
+                    f"pr #{p} 标签设置失败: {r.stderr.strip()[:200]}")
+            return True
         return True
 
     def pr_create(self, head, title, body, label=None, base=None, repo=None):

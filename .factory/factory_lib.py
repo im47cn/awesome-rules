@@ -52,20 +52,74 @@ class CircuitOpen(RuntimeError):
 
 
 def parse_agent_json(text: str, allowed: set[str]) -> dict:
-    """从 agent stdout 提取（唯一）JSON 裁决对象。
+    r"""从 agent stdout 扫描返回首个 verdict 合法的完整 JSON 裁决对象。
 
-    fence 优先（```json {...} ```），裸 JSON 贪心兜底；两者均取捕获组 1——
-    组 0 含围栏字面量，loads 必炸（见模块 docstring 缺陷 1）。
-    verdict 不在 allowed → ValueError（fail-closed，不让坏裁决流入链）。
+    fence 优先（```json 是 LLM 显式结构化输出信号，穷尽全部 fence 才轮到
+    裸对象——首个 fence 裁决非法不压制后位合法 fence）；其后按文档序逐 `{`
+    偏移 raw_decode——#207 实证贪心 `\{.*\}` 把「重复 JSON / 带花括号
+    尾文」从首 `{` 拼到末 `}`（Extra data: char 429）一次即崩；多对象
+    并存取首个合法者（重复块即恢复形态）。顶层 verdict 契约（PR #211
+    Sourcery 评论1）：对象一旦完整解析，其内部偏移全部丧失资格——
+    外层 verdict 非法时嵌套 evidence/元数据携带的合法 verdict 不代表
+    裁决（防坏裁决借嵌套混入链）；坏 verdict 跳过其整个对象继续扫后续
+    顶层；解码失败的对象按字符串感知平衡范围整体跳过（未闭合则跳到
+    输入末尾——CodeRabbit 评论2：坏外层不得放行嵌套 verdict）；
+    无任何合法对象 → ValueError（fail-closed）。
     """
-    m = re.search(r"```json\s*(\{.*?\})\s*```", text, re.S) or re.search(r"(\{.*\})", text, re.S)
-    if not m:
-        raise ValueError("输出中未找到 JSON 对象")
-    d = json.loads(m.group(1))
-    verdict = d.get("verdict")
-    if verdict not in allowed:
-        raise ValueError(f"verdict={verdict!r} 不在 {sorted(allowed)}")
-    return d
+    dec = json.JSONDecoder()
+
+    def _decode(i: int) -> tuple[dict, int] | None:
+        try:
+            obj, end = dec.raw_decode(text, i)
+        except ValueError:
+            return None
+        return (obj, end) if isinstance(obj, dict) else None
+
+    def _balanced_end(start: int) -> int | None:
+        """depth-0 `{` 起字符串感知扫描平衡闭区间终点（闭 `}` 后一位）；
+        未闭合返回 None（其后内容视为对象内部，一并放弃）。"""
+        depth = 0
+        in_str = esc = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+            elif ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return i + 1
+        return None
+
+    for m in re.finditer(r"```json\s*(\{)", text):
+        hit = _decode(m.start(1))
+        if hit is not None and hit[0].get("verdict") in allowed:
+            return hit[0]
+    # 文档序扫描：对象一旦完整解析，[i, end) 内的嵌套偏移全部跳过
+    # ——顶层 verdict 契约（嵌套 verdict 不代表裁决）
+    skip_until = 0
+    for i in sorted({i for i, ch in enumerate(text) if ch == "{"}):
+        if i < skip_until:
+            continue
+        hit = _decode(i)
+        if hit is None:
+            # 解码失败的对象整体跳过其平衡范围，不许嵌套 `{` 接管裁决
+            end = _balanced_end(i)
+            skip_until = len(text) if end is None else end
+            continue
+        obj, skip_until = hit
+        if obj.get("verdict") in allowed:
+            return obj
+    raise ValueError(
+        f"输出中未找到 JSON 裁决对象（合法 verdict ∈ {sorted(allowed)}）")
 
 
 def evidence_suites(changed_files: list[str]) -> list[str]:
@@ -384,14 +438,18 @@ def neutralize_marker(text: str) -> str:
     return text
 
 def rejected_reconcile(issues: list[dict]) -> list[dict]:
-    """open+factory:rejected issue → 人工处置活动对账（纯函数）。
+    """open+factory:rejected issue → 回执存在性 + 人工处置活动对账（纯函数）。
 
-    闭环缺口（2026-08-23 审计实证）：4 个 rejected issue 的修复已由人工
+    闭环缺口一（2026-08-23 审计实证）：4 个 rejected issue 的修复已由人工
     feedback PR 吸收进 main，但 issue 仍 open 挂 rejected——链的 reject
     语义是"不修"，reject→人工路径有效但没有回写闭环，"已修未关"只能靠
     人工审计发现。本函数不判定"是否已修复"（语义判断，机器不可判定），
-    只暴露处置信号：reject 回执之后的人工评论数（bot 回执标题为界）。
+    只暴露处置信号：reject 回执之后的人工评论数（回执幂等 marker 为界）。
     有后续人工评论 = 大概率已处置，提示复核关闭；零评论 = 静默滞留。
+    闭环缺口二（2026-09-20 #207 实证）：落标假阴性早退 → 只落标无回执
+    ——只落标不发判据是不可审计的静默拒绝（steering 审查报告规范），
+    has_receipt=False 即链完整性违规。无回执时不计人工评论（提交/
+    裁决前评论 ≠ 处置信号，缺回执本身已是要点名的违规）。
     输出仅报告（dispatch 每轮尾部 echo），不动作——铁律 4：零 LLM 纯 bash
     调用，关闭决策永远归人类。
     """
@@ -399,17 +457,25 @@ def rejected_reconcile(issues: list[dict]) -> list[dict]:
     for it in issues:
         comments = [c for c in (it.get("comments") or [])
                     if isinstance(c, dict)]
+        # 回执判据 = 幂等 marker（issue_reject 评论尾埋
+        # <!-- factory:receipt:issue-N:r… -->，hosting 两平台均保留注释）：
+        # 标题子串可被人工评论复述冒充、屏蔽完整性违规（PR #211
+        # Sourcery 评论2）；number 缺失的畸形条目 marker 永不命中 →
+        # has_receipt=False（fail-closed 方向）
+        marker = f"factory:receipt:issue-{it.get('number')}:r"
         bot_idx = [i for i, c in enumerate(comments)
-                   if "工厂 triage 裁决：reject" in str(c.get("body") or "")]
-        after = comments[(max(bot_idx) + 1):] if bot_idx else comments
+                   if marker in str(c.get("body") or "")]
+        after = comments[(max(bot_idx) + 1):] if bot_idx else []
         # 人工评论 = 有 author 且非 [bot] 后缀（GitHub bot 通用标识）且
-        # 非链回执；缺 author 的畸形条目不计（报告宁少勿多）
+        # 非链回执（marker 同上——人工复述标题是真人工活动，应计数）；
+        # 缺 author 的畸形条目不计（报告宁少勿多）
         human = [c for c in after
                  if str(c.get("author") or "") and not str(c.get("author")).endswith("[bot]")
-                 and "工厂 triage 裁决" not in str(c.get("body") or "")]
+                 and marker not in str(c.get("body") or "")]
         out.append({
             "number": it.get("number"),
             "title": str(it.get("title") or "")[:60],
+            "has_receipt": bool(bot_idx),
             "human_comments_after_reject": len(human),
         })
     return out
@@ -841,15 +907,19 @@ def _final_sync(cfg: _DispatchCfg) -> None:
 
 
 def _reconcile_rejected(cfg: _DispatchCfg) -> None:
-    """rejected 存量对账（reject→人工闭环缺口，2026-08-23 审计）。
-    只报告不动作（铁律 4）：有 reject 后人工评论的 → 提示复核关闭；
+    """rejected 存量对账（reject→人工闭环缺口，2026-08-23 审计；
+    2026-09-20 #207 补回执存在性）。只报告不动作（铁律 4）：缺回执的 →
+    点名补发（链完整性违规）；有 reject 后人工评论的 → 提示复核关闭；
     零评论的 → 静默滞留计数。关闭决策永远归人类。"""
     for r in rejected_reconcile(_hosting_json(
             cfg, "issue list(rejected)",
             lambda: cfg.adapter.issue_list(state="open", label="factory:rejected",
                                            limit=100, comments=True))):
         c, t = r["human_comments_after_reject"], r["title"]
-        if c > 0:
+        if not r["has_receipt"]:
+            print(f"  [rejected] #{r['number']} 缺回执评论（只落标不发判据 = "
+                  f"不可审计的静默拒绝，#207 同型）——需补发（{t}）")
+        elif c > 0:
             print(f"  [rejected] #{r['number']} 裁决后有 {c} 条人工评论——已处置？复核关闭（{t}）")
         else:
             print(f"  [rejected] #{r['number']} 静默滞留（无后续人工评论，{t}）")
