@@ -419,6 +419,65 @@ def test_change_column_detected():
     assert any(i.rule == "禁止 CHANGE COLUMN" for i in issues)
 
 
+# ── 禁用语句全文级（触发器/存储过程/自定义函数）─────────────────────────────
+
+def test_create_trigger_flagged_mandatory():
+    """含 CREATE TRIGGER → 报【强制】禁用触发器，位置带文件:行号（负控制）。"""
+    issues = _issues_for(
+        "-- 清理触发器\n"
+        "CREATE TRIGGER trg_order_clean BEFORE DELETE ON t_order\n"
+        "FOR EACH ROW\n"
+        "BEGIN\n"
+        "  SET @x = 1;\n"
+        "END;\n"
+    )
+    hit = [i for i in _mandatory(issues) if i.rule == "禁用触发器"]
+    assert len(hit) == 1
+    assert hit[0].location.endswith(":2")   # 命中行号可定位
+
+
+def test_create_procedure_flagged_mandatory():
+    """含 CREATE PROCEDURE → 报【强制】禁用存储过程。"""
+    issues = _issues_for("CREATE PROCEDURE p_sync()\nBEGIN\nEND;\n")
+    assert any(i.rule == "禁用存储过程" and i.severity == Severity.MANDATORY
+               for i in issues)
+
+
+def test_create_function_flagged_recommended():
+    """含 CREATE FUNCTION → 报【推荐】自定义函数（规范为推荐级）。"""
+    issues = _issues_for("CREATE FUNCTION f_add(a int) RETURNS int\nRETURN a + 1;\n")
+    assert any(i.rule == "自定义函数" and i.severity == Severity.RECOMMENDED
+               for i in issues)
+
+
+def test_forbidden_statement_case_insensitive_cross_line():
+    """小写 + 跨行写法（create\\n trigger）同样检出。"""
+    issues = _issues_for(
+        "create\n  trigger trg_x BEFORE INSERT ON t_a\nFOR EACH ROW SET @y = 1;\n")
+    assert any(i.rule == "禁用触发器" for i in issues)
+
+
+def test_forbidden_statement_in_comment_not_flagged():
+    """注释中的 CREATE TRIGGER/PROCEDURE/FUNCTION → 不报（注释不参与检查）。"""
+    issues = _issues_for(
+        "-- 历史遗留：CREATE TRIGGER trg_x ...\n"
+        "# CREATE PROCEDURE p_x\n"
+        "/* CREATE FUNCTION f_x */\n"
+        "CREATE TABLE t_ok (\n"
+        "  id bigint COMMENT '主键'\n"
+        ") COMMENT='ok';\n"
+    )
+    assert all(i.rule not in ("禁用触发器", "禁用存储过程", "自定义函数")
+               for i in issues)
+
+
+def test_clean_table_no_forbidden_statement():
+    """合规建表不含禁用语句 → 无禁用语句检出（正控制）。"""
+    issues = _issues_for(_ddl_with_field("order_no varchar(36) COMMENT '订单编号'"))
+    assert all(i.rule not in ("禁用触发器", "禁用存储过程", "自定义函数")
+               for i in issues)
+
+
 # ── 表名 / 表注释违规分支 ────────────────────────────────────────────────
 
 TABLE_NAME_CASES = [
