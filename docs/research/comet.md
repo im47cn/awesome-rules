@@ -1,6 +1,6 @@
 ---
 last-checked: 2026-09-20
-re-check-trigger: Comet 发布 0.5.0 或 Native/Classic 工作流语义变更；或本仓 replay-eval 落地 pass^k 条款时复评
+re-check-trigger: Comet 发布任意高于 0.4.1 的新版本或 Native/Classic 工作流语义变更；或本仓 replay-eval 落地 pass^k 条款时复评
 depth: 文档级（README 全文 + docs llms.txt 索引 + tech-blog + npm registry 元数据；未做代码级验证）
 ---
 
