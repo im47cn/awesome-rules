@@ -30,6 +30,9 @@ npm i -g lefthook && lefthook install   # 或 npm run setup:hooks
 ```
 
 - **commit-msg**：commitlint 校验提交信息格式（`steering/git-conventions.md`）
+- **pre-commit**：轻量双门——变更行覆盖轻检（coverage-light：复用已有覆盖产物，
+  变更行 ≥ 阈值；无产物时提示放行，红线强制在 pre-push）+ spec 条款一致性
+  （spec-check：仅对含 `spec:<ID>` 标签的 spec 工作流文档生效，无则跳过）
 - **pre-push**：全量测试 + badcase 回归 + 安装入口 blob 锁定 + 文档链接
   （md_link_check）+ 文档新鲜度（doc_freshness）校验，任一失败即阻断推送
   （跳过：`git push --no-verify`）
