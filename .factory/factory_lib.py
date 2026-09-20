@@ -52,25 +52,41 @@ class CircuitOpen(RuntimeError):
 
 
 def parse_agent_json(text: str, allowed: set[str]) -> dict:
-    r"""从 agent stdout 提取（唯一）JSON 裁决对象。
+    r"""从 agent stdout 扫描返回首个 verdict 合法的完整 JSON 裁决对象。
 
-    fence 优先；其后全量 `{` 偏移 raw_decode 扫描——#207 首次尝试实证
-    贪心 `\{.*\}` 把「重复 JSON / 带花括号尾文」从首 `{` 拼到末 `}`
-    （Extra data: char 429）一次即崩。raw_decode 在每个偏移解析首个
-    完整对象（嵌套花括号不再截断），坏偏移/坏 verdict 跳过继续扫；
-    无任何合法对象 → ValueError（fail-closed，不让坏裁决流入链）。
+    fence 优先（```json 是 LLM 显式结构化输出信号）；其后按文档序逐 `{`
+    偏移 raw_decode——#207 实证贪心 `\{.*\}` 把「重复 JSON / 带花括号
+    尾文」从首 `{` 拼到末 `}`（Extra data: char 429）一次即崩；多对象
+    并存取首个合法者（重复块即恢复形态）。顶层 verdict 契约（PR #211
+    Sourcery 评论1）：对象一旦完整解析，其内部偏移全部丧失资格——
+    外层 verdict 非法时嵌套 evidence/元数据携带的合法 verdict 不代表
+    裁决（防坏裁决借嵌套混入链）；坏偏移跳过、坏 verdict 跳过其整个
+    对象继续扫后续顶层；无任何合法对象 → ValueError（fail-closed）。
     """
     dec = json.JSONDecoder()
-    starts: list[int] = []
-    if m := re.search(r"```json\s*(\{)", text):
-        starts.append(m.start(1))
-    starts += (i for i, ch in enumerate(text) if ch == "{")
-    for i in dict.fromkeys(starts):
+
+    def _decode(i: int) -> tuple[dict, int] | None:
         try:
-            obj, _ = dec.raw_decode(text, i)
+            obj, end = dec.raw_decode(text, i)
         except ValueError:
+            return None
+        return (obj, end) if isinstance(obj, dict) else None
+
+    if m := re.search(r"```json\s*(\{)", text):
+        hit = _decode(m.start(1))
+        if hit is not None and hit[0].get("verdict") in allowed:
+            return hit[0]
+    # 文档序扫描：对象一旦完整解析，[i, end) 内的嵌套偏移全部跳过
+    # ——顶层 verdict 契约（嵌套 verdict 不代表裁决）
+    skip_until = 0
+    for i in sorted({i for i, ch in enumerate(text) if ch == "{"}):
+        if i < skip_until:
             continue
-        if isinstance(obj, dict) and obj.get("verdict") in allowed:
+        hit = _decode(i)
+        if hit is None:
+            continue
+        obj, skip_until = hit
+        if obj.get("verdict") in allowed:
             return obj
     raise ValueError(
         f"输出中未找到 JSON 裁决对象（合法 verdict ∈ {sorted(allowed)}）")
@@ -398,7 +414,7 @@ def rejected_reconcile(issues: list[dict]) -> list[dict]:
     feedback PR 吸收进 main，但 issue 仍 open 挂 rejected——链的 reject
     语义是"不修"，reject→人工路径有效但没有回写闭环，"已修未关"只能靠
     人工审计发现。本函数不判定"是否已修复"（语义判断，机器不可判定），
-    只暴露处置信号：reject 回执之后的人工评论数（bot 回执标题为界）。
+    只暴露处置信号：reject 回执之后的人工评论数（回执幂等 marker 为界）。
     有后续人工评论 = 大概率已处置，提示复核关闭；零评论 = 静默滞留。
     闭环缺口二（2026-09-20 #207 实证）：落标假阴性早退 → 只落标无回执
     ——只落标不发判据是不可审计的静默拒绝（steering 审查报告规范），
@@ -411,14 +427,21 @@ def rejected_reconcile(issues: list[dict]) -> list[dict]:
     for it in issues:
         comments = [c for c in (it.get("comments") or [])
                     if isinstance(c, dict)]
+        # 回执判据 = 幂等 marker（issue_reject 评论尾埋
+        # <!-- factory:receipt:issue-N:r… -->，hosting 两平台均保留注释）：
+        # 标题子串可被人工评论复述冒充、屏蔽完整性违规（PR #211
+        # Sourcery 评论2）；number 缺失的畸形条目 marker 永不命中 →
+        # has_receipt=False（fail-closed 方向）
+        marker = f"factory:receipt:issue-{it.get('number')}:r"
         bot_idx = [i for i, c in enumerate(comments)
-                   if "工厂 triage 裁决：reject" in str(c.get("body") or "")]
+                   if marker in str(c.get("body") or "")]
         after = comments[(max(bot_idx) + 1):] if bot_idx else []
         # 人工评论 = 有 author 且非 [bot] 后缀（GitHub bot 通用标识）且
-        # 非链回执；缺 author 的畸形条目不计（报告宁少勿多）
+        # 非链回执（marker 同上——人工复述标题是真人工活动，应计数）；
+        # 缺 author 的畸形条目不计（报告宁少勿多）
         human = [c for c in after
                  if str(c.get("author") or "") and not str(c.get("author")).endswith("[bot]")
-                 and "工厂 triage 裁决" not in str(c.get("body") or "")]
+                 and marker not in str(c.get("body") or "")]
         out.append({
             "number": it.get("number"),
             "title": str(it.get("title") or "")[:60],

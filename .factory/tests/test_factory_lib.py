@@ -104,6 +104,20 @@ class TestParseAgentJson:
                 '```json\n{"verdict": "FAIL", "evidence": "fence 裁决"}\n```')
         assert parse_agent_json(text, self.VERDICTS)["verdict"] == "FAIL"
 
+    def test_parse_nested_verdict_not_accepted(self):
+        """PR #211 Sourcery 评论1：外层 verdict 非法时，嵌套对象携带的
+        合法 verdict 不具裁决资格——顶层 fail-closed 契约（防坏裁决借
+        evidence/元数据嵌套混入链），整对象跳过后 ValueError。"""
+        text = '{"verdict": "MAYBE", "evidence": {"verdict": "reject"}}'
+        with pytest.raises(ValueError, match="verdict"):
+            parse_agent_json(text, {"accept", "reject"})
+
+    def test_parse_disallowed_outer_then_valid_sibling_recovers(self):
+        """坏 verdict 顶层对象被整体跳过后继续扫后续顶层——多对象恢复
+        不因嵌套封堵回退（重复块恢复的邻接形态）。"""
+        text = '{"verdict": "MAYBE"} {"verdict": "reject"}'
+        assert parse_agent_json(text, {"accept", "reject"})["verdict"] == "reject"
+
 
 class TestEvidenceSuites:
     def test_skills_change_yields_suite(self):

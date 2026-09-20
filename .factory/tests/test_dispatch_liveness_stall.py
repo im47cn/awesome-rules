@@ -98,7 +98,9 @@ def test_pg_mode_degrades_in_progress_check(tmp_path, monkeypatch, capsys):
 
 
 # -- rejected 滞留：宽限阈值 --------------------------------------------------
-RECEIPT = "## 工厂 triage 裁决：reject —— 判据 b 不通过"
+RECEIPT_HEADING = "## 工厂 triage 裁决：reject —— 判据 b 不通过"
+RECEIPT = (f"{RECEIPT_HEADING}\n"
+           "<!-- factory:receipt:issue-104:rbatch -->")
 
 
 def test_rejected_beyond_grace_fails(tmp_path, monkeypatch, capsys):
@@ -148,12 +150,24 @@ def test_rejected_no_receipt_fails_immediately(tmp_path, monkeypatch):
 
 
 def test_rejected_pre_receipt_comments_do_not_count(tmp_path, monkeypatch):
-    """提交讨论评论 ≠ 回执——只有正文含回执标题串的评论算回执
-    （判别串对齐 reject_receipt，两层不得漂移）。"""
+    """提交讨论评论 ≠ 回执——回执判据 = 幂等 marker（issue_reject 评论
+    尾埋），判据与 rejected_reconcile 同源不得漂移。"""
     _patch_hosting(monkeypatch, issues=[
         {"number": 104, "labels": ["factory:rejected"],
          "updatedAt": _iso(datetime.now(timezone.utc)),
          "comments": [{"author": "im47cn", "body": "按指引重投"}]}])
+    repo = _mk_repo(tmp_path)
+    problems = []
+    dl.check_stalled_labels(repo, 7, problems)
+    assert any("无回执" in p for p in problems), problems
+
+def test_rejected_human_quoted_heading_not_receipt(tmp_path, monkeypatch):
+    """PR #211 Sourcery 评论2：人工复述回执标题（无 marker）不算回执
+    ——判据与 rejected_reconcile 同为幂等 marker，两层不得漂移。"""
+    _patch_hosting(monkeypatch, issues=[
+        {"number": 104, "labels": ["factory:rejected"],
+         "updatedAt": _iso(datetime.now(timezone.utc)),
+         "comments": [{"author": "im47cn", "body": RECEIPT_HEADING}]}])
     repo = _mk_repo(tmp_path)
     problems = []
     dl.check_stalled_labels(repo, 7, problems)

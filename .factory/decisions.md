@@ -505,10 +505,18 @@ zero-diff → 留守 → 次日再 wake」的每日一轮整链循环，唯一�
 5. **marker 裁定**：幂等键 r${ROUND:-batch}，r 前缀恒在 → 批次键
    rbatch（docstring 曾误写 batch，以代码为准，改格式破坏既有查重）。
    #207 回执按 rbatch 补发，timeline 验证单条，批次重放查重收敛。
+6. **判据收紧（PR #211 Sourcery 二轮）**：parse_agent_json 顶层
+   verdict 契约——对象一旦完整解析，内部偏移全部丧失资格（外层
+   verdict 非法时嵌套 evidence 携带的合法 verdict 不代表裁决，
+   skip 至对象末尾继续扫后续顶层）；has_receipt/无回执 FAIL 判据
+   从回执标题子串改为幂等 marker（人工复述标题不得冒充回执、屏蔽
+   完整性违规——线上 3 个 open rejected 回执全带 marker，无存量
+   误伤），rejected_reconcile 与 dispatch_liveness 同步换用。
 
-**验证**：全套 455 绿（stall 10→12：无回执即时 FAIL/提交评论不算回执；
-沙箱 test_issue_reject_receipt 3 例正则提取真函数三态；hosting 和解
-4 例；parse 3 例；rejected_reconcile 语义重写）+ bash -n +
-check_hosting_exit 干净。
+**验证**：全套 460 绿（stall 10→13：无回执即时 FAIL/提交评论不算回执/
+人工复述标题非回执；沙箱 test_issue_reject_receipt 3 例正则提取真函数
+三态；hosting 和解 4 例；parse 3→5：嵌套 verdict 不具顶层资格/坏外层
+后兄弟对象恢复；rejected_reconcile +2：复述标题不冒充回执/回执后复述
+计人工）+ bash -n + check_hosting_exit 干净。
 
 **引用**：steering/review-report-standards.md；README「拒绝 = 单一动作」。

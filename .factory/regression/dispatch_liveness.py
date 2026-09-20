@@ -160,10 +160,13 @@ def check_stalled_labels(repo: Path, stale_days: int, problems: list[str]) -> st
         elif "factory:rejected" in labels:
             # 回执存在性先行（#207 实证：落标假阴性早退 → 只落标无
             # 回执，只落标不发判据 = 不可审计的静默拒绝）——链完整性
-            # 违规不进宽限时钟，即时 FAIL；回执判别串对齐
-            # factory_lib.rejected_reconcile（reject_receipt 标题）。
+            # 违规不进宽限时钟，即时 FAIL；回执判据 = 幂等 marker
+            # （issue_reject 评论尾埋；标题子串可被人工复述冒充，PR #211
+            # Sourcery 评论2），与 factory_lib.rejected_reconcile 同一
+            # 判据不得漂移。
+            marker = f"factory:receipt:issue-{n}:r"
             if all(
-                "工厂 triage 裁决：reject" not in str(c.get("body") or "")
+                marker not in str(c.get("body") or "")
                 for c in (it.get("comments") or [])
                 if isinstance(c, dict)
             ):
