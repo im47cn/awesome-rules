@@ -32,6 +32,7 @@ python3 scripts/api_check.py path/to/project/ --format json
 | 动作收敛 | 末段须在固定动词集内：create/query/update/remove/cancel/sync/confirm/apply/push |
 | 路径变量 | 禁止 path 中传 `{id}` 等唯一标识 |
 | 时间注解 | DTO 禁 `shape=NUMBER`（须 ISO 8601 pattern）；PO 禁任何日期注解 |
+| 映射注解 | 禁止 @RequestMapping(method=...)，须用 @PostMapping/@GetMapping 等具体注解 |
 
 ## 需人工补充的规则
 

@@ -17,7 +17,7 @@ module.exports = {
     // ── scope 建议在枚举内（warn，业务域靠 warn 放行，不阻断）─────
     //    下游通用最小子集：仅业务域 + dependency，不随上游技能清单扩展；
     //    上游完整枚举见 awesome-rules 根 commitlint.config.js（doc-freshness
-    //    R9 门禁守护上游三方一致，本件不参与比对）
+    //    R9 门禁守护上游三方一致，本件为下游子集：R9 校验其枚举 ⊆ 根枚举且声明须带「下游」标注）
     'scope-enum': [1, 'always', ['api', 'db', 'ui', 'ci', 'dependency']],
 
     // ── 行长度（2026-09-16 数据驱动校准：6 仓 1353 提交实测，拦截率 ≤5% 红线，

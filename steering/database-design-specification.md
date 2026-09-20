@@ -128,7 +128,7 @@ del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]'
 
 **文件**：`.sql` 扩展名 / 已去除 engine/charset/collate/auto_increment/row_format / 注释用 `-- `。
 
-**表**：表注释 ≤ 64 / 表名合规 ≤ 30 / 含 5 个必含字段。
+**表**：表注释 ≤ 64 / 表名合规 ≤ 30 / 含 5 个必含字段（日志/流水表按 :43 豁免保留 id+create_time）。
 
 **字段**：字段注释 ≤ 128 无全角 / 类型禁用项已规避 / 字段数 ≤ 40 / 命名按属性级别 / `del_flag` 统一。
 

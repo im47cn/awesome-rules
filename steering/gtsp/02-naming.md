@@ -14,7 +14,7 @@ scenario: 类后缀/方法/注入/常量类
 | Feign 接口 | `Inter` | client | `ProcessInter` |
 | Controller | `Controller` | adapter.web | `FlowController` |
 | 应用服务 | `AppService` | app.application.service | `FlowOperateAppService` |
-| 装配器 | `Assembler` | app.application.assembler | `OrderCreateAssembler`（Entity↔DTO 转换，见 [01](01-project-structure.md) §7） |
+| 装配器 | `Assembler` | app.application.assembler | `OrderCreateAssembler`（Entity↔DTO 转换，见 [01](01-project-structure.md) §4） |
 | 命令/查询执行器 | `CmdExe`/`QryExe` | app.application.executor | `OrderCreateCmdExe`（见 [01](01-project-structure.md) CQRS） |
 | 策略分发处理器 | `Handler` | app.application.handler | `PaymentHandler`（见 [01](01-project-structure.md) Handler） |
 | 流程编排 | `Manager` | app.application.manager | `PaymentProcessManager` |

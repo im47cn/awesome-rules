@@ -50,6 +50,8 @@ awesome-rules/
 └── README.md
 ```
 
+> 注：仅列规范消费面与主要入口，门禁/模板/工厂链等顶层目录（`tools/`、`templates/`、`.factory/`、`.github/`）不逐项展开；完整目录与文件清单以 `git ls-files` 为准。
+
 ## 规范文件（steering/）
 
 规范分两组，体系独立：
@@ -59,13 +61,13 @@ awesome-rules/
 | 规范 | 说明 |
 | --- | --- |
 | [Open API 设计规范](steering/openapi-standards.md) | RESTful API 约定：URL 结构、HTTP 方法、响应格式、错误码、分页 |
-| [数据库设计规范](steering/database-design-specification.md) | MySQL DDL/DML 设计标准：表、字段、索引、注释、SQL 语句，按【强制】【推荐】分级 |
+| [数据库设计规范](steering/database-design-specification.md) | MySQL DDL/DML 设计标准：表、字段、索引、注释、SQL 语句，按强制级/推荐级/参考级三级分级 |
 | [Git 提交规范](steering/git-conventions.md) | 分支命名、Commit 格式、MR 约定 |
 | [测试规范](steering/testing-standards.md) | 测试编写与审查标准 |
 | [审查报告输出规范](steering/review-report-standards.md) | 审查结论输出结构（guard 技能人工判断部分、CR 评审意见） |
 | [跨仓契约兼容性规范](steering/cross-repo-contract-standards.md) | 变更被其他仓库依赖的 API 模块/契约门禁（japicmp、下游编译触发） |
 | [任务包与派发守护规范](steering/task-package-standards.md) | AI Agent 任务包五要素骨架与派发治理：L1 记录型 watcher / L2 事后异构审查分级守护 |
-| [前端工程技术规范（Vue3 管理端）](steering/frontend-standards.md) | Vue3 管理端工程标准：mock 联调门控、菜单下发路由、axios 工厂复用、可交互数据展示、变更验证，按【强制】【推荐】分级 |
+| [前端工程技术规范（Vue3 管理端）](steering/frontend-standards.md) | Vue3 管理端工程标准：mock 联调门控、菜单下发路由、axios 工厂复用、可交互数据展示、变更验证，按强制级/推荐级分级 |
 | [API 契约冻结规范](steering/api-contract-freeze-standards.md) | 新端点实现前契约逐字段冻结：method/path/请求参数名/响应信封/字段名未冻结禁止实现（mock 也不许先写），先冻结再实现 |
 
 ### GTSP 工程规范（`steering/gtsp/`，编码阶段）
@@ -152,3 +154,5 @@ Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分�
 > blob 锁定保护（zero-regression 模式）：有意变更后运行
 > `python3 scripts/plugin_lock.py --update` 并随变更一起提交；校验命令
 > `python3 scripts/plugin_lock.py`（非零退出 = 漂移或新增未锁定入口）。
+
+> **门禁定位（spec-check）**：spec-check 为 spec 工作流文档的条款↔测试核对设施（opt-in：仅含 `spec:<ID>` 标签的文件触发），非全仓强制门——执行体 `tools/git/lefthook/spec-check.sh`；口径与 [CONTRIBUTING.md](CONTRIBUTING.md) 钩子说明一致。
