@@ -494,8 +494,17 @@ def check_forbidden_clauses(text: str, issues: list, file_path: str):
 # 禁用语句全文扫描（steering/database-design-specification.md 第七节）：
 # 触发器、存储过程【强制】不得使用；自定义函数【推荐】不使用（确需时须经技术管理委员会
 # 评审）。视图同为【推荐】但不在脚本拦截范围，维持人工审查（ddl-manual-rules.md）。
+# 允许 MySQL 可选 DEFINER 子句（CREATE DEFINER=... TRIGGER 形态不得绕过检查）。
 _FORBIDDEN_STATEMENT_RE = re.compile(
-    r"(?i)\bcreate\s+(?:or\s+replace\s+)?(trigger|procedure|function)\b")
+    r"(?i)\bcreate\s+(?:or\s+replace\s+)?"
+    r"(?:definer\s*=\s*(?:current_user(?:\s*\(\s*\))?"
+    r"|(?:'[^']*'|`[^`]*`|[^\s@]+)(?:\s*@\s*(?:'[^']*'|`[^`]*`|[^\s@]+))?)\s+)?"
+    r"(trigger|procedure|function)\b")
+
+# 引号字面量区间提取（保持行号/列号不变）：COMMENT 'migration note: CREATE TRIGGER ...'
+# 这类解释性字符串不得误报为禁用语句——匹配仍跑原始文本（DEFINER='u'@'%' 值内含
+# 引号，先掩码会破坏 DEFINER 子句匹配），命中起点落在字面量区间内则跳过
+_SQL_LITERAL_RE = re.compile(r"'(?:[^']|'')*'|\"[^\"]*\"|`[^`]*`")
 
 _FORBIDDEN_STATEMENTS = {
     "trigger": (
@@ -515,8 +524,20 @@ _FORBIDDEN_STATEMENTS = {
 
 
 def check_forbidden_statements(text: str, issues: list, file_path: str):
-    """全文级检测禁用语句（不依赖 CREATE TABLE 解析，大小写不敏感）。"""
+    """全文级检测禁用语句（不依赖 CREATE TABLE 解析，大小写不敏感）。
+
+    引号字面量内的解释性短语（COMMENT '... CREATE TRIGGER ...'）不报：
+    命中起点落在字符串字面量区间内即跳过；匹配跑原始文本以兼容
+    DEFINER='u'@'%' 等含引号的合法子句形态。
+    """
+    literal_spans = [m.span() for m in _SQL_LITERAL_RE.finditer(text)]
+
+    def _in_literal(pos: int) -> bool:
+        return any(s <= pos < e for s, e in literal_spans)
+
     for m in _FORBIDDEN_STATEMENT_RE.finditer(text):
+        if _in_literal(m.start()):
+            continue
         severity, rule, description, suggestion = _FORBIDDEN_STATEMENTS[m[1].lower()]
         line = text.count("\n", 0, m.start()) + 1
         issues.append(Issue(

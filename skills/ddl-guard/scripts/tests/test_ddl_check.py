@@ -478,6 +478,30 @@ def test_clean_table_no_forbidden_statement():
                for i in issues)
 
 
+def test_forbidden_statement_in_string_literal_not_flagged():
+    """引号字面量内的解释性短语不误报（PR #210 Sourcery 意见）：
+    COMMENT '... CREATE TRIGGER ...' 是描述文本而非建触发器语句。"""
+    issues = _issues_for(
+        "CREATE TABLE t_note (\n"
+        "  id bigint COMMENT '主键',\n"
+        "  remark varchar(200) COMMENT 'migration note: CREATE TRIGGER is forbidden'\n"
+        ") COMMENT='含禁用语句示例文案的合规表';\n"
+    )
+    assert all(i.rule not in ("禁用触发器", "禁用存储过程", "自定义函数")
+               for i in issues)
+
+
+def test_definer_clause_does_not_bypass():
+    """CREATE DEFINER=... TRIGGER/PROCEDURE 不得绕过检查（PR #210 Sourcery 意见）。"""
+    issues = _issues_for(
+        "CREATE DEFINER=CURRENT_USER TRIGGER trg_a BEFORE INSERT ON t_a\n"
+        "FOR EACH ROW SET @x = 1;\n")
+    assert any(i.rule == "禁用触发器" for i in issues)
+    issues = _issues_for(
+        "CREATE DEFINER='u'@'%' PROCEDURE p_clean() BEGIN DELETE FROM t_b; END;\n")
+    assert any(i.rule == "禁用存储过程" for i in issues)
+
+
 # ── 表名 / 表注释违规分支 ────────────────────────────────────────────────
 
 TABLE_NAME_CASES = [
