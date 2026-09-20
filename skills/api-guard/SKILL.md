@@ -5,7 +5,7 @@ description: >
   API设计、接口设计、API规范、接口规范、检查API、检查接口、API审核、接口审核、
   审查Controller、业务接口审查、API合规检查。提供两类能力：
   (1) 按规范设计新 API，(2) 用脚本审查 Java Controller 中的业务接口合规性。
-  仅检查业务接口通用规范（路径命名、动作收敛、禁止 path 传标识、时间注解），不检查对外 Open API 四段式规范。
+  仅检查业务接口通用规范（路径命名、动作收敛、禁止 path 传标识、时间注解、映射注解），不检查对外 Open API 四段式规范。
 files:
   - README.md
   - api-manual-rules.md

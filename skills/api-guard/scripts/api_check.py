@@ -338,6 +338,36 @@ def _extract_class_name(content: str) -> str:
     return m.group(1) if m else "(类级)"
 
 
+# 09-cr-checklist「API 与 Controller」：@RequestMapping(method=...) 须改用具体映射注解。
+# extract_endpoints 的正则要求带引号路径，@RequestMapping(method = POST)（无路径）
+# 不产生端点，故本检查为文件级，且必须在 check_file 的无端点早退之前挂载。
+REQUEST_MAPPING_METHOD_RE = re.compile(
+    r'@RequestMapping\s*\([^)]*\bmethod\b\s*=',
+    re.DOTALL,
+)
+
+
+def check_mapping_annotation(file_path: str, content: str) -> list:
+    """检查 Controller 映射注解风格（09-cr-checklist API 与 Controller）：
+
+    - 禁止 @RequestMapping(method=...)，须用 @PostMapping/@GetMapping 等具体注解
+    - content 须已过 strip_java_comments（内部再剥离一次，幂等，支持直接传入原文）
+    """
+    issues = []
+    clean = strip_java_comments(content)
+    class_name = _extract_class_name(clean)
+    for m in REQUEST_MAPPING_METHOD_RE.finditer(clean):
+        line = clean[:m.start()].count("\n") + 1
+        issues.append(Issue(
+            file=file_path, endpoint=class_name, http_method="",
+            severity=Severity.MANDATORY, rule="映射注解",
+            location=f"{file_path}:{line}",
+            description="@RequestMapping(method=...) 应改用 @PostMapping/@GetMapping 等具体注解",
+            suggestion="使用 @PostMapping/@GetMapping/@PutMapping/@DeleteMapping 明确 HTTP 语义",
+        ))
+    return issues
+
+
 def check_file(file_path: str) -> list:
     """检查单个 Controller 文件，返回 issues 列表。"""
     issues = []
@@ -354,6 +384,9 @@ def check_file(file_path: str) -> list:
         return issues
 
     content = strip_java_comments(content)
+    # 文件级映射注解检查：@RequestMapping(method=...) 无路径时 extract_endpoints
+    # 不产生端点，须在无端点早退之前执行
+    issues.extend(check_mapping_annotation(file_path, content))
     endpoints = extract_endpoints(content, file_path)
 
     if not endpoints:

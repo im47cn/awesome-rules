@@ -1418,3 +1418,98 @@ def test_run_static_import_badcase_005():
     assert arch_check.STATE_FIELD_LEAKAGE in codes
     # 通配结构性债务恰好 1 条：依赖方向检查统一报告，purity 不双报
     assert stats["structural_debt_count"] == 1
+
+
+# ── 注入注解 / 控制台输出检查（09-cr-checklist 命名与方法 / 日志与异常） ──
+
+def test_injection_annotation_catches_autowired():
+    """@Autowired 注入被拦：MANDATORY、rule_code、行号定位。"""
+    content = (
+        "public class OrderService {\n"
+        "    @Autowired\n"
+        "    private OrderMapper orderMapper;\n"
+        "}\n"
+    )
+    issues = arch_check.check_injection_annotation("a.java", content)
+    assert len(issues) == 1
+    assert issues[0].severity == arch_check.Severity.MANDATORY
+    assert issues[0].rule_code == arch_check.INJECTION_ANNOTATION
+    assert issues[0].line == 2
+
+
+def test_injection_annotation_allows_resource():
+    """规范写法 @Resource 零误报。"""
+    content = (
+        "public class OrderService {\n"
+        "    @Resource\n"
+        "    private OrderMapper orderMapper;\n"
+        "}\n"
+    )
+    assert arch_check.check_injection_annotation("a.java", content) == []
+
+
+def test_console_output_catches_system_out_and_err():
+    """System.out.println / System.err.print 被拦，行号逐一对应。"""
+    content = (
+        "class A {\n"
+        "    void f() {\n"
+        "        System.out.println(\"x\");\n"
+        "        System.err.print ( \"y\" );\n"
+        "    }\n"
+        "}\n"
+    )
+    issues = arch_check.check_console_output("a.java", content)
+    assert len(issues) == 2
+    assert all(i.rule_code == arch_check.CONSOLE_OUTPUT for i in issues)
+    assert all(i.severity == arch_check.Severity.MANDATORY for i in issues)
+    assert [i.line for i in issues] == [3, 4]
+
+
+def test_console_output_allows_logger_and_env():
+    """log.info 与 System.getenv 等非输出调用零误报。"""
+    content = (
+        "class A {\n"
+        "    void f() {\n"
+        "        log.info(\"{}\", System.getenv(\"HOME\"));\n"
+        "    }\n"
+        "}\n"
+    )
+    assert arch_check.check_console_output("a.java", content) == []
+
+
+def test_check_file_mounts_injection_and_console_checks(tmp_path):
+    """挂载验证：application 层 Service 的 @Autowired + System.out 经 check_file 均被捕获。"""
+    src = tmp_path / "src/main/java/com/example/application/service"
+    src.mkdir(parents=True)
+    f = src / "OrderAppService.java"
+    f.write_text(
+        "package com.example.application.service;\n"
+        "public class OrderAppService {\n"
+        "    @Autowired\n"
+        "    private Object dep;\n"
+        "    void f() { System.out.println(\"x\"); }\n"
+        "}\n", encoding="utf-8")
+    cfg = _cfg()
+    issues, classified, layer = arch_check.check_file(str(f), str(tmp_path),
+                                                      _patterns(cfg), cfg)
+    assert classified is True and layer == "application"
+    codes = {i.rule_code for i in issues}
+    assert arch_check.INJECTION_ANNOTATION in codes
+    assert arch_check.CONSOLE_OUTPUT in codes
+
+
+def test_check_file_injection_console_ignores_comments_and_strings(tmp_path):
+    """负控制：注释/字符串里的 @Autowired 与 System.out 不触发（噪音剥离免疫）。"""
+    src = tmp_path / "src/main/java/com/example/domain/entity"
+    src.mkdir(parents=True)
+    f = src / "OrderE.java"
+    f.write_text(
+        "package com.example.domain.entity;\n"
+        "public class OrderE {\n"
+        "    // @Autowired 见注释\n"
+        '    String s = "System.out.println(x)";\n'
+        "}\n", encoding="utf-8")
+    cfg = _cfg()
+    issues, _, _ = arch_check.check_file(str(f), str(tmp_path), _patterns(cfg), cfg)
+    assert not any(i.rule_code in (arch_check.INJECTION_ANNOTATION,
+                                   arch_check.CONSOLE_OUTPUT) for i in issues)
