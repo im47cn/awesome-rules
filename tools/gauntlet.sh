@@ -240,25 +240,24 @@ else
 
     # sh -n 只语法检第一个文件操作数（其余被视为位置参数）——2026-09-20 扩容
     # 分发面时实证发现该历史缺陷：原单语句多文件形态下清单实检只有 gauntlet.sh
-    # 一个文件。改逐文件循环（与 syntax-factory-sh 层同口径）才是清单语义；
-    # 7 个无 bash 专有语法的钩子并入本层，install.sh/spec-check.sh 走下条 bash -n
+    # 一个文件。改逐文件循环（与 syntax-factory-sh 层同口径）才是清单语义
     _syn_sh_n="tools/gauntlet.sh tools/must_not_match.sh tools/run_diff_cover.sh \
         tools/test_gauntlet_orchestration.sh tools/test_gauntlet_checks.sh \
         tools/test_spec_check.sh tools/test_pre-push-delete-guard.sh \
-        tools/test_dispatch_watch.sh hooks/load-steering.sh hooks/on-session-end.sh \
-        tools/git/lefthook/coverage.sh tools/git/lefthook/commitmsg-check.sh \
-        tools/git/lefthook/run-tests.sh tools/git/lefthook/sourcery-gate.sh \
-        tools/git/lefthook/mutation-gate.sh tools/git/lefthook/coderabbit-gate.sh \
-        tools/git/lefthook/pre-push-delete-guard.sh"
+        tools/test_dispatch_watch.sh hooks/load-steering.sh hooks/on-session-end.sh"
     # shellcheck disable=SC2016  # $1 刻意由内层 sh 展开（外层单引号防本层展开）
     run_layer syntax-sh-n sh -c 'for f in $1; do sh -n "$f" || exit 1; done' sh "$_syn_sh_n"
-    # tools/git 分发面语法门（2026-09-20 审计 C 纳入）：install.sh 与 spec-check.sh
-    # 用进程替换 < <()（bash 专有语法；2026-09-20 实证 install.sh:139 /
-    # spec-check.sh:60 在 sh -n 的 POSIX 模式下解析即挂），不能并入上条，走
-    # bash -n（与 syntax-factory-sh 层同口径）
-    # shellcheck disable=SC2016  # 同上：$1 由内层 sh 展开
+    # tools/git 分发面语法门（2026-09-20 审计 C 纳入）：全部为 bash 解释器
+    # （shebang #!/usr/bin/env bash；含数组/here-string/进程替换等 bash 专有语法，
+    # 如 coverage.sh 的 MVN 数组与 install.sh:139 的 < <()），sh -n 在 dash 等
+    # 真正的 POSIX /bin/sh 上会假红——按解释器走 bash -n
+    # shellcheck disable=SC2016  # $1 由内层 sh 展开
     run_layer syntax-git-dist-bash-n sh -c 'for f in $1; do bash -n "$f" || exit 1; done' \
-        sh 'tools/git/install.sh tools/git/lefthook/spec-check.sh'
+        sh 'tools/git/install.sh tools/git/lefthook/coverage.sh \
+            tools/git/lefthook/commitmsg-check.sh tools/git/lefthook/run-tests.sh \
+            tools/git/lefthook/sourcery-gate.sh tools/git/lefthook/mutation-gate.sh \
+            tools/git/lefthook/coderabbit-gate.sh tools/git/lefthook/pre-push-delete-guard.sh \
+            tools/git/lefthook/spec-check.sh'
     # lint 范围只含本仓 tools/ 脚本：hooks/ 属既有代码，其基线告警不属本门范围
     # （豁免保留）；tools/git/（install.sh + 全部 8 钩子）2026-09-20 纳入——分发面：
     # 脚本随 install.sh 分发给下游仓直接消费，缺陷随分发放大，须与仓内脚本同
