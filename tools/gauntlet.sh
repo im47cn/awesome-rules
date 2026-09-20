@@ -233,7 +233,7 @@ else
     run_layer pytest-doc-gen "$PY" -m pytest skills/doc-gen/scripts/tests -q
     run_layer pytest-arch-hawkeye "$PY" -m pytest arch-hawkeye/scripts/tests -q
     run_layer plugin-versions "$PY" tools/check_plugin_versions.py
-    # 实现↔文档一致性（数字/清单/指向漂移，R1-R9 语义见脚本头注释）
+    # 实现↔文档一致性（数字/清单/指向漂移，R1-R11 语义见脚本头注释）
     run_layer doc-freshness "$PY" tools/check_doc_freshness.py
     # frontmatter 清单门禁（M1 steering 必填 / M2 skills files 断链单向+围栏，
     # 解析单一事实源 tools/frontmatter_lib.py，语义见 docs/design/skill-manifest-gate.md）
