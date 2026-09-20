@@ -88,7 +88,7 @@ n=$(grep -cE 'outside|owned_deleted' "$LOG")
 if [ "$n" = 1 ] && grep -q '"untracked_outside","path":"sentry.md"' "$LOG"; then
   ok "NC19e owned 区零事件 + 哨兵链路活着"
 else
-  bad "NC19e 事件数=$n（应恰 1 条哨兵）：$(grep -E 'outside|owned_deleted' "$LOG")"
+  bad "NC19e 事件数=${n}（应恰 1 条哨兵）：$(grep -E 'outside|owned_deleted' "$LOG")"
 fi
 cleanup
 
