@@ -70,7 +70,7 @@ awesome-rules/
 
 ### GTSP 工程规范（`steering/gtsp/`，编码阶段）
 
-Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分为 10 个文件（项目结构、分层架构、命名、Feign、MyBatis、日志、异常、配置、注释、CR 清单）。总入口：[steering/gtsp/README.md](steering/gtsp/README.md)。
+Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分，维度文件清单见 `ls steering/gtsp/0*.md`。总入口：[steering/gtsp/README.md](steering/gtsp/README.md)。
 
 规范文件由人工维护，是所有审查和设计的唯一依据。
 
