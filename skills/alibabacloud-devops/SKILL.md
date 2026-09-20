@@ -89,7 +89,7 @@ mcporter list yunxiao --schema && mcporter call yunxiao.<tool> key=value   # 秒
    批量拉取——工具未覆盖时直连，端点/字段形态见「注意」节。
 2. **脚本化集成**（历史 `.factory/forge` 形态，已由 ADR-008 hosting 抽象层取代，实测知识见 ADR-007）：需要稳定 argv 界面时。完整实测
    知识（字段配置端点形态、value 形态矩阵、assignedTo 24-hex、空体容错）沉淀在
-  [docs/adr/ADR-007-forge-adapter.md](../../docs/adr/ADR-007-forge-adapter.md)，不在此复制——
+   [docs/adr/ADR-007-forge-adapter.md](../../docs/adr/ADR-007-forge-adapter.md)，不在此复制——
    实例态数据（fieldId 等）随 space 模板变化，正确位置是代码运行时发现，不是文档。
 
 ### 排错信源优先级（黑盒探针成本实证）
