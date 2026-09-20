@@ -242,12 +242,22 @@ else
                tools/run_diff_cover.sh tools/test_gauntlet_orchestration.sh \
                tools/test_gauntlet_checks.sh tools/test_spec_check.sh \
                tools/test_pre-push-delete-guard.sh tools/test_dispatch_watch.sh \
-               hooks/load-steering.sh hooks/on-session-end.sh
-    # lint 范围只含本仓新增 tools/ 脚本：hooks/ 属既有代码，其基线告警不属本门范围；清单镜像于 scripts/run_tests.sh lint-shellcheck 层，两处同步维护
+               hooks/load-steering.sh hooks/on-session-end.sh \
+               tools/git/lefthook/commitmsg-check.sh \
+               tools/git/lefthook/coverage.sh tools/git/lefthook/mutation-gate.sh \
+               tools/git/lefthook/pre-push-delete-guard.sh tools/git/lefthook/sourcery-gate.sh \
+               tools/git/lefthook/coderabbit-gate.sh tools/git/lefthook/run-tests.sh
+    # lint 范围只含本仓新增 tools/ 脚本：hooks/ 属既有代码，其基线告警不属本门范围；tools/git/ 分发面 9 脚本已清零基线告警后入门（2026-09-20 审计：两处活性断裂恰落在该未门控集合内）；清单镜像于 scripts/run_tests.sh lint-shellcheck 层，两处同步维护
+    # install.sh/spec-check.sh 含 bash 进程替换, sh -n 不适用, 仅入 lint 层（shellcheck 按 bash 解析）
     run_layer lint-shellcheck shellcheck tools/gauntlet.sh tools/must_not_match.sh \
                 tools/run_diff_cover.sh tools/test_gauntlet_orchestration.sh \
                 tools/test_gauntlet_checks.sh tools/test_spec_check.sh \
-                tools/test_pre-push-delete-guard.sh tools/test_dispatch_watch.sh
+                tools/test_pre-push-delete-guard.sh tools/test_dispatch_watch.sh \
+                tools/git/install.sh tools/git/lefthook/commitmsg-check.sh \
+                tools/git/lefthook/coverage.sh tools/git/lefthook/mutation-gate.sh \
+                tools/git/lefthook/pre-push-delete-guard.sh tools/git/lefthook/sourcery-gate.sh \
+                tools/git/lefthook/spec-check.sh tools/git/lefthook/coderabbit-gate.sh \
+                tools/git/lefthook/run-tests.sh
 
     # ── .factory/ shell 门（2026-08-22 feedback 事故后补） ─────────────
     # 事故：feedback 适配节点产出 BRANCH 未定义（SC2154）的 fix-issue.sh，
