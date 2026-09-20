@@ -48,7 +48,10 @@ trap 'rc=$?; if [ $rc -ne 0 ] || [ "${#FAILED[@]}" -gt 0 ]; then
   echo "❌ run_tests 失败 (rc=$rc)" >&2
 fi' EXIT
 
-FAILED_TAGS="$(mktemp "${TMPDIR:-/tmp}/ar-run-tags.XXXXXX")"
+if ! FAILED_TAGS="$(mktemp "${TMPDIR:-/tmp}/ar-run-tags.XXXXXX")"; then
+  echo "❌ 无法创建并行门失败标签文件（mktemp）" >&2
+  exit 2
+fi
 PAR_RC=0
 "$PY" .factory/factory_lib.py parallel-gate --failed-tags "$FAILED_TAGS" || PAR_RC=$?
 if [ "$PAR_RC" -eq 2 ]; then

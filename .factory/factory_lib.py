@@ -401,12 +401,22 @@ def parallel_gate_cfg() -> dict | None:
             seen.add(tag)
             if bad_keys := set(s) - _PARALLEL_SEGMENT_KEYS:
                 raise ValueError(f"段 {tag} 未知键: {sorted(bad_keys)}")
-            has_argv = isinstance(s.get("argv"), list) and bool(s["argv"])
-            has_shell = isinstance(s.get("shell"), str) and bool(s["shell"].strip())
+            # 二选一按「键存在」判（PR #220 评论）：{"argv": [], "shell":
+            # "x"} 若按值判会双双通过 XOR，空 argv 落到 spawn 期才炸
+            has_argv = "argv" in s
+            has_shell = "shell" in s
             if has_argv == has_shell:
                 raise ValueError(f"段 {tag}: argv（词数组）与 shell（命令串）二选一")
-            if has_argv and not all(isinstance(w, str) and w for w in s["argv"]):
+            if has_argv and (
+                not isinstance(s["argv"], list)
+                or not s["argv"]
+                or not all(isinstance(w, str) and w for w in s["argv"])
+            ):
                 raise ValueError(f"段 {tag}: argv 词须为非空字符串")
+            if has_shell and (
+                not isinstance(s["shell"], str) or not s["shell"].strip()
+            ):
+                raise ValueError(f"段 {tag}: shell 须为非空字符串")
             intra = s.get("intra", "off")
             if intra not in ("off", "auto"):
                 raise ValueError(f"段 {tag}: intra 取值 off|auto（得到 {intra!r}）")
@@ -1254,6 +1264,17 @@ def intra_parallel_args(stack: str | None, py: str) -> tuple[list[str], str | No
     return [], "未识别测试栈：段内串行（段配置 stack 显式指定可启用并行档）"
 
 
+# 中断清理限宽：SIGTERM 后最多等这么久，仍存活的段进程组 SIGKILL 收尾
+_TERM_GRACE_SECS = 5.0
+
+
+def _kill_group(pgid: int, sig: int) -> None:
+    """向段进程组发信号；组已消失（已退出/已收割）则静默——清理不放大异常。"""
+    try:
+        os.killpg(pgid, sig)
+    except (ProcessLookupError, PermissionError):
+        pass
+
 def _seg_log_path(log_dir: Path, i: int, tag: str) -> Path:
     """段日志路径：序号前缀保回放序可读；tag 清洗禁路径分隔符。"""
     return log_dir / f"{i:02d}-{tag.replace('/', '__')}.log"
@@ -1272,12 +1293,23 @@ def run_parallel_gate(
     序=配置段序、与完成序解耦——输出 diff 稳定，先完成的段不抢跑。
     失败段 tag 逐行写 failed_tags_path（供宿主脚本聚合串行段失败后一次
     裁决；无失败=空文件）。workers=0 不限并发（缺省），>0 有界槽位
-    轮转（CI 资源受限仓的节流面）。
+    轮转（CI 资源受限仓的节流面）。段独立进程组（start_new_session）
+    执行；中断（BaseException）按组收尸：SIGTERM → 限宽等待 → SIGKILL
+    → 收割直接子进程，段日志保留取证，原始异常照抛（PR #220 评论）。
     """
     root = Path(repo_root) if repo_root is not None else Path(__file__).resolve().parent.parent
-    if cfg is None and (cfg := parallel_gate_cfg()) is None:
-        print("未配置 parallel_gate（可选键缺失），无并行门可执行", file=sys.stderr)
-        return 2
+    if cfg is None:
+        # 损坏配置 RuntimeError 在此转 rc 2（PR #220 评论）：宿主脚本仅
+        # 对 2 走 fail-closed 立即终止，traceback（rc 1）会漏进普通段
+        # 失败路径
+        try:
+            cfg = parallel_gate_cfg()
+        except RuntimeError as exc:
+            print(exc, file=sys.stderr)
+            return 2
+        if cfg is None:
+            print("未配置 parallel_gate（可选键缺失），无并行门可执行", file=sys.stderr)
+            return 2
     py = os.environ.get("PYTHON") or "python3"
 
     # 执行前预算：cwd 存在性 + intra 档解析 + 注记去重（原子性：任何段
@@ -1303,9 +1335,9 @@ def run_parallel_gate(
     log_dir = Path(tempfile.mkdtemp(prefix="factory-parallel-gate."))
     rcs: list[int | None] = [None] * len(segs)
     failed: list[str] = []
+    running: list[tuple[int, subprocess.Popen]] = []   # try 外可见：异常清理要收它
     try:
         pending = list(range(len(segs)))
-        running: list[tuple[int, subprocess.Popen]] = []
         workers = cfg["workers"]
         while pending or running:
             while pending and (workers == 0 or len(running) < workers):
@@ -1318,10 +1350,13 @@ def run_parallel_gate(
                     # （宿主脚本 $PY 占位约定的等价面）；pipefail 保管道
                     # 段退出码真实（吞码缺陷类，ADR-002 记账）
                     words = ["bash", "-o", "pipefail", "-c", seg["shell"], "_", py]
+                # 独立进程组（会话组长，pgid=pid）：中断清理 killpg 收整组，
+                # 段的测试后代（xdist worker 等）不残留为孤儿
                 with open(_seg_log_path(log_dir, i, seg["tag"]), "wb") as log_fh:
                     running.append((i, subprocess.Popen(
                         words, cwd=str(root / seg.get("cwd", ".")),
-                        stdout=log_fh, stderr=subprocess.STDOUT)))
+                        stdout=log_fh, stderr=subprocess.STDOUT,
+                        start_new_session=True)))
             still: list[tuple[int, subprocess.Popen]] = []
             for i, p in running:
                 if (rc := p.poll()) is None:
@@ -1341,8 +1376,22 @@ def run_parallel_gate(
             if rcs[i] != 0:
                 failed.append(seg["tag"])
     except BaseException:
-        # 中断（KeyboardInterrupt/信号）也要让取证路径可观测，不留哑尸体
+        # 中断（KeyboardInterrupt/信号）也要让取证路径可观测，不留哑尸体：
+        # 逐组 SIGTERM → 限宽等待 → SIGKILL → 收割直接子进程；清理自身
+        # 的异常被吞，不得覆盖原始异常
         print(f"⚠️ 并行门中断，段日志保留: {log_dir}", file=sys.stderr)
+        for _i, p in running:
+            _kill_group(p.pid, signal.SIGTERM)
+        deadline = time.monotonic() + _TERM_GRACE_SECS
+        for _i, p in running:
+            try:
+                p.wait(timeout=max(0.0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                _kill_group(p.pid, signal.SIGKILL)
+                try:
+                    p.wait()
+                except OSError:
+                    pass
         raise
     if failed_tags_path is not None:
         Path(failed_tags_path).write_text(

@@ -196,7 +196,8 @@ inclusion: always
 
 - **段间并行的准入**：无共享可变状态的段才进 `parallel_gate.segments`
   （独立工作目录/端口/临时文件）；顺序敏感段（依赖前段产物，如
-  doc-freshness 类）留宿主串行尾段，靠「并行段全绿后再跑」保序
+  doc-freshness 类）留宿主串行尾段，靠「并行门完成后再跑（不短路，
+  失败照记、末尾统一裁决）」保序
 - **段内并行缺省 off**：`intra:"auto"` 逐段显式 opt-in，只注保守档参数
   （模块/fork/worker 级分发，如 maven `-T 1C -DforkCount=1C
   -DreuseForks=true`）；禁线程交错类参数（`-Dparallel=methods` 类顺序

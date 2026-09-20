@@ -10,7 +10,8 @@
   pytest-xdist 缺席软降级带提示。
 - run_parallel_gate：配置序回放（与完成序解耦）、失败 tag 逐行落盘
   （尾带换行）、段日志失败保留/成功即删（TMPDIR 私有化断言）、
-  workers 有界并发、$PY 词替换、shell 段 pipefail、cwd 预检 fail-closed。
+  workers 有界并发、$PY 词替换、shell 段 pipefail、cwd 预检 fail-closed、
+  损坏配置转 rc 2、段独立进程组 + 中断收尸（SIGTERM→限宽→SIGKILL）。
 - main parallel-gate：未知参数/缺路径 → 2，--failed-tags 透传。
 
 运行：python3 -m pytest .factory/tests/test_parallel_gate.py -o addopts= -q
@@ -19,11 +20,32 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
+import time
 
 import pytest
 
 import factory_lib as fl
+
+
+_REAL_SLEEP = time.sleep   # 中断测试 monkeypatch fl.time.sleep 后，真睡轮询仍可用
+
+
+def _assert_dead(pid, timeout=5.0):
+    """轮询断言进程已死（僵尸先收割——本测试进程即段进程之父）。"""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        try:
+            os.waitpid(pid, os.WNOHANG)   # 已退出未 wait 的僵尸在此收走
+        except ChildProcessError:
+            pass
+        _REAL_SLEEP(0.02)
+    pytest.fail(f"进程 {pid} 清理后仍存活")
 
 
 def _argv_seg(tag, code, *extra_words, **extra):
@@ -90,9 +112,12 @@ class TestParallelGateCfg:
     @pytest.mark.parametrize("seg", [
         {"tag": "a"},                                   # argv/shell 全无
         {"tag": "a", "argv": ["x"], "shell": "true"},   # argv/shell 并存
-        {"tag": "a", "argv": []},                       # 空词组 → 视同无 argv
+        {"tag": "a", "argv": []},                       # 空词组（键在即占二选一位）
+        {"tag": "a", "argv": [], "shell": "true"},      # 按值判会双双漏过 XOR
         {"tag": "a", "argv": ["ok", ""]},               # 空词
+        {"tag": "a", "argv": "x"},                      # argv 非数组
         {"tag": "a", "shell": "   "},                   # 空白命令串
+        {"tag": "a", "shell": 42},                      # shell 非字符串
         {"tag": "a", "argv": ["x"], "intra": "on"},     # intra 取值域
         {"tag": "a", "argv": ["x"], "stack": "pytest2"},  # 栈白名单
         {"tag": "a", "argv": ["x"], "typo": 1},         # 段级未知键
@@ -101,6 +126,13 @@ class TestParallelGateCfg:
     def test_segment_rejections(self, monkeypatch, seg):
         with pytest.raises(RuntimeError):
             self._cfg(monkeypatch, {"segments": [seg]})
+
+    def test_argv_shell_value_errors_are_distinct(self, monkeypatch):
+        """空词组/空白命令串各自报值错误（键存在已占二选一位）。"""
+        with pytest.raises(RuntimeError, match="argv 词须为非空字符串"):
+            self._cfg(monkeypatch, {"segments": [{"tag": "a", "argv": []}]})
+        with pytest.raises(RuntimeError, match="shell 须为非空字符串"):
+            self._cfg(monkeypatch, {"segments": [{"tag": "a", "shell": "  "}]})
 
     @pytest.mark.parametrize("workers", [-1, "2", 1.5, True])
     def test_bad_workers_rejected(self, monkeypatch, workers):
@@ -360,6 +392,71 @@ class TestRunParallelGate:
         rc = fl.run_parallel_gate(repo_root=tmp_path)
         assert rc == 2
         assert "未配置 parallel_gate" in capsys.readouterr().err
+
+    def test_corrupted_cfg_converted_to_rc2_not_traceback(
+            self, tmp_path, monkeypatch, capsys):
+        """损坏配置 RuntimeError → rc 2：宿主脚本仅对 2 走 fail-closed 终止。"""
+        monkeypatch.setattr(fl, "_LOCAL_CFG", {"parallel_gate": 42})
+        assert fl.run_parallel_gate(repo_root=tmp_path) == 2
+        assert "fail-closed" in capsys.readouterr().err
+
+    def test_segments_run_as_own_session_leader(self, tmp_path):
+        """start_new_session 契约：段进程即会话组长（getsid==getpid）。"""
+        rc = self._gate(tmp_path, [
+            _argv_seg("grp", "import os, sys\n"
+                              "sys.exit(0 if os.getsid(0) == os.getpid() else 3)"),
+        ], failed="tags.txt")
+        assert rc == 0
+
+    def test_interrupt_terminates_segment_group(
+            self, tmp_path, capsys, monkeypatch):
+        """KeyboardInterrupt：SIGTERM 收段组并收割，段日志保留取证。"""
+        pid_file = tmp_path / "seg.pid"
+        code = ("import os, time\n"
+                f"with open({str(pid_file)!r}, 'w') as f:\n"
+                "    f.write(str(os.getpid()))\n"
+                "time.sleep(30)\n")
+
+        fired = []
+
+        def _ctrl_c_once(secs):
+            # 单次 Ctrl-C 建模：段起跑后只抛一次，其余真睡——否则清理路径
+            # 里 Popen.wait 的内部轮询 sleep 会连环再抛，收尸永不执行
+            if pid_file.exists() and not fired:
+                fired.append(1)
+                raise KeyboardInterrupt
+            _REAL_SLEEP(min(secs, 0.05))
+
+        monkeypatch.setattr(fl.time, "sleep", _ctrl_c_once)
+        with pytest.raises(KeyboardInterrupt):
+            fl.run_parallel_gate(repo_root=tmp_path, cfg={"workers": 0, "segments": [
+                {"tag": "hang", "argv": ["$PY", "-c", code]}]})
+        assert "并行门中断，段日志保留" in capsys.readouterr().err
+        _assert_dead(int(pid_file.read_text()))
+        assert list(self.tmp.glob("factory-parallel-gate.*"))   # 取证保留
+
+    def test_interrupt_sigkills_term_ignoring_group(
+            self, tmp_path, monkeypatch):
+        """TERM 免疫段（trap '' TERM）：限宽后 SIGKILL 收组。"""
+        pid_file = tmp_path / "stubborn.pid"
+        monkeypatch.setattr(fl, "_TERM_GRACE_SECS", 0.3)
+
+        fired = []
+
+        def _ctrl_c_once(secs):
+            # 同上：单次 Ctrl-C，其余真睡
+            if pid_file.exists() and not fired:
+                fired.append(1)
+                raise KeyboardInterrupt
+            _REAL_SLEEP(min(secs, 0.05))
+
+        monkeypatch.setattr(fl.time, "sleep", _ctrl_c_once)
+        with pytest.raises(KeyboardInterrupt):
+            fl.run_parallel_gate(repo_root=tmp_path, cfg={"workers": 0, "segments": [
+                {"tag": "stubborn",
+                 "shell": f"echo $$ > '{pid_file}'; trap '' TERM; "
+                          "while :; do sleep 30; done"}]})
+        _assert_dead(int(pid_file.read_text()))
 
 
 # ───────────────────────── CLI（main parallel-gate） ─────────────────────────
