@@ -91,10 +91,9 @@ def extract_endpoints(content: str, file_path: str):
     class_mapping = ""
     if cm := re.search(r"class\s+\w+[^{]*?\{", content):
         before_class = content[: cm.start()]
-        rm = re.search(
+        if rm := re.search(
             r'@RequestMapping\s*\(\s*(?:value\s*=\s*)?"([^"]+)"', before_class
-        )
-        if rm:
+        ):
             class_mapping = rm[1]
 
     # 方法级映射注解
@@ -126,8 +125,7 @@ def extract_endpoints(content: str, file_path: str):
 
         # @RequestMapping 的 method
         if ann_type == "RequestMapping":
-            mm = re.search(r"method\s*=\s*(\w+\.\w+)", extra)
-            if mm:
+            if mm := re.search(r"method\s*=\s*(\w+\.\w+)", extra):
                 method_name = mm[1].split(".")[-1].upper()
                 if method_name in ("GET", "POST", "PUT", "DELETE", "PATCH"):
                     http_method = method_name
