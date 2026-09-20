@@ -1,9 +1,10 @@
 """dispatch_liveness 滞留检测负控制（第三死法：GitHub 侧滞留）。
 
 2026-09-15 issue #165 实证：零改动轮留守 in-progress 5 天不可见。
-本套件钉死两种滞留（in-progress 无租约 / rejected 超宽限无跟进）必须
-进 problems（= 回归 FAIL），以及合法状态（链存活持锁 / 宽限内 /
-hosting 不可用）不得误报。hosting 子进程一律 monkeypatch，零网络零 git。
+本套件钉死三种滞留（in-progress 无租约 / rejected 无回执 / rejected
+超宽限无跟进）必须进 problems（= 回归 FAIL），以及合法状态（链存活
+持锁 / 有回执宽限内 / hosting 不可用）不得误报。hosting 子进程一律
+monkeypatch，零网络零 git。
 """
 import json
 import sys
@@ -97,12 +98,15 @@ def test_pg_mode_degrades_in_progress_check(tmp_path, monkeypatch, capsys):
 
 
 # -- rejected 滞留：宽限阈值 --------------------------------------------------
+RECEIPT = "## 工厂 triage 裁决：reject —— 判据 b 不通过"
+
 
 def test_rejected_beyond_grace_fails(tmp_path, monkeypatch, capsys):
     old = datetime.now(timezone.utc) - timedelta(days=10)
     _patch_hosting(monkeypatch, issues=[
         {"number": 104, "labels": ["factory:rejected"],
-         "updatedAt": _iso(old)}])
+         "updatedAt": _iso(old),
+         "comments": [{"author": "im47cn", "body": RECEIPT}]}])
     repo = _mk_repo(tmp_path)
     problems = []
     assert dl.check_stalled_labels(repo, 7, problems) == "ok"
@@ -113,7 +117,8 @@ def test_rejected_within_grace_ok(tmp_path, monkeypatch, capsys):
     recent = datetime.now(timezone.utc) - timedelta(days=2)
     _patch_hosting(monkeypatch, issues=[
         {"number": 104, "labels": ["factory:rejected"],
-         "updatedAt": _iso(recent)}])
+         "updatedAt": _iso(recent),
+         "comments": [{"author": "im47cn", "body": RECEIPT}]}])
     repo = _mk_repo(tmp_path)
     problems = []
     assert dl.check_stalled_labels(repo, 7, problems) == "ok"
@@ -122,11 +127,37 @@ def test_rejected_within_grace_ok(tmp_path, monkeypatch, capsys):
 
 def test_rejected_missing_updatedat_skips(tmp_path, monkeypatch, capsys):
     _patch_hosting(monkeypatch, issues=[
-        {"number": 104, "labels": ["factory:rejected"], "updatedAt": None}])
+        {"number": 104, "labels": ["factory:rejected"], "updatedAt": None,
+         "comments": [{"author": "im47cn", "body": RECEIPT}]}])
     repo = _mk_repo(tmp_path)
     problems = []
     dl.check_stalled_labels(repo, 7, problems)
     assert not problems
+
+def test_rejected_no_receipt_fails_immediately(tmp_path, monkeypatch):
+    """#207 事故形态：只落标无回执——链完整性违规即时 FAIL，不进宽限
+    时钟（新鲜 updatedAt 否则宽限 OK），有回执才轮到滞留判定。"""
+    _patch_hosting(monkeypatch, issues=[
+        {"number": 207, "labels": ["factory:rejected"],
+         "updatedAt": _iso(datetime.now(timezone.utc))}])
+    repo = _mk_repo(tmp_path)
+    problems = []
+    assert dl.check_stalled_labels(repo, 7, problems) == "ok"
+    assert any("#207" in p and "无回执" in p for p in problems), problems
+    assert all("滞留" not in p for p in problems), problems
+
+
+def test_rejected_pre_receipt_comments_do_not_count(tmp_path, monkeypatch):
+    """提交讨论评论 ≠ 回执——只有正文含回执标题串的评论算回执
+    （判别串对齐 reject_receipt，两层不得漂移）。"""
+    _patch_hosting(monkeypatch, issues=[
+        {"number": 104, "labels": ["factory:rejected"],
+         "updatedAt": _iso(datetime.now(timezone.utc)),
+         "comments": [{"author": "im47cn", "body": "按指引重投"}]}])
+    repo = _mk_repo(tmp_path)
+    problems = []
+    dl.check_stalled_labels(repo, 7, problems)
+    assert any("无回执" in p for p in problems), problems
 
 
 # -- 降级：hosting 不可用不误报 ----------------------------------------------

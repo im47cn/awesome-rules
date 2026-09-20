@@ -2,6 +2,7 @@
 
 场景锚定真实事故形态：4 个 rejected issue 修复已进 main 但 issue 未关。
 机器不可判定"是否已修复"，只暴露处置信号（回执后人工评论数）。
+2026-09-20 #207：只落标无回执 = 链完整性违规，has_receipt 一等字段。
 """
 
 import json
@@ -27,6 +28,7 @@ def test_human_comment_after_receipt_counted():
         {"author": "im47cn", "body": RECEIPT_BODY},      # 链回执（bot 语义）
         {"author": "im47cn", "body": "已人工修复，PR #27"},  # 回执后人工评论
     ])])[0]
+    assert it["has_receipt"] is True
     assert it["human_comments_after_reject"] == 1
 
 
@@ -47,15 +49,19 @@ def test_latest_receipt_wins_when_multiple():
         {"author": "im47cn", "body": "按指引重投"},         # round0 后（应忽略）
         {"author": "im47cn", "body": RECEIPT_BODY},       # round1 回执
     ])])[0]
+    assert it["has_receipt"] is True
     assert it["human_comments_after_reject"] == 0
 
 
-def test_no_receipt_counts_all_human():
-    """无回执（历史形态/批次落标无评论）→ 全部人工评论计为处置信号。"""
+def test_no_receipt_flags_integrity_violation():
+    """无回执（#207 实证形态：落标假阴性早退 → 只落标无评论）= 链
+    完整性违规：has_receipt=False 优先报告；提交/裁决前的人工评论
+    ≠ 处置信号，不计（2026-09-20 语义修正，旧契约曾全量计数）。"""
     it = rejected_reconcile([_issue(3, [
         {"author": "im47cn", "body": "人工处置说明"},
     ])])[0]
-    assert it["human_comments_after_reject"] == 1
+    assert it["has_receipt"] is False
+    assert it["human_comments_after_reject"] == 0
 
 
 def test_malformed_entries_fail_open():
@@ -66,6 +72,7 @@ def test_malformed_entries_fail_open():
         {"number": 3, "title": "t", "comments": [42, {"body": "x"}]},
     ])
     assert [r["human_comments_after_reject"] for r in out] == [0, 0, 0]
+    assert [r["has_receipt"] for r in out] == [False, False, False]
 
 
 def test_title_truncated():

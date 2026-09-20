@@ -16,10 +16,13 @@ hub 是多仓唯一调度入口，任一注册仓库的调度死法都是本层�
    a. open issue 挂 factory:in-progress 但 leases/issue:<n>.lock 不存在
       ——链已收官/早亡，无存活租约（锁先于标签获取，标签在而锁不在
       = 滞留，无阈值窗口）；
-   b. open issue 挂 factory:rejected 且 updatedAt 超过 --stale-days 无
-      人工跟进（拒裁回执评论会刷新 updatedAt，故 updatedAt ≥ 拒裁时刻）
-      ——dispatch 尾部 rejected-reconcile 对账只在本地日志，本层把
-      静默滞留升为回归 FAIL。
+   b. open issue 挂 factory:rejected：先验回执存在性——只落标无回执
+      评论 = 链完整性违规（2026-09-20 #207 实证：落标假阴性早退，
+      只落标不发判据 = 不可审计的静默拒绝），不受宽限即时 FAIL；
+      有回执且 updatedAt 超过 --stale-days 无人工跟进（拒裁回执评论
+      会刷新 updatedAt，故 updatedAt ≥ 拒裁时刻）才计滞留——dispatch
+      尾部 rejected-reconcile 对账只在本地日志，本层把静默滞留升为
+      回归 FAIL。
    hosting 不可用（无凭据/离线/下游仓未配）→ note 跳过，不误报——
    本地两层（stalled/streak）照常检查。
 
@@ -82,7 +85,8 @@ def hosting_issues(factory: Path) -> list[dict] | None:
     try:
         r = subprocess.run(
             [sys.executable, str(factory / "hosting.py"),
-             "issue", "list", "--state", "open", "--limit", "200"],
+            "issue", "list", "--state", "open", "--limit", "200",
+            "--comments"],
             capture_output=True, text=True, timeout=90, cwd=str(factory.parent))
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -154,6 +158,19 @@ def check_stalled_labels(repo: Path, stale_days: int, problems: list[str]) -> st
             else:
                 n_ok += 1
         elif "factory:rejected" in labels:
+            # 回执存在性先行（#207 实证：落标假阴性早退 → 只落标无
+            # 回执，只落标不发判据 = 不可审计的静默拒绝）——链完整性
+            # 违规不进宽限时钟，即时 FAIL；回执判别串对齐
+            # factory_lib.rejected_reconcile（reject_receipt 标题）。
+            if all(
+                "工厂 triage 裁决：reject" not in str(c.get("body") or "")
+                for c in (it.get("comments") or [])
+                if isinstance(c, dict)
+            ):
+                problems.append(
+                    f"[{tag}] issue #{n} rejected 无回执评论——链完整性违规"
+                    "（#207 同型），需补发回执")
+                continue
             age = _gh_updated_age_secs(it.get("updatedAt"))
             if age is not None and age > stale_days * 86400:
                 problems.append(

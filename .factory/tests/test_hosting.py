@@ -97,6 +97,63 @@ class TestGithubCommands:
         args = [c for c in calls if c[0][:2] == ("issue", "edit")][0][0]
         assert "--remove-label" not in args  # bash 3.2 空参守卫的 py 侧等价
 
+    def test_set_labels_false_negative_reconciles(self):
+        """#207 实证形态：gh edit 非零但标签已落服务端（mutation
+        landed + client reported failure）——失败路径重读标签态，
+        目标已达成即幂等成功，裁决不被传输层误报否决。"""
+        calls = []
+        ad = hosting.GitHubAdapter()
+        ad.slug = lambda o=None: "o/r"
+
+        def fake_gh(args, repo_override=None, stdin=None):
+            calls.append(tuple(args))
+            if args[:2] == ["issue", "edit"]:
+                return _cp(rc=1, err="gh: POST api.github.com: 502")
+            return _cp(out=json.dumps(
+                {"labels": [{"name": "factory:rejected"}]}))
+        ad._gh = fake_gh
+        assert ad.issue_set_labels(9, add=["factory:rejected"],
+                                   remove=["factory:triaging"]) is True
+        assert calls[1][:2] == ("issue", "view")  # 复核是读路径
+
+    def test_set_labels_true_failure_raises(self):
+        """复核确证目标未达成 → 原 fail-closed 透传（和解不吞真失败）。"""
+        ad = hosting.GitHubAdapter()
+        ad.slug = lambda o=None: "o/r"
+
+        def fake_gh(args, repo_override=None, stdin=None):
+            if args[:2] == ["issue", "edit"]:
+                return _cp(rc=1, err="boom")
+            return _cp(out=json.dumps(
+                {"labels": [{"name": "factory:triaging"}]}))
+        ad._gh = fake_gh
+        with pytest.raises(hosting.HostingError):
+            ad.issue_set_labels(9, add=["factory:rejected"])
+
+    def test_set_labels_readback_failure_raises(self):
+        """复核读自身失败（网络仍断）→ 不视作已落定，fail-closed。"""
+        ad = hosting.GitHubAdapter()
+        ad.slug = lambda o=None: "o/r"
+        ad._gh = lambda a, r=None, s=None: _cp(rc=1, err="still down")
+        with pytest.raises(hosting.HostingError):
+            ad.issue_set_labels(9, add=["factory:rejected"])
+
+    def test_pr_set_labels_false_negative_reconciles(self):
+        """PR 侧镜像：同构假阴性和解（pr view 重读标签态）。"""
+        calls = []
+        ad = hosting.GitHubAdapter()
+        ad.slug = lambda o=None: "o/r"
+
+        def fake_gh(args, repo_override=None, stdin=None):
+            calls.append(tuple(args))
+            if args[:2] == ["pr", "edit"]:
+                return _cp(rc=1, err="gh: 502")
+            return _cp(out=json.dumps(
+                {"labels": [{"name": "factory:in-progress"}]}))
+        ad._gh = fake_gh
+        assert ad.pr_set_labels(12, add=["factory:in-progress"]) is True
+        assert calls[1][:2] == ("pr", "view")
+
     def test_pr_create_overrides_repo(self):
         calls = []
         ad = self._ad(calls)

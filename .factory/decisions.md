@@ -482,3 +482,33 @@ action）缓行约一周。
 **已知成本**（接受）：滞留不可由代码修复时存在「日 FAIL → wake → 链 →
 zero-diff → 留守 → 次日再 wake」的每日一轮整链循环，唯一出口是人工裁决
 关闭；轮次上限/退避暂不实现（每次新失败即真实新证据，重派语义正确）。
+
+## ADR-015 · 2026-09-20 · #207 拒绝回执缺失：标签假阴性和解 + 回执存在性断言
+
+**背景**：#207 拒绝裁决 11:01:01Z factory:rejected 已落 GitHub，gh 客户端
+却报非零（mutation landed + client reported failure 假阴性）；
+`issue_label_swap … || return 1` 早退致判据回执永不执行——只落标不发
+评论的静默拒绝，违反 steering/review-report-standards.md:19（自动化
+拒绝必须附回执）；ADR-013 宽限检测按 updatedAt 计，无回执态被推迟暴露。
+
+**决策**：
+1. **动作层（A/B）**：issue_reject 落标失败先复核远端标签态——
+   factory:rejected 在列即按已落定继续回执（swap stderr 落档回显），
+   确证缺失才中止。
+2. **传输层（C）**：hosting.py issue/pr_set_labels 失败路径读回复核，
+   目标集已达成（增集在列 ∧ 删集缺席）即判成功。
+3. **解析兜底（D）**：parse_agent_json 改逐 `{` 偏移 raw_decode——
+   重复 JSON 块/尾文花括号不再崩（#207 triage 双块崩溃根因）。
+4. **存在性断言（E）**：rejected_reconcile 增 has_receipt、无回执时
+   不计人工评论；dispatch_liveness 无回执即时 FAIL 不进宽限——
+   ADR-013「回执刷新 updatedAt」前提对无回执态不成立。
+5. **marker 裁定**：幂等键 r${ROUND:-batch}，r 前缀恒在 → 批次键
+   rbatch（docstring 曾误写 batch，以代码为准，改格式破坏既有查重）。
+   #207 回执按 rbatch 补发，timeline 验证单条，批次重放查重收敛。
+
+**验证**：全套 455 绿（stall 10→12：无回执即时 FAIL/提交评论不算回执；
+沙箱 test_issue_reject_receipt 3 例正则提取真函数三态；hosting 和解
+4 例；parse 3 例；rejected_reconcile 语义重写）+ bash -n +
+check_hosting_exit 干净。
+
+**引用**：steering/review-report-standards.md；README「拒绝 = 单一动作」。

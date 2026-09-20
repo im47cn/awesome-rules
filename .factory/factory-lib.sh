@@ -54,10 +54,14 @@ issue_label_swap() { # issue_label_swap <"删,删"|空> <"加,加"> —— 单�
   local -a args=("issue" "set-labels" "${ISSUE}")
   [ -n "${1:-}" ] && args+=(--remove "${1}")
   [ -n "${2:-}" ] && args+=(--add "${2}")
-  if python3 "${REPO}/.factory/hosting.py" "${args[@]}" >/dev/null 2>&1; then
+  local err
+  if err="$(python3 "${REPO}/.factory/hosting.py" "${args[@]}" 2>&1 >/dev/null)"; then
     echo "  [label] -${1:-} +${2}"
   else
+    # stderr 落档（#207 实证：>/dev/null 2>&1 把 HostingError 里的 gh
+    # 失败原因吞掉，[error] 行无从排查）——hosting 侧原因回显在错误行下。
     echo "[error] 标签转移失败：-${1:-} +${2}（issue #${ISSUE}）" >&2
+    [ -n "${err}" ] && printf '  [hosting] %s\n' "${err}" >&2
     return 1
   fi
 }
@@ -94,16 +98,30 @@ issue_reject() { # issue_reject <remove-csv|空> <triage.json> —— 拒绝的�
   #   <remove-csv>  落标同时原子移除的标签。链入口传 "factory:triaging,
   #                 factory:in-progress"；批次入口（零标签 issue）传 ""
   #   <triage.json> 判据源；回执渲染于同目录 reject-receipt.md
-  # 失败语义分两级：落标失败 return 1——裁决未落定，调用方终止/跳过；
+  # 失败语义分两级：落标调用失败先复核远端标签态（#207 实证：gh 非零
+  # 但标签已落远端——退出码 ≠ 落定事实），factory:rejected 确在列即按
+  # 已落定继续回执，确证缺失才 return 1（裁决未落定，调用方终止/跳过）；
   # 回执生成/评论失败仅告警——裁决已由标签落定，回执是透明度而非门，
   # 正文留档可手动补发。评论经 issue_comment 唯一出口，标记中和不因入口
   # 不同而绕过；回执刻意不含裸标记——标记评论通道保留给人类手动覆盖。
   # 回执带幂等键：同轮次重放（诈尸残窗/人工重跑）查重跳过；链侧带轮次
-  # ROUND、批次侧固定 batch——同 issue 两入口的回执键天然互不冲突。
+  # ROUND、批次侧固定 rbatch（r 前缀恒在，ROUND 缺省展开 batch）——同
+  # issue 两入口的回执键天然互不冲突。
   local marker="factory:receipt:issue-${ISSUE}:r${ROUND:-batch}"
   local dir
   dir="$(dirname "$2")"
-  issue_label_swap "${1:-}" "factory:rejected" || return 1
+  if ! issue_label_swap "${1:-}" "factory:rejected"; then
+    # 假阴性复核（#207：mutation landed + client reported failure——
+    # 2026-09-20 11:01:01Z 标签已落 GitHub 而 gh 报非零）：落标调用失败
+    # ≠ 裁决未落定。factory:rejected 在远端 = 裁决已生效，回执必须跟上
+    # （steering 审查报告规范：只落标不发判据 = 不可审计的静默拒绝）；
+    # 确证缺失才按未落定终止。
+    if ! python3 "${REPO}/.factory/hosting.py" issue get-labels "${ISSUE}" 2>/dev/null \
+        | grep -q '"factory:rejected"'; then
+      return 1
+    fi
+    echo "  [warn] 落标调用失败但 factory:rejected 已在远端（issue #${ISSUE}）——按已落定继续回执" >&2
+  fi
   if python3 "${REPO}/.factory/factory_lib.py" receipt "$2" \
       > "${dir}/reject-receipt.md" 2>/dev/null; then
     if issue_comment "${dir}/reject-receipt.md" "${marker}" >/dev/null 2>&1; then

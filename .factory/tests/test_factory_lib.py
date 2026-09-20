@@ -82,6 +82,28 @@ class TestParseAgentJson:
         d = parse_agent_json(text, self.VERDICTS)
         assert d["verdict"] == "PASS"
 
+    def test_parse_duplicated_json_blobs(self):
+        """#207 首次尝试实证崩形：裁决 JSON 被整段重复（Extra data:
+        char 429）。旧贪心兜底从首个左花括号拼到末个右花括号再
+        json.loads 必炸；逐偏移 raw_decode 取首个完整对象。"""
+        blob = '{"verdict": "reject", "reasons": ["判据b: 不通过"]}'
+        d = parse_agent_json(blob + blob, {"accept", "reject"})
+        assert d["verdict"] == "reject"
+
+    def test_parse_trailing_prose_with_braces(self):
+        """裸 JSON 后跟含花括号尾文（fence 丢失形态）——旧贪心兜底
+        同样把尾文花括号拼进来；逐偏移扫描在首个合法对象处停。"""
+        text = ('{"verdict": "FAIL", "evidence": "x"}\n'
+                '附注：详见 {附录A} 与 {附录B}')
+        assert parse_agent_json(text, self.VERDICTS)["verdict"] == "FAIL"
+
+    def test_parse_fence_priority_over_earlier_bare(self):
+        """fence 内对象优先于正文更早出现的裸对象——fence 是 LLM
+        显式结构化输出信号（#207 重写后保序语义锚）。"""
+        text = ('{"verdict": "PASS", "evidence": "正文里的裸对象"}\n'
+                '```json\n{"verdict": "FAIL", "evidence": "fence 裁决"}\n```')
+        assert parse_agent_json(text, self.VERDICTS)["verdict"] == "FAIL"
+
 
 class TestEvidenceSuites:
     def test_skills_change_yields_suite(self):
