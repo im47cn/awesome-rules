@@ -24,7 +24,7 @@ if [ -z "$CL" ]; then
     CL="$(command -v commitlint || true)"
     [ -n "$CL" ] || CL="$(npm prefix -g)/bin/commitlint"
     [ -x "$CL" ] || {
-      echo "⚠ [commitmsg] 已安装但未定位到可执行文件（$CL），本次放行"
+      echo "⚠ [commitmsg] 已安装但未定位到可执行文件（${CL}），本次放行"
       exit 0
     }
   else

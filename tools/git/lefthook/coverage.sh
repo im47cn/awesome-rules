@@ -13,7 +13,8 @@ FAIL_UNDER_PY=90
 FAIL_UNDER_TS=90
 
 REPO=$(git rev-parse --show-toplevel)
-cd "$REPO"
+# cd 失败即终止（fail-closed）：后续 diff/产物收集全按相对路径，静默继续会整门假绿
+cd "$REPO" || { echo "✗ [cov] 无法进入仓库根目录 ($REPO), 终止"; exit 1; }
 
 # 变更集: light=staged; full=增量基线 @{push}(上次推送点)...HEAD —— 度量"本次推送新增行"，
 # 回退 @{u}(上游)；均不可解析=首次推送，跳过。不回退主干：长命特性分支对 master 的全量
@@ -147,9 +148,10 @@ if [ "$HAS_JAVA" = 1 ]; then
     if [ "$MODE" = "light" ]; then
       (
         cd "$d" || exit 0
-        xmls=$(ls target/site/jacoco/jacoco.xml */target/site/jacoco/jacoco.xml 2>/dev/null || true)
+        xmls=$(ls -- target/site/jacoco/jacoco.xml */target/site/jacoco/jacoco.xml 2>/dev/null || true)
         [ -n "$xmls" ] || { echo "[cov] 无 jacoco 产物, 跳过轻检 (跑一次 mvn test 生成; 红线在 pre-push full)"; exit 0; }
         echo "[cov] pre-commit $d java staged 变更覆盖检查 (≥${FAIL_UNDER_JAVA}%)"
+        # shellcheck disable=SC2086  # $xmls 是空白分词的多份 jacoco.xml 清单，分词是意图
         out=$(dc $xmls --compare-branch=HEAD --ignore-unstaged --fail-under="$FAIL_UNDER_JAVA")
         rc=$?
         printf '%s\n' "$out"
@@ -181,7 +183,7 @@ if [ "$HAS_JAVA" = 1 ]; then
         esac
         case "$jver" in
           *[!0-9.-]*)
-            echo "[cov] ⚠ $d jacoco 版本「$jver」非数字字面量, 跳过版本校验（确保运行时 ≥0.8.2）"
+            echo "[cov] ⚠ $d jacoco 版本「${jver}」非数字字面量, 跳过版本校验（确保运行时 ≥0.8.2）"
             jver=
             ;;
         esac
@@ -195,9 +197,10 @@ if [ "$HAS_JAVA" = 1 ]; then
         "${MVN[@]}" -q clean org.jacoco:jacoco-maven-plugin:prepare-agent test org.jacoco:jacoco-maven-plugin:report
         rc=$?
         [ $rc -ne 0 ] && exit 1
-        xmls=$(ls target/site/jacoco/jacoco.xml */target/site/jacoco/jacoco.xml 2>/dev/null || true)
+        xmls=$(ls -- target/site/jacoco/jacoco.xml */target/site/jacoco/jacoco.xml 2>/dev/null || true)
         [ -n "$xmls" ] || { echo "[cov] $d 未生成任何 jacoco.xml, 跳过"; exit 0; }
         # 全量红线（存量+新增）: 汇总报告级 LINE/BRANCH 计数（生成代码剔除由 JaCoCo ≥0.8.2 注解过滤保证）
+        # shellcheck disable=SC2086  # $xmls 同上：多份 jacoco.xml 按空白分词传入
         read -r lm lc bm bc <<<"$(jacoco_totals $xmls)"
         # 豁免预算（可选）: .lefthook/coverage-budget.env 提供 BUDGET_LINE_MISSED / BUDGET_BRANCH_MISSED
         # （纯数字）。语义: 报告级 missed 扣除预算后须仍达红线——预算是棘轮上限而非目标, 任何新增
@@ -222,7 +225,7 @@ if [ "$HAS_JAVA" = 1 ]; then
             led_l=$((10#$led_l)); led_b=$((10#$led_b))
             [ "$led_l" -lt "$BUDGET_LINE_MISSED" ] && BUDGET_LINE_MISSED=$led_l
             [ "$led_b" -lt "$BUDGET_BRANCH_MISSED" ] && BUDGET_BRANCH_MISSED=$led_b
-            echo "[cov] $d 豁免预算生效: 行 ≤$BUDGET_LINE_MISSED / 分支 ≤$BUDGET_BRANCH_MISSED（min(申报, 台账 LEDGER_TOTAL 行$led_l/分支$led_b), 逐项条目归 CR 审查）"
+            echo "[cov] $d 豁免预算生效: 行 ≤$BUDGET_LINE_MISSED / 分支 ≤${BUDGET_BRANCH_MISSED}（min(申报, 台账 LEDGER_TOTAL 行$led_l/分支$led_b), 逐项条目归 CR 审查）"
           fi
         fi
         lme=$(( lm > BUDGET_LINE_MISSED ? lm - BUDGET_LINE_MISSED : 0 ))
@@ -231,14 +234,17 @@ if [ "$HAS_JAVA" = 1 ]; then
           echo "[cov] $d jacoco 报告无 LINE 计数, 跳过全量红线"
         else
           lp=$(awk "BEGIN{printf \"%.1f\", 100*$lc/($lme+$lc)}")
+          # shellcheck disable=SC2004  # 算术内 $ 前缀系既有写法（豁免类不改行），指令豁免以过分发面 lint 门
           if [ $((lc * 100)) -lt $((FAIL_UNDER_JAVA * ($lme + lc))) ]; then
-            echo "✗ [cov] $d 全量行覆盖 ${lp}%（实 missed $lm, 预算扣除后 $lme）< ${FAIL_UNDER_JAVA}%（存量+新增红线, 补测或按排除实践豁免后重跑）"
+            echo "✗ [cov] $d 全量行覆盖 ${lp}%（实 missed $lm, 预算扣除后 ${lme}）< ${FAIL_UNDER_JAVA}%（存量+新增红线, 补测或按排除实践豁免后重跑）"
             exit 1
           fi
           if [ $((bm + bc)) -gt 0 ]; then
-            bp=$(awk "BEGIN{printf \"%.1f\", 100*$bc/($bme+$bc)}")
+            # 预算吃满 missed 且 covered=0 时分母为 0, awk 会打出空串——显式置 100.0
+            if [ $((bme + bc)) -eq 0 ]; then bp="100.0"; else bp=$(awk "BEGIN{printf \"%.1f\", 100*$bc/($bme+$bc)}"); fi
+            # shellcheck disable=SC2004  # 同上：$bme/$bc 算术内 $ 前缀豁免
             if [ $((bc * 100)) -lt $((FAIL_UNDER_JAVA * ($bme + bc))) ]; then
-              echo "✗ [cov] $d 全量分支覆盖 ${bp}%（实 missed $bm, 预算扣除后 $bme）< ${FAIL_UNDER_JAVA}%（存量+新增红线）"
+              echo "✗ [cov] $d 全量分支覆盖 ${bp}%（实 missed $bm, 预算扣除后 ${bme}）< ${FAIL_UNDER_JAVA}%（存量+新增红线）"
               exit 1
             fi
           else
@@ -247,6 +253,7 @@ if [ "$HAS_JAVA" = 1 ]; then
           echo "[cov] ✓ $d 全量行覆盖 ${lp}% / 分支 ${bp}% ≥ ${FAIL_UNDER_JAVA}%（原始 missed 行 ${lm}/分支 ${bm}；预算扣除 行-${BUDGET_LINE_MISSED:-0}/分支-${BUDGET_BRANCH_MISSED:-0}，% 为扣除后生效口径，原始数以台账为准）"
         fi
         # 增量补充检查（变更行）: 不替代上面的全量红线
+        # shellcheck disable=SC2086  # $xmls 同上：多份 jacoco.xml 按空白分词传入
         dc $xmls --compare-branch="$COMPARE" --fail-under="$FAIL_UNDER_JAVA"
       ) || fail=1
     fi

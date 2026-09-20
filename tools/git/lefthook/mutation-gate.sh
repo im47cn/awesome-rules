@@ -7,7 +7,8 @@
 set -u
 
 REPO=$(git rev-parse --show-toplevel)
-cd "$REPO"
+# cd 失败即终止（fail-closed）：后续 diff/模块收集全按相对路径，静默继续会整门假绿
+cd "$REPO" || { echo "✗ [mutation] 无法进入仓库根目录 ($REPO), 终止"; exit 1; }
 
 # 增量基线: @{push}(上次推送点)...HEAD，回退 @{u}(上游)；均不可解析=首次推送，跳过
 # （与 coverage.sh full 模式同口径：度量"本次推送"，不回退主干避免长命分支欠账失真）
@@ -22,14 +23,17 @@ changed=$(git diff --name-only "$COMPARE"...HEAD 2>/dev/null)
 deleted_tests=$(git diff --name-only --diff-filter=D "$COMPARE"...HEAD 2>/dev/null | grep -E 'src/test/.*\.(java|kt)$' || true)
 if [ -n "$deleted_tests" ]; then
   echo "⚠ [mutation] 本次推送删除了测试文件(不拦截; 变异分由下次生产变更时阈值兜底):"
+  # shellcheck disable=SC2086  # $deleted_tests 是换行分隔的文件清单，按空白分词逐条打印是意图
   printf '  - %s\n' $deleted_tests
 fi
 
 # 触发条件: 生产 java 代码变更（src/main/java）；纯测试/文档/配置变更直接跳过
+# shellcheck disable=SC2086  # $changed 是换行分隔的变更文件清单，按空白分词喂给 grep 过滤是意图
 prod=$(printf '%s\n' $changed | grep -E 'src/main/java/.*\.java$' || true)
 [ -z "$prod" ] && { echo "○ [mutation] 无 src/main/java 生产代码变更, 跳过"; exit 0; }
 
 # 候选模块: 变更文件一级目录；根结构(src/main/java 直接在仓库根)映射为 "."
+# shellcheck disable=SC2086  # $prod 同上：src/main/java 清单按空白分词喂给 awk 提取模块名是意图
 mods=$(printf '%s\n' $prod | awk -F/ '{print ($1=="src") ? "." : $1}' | sort -u)
 
 fail=0
