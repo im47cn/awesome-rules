@@ -27,8 +27,7 @@ import factory_lib as fl
 
 
 def _argv_seg(tag, code, *extra_words, **extra):
-    seg = {"tag": tag, "argv": ["$PY", "-c", code, *extra_words]}
-    seg.update(extra)
+    seg = {"tag": tag, "argv": ["$PY", "-c", code, *extra_words]} | extra
     return seg
 
 
@@ -221,7 +220,7 @@ class TestIntraParallelArgs:
     def test_maven_excludes_thread_interleaving(self):
         """保守档契约：Maven 不注入 -Dparallel=methods（顺序敏感放大器）。"""
         argv, _ = fl.intra_parallel_args("maven", "python3")
-        assert not any("parallel=" in w for w in argv)
+        assert all("parallel=" not in w for w in argv)
 
 
 # ───────────────────────── run_parallel_gate ─────────────────────────
@@ -253,7 +252,7 @@ class TestRunParallelGate:
         assert out.index("── slow-print") < out.index("── fast-print")
         assert out.index("slow-done") < out.index("fast-done")
         assert (tmp_path / "tags.txt").read_text(encoding="utf-8") == ""
-        assert list(self.tmp.glob("factory-parallel-gate.*")) == []
+        assert not list(self.tmp.glob("factory-parallel-gate.*"))
 
     def test_failure_retains_logs_and_writes_tags(
             self, tmp_path, capsys):
@@ -316,7 +315,7 @@ class TestRunParallelGate:
                 "open(p+'.{s}','w').write(str(time.time()))\n"
                 "time.sleep(0.3)\n"
                 "open(p+'.{e}','w').write(str(time.time()))\n")
-        segs = [_argv_seg(t, code.format(s=t + "1", e=t + "2"), str(m))
+        segs = [_argv_seg(t, code.format(s=f"{t}1", e=f"{t}2"), str(m))
                 for t in ("wa", "wb")]
         rc = self._gate(tmp_path, segs, failed="tags.txt", workers=1)
         assert rc == 0
@@ -347,7 +346,7 @@ class TestRunParallelGate:
         assert rc == 2
         assert "cwd 不存在" in capsys.readouterr().err
         assert not (tmp_path / "tags.txt").exists()   # 半跑状态零产出
-        assert list(self.tmp.glob("factory-parallel-gate.*")) == []
+        assert not list(self.tmp.glob("factory-parallel-gate.*"))
 
     def test_unrecognized_stack_note_deduplicated(self, tmp_path, capsys):
         rc = self._gate(tmp_path, [

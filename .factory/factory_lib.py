@@ -381,8 +381,7 @@ def parallel_gate_cfg() -> dict | None:
     try:
         if not isinstance(raw, dict):
             raise ValueError("parallel_gate 须为对象")
-        unknown = set(raw) - {"segments", "workers"}
-        if unknown:
+        if unknown := set(raw) - {"segments", "workers"}:
             raise ValueError(f"未知顶层键: {sorted(unknown)}")
         segs_raw = raw.get("segments")
         if not isinstance(segs_raw, list) or not segs_raw:
@@ -400,8 +399,7 @@ def parallel_gate_cfg() -> dict | None:
             if tag in seen:
                 raise ValueError(f"段 tag 重复: {tag}")
             seen.add(tag)
-            bad_keys = set(s) - _PARALLEL_SEGMENT_KEYS
-            if bad_keys:
+            if bad_keys := set(s) - _PARALLEL_SEGMENT_KEYS:
                 raise ValueError(f"段 {tag} 未知键: {sorted(bad_keys)}")
             has_argv = isinstance(s.get("argv"), list) and bool(s["argv"])
             has_shell = isinstance(s.get("shell"), str) and bool(s["shell"].strip())
