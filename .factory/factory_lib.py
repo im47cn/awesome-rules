@@ -54,14 +54,17 @@ class CircuitOpen(RuntimeError):
 def parse_agent_json(text: str, allowed: set[str]) -> dict:
     r"""从 agent stdout 扫描返回首个 verdict 合法的完整 JSON 裁决对象。
 
-    fence 优先（```json 是 LLM 显式结构化输出信号）；其后按文档序逐 `{`
+    fence 优先（```json 是 LLM 显式结构化输出信号，穷尽全部 fence 才轮到
+    裸对象——首个 fence 裁决非法不压制后位合法 fence）；其后按文档序逐 `{`
     偏移 raw_decode——#207 实证贪心 `\{.*\}` 把「重复 JSON / 带花括号
     尾文」从首 `{` 拼到末 `}`（Extra data: char 429）一次即崩；多对象
     并存取首个合法者（重复块即恢复形态）。顶层 verdict 契约（PR #211
     Sourcery 评论1）：对象一旦完整解析，其内部偏移全部丧失资格——
     外层 verdict 非法时嵌套 evidence/元数据携带的合法 verdict 不代表
-    裁决（防坏裁决借嵌套混入链）；坏偏移跳过、坏 verdict 跳过其整个
-    对象继续扫后续顶层；无任何合法对象 → ValueError（fail-closed）。
+    裁决（防坏裁决借嵌套混入链）；坏 verdict 跳过其整个对象继续扫后续
+    顶层；解码失败的对象按字符串感知平衡范围整体跳过（未闭合则跳到
+    输入末尾——CodeRabbit 评论2：坏外层不得放行嵌套 verdict）；
+    无任何合法对象 → ValueError（fail-closed）。
     """
     dec = json.JSONDecoder()
 
@@ -72,7 +75,31 @@ def parse_agent_json(text: str, allowed: set[str]) -> dict:
             return None
         return (obj, end) if isinstance(obj, dict) else None
 
-    if m := re.search(r"```json\s*(\{)", text):
+    def _balanced_end(start: int) -> int | None:
+        """depth-0 `{` 起字符串感知扫描平衡闭区间终点（闭 `}` 后一位）；
+        未闭合返回 None（其后内容视为对象内部，一并放弃）。"""
+        depth = 0
+        in_str = esc = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+            elif ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return i + 1
+        return None
+
+    for m in re.finditer(r"```json\s*(\{)", text):
         hit = _decode(m.start(1))
         if hit is not None and hit[0].get("verdict") in allowed:
             return hit[0]
@@ -84,6 +111,9 @@ def parse_agent_json(text: str, allowed: set[str]) -> dict:
             continue
         hit = _decode(i)
         if hit is None:
+            # 解码失败的对象整体跳过其平衡范围，不许嵌套 `{` 接管裁决
+            end = _balanced_end(i)
+            skip_until = len(text) if end is None else end
             continue
         obj, skip_until = hit
         if obj.get("verdict") in allowed:

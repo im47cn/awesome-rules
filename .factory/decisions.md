@@ -512,11 +512,19 @@ zero-diff → 留守 → 次日再 wake」的每日一轮整链循环，唯一�
    从回执标题子串改为幂等 marker（人工复述标题不得冒充回执、屏蔽
    完整性违规——线上 3 个 open rejected 回执全带 marker，无存量
    误伤），rejected_reconcile 与 dispatch_liveness 同步换用。
+7. **解析缺口补封（PR #211 CodeRabbit 三轮）**：fence 优先级穷尽
+   兑现——`re.search` 只看首个 fence，首 fence 裁决非法时更早的
+   合法裸对象会抢先后位合法 fence，改 `finditer` 全量 fence 预检
+   后才落裸对象扫描；解码失败的对象（未闭合外层）不得落到嵌套
+   `{` 接受其 verdict——原 `continue` 不推进 skip，改字符串感知
+   平衡范围扫描（`_balanced_end`）：坏对象整体跳过其平衡区间，
+   未闭合则跳到输入末尾（其后视为对象内部，fail-closed）。
 
-**验证**：全套 460 绿（stall 10→13：无回执即时 FAIL/提交评论不算回执/
+**验证**：全套 463 绿（stall 10→13：无回执即时 FAIL/提交评论不算回执/
 人工复述标题非回执；沙箱 test_issue_reject_receipt 3 例正则提取真函数
-三态；hosting 和解 4 例；parse 3→5：嵌套 verdict 不具顶层资格/坏外层
-后兄弟对象恢复；rejected_reconcile +2：复述标题不冒充回执/回执后复述
+三态；hosting 和解 4 例；parse 3→8：嵌套 verdict 不具顶层资格/坏外层
+后兄弟对象恢复/全量 fence 优先/未闭合外层嵌套拒绝/散文花括号平衡跳过
+后恢复；rejected_reconcile +2：复述标题不冒充回执/回执后复述
 计人工）+ bash -n + check_hosting_exit 干净。
 
 **引用**：steering/review-report-standards.md；README「拒绝 = 单一动作」。

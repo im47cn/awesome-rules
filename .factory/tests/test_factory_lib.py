@@ -118,6 +118,29 @@ class TestParseAgentJson:
         text = '{"verdict": "MAYBE"} {"verdict": "reject"}'
         assert parse_agent_json(text, {"accept", "reject"})["verdict"] == "reject"
 
+    def test_parse_all_fences_scanned_before_bare(self):
+        """PR #211 CodeRabbit 评论1：fence 优先 = 穷尽全部 fence。首个
+        fence 裁决非法时，正文更早出现的合法裸对象不得抢先后位合法
+        fence——fence 是更强的结构化输出信号，优先级须穷尽兑现。"""
+        text = ('{"verdict": "PASS", "evidence": "正文裸对象"}\n'
+                '```json\n{"verdict": "MAYBE"}\n```\n'
+                '```json\n{"verdict": "FAIL", "evidence": "后位 fence"}\n```')
+        assert parse_agent_json(text, self.VERDICTS)["verdict"] == "FAIL"
+
+    def test_parse_unclosed_outer_nested_verdict_rejected(self):
+        """PR #211 CodeRabbit 评论2：外层对象未闭合时，解码失败不得
+        落到嵌套 `{` 接受其 verdict——坏对象按字符串感知平衡范围整体
+        跳过（未闭合则跳到输入末尾），fail-closed。"""
+        text = '{"verdict": "MAYBE", "evidence": {"verdict": "reject"}'
+        with pytest.raises(ValueError, match="verdict"):
+            parse_agent_json(text, {"accept", "reject"})
+
+    def test_parse_failed_prose_brace_skips_balanced_range(self):
+        """解码失败的散文花括号按平衡范围跳过（未闭合吞到末尾的对偶
+        边界）：`{附录A}` 平衡闭合后，其后合法顶层对象仍可恢复。"""
+        text = '附注 {附录A}\n{"verdict": "FAIL", "evidence": "x"}'
+        assert parse_agent_json(text, self.VERDICTS)["verdict"] == "FAIL"
+
 
 class TestEvidenceSuites:
     def test_skills_change_yields_suite(self):
