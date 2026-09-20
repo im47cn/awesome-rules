@@ -58,7 +58,7 @@ scenario: 设计表结构/编写 SQL
 - 【强制】禁止使用 LOB、TEXT、JSON、enum、set、timestamp、float、double 类型（浮点改 decimal 或 bigint；枚举/时间改 tinyint/datetime）。
 - 【强制】禁止存储图片、二进制文件等静态资源，数据库仅存 URL。
 - 【强制】新加字段一律追加在表末尾；修改字段用 `MODIFY`/`RENAME`，禁止 `CHANGE COLUMN`。
-- 【强制】单表字段数 ≤ 40，超出需重构或经技术委员会评审。
+- 【强制】单表字段数 ≤ 40，超出需重构或经技术管理委员会评审。
 - 【推荐】字段尽量 NOT NULL 并指定默认值。常用类型默认值：
   - 整型 → `0`；decimal → `0.0`；char/varchar → `''`。
 - 【推荐】字符串长度够用即可；varchar ≤ 500，char ≤ 20，定长用 char 否则用 varchar。
