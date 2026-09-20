@@ -9,7 +9,7 @@ scenario: Javadoc/@Deprecated
 
 ## 1. 类注释
 
-所有 Java 类必须含 Javadoc，包含 `@author` 和 `@date`（格式 `yyyy-MM-dd`）。
+所有 Java 类应含 Javadoc（CR 门禁为【推荐】，未遵守须在 CR 说明理由），包含 `@author` 和 `@date`（格式 `yyyy-MM-dd`）。
 
 ## 2. 方法注释
 
@@ -17,7 +17,7 @@ public 方法应有 Javadoc（功能说明 + `@param` + `@return`）。**Feign �
 
 ## 3. 字段注释
 
-- PO/Entity/DTO 所有字段必须有 Javadoc
+- PO/Entity/DTO 所有字段应有 Javadoc
 - 状态码/枚举值字段注释须说明码值映射（如 `1是 0否`）
 - 用 `/** */`，不用单行 `//`
 
