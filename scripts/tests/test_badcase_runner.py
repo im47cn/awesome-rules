@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from badcase_runner import run_badcase
+from badcase_runner import parse_prompts, run_badcase
 
 # 放行型 expected.md（与 skills/ddl-guard/eval/007-clean 同构：
 # 「预期检查输出」小节内无「脚本自动检出」行 → expected_rules = []）
@@ -101,3 +101,28 @@ class TestStrictExact:
         assert result.passed is False
         assert result.missing_rules == ["表注释缺失"]
         assert result.unexpected_rules == ["全角字符"]
+
+
+class TestParsePrompts:
+    """prompts.md 双格式解析（@date 2026-09-20 双 Agent 扩展）。
+
+    与 skills/skill-evo/scripts/evo_replay.py 的 parse_prompts 同构：
+    旧式纯 bullet 零回归；`---` 围栏块 = 回合（块内 bullet 恒等于回合）。
+    """
+
+    def test_missing_file_returns_empty(self, tmp_path):
+        assert parse_prompts(tmp_path / "absent.md") == ([], [])
+
+    def test_plain_bullets_zero_regression(self, tmp_path):
+        # 旧式：每行 bullet 一条 prompt，已知问题 section 剥离（历史行为锚）
+        f = tmp_path / "prompts.md"
+        f.write_text("# 提示词集\n\n- 素材A\n- 素材B\n\n"
+                     "## 已知问题\n\n- 噪音1\n", encoding="utf-8")
+        assert parse_prompts(f) == (["素材A", "素材B"], ["噪音1"])
+
+    def test_fenced_blocks_each_one_prompt(self, tmp_path):
+        # 围栏模式：无 bullet 块剥 `#` 标题后整块压缩空白为一条
+        f = tmp_path / "prompts.md"
+        f.write_text("# 提示词集\n\n---\n\n## 回合1\n\n素材一\n继续行\n\n"
+                     "---\n\n- 素材二a\n- 素材二b\n", encoding="utf-8")
+        assert parse_prompts(f) == (["素材一 继续行", "素材二a", "素材二b"], [])

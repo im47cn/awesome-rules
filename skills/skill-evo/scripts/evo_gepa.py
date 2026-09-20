@@ -108,6 +108,10 @@ def run_gepa(baseline: str, train: List[Case], holdout: List[Case],
              asset_desc: str = "") -> Tuple[Candidate, ScoreMatrix, List[dict]]:
     """GEPA 主循环，rollout 预算 = execute 调用总次数。
 
+    score 语义（replay 链路）：replay_k>1 时 execute 返回 pass^k（0/1，k 次全过
+    才记通过），故 train/holdout 均分即可靠性下限（pass^k 逐 case 均值）；
+    pass@k 无偏估值在 execute 的 feedback 文本内，不进本函数分数矩阵。
+
     返回 (最优候选, 分数矩阵, 迭代日志)。语义：
     1. baseline 在 train 子集上评分（预算 1/4 上限，防大数据集吃光预算）
     2. 循环：Pareto 采样候选 → minibatch 执行（留 trace/反馈）→ reflect 变异
@@ -186,6 +190,8 @@ def run_gepa(baseline: str, train: List[Case], holdout: List[Case],
 
     # 3) holdout 选优（验收信号，独立于 rollout 预算：每候选每 case 只评一次）
     #    c0（baseline）必评作改善锚；其余按 train 均分降序评（预算外不截断）
+    #    replay 链路 k>1 时此处的「均分」= pass^k 逐 case 均值（可靠性下限），
+    #    选优即「可靠性下限最高」的候选（k=1 时退化为旧语义平均 F1）
     holdout_matrix = ScoreMatrix()
     ranked = sorted(pool, key=lambda c: matrix.mean(c), reverse=True)
     ranked = ["c0"] + [c for c in ranked if c != "c0"]

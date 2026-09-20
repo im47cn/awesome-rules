@@ -32,7 +32,9 @@ DEFAULTS = {
     # 运行数据根目录（proposals/ state.json logs/ 均在其下）
     "base_dir": "~/.config/ar/skill-evo",
     # ── GEPA 进化（evo.py evolve）──
-    # rollout 预算 = evolve 一次的 execute 调用上限（每次 execute 含提炼+judge 两次 claude -p）
+    # rollout 预算 = evolve 一次的 execute 调用上限（v2 链路每次 execute 含提炼+judge
+    # 两次 claude -p；replay 链路 k>1 时每次 execute 内含 k 次 claude -p，见 replay_k；
+    # 含 prompts.md 的多轮 case 每次采样上浮至 2*(回合+1) 次调用封顶，见 replay_dual_agent）
     "gepa_budget": 16,
     "gepa_batch_size": 4,
     "gepa_holdout_ratio": 0.2,
@@ -40,6 +42,16 @@ DEFAULTS = {
     "gepa_min_cases": 10,
     # replay 评估集（拦截/放行/混合型 case 总数）低于此数拒绝进化（冷启动保护）
     "replay_min_cases": 8,
+    # ── replay 评估升级（Comet 机制借鉴：pass@k/pass^k + 双 Agent + 调用证据）──
+    # 单 case 重复采样次数：k>1 时 score 聚合为 pass^k（0/1 主信号，可靠性下限），
+    # pass@k 无偏估值写入 feedback（能力上限参考）；k=1 保持单次 F1 旧语义。@date 2026-09-20
+    "replay_k": 3,
+    # 双 Agent 多轮：case 目录含 prompts.md 时注入模拟用户回合（无 prompts 零回归）
+    "replay_dual_agent": True,
+    # 调用证据硬门禁：execute 提供 stream 通道时，未真实触发技能的运行计为失败
+    "replay_evidence": True,
+    # 单次运行通过阈值：F1 ≥ 该值记一次通过（pass^k / pass@k 的「通过」定义）
+    "replay_pass_threshold": 1.0,
     # ── 插件哑故障巡检（evo_patrol）──
     # 两次巡检最小间隔（小时）；run 搭车执行，patrol 子命令 --force 可越过
     "patrol_interval_hours": 6,

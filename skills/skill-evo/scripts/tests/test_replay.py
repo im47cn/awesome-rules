@@ -234,7 +234,7 @@ def test_execute_scores_and_feedback(monkeypatch):
         return '报告…\n{"rules": ["禁用类型"]}'
 
     case = _case(expected=["禁用类型", "表注释缺失"])
-    execute = R.make_execute({}, fake_claude_raw, "s")
+    execute = R.make_execute({"replay_k": 1}, fake_claude_raw, "s")
     score, fb = execute("候选 SKILL.md", case)
     assert score == 2 * 0.5 * 1 / 1.5        # recall=1/2, precision=1/1 → F1=2*0.5*1/1.5
     assert "漏拦: 表注释缺失" in fb
@@ -244,14 +244,14 @@ def test_execute_scores_and_feedback(monkeypatch):
 def test_execute_full_hit_and_unexpected(monkeypatch):
     def fake(prompt, cfg):
         return '{"rules": ["禁用类型", "全角字符"]}'
-    execute = R.make_execute({}, fake, "s")
+    execute = R.make_execute({"replay_k": 1}, fake, "s")
     score, fb = execute("x", _case(expected=["禁用类型"]))
     assert score == 2 * 1.0 * 0.5 / 1.5       # recall=1/1, precision=1/2 → 0.667
     assert "误拦: 全角字符" in fb
 
     def fake_clean(prompt, cfg):
         return '{"rules": ["禁用类型"]}'
-    execute2 = R.make_execute({}, fake_clean, "s")
+    execute2 = R.make_execute({"replay_k": 1}, fake_clean, "s")
     score2, fb2 = execute2("x", _case(expected=["禁用类型"]))
     assert score2 == 1.0 and "全部命中" in fb2
 
@@ -588,10 +588,13 @@ def test_script_baseline_f1_exit_2_recorded(monkeypatch, tmp_path):
 def test_script_baseline_f1_check_script_selects_matching(monkeypatch, tmp_path):
     """expected.md 声明 check: → 只跑匹配的注册脚本，无关检查器不混入。"""
     import types
+    # 真实布局：expected.md 在 case 目录（input/ 的父级），@date 2026-09-20
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
     (tmp_path / "expected.md").write_text(
         "## 预期检查输出\n- check: sql_check.py\n- 脚本自动检出：禁用类型\n",
         encoding="utf-8")
-    case = G.Case(id="c1", inputs={"input_dir": str(tmp_path), "files": {"a.sql": "x"}},
+    case = G.Case(id="c1", inputs={"input_dir": str(input_dir), "files": {"a.sql": "x"}},
                   reference={"expected_rules": ["禁用类型"], "manual_rules": [],
                              "expected_empty": False})
     calls = []
@@ -608,10 +611,13 @@ def test_script_baseline_f1_check_script_selects_matching(monkeypatch, tmp_path)
 
 def test_script_baseline_f1_check_script_unregistered_fails_closed(monkeypatch, tmp_path):
     """expected.md 声明未注册脚本 → fail-closed 记 error，不静默空跑。"""
+    # 真实布局：expected.md 在 case 目录（input/ 的父级），@date 2026-09-20
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
     (tmp_path / "expected.md").write_text(
         "## 预期检查输出\n- check: ghost.py\n- 脚本自动检出：禁用类型\n",
         encoding="utf-8")
-    case = G.Case(id="c1", inputs={"input_dir": str(tmp_path), "files": {"a.sql": "x"}},
+    case = G.Case(id="c1", inputs={"input_dir": str(input_dir), "files": {"a.sql": "x"}},
                   reference={"expected_rules": ["禁用类型"], "manual_rules": [],
                              "expected_empty": False})
     avg, details = R.script_baseline_f1({}, "ddl-guard", [case])
@@ -649,3 +655,324 @@ def test_extract_rules_against_real_report():
         skill_dir / "eval" / "008-real" / "expected.md")
     tail = json.dumps({"rules": expected_rules}, ensure_ascii=False)
     assert R.extract_rules_from_report(report + "\n" + tail) == (expected_rules, True)
+
+
+# ── k 采样指标（pass@k / pass^k，Comet 机制 ①，@date 2026-09-20）──────────
+def test_pass_at_k_unbiased_formula():
+    # n=10,c=2,k=5：1 - C(8,5)/C(10,5) = 1 - 56/252 = 7/9 ≈ 0.7778（非退化）
+    pak, deg = R.pass_at_k(10, 2, 5)
+    assert abs(pak - 7 / 9) < 1e-12 and deg is False
+    assert R.pass_at_k(10, 0, 5) == (0.0, False)
+    assert R.pass_at_k(10, 10, 5) == (1.0, False)
+    # n-c < k → C(n-c,k)=0 → 恰 1.0（HumanEval 同款守卫，含 n==k 边界）
+    assert R.pass_at_k(3, 1, 3) == (1.0, False)
+    assert R.pass_at_k(4, 3, 3) == (1.0, False)
+
+
+def test_pass_at_k_degenerate_and_bounds():
+    # n<k：退化「至少一次通过」且 degenerate=True
+    assert R.pass_at_k(1, 1, 3) == (1.0, True)
+    assert R.pass_at_k(1, 0, 3) == (0.0, True)
+    assert R.pass_at_k(0, 5, 3) == (0.0, True)          # n≤0
+    # c 越界夹取 [0,n]
+    assert R.pass_at_k(5, 99, 3) == R.pass_at_k(5, 5, 3)
+
+
+def test_pass_cap_k_semantics():
+    assert R.pass_cap_k([True, True]) == 1.0
+    assert R.pass_cap_k([True, False, True]) == 0.0
+    assert R.pass_cap_k([]) == 0.0                      # 空采样不是全过
+
+
+def test_execute_k_all_pass_and_partial():
+    agg = R.execute_k("c", _case(), 3, lambda c, cs: (1.0, "全部命中", None))
+    assert agg["pass_cap_k"] == 1.0 and agg["c"] == 3 and agg["n"] == 3
+    assert "pass^k=3/3" in agg["feedback"] and agg["pass_at_k"] == 1.0
+
+    seq = iter([(1.0, "全部命中", None), (1.0, "全部命中", False), (1.0, "全部命中", None)])
+    agg2 = R.execute_k("c", _case(), 3, lambda c, cs: next(seq))
+    # invoked=False 计失败：分子剔除（c=2）、分母保留（n=3）→ pass^k=0
+    assert agg2["pass_cap_k"] == 0.0 and agg2["c"] == 2 and agg2["n"] == 3
+    assert "未触发轮次=[2]" in agg2["feedback"] and "pass@k=" in agg2["feedback"]
+
+
+def test_execute_k_threshold_and_k1_passthrough():
+    def run(c, cs):
+        return (0.9, "部分命中", None)
+
+    # 阈值语义：0.9 ≥ 0.9 记通过；threshold=1.0 记失败
+    assert R.execute_k("c", _case(), 1, run, threshold=0.9)["c"] == 1
+    assert R.execute_k("c", _case(), 3, run, threshold=1.0)["c"] == 0
+    # k=1：feedback 原样透传（旧语义锚）
+    assert R.execute_k("c", _case(), 1, run, threshold=0.5)["feedback"] == "部分命中"
+
+
+def test_execute_k_aggregated_via_make_execute():
+    # k>1 时 execute 主信号 = pass^k：全过 → 1.0；任一失败 → 0.0
+    outs = iter(['{"rules": ["禁用类型"]}', '{"rules": ["禁用类型"]}',
+                 '{"rules": ["禁用类型"]}'])
+    execute = R.make_execute({"replay_k": 3}, lambda p, c: next(outs), "s")
+    score, fb = execute("x", _case(expected=["禁用类型"]))
+    assert score == 1.0 and "pass^k=3/3" in fb
+
+    outs2 = iter(['{"rules": ["禁用类型"]}', '{"rules": []}', '{"rules": ["禁用类型"]}'])
+    execute2 = R.make_execute({"replay_k": 3}, lambda p, c: next(outs2), "s")
+    score2, fb2 = execute2("x", _case(expected=["禁用类型"]))
+    assert score2 == 0.0 and "r2: 漏拦: 禁用类型" in fb2
+
+
+# ── prompt 拼装零回归锚 ───────────────────────────────────────────────────
+def test_build_prompt_zero_regression_bytes():
+    candidate = "---\nname: x\ndescription: d\n\n## 审查规则\nR1"
+    files_text = "--- a.sql ---\nCREATE TABLE t (id int);"
+    # 旧版拼装的硬拷贝（非证据、无多轮必须逐字节一致）
+    expected = (
+        candidate + "\n\n# 待审查输入\n" + files_text + "\n\n# 任务\n"
+        "按上述 SKILL 的规则与工作流对输入做静态审查，输出审查报告。\n"
+        "仅纯文本分析，禁止调用任何工具/脚本/命令（本环境无工具可用）。\n"
+        "报告末尾必须附加检出清单 JSON（严格单个 JSON，无围栏无其他文字）：\n"
+        '{"rules": ["规则名1", "规则名2", ...]}\n'
+        '规则名与 SKILL 中的规则命名一致；未检出问题则输出 {"rules": []}')
+    assert R._build_prompt(candidate, files_text, "", False, False, "ddl-guard") == expected
+
+    # 集成层：文本模式 execute 实发 prompt 与硬拷贝逐字节一致
+    seen = {}
+
+    def fake(prompt, cfg):
+        seen["p"] = prompt
+        return '{"rules": []}'
+
+    R.make_execute({"replay_k": 1}, fake, "ddl-guard")(
+        candidate, _case(files={"a.sql": "CREATE TABLE t (id int);"}))
+    assert seen["p"] == expected
+
+
+# ── 调用证据门禁（stream-json 事件流，Comet 机制 ③）───────────────────────
+def test_skill_invoked_from_events_branches():
+    assert R.skill_invoked_from_events(
+        [{"name": "Read", "input": {"file_path": "/r/skills/ddl-guard/SKILL.md"}}],
+        "ddl-guard") is True
+    assert R.skill_invoked_from_events(
+        [{"name": "Bash", "input": {"command": "python3 skills/ddl-guard/scripts/c.py"}}],
+        "ddl-guard") is True
+    assert R.skill_invoked_from_events(
+        [{"name": "Skill", "input": {"skill": "ddl-guard"}}], "ddl-guard") is True
+    # 无事件 / 他技能路径 / 无关工具名 → False（fail-closed）
+    assert R.skill_invoked_from_events([], "ddl-guard") is False
+    assert R.skill_invoked_from_events(
+        [{"name": "Read", "input": {"file_path": "/r/skills/api-guard/SKILL.md"}}],
+        "ddl-guard") is False
+    assert R.skill_invoked_from_events(
+        [{"name": "Grep", "input": {"pattern": "skills/ddl-guard/SKILL.md"}}],
+        "ddl-guard") is False
+
+
+def test_execute_evidence_gate_blocks_uninvoked():
+    def fake_raw(prompt, cfg):
+        raise AssertionError("证据模式单轮 case 不应走 raw 通道（仅 sim-user 备用）")
+
+    def fake_stream(prompt, cfg):
+        return ('{"rules": ["禁用类型"]}', [])   # 报告可解析但无工具调用事件
+
+    execute = R.make_execute({"replay_k": 1}, fake_raw, "ddl-guard", fake_stream)
+    score, fb = execute("x", _case(expected=["禁用类型"]))
+    assert score == 0.0 and "skill 未触发" in fb
+
+
+def test_execute_evidence_mode_reads_deployed_skill():
+    seen = []
+
+    def fake_stream(prompt, cfg):
+        seen.append(prompt)
+        return ('{"rules": ["禁用类型"]}',
+                [{"name": "Read",
+                  "input": {"file_path": "/r/skills/ddl-guard/SKILL.md"}}])
+
+    execute = R.make_execute({"replay_k": 1}, lambda p, c: "", "ddl-guard", fake_stream)
+    score, fb = execute("CANDIDATE-SENTINEL", _case(expected=["禁用类型"]))
+    assert score == 1.0 and "全部命中" in fb
+    # 证据模式：指令 Read 部署态 SKILL.md；不嵌候选文本；无「禁止工具」行
+    assert "Read 工具完整读取 skills/ddl-guard/SKILL.md" in seen[0]
+    assert "CANDIDATE-SENTINEL" not in seen[0]
+    assert "禁止调用任何工具" not in seen[0]
+
+
+# ── 双 Agent 多轮（Comet 机制 ②）──────────────────────────────────────────
+def _da_case(expected=None):
+    return G.Case(
+        id="c1",
+        inputs={"input_dir": "/tmp/x",
+                "files": {"a.sql": "CREATE TABLE t (id int);"},
+                "prompts": ["素材1：表 t 无外键，id 为主键"]},
+        reference={"expected_rules": expected or [], "manual_rules": [],
+                   "expected_empty": not expected})
+
+
+def test_dual_agent_sim_user_and_history_replay():
+    calls = []
+
+    def fake_raw(prompt, cfg):
+        calls.append(prompt)
+        if len(calls) == 1:
+            return "审查中。\nDECISION_REQUEST: 表 t 是否有外键？"
+        if len(calls) == 2:
+            return "没有外键"
+        return '{"rules": ["禁用类型"]}'
+
+    run_once = R.make_run_once({"replay_dual_agent": True}, fake_raw, "ddl-guard")
+    score, fb, invoked = run_once("候选", _da_case(expected=["禁用类型"]))
+    # 调用序列：agent r1 / sim-user / agent r2（终局报告）
+    assert len(calls) == 3
+    assert "DECISION_REQUEST:" in calls[0]              # 多轮协议进首轮任务段
+    assert "你是用户" in calls[1] and "素材1" in calls[1] and "外键" in calls[1]
+    # 终局回合无状态重放：对话记录以 [助手]/[用户] 文本拼进 prompt
+    assert "# 对话记录" in calls[2]
+    assert "[助手] DECISION_REQUEST: 表 t 是否有外键？" in calls[2]
+    assert "[用户] 没有外键" in calls[2]
+    assert score == 1.0 and "全部命中" in fb and invoked is None
+
+
+def test_dual_agent_round_cap_and_deterministic_fallback():
+    calls = []
+
+    def fake_raw(prompt, cfg):
+        calls.append(prompt)
+        return "DECISION_REQUEST: 还需要什么？"       # 病态：恒提问
+
+    run_once = R.make_run_once({"replay_dual_agent": True}, fake_raw, "ddl-guard")
+    score, fb, invoked = run_once("候选", _da_case())
+    # 调用预算 2*(1+1)=4：agent / sim-user / agent / agent，超限截断
+    assert len(calls) == 4
+    # 素材耗尽后的确定性兜底进第 4 次 prompt（不走 LLM）
+    assert "[用户] 无更多输入，请直接给出最终报告" in calls[3]
+    assert score == 0.0 and "报告不可解析" in fb and invoked is None
+
+
+def test_dual_agent_sim_user_empty_reply_fallback():
+    calls = []
+
+    def fake_raw(prompt, cfg):
+        calls.append(prompt)
+        if len(calls) == 1:
+            return "DECISION_REQUEST: 用哪种命名规范？"
+        if len(calls) == 2:
+            return "   "                               # sim-user 空应答
+        return '{"rules": []}'
+
+    run_once = R.make_run_once({"replay_dual_agent": True}, fake_raw, "ddl-guard")
+    score, fb, _inv = run_once("候选", _da_case())
+    assert len(calls) == 3
+    assert "[用户] 按你的建议继续" in calls[2]         # 空应答 → 固定兜底
+    assert score == 1.0                                # 放行型（expected 空 + 空 actual）
+
+
+# ── 证据 JSON（content_hash / 契约字段 / dry-run 入口）─────────────────────
+def test_skill_content_hash_deterministic_order(tmp_path):
+    import hashlib
+    skill = tmp_path / "skills" / "demo"
+    (skill / "scripts").mkdir(parents=True)
+    (skill / "SKILL.md").write_bytes(b"A")
+    (skill / "scripts" / "a.py").write_bytes(b"C")
+    (skill / "scripts" / "b.py").write_bytes(b"B")
+    # 字典序 SKILL.md < scripts/a.py < scripts/b.py，字节顺序拼接
+    want = "sha256:" + hashlib.sha256(b"A" + b"C" + b"B").hexdigest()
+    assert R.skill_content_hash("demo", root=tmp_path) == want
+    # SKILL.md 缺失 → fail-closed
+    (skill / "SKILL.md").unlink()
+    try:
+        R.skill_content_hash("demo", root=tmp_path)
+        assert False, "应抛 FileNotFoundError"
+    except FileNotFoundError:
+        pass
+
+
+def test_execute_evidence_kill_switch_uses_raw_channel():
+    # replay_evidence=False 杀开关：即便提供 stream 通道也不启用证据门禁，
+    # 文本模式原样走 raw 通道（门禁关闭时不阻断、不降级计分）
+    def fake_stream(prompt, cfg):
+        raise AssertionError("杀开关下不应调用 stream 通道")
+
+    execute = R.make_execute({"replay_k": 1, "replay_evidence": False},
+                             lambda p, c: '{"rules": ["禁用类型"]}',
+                             "ddl-guard", fake_stream)
+    score, fb = execute("CAND", _case(expected=["禁用类型"]))
+    assert score == 1.0 and "全部命中" in fb
+
+
+def test_write_replay_evidence_contract(tmp_path):
+    import json as _json
+    from datetime import datetime
+    path = R.write_replay_evidence("demo", {
+        "content_hash": "sha256:" + "0" * 64, "k": 3,
+        "pass_at_k": 0.77777777, "pass_cap_k": 0.0,
+        "invocation": {"skill_invoked": False, "evidence": "disabled"},
+        "cases": 12,
+    }, root=tmp_path)
+    raw = path.read_text(encoding="utf-8")
+    assert raw.endswith("}\n")                          # 尾换行
+    doc = _json.loads(raw)
+    # 字段与顺序一字不差（跨路契约）
+    assert list(doc.keys()) == ["schema", "skill", "content_hash", "generated_at",
+                                "k", "pass_at_k", "pass_cap_k", "invocation", "cases"]
+    assert doc["schema"] == "replay-evidence/1" and doc["skill"] == "demo"
+    assert doc["pass_at_k"] == 0.7778                   # round 4
+    assert doc["pass_cap_k"] == 0.0
+    assert doc["invocation"] == {"skill_invoked": False, "evidence": "disabled"}
+    datetime.fromisoformat(doc["generated_at"])         # ISO8601 可解析
+    assert doc["cases"] == 12 and isinstance(doc["cases"], int)  # 契约：整数计数
+    assert path == (tmp_path / "skills" / "skill-evo" / "artifacts"
+                    / "replay-evidence" / "demo.json")
+
+
+def test_parse_prompts_bullet_and_fenced(tmp_path):
+    # 旧式纯 bullet（零回归）+ 已知问题剥离
+    f1 = tmp_path / "p1.md"
+    f1.write_text("# 提示词集\n\n- 素材A\n- 素材B\n\n## 已知问题\n\n- 噪音\n",
+                  encoding="utf-8")
+    assert R.parse_prompts(f1) == (["素材A", "素材B"], ["噪音"])
+    assert R.parse_prompts(tmp_path / "absent.md") == ([], [])
+    # `---` 围栏：块内有 bullet → 逐 bullet；无 bullet → 剥标题整块压缩
+    f2 = tmp_path / "p2.md"
+    f2.write_text("# 提示词集\n\n---\n\n## 回合1\n\n素材一\n继续行\n\n---\n\n"
+                  "- 素材二a\n- 素材二b\n", encoding="utf-8")
+    prompts2, known2 = R.parse_prompts(f2)
+    assert prompts2 == ["素材一 继续行", "素材二a", "素材二b"] and known2 == []
+
+
+def test_load_eval_set_prompts_key(tmp_path):
+    d = tmp_path / "eval"
+    for name, with_prompts in (("101-x", True), ("102-y", False)):
+        (d / name / "input").mkdir(parents=True)
+        (d / name / "input" / "t.sql").write_text("x", encoding="utf-8")
+        (d / name / "expected.md").write_text(
+            "# c\n\n## 预期检查输出\n\n- 脚本自动检出：禁用类型\n", encoding="utf-8")
+        if with_prompts:
+            (d / name / "prompts.md").write_text(
+                "# 提示词集\n\n- 素材1：无外键\n- 素材2：含外键\n", encoding="utf-8")
+    cases = R.load_eval_set("s", d, {})
+    assert cases[0].inputs["prompts"] == ["素材1：无外键", "素材2：含外键"]
+    assert "prompts" not in cases[1].inputs             # 无 prompts.md 零回归
+
+
+def test_cmd_evidence_dry_run_writes_evidence(tmp_path, monkeypatch, capsys):
+    import json
+    import evo_replay
+
+    def fake_run(cmd, capture_output=True, text=True, timeout=None):
+        return types.SimpleNamespace(stdout=json.dumps([{"issues": []}]),
+                                     returncode=0)
+
+    monkeypatch.setattr(evo_replay.subprocess, "run", fake_run)
+    cfg = {"replay_min_cases": 8, "replay_k": 3, "replay_pass_threshold": 1.0}
+    assert evo_replay.cmd_evidence_dry_run("ddl-guard", cfg, out_root=tmp_path) == 0
+    path = (tmp_path / "skills" / "skill-evo" / "artifacts"
+            / "replay-evidence" / "ddl-guard.json")
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    assert doc["schema"] == "replay-evidence/1"
+    assert doc["invocation"] == {"skill_invoked": True, "evidence": "dry-run"}
+    assert doc["k"] == 3 and doc["content_hash"].startswith("sha256:")
+    # 契约：cases 为整数计数（任务书样例 "cases": 12），真实评估集 73 cases
+    assert isinstance(doc["cases"], int) and doc["cases"] >= 8
+    # @date 2026-09-20 回归锚：check: 选择生效 → 无脚本误跑的 exit-2 错误明细
+    # （原 input/expected.md 路径 bug 使全脚本误跑、exit 2 重复行）
+    assert "exit 2" not in capsys.readouterr().out

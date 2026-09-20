@@ -64,6 +64,42 @@ python3 skills/skill-evo/scripts/evo.py evolve --skill ddl-guard  # replay-eval 
 
 replay-eval 链路（详见 `docs/design/skill-evo-replay-eval.md`）：以 `skills/<skill>/badcase/`（拦截）+ `eval/`（放行/混合）确定性评估集为打分信号源，GEPA 候选经 headless claude 审查、确定性解析器提取检出清单、逐 case F1 打分；holdout 集独立于 rollout 预算必评（baseline c0 作改善锚），门禁拒绝「全盘拒绝」型退化，改善 > 0.2 才生成 prompt_evolution 型 pending 提案（人工采纳，不自动 apply）。
 
+### 评估协议（Comet 三机制升级，@date 2026-09-20）
+
+指标（每 case 独立 k 次采样，`replay_k` 默认 3）：
+
+- **pass@k**：HumanEval 无偏估计 `1 - C(n-c,k)/C(n,k)`（c = 通过次数）——能力上限；
+  `n<k` 时退化为「至少一次通过」并标记 degenerate
+- **pass^k**（`pass_cap_k`）：k 次全过（0/1）——可靠性下限，GEPA 主信号
+  （holdout 优化目标，改善锚不变）
+- 单次通过判定 = 该次 F1 ≥ `replay_pass_threshold`（默认 1.0）；调用轮次未过
+  证据门禁的采样计失败（分子剔除、分母保留）
+
+调用证据硬门禁（`replay_evidence`，默认开）：headless claude 加 `--output-format
+stream-json`，工具调用流中未出现指向本 skill 的 Read/Bash/Skill 事件的轮次记
+0 分——prompt-only 污染（Comet 实测 ~70% 触发率虚高）不计分。证据模式下
+prompt 不嵌候选文本，改为指令 Agent 用 Read 工具完整读取部署态
+`skills/<skill>/SKILL.md`（评估部署态技能保真度，不能直接用于 GEPA 变异
+候选筛选）。
+
+双 Agent 多轮（case 目录含 `prompts.md` 即激活，`replay_dual_agent` 默认开）：
+被测 Agent 在 `DECISION_REQUEST:` 决策点暂停，模拟用户 Agent 消费 prompts
+素材逐回合应答；素材耗尽 / 空应答走确定性兜底（不走 LLM），调用预算
+`2*(回合数+1)` 封顶。
+
+证据产物（跨路契约，schema `replay-evidence/1`，未跟踪交付物）：
+`skills/skill-evo/artifacts/replay-evidence/<skill>.json`，字段顺序固定
+`schema/skill/content_hash（SKILL.md+scripts 字节级指纹）/generated_at/k/
+pass_at_k/pass_cap_k/invocation/cases（整数计数）`；逐 case 明细走 CLI stdout。
+
+```bash
+python3 skills/skill-evo/scripts/evo_replay.py ddl-guard   # 证据 dry-run 冒烟（零 LLM，CI 可跑）
+```
+
+成本：完整评估 = k × cases 次 LLM 调用为下限——含 `prompts.md` 的多轮 case
+每次采样上浮至 `2*(回合+1)` 次调用封顶（GEPA 预算按 execute 调用次数计，
+每次内部含上述 k 次采样）；dry-run 入口零 LLM。
+
 ## 提案格式
 
 置信度三级（High = 明确纠正 / Medium = 可行模式 / Low = 待观察），每条 lesson 必须含可追溯 evidence（审核第一步即核对原文，防幻觉）。护栏命中需 `--force`：

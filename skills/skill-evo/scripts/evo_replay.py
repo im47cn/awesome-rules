@@ -14,16 +14,25 @@
 
 产物为 prompt_evolution 型 pending 提案（人工采纳，护栏不变：提取全自动、
 应用必须人工、永不自动 commit）。
+
+2026-09-20 升级（借鉴 Comet 评估机制，spec 见 docs/design/skill-evo-replay-eval.md）：
+- pass@k / pass^k 分离：pass@k = HumanEval 无偏估计（能力上限），
+  pass^k = k 次全过（可靠性下限）；k>1 时 execute 主信号切换为 pass^k
+- 双 Agent 多轮：case 含 prompts.md 时模拟用户回合（DECISION_REQUEST 协议）
+- 调用证据硬门禁：execute 注入 stream 通道时解析 stream-json 工具调用流，
+  未真实触发技能的运行计为失败（evidence JSON 落 artifacts/replay-evidence/）
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import random
 import re
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, List, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import evo_gepa as G
 import evo_proposal as PR
@@ -66,6 +75,22 @@ REJECT_ALL_TEXT = """你是 DDL 审查工具。无论输入内容如何，一律
              "字段注释长度", "全角字符"]}
 - 规则清单必须完整列出以上全部规则，不得省略。
 """
+
+# ── 双 Agent 多轮协议（Comet 机制 ②，@date 2026-09-20）──────────────────
+# 被测 Agent 需要用户决策时输出单独一行该 marker 并停止；模拟用户据下一回合
+# 素材作答（共用同一 claude 通道，角色指令见 SIM_USER_PROMPT）
+DECISION_MARKER = "DECISION_REQUEST:"
+
+# 模拟用户 prompt：只按素材当前回合应答，不解决任务本身——否则多轮评估
+# 退化为单 Agent 自答（sim-user 替被测 Agent 完成了审查）
+SIM_USER_PROMPT = """你是用户，只按素材当前回合应答，不解决任务本身。
+素材未覆盖的问题回复『按你的建议继续』；只输出一行应答。
+
+# 素材
+{material}
+
+# 问题
+{question}"""
 
 
 def _repo_root() -> Path:
@@ -138,6 +163,59 @@ def parse_expected(expected_path: Path) -> Tuple[str, List[str], List[str]]:
                 if rule and not rule.startswith("#"):
                     expected_rules.append(rule)
     return check_script, expected_rules, manual_rules
+
+
+# ── prompts.md 解析（与 badcase_runner.parse_prompts 同构，见其 docstring）──
+def parse_prompts(prompts_path: Path) -> Tuple[List[str], List[str]]:
+    """解析 prompts.md，返回 (prompts, known_issues)。
+
+    两种格式（@date 2026-09-20 双 Agent 扩展）：
+    - 旧式纯 bullet：每行 `- 内容` 即一条 prompt（一个回合），行为与历史
+      版本逐字一致（零回归锚）
+    - `---` 围栏块：每个围栏块一条 prompt；块内有 bullet → 逐 bullet 一条
+      （bullet 恒等于回合）；无 bullet → 剥 `#` 标题行后整块压缩空白为一条
+    已知问题 section 先剥离再解析。prompts.md 无 YAML frontmatter，
+    ^---$ 行不与其分隔符冲突。
+    """
+    if not prompts_path.is_file():
+        return [], []
+    text = prompts_path.read_text(encoding="utf-8")
+
+    known_section = ""
+    if km := re.search(r"##\s*已知问题\s*\n(.*?)(?=\n##\s|$)", text, re.DOTALL):
+        known_section = km[1].strip()
+        # 从 text 中移除已知问题部分，避免解析到 prompts
+        text = text[: km.start()] + text[km.end():]
+
+    blocks = re.split(r"(?m)^---\s*$", text)
+    if len(blocks) > 1:
+        # 围栏模式：逐块 → prompt
+        prompts = []
+        for block in blocks:
+            bullets = [m[1].strip() for line in block.split("\n")
+                       if (m := re.match(r"^[-*]\s+(.+)", line.strip()))]
+            if bullets:
+                prompts.extend(b for b in bullets if b)
+            else:
+                body = "\n".join(l for l in block.split("\n")
+                                 if not l.strip().startswith("#"))
+                if compact := " ".join(body.split()):
+                    prompts.append(compact)
+    else:
+        # 无围栏 → 既有纯 bullet 行为（零回归）
+        prompts = []
+        for line in text.split("\n"):
+            line = line.strip()
+            if m := re.match(r"^[-*]\s+(.+)", line):
+                if prompt := m[1].strip():
+                    prompts.append(prompt)
+
+    known_issues = []
+    for line in known_section.split("\n"):
+        line = line.strip()
+        if m := re.match(r"^[-*]\s+(.+)", line):
+            known_issues.append(m[1].strip())
+    return prompts, known_issues
 
 
 def _rule_matches(expected_rule: str, actual_rules: list) -> bool:
@@ -221,6 +299,74 @@ def f1_score(tp: int, n_expected: int, n_actual: int, n_hit_actual: int) -> floa
     return 2 * precision * recall / (precision + recall)
 
 
+# ── k 采样指标（Comet 机制 ①：pass@k / pass^k 分离，@date 2026-09-20）─────
+def pass_at_k(n: int, c: int, k: int) -> Tuple[float, bool]:
+    """HumanEval 无偏估计 pass@k（能力上限）。
+
+    n = 总运行次数，c = 通过次数；n≥k 用防溢出乘积式
+    1 - Π_{i=0..k-1} (n-c-i)/(n-i)，与 1 - C(n-c,k)/C(n,k) 等价。
+    n<k 时退化为「至少一次通过」（c>0 → 1.0）并置 degenerate=True 供调用方
+    标注（feedback / 证据 JSON 中显示为「退化估计」）；n≤0 → (0.0, True)。
+    c 夹取 [0,n]；n==k 且 c>0 时经下方守卫返回 1.0（无偏）。
+    """
+    n = int(n)
+    c = max(0, min(int(c), n))
+    if n <= 0:
+        return 0.0, True
+    if n < k:
+        return (1.0 if c > 0 else 0.0), True
+    if n - c < k:
+        # C(n-c,k) = 0：任取 k 个必含通过样本 → 无偏值恰为 1（HumanEval 同款
+        # 守卫，同时避免乘积式出现负因子）
+        return 1.0, False
+    prob_all_miss = 1.0
+    for i in range(k):
+        prob_all_miss *= (n - c - i) / (n - i)
+    return 1.0 - prob_all_miss, False
+
+
+def pass_cap_k(passes: List[bool]) -> float:
+    """pass^k（可靠性下限）：k 次运行是否全部通过（非空且全过 → 1.0，否则 0.0）。"""
+    return 1.0 if passes and all(passes) else 0.0
+
+
+def execute_k(candidate: str, case: G.Case, k: int, run_once: Callable,
+              threshold: float = 1.0) -> dict:
+    """k 采样聚合（契约函数；run_once 注入使其可独立测试）。
+
+    run_once(candidate, case) -> (score, feedback, invoked)；invoked=None 表示
+    证据门禁未启用（文本通道）。invoked=False 的运行计为失败：分子剔除、
+    分母保留（skill 未真实触发，不构成有效通过样本，但占用了一次采样）。
+    返回 {runs, passes, pass_at_k, pass_at_k_degenerate, pass_cap_k, n, c,
+    feedback}；k 路径不在此 round，round 仅发生在证据 JSON 写入处。
+    """
+    runs, passes = [], []
+    for _ in range(k):
+        score, feedback, invoked = run_once(candidate, case)
+        runs.append({"score": score, "feedback": feedback, "invoked": invoked})
+        passes.append(score >= threshold and invoked is not False)
+    n = len(passes)
+    c = sum(1 for p in passes if p)
+    pak, degenerate = pass_at_k(n, c, k)
+    cap = pass_cap_k(passes)
+    if k <= 1:
+        # k=1 保持旧语义：主信号 = 单次 F1，feedback 原样透传（零回归锚）
+        return {"runs": runs, "passes": passes, "pass_at_k": pak,
+                "pass_at_k_degenerate": degenerate, "pass_cap_k": cap,
+                "n": n, "c": c, "feedback": runs[0]["feedback"]}
+    # k>1：主信号 = pass^k（0/1），feedback 聚合全部运行明细
+    pak_txt = f"pass@k={pak:.3f}" + ("（退化估计）" if degenerate else "")
+    bits = [f"pass^k={c}/{k}", pak_txt,
+            "单次F1=" + ",".join(f"{r['score']:.3f}" for r in runs)]
+    missed = [str(i + 1) for i, r in enumerate(runs) if r["invoked"] is False]
+    if missed:
+        bits.append("未触发轮次=[" + ",".join(missed) + "]")
+    bits.extend(f"r{i+1}: {r['feedback']}" for i, r in enumerate(runs))
+    return {"runs": runs, "passes": passes, "pass_at_k": pak,
+            "pass_at_k_degenerate": degenerate, "pass_cap_k": cap,
+            "n": n, "c": c, "feedback": "; ".join(bits)}
+
+
 # ── 评估集加载 ────────────────────────────────────────────────────────────
 def load_eval_set(skill: str, eval_dir: Path, cfg: dict,
                   include_manual: bool = False) -> List[G.Case]:
@@ -246,9 +392,15 @@ def load_eval_set(skill: str, eval_dir: Path, cfg: dict,
             for f in sorted(input_dir.iterdir())
             if f.is_file()
         }
+        # 双 Agent：case 目录含 prompts.md 时加载回合素材（无 prompts 零回归，
+        # inputs 不含 prompts 键——旧消费方无感）
+        prompts, _ = parse_prompts(case_dir / "prompts.md")
+        inputs = {"input_dir": str(input_dir), "files": files}
+        if prompts:
+            inputs["prompts"] = prompts
         cases.append(G.Case(
             id=f"{skill}:{case_dir.name}",
-            inputs={"input_dir": str(input_dir), "files": files},
+            inputs=inputs,
             reference={"expected_rules": expected_rules,
                        "manual_rules": manual_rules,
                        "expected_empty": not expected_rules},
@@ -271,28 +423,110 @@ def split_eval(cases: List[G.Case], cfg: dict) -> Tuple[List[G.Case], List[G.Cas
 
 
 # ── execute / reflect / validate（GEPA 可注入回调）────────────────────────
-def make_execute(cfg, call_claude_raw, skill_name: str):
-    """execute(candidate_text, case) -> (score 0-1, feedback)。
+def _build_prompt(candidate: str, files_text: str, history: str,
+                  multi_round: bool, evidence_mode: bool, skill_name: str) -> str:
+    """构造单轮审查 prompt（双 Agent / 证据门禁各模式的唯一拼装点）。
 
-    候选 SKILL.md 全文 → headless claude -p → 审查报告 → 确定性解析器提取
-    rules → 双向对账 → F1 + missing/unexpected 明细。打分器本身零 LLM。
+    零回归锚：非证据、无多轮（evidence_mode=multi_round=False、history 空）
+    时与旧版拼装逐字节一致（test_replay.py 有字节相等断言）。
+    证据模式不嵌 candidate 文本——改为指令 Read 部署态 SKILL.md（门禁面向
+    部署态技能保真度评测，不能直接用于 GEPA 变异候选筛选，见 README）。
     """
-    def execute(candidate_text: str, case: G.Case) -> Tuple[float, str]:
+    parts: List[str] = []
+    if not evidence_mode:
+        parts.append(candidate)
+    parts.append(f"# 待审查输入\n{files_text}")
+    if history:
+        parts.append(f"# 对话记录\n{history}")
+    if evidence_mode:
+        task = (f"先用 Read 工具完整读取 skills/{skill_name}/SKILL.md（已授权），"
+                f"严格按其规则与工作流对输入做静态审查，输出审查报告。\n")
+    else:
+        task = ("按上述 SKILL 的规则与工作流对输入做静态审查，输出审查报告。\n"
+                "仅纯文本分析，禁止调用任何工具/脚本/命令（本环境无工具可用）。\n")
+    if multi_round:
+        task += (f"若需用户决策，输出单独一行 {DECISION_MARKER} <问题> 并停止"
+                 f"（不输出报告）；否则输出最终报告。\n")
+    task += ("报告末尾必须附加检出清单 JSON（严格单个 JSON，无围栏无其他文字）：\n"
+             '{"rules": ["规则名1", "规则名2", ...]}\n'
+             "规则名与 SKILL 中的规则命名一致；未检出问题则输出 {\"rules\": []}")
+    parts.append(f"# 任务\n{task}")
+    return "\n\n".join(parts)
+
+
+def make_run_once(cfg, call_claude_raw, skill_name: str,
+                  call_claude_stream: Optional[Callable] = None) -> Callable:
+    """run_once(candidate, case) -> (score, feedback, invoked)。
+
+    通道选择：call_claude_stream 且 replay_evidence 开启 → 证据模式
+    （stream-json 事件累积，skill 未真实触发 → 0 分 fail-closed，invoked=False）；
+    否则文本模式 call_claude_raw（invoked=None，门禁未启用）。通道异常同样
+    fail-closed 计 0 分。
+
+    双 Agent 多轮（replay_dual_agent 且 case 含 prompts）：每轮新 subprocess
+    （无状态重放），对话记录以 [助手]/[用户] 文本拼进 prompt；触发
+    DECISION_REQUEST 时由 SIM_USER_PROMPT（共用 call_claude_raw 通道）模拟
+    用户应答（应答空 → 「按你的建议继续」；素材耗尽 → 确定性兜底不走 LLM）；
+    调用预算 2*(len(prompts)+1)（agent 与 sim-user 各计一次），超限取当前输出
+    （含 marker → 报告不可解析 → 0 分）。
+    """
+    evidence_on = bool(cfg.get("replay_evidence", True)) and call_claude_stream is not None
+    dual_agent = bool(cfg.get("replay_dual_agent", True))
+
+    def run_once(candidate: str, case: G.Case) -> Tuple[float, str, object]:
         files_text = "\n\n".join(
             f"--- {name} ---\n{content}" for name, content in case.inputs["files"].items())
-        prompt = (f"{candidate_text}\n\n# 待审查输入\n{files_text}\n\n# 任务\n"
-                  f"按上述 SKILL 的规则与工作流对输入做静态审查，输出审查报告。\n"
-                  f"仅纯文本分析，禁止调用任何工具/脚本/命令（本环境无工具可用）。\n"
-                  f"报告末尾必须附加检出清单 JSON（严格单个 JSON，无围栏无其他文字）：\n"
-                  f'{{"rules": ["规则名1", "规则名2", ...]}}\n'
-                  f"规则名与 SKILL 中的规则命名一致；未检出问题则输出 {{\"rules\": []}}")
-        try:
-            out = call_claude_raw(prompt, cfg)
-        except Exception as e:
-            return 0.0, f"执行失败: {e}"
+        prompts = case.inputs.get("prompts") if dual_agent else None
+        multi_round = bool(prompts)
+        # 调用预算：多轮 = 2*(len(prompts)+1)（每回合 agent+sim-user 各一次，
+        # 预留收尾回合）；单轮 = 1。恒 DECISION_REQUEST 的病态循环会被预算截断
+        budget = 2 * (len(prompts) + 1) if multi_round else 1
+        round_no = 0
+        history_lines: List[str] = []
+        session_events: List[dict] = []
+        out = ""
+        while budget > 0:
+            budget -= 1
+            prompt = _build_prompt(candidate, files_text, "\n".join(history_lines),
+                                   multi_round, evidence_on, skill_name)
+            try:
+                if evidence_on:
+                    out, events = call_claude_stream(prompt, cfg)
+                    session_events.extend(events)
+                else:
+                    out = call_claude_raw(prompt, cfg)
+            except Exception as e:
+                # fail-closed：通道异常即本次运行失败（证据模式 invoked=False）
+                return 0.0, f"执行失败: {e}", False if evidence_on else None
+            if not multi_round:
+                break
+            question = _decision_question(out)
+            if question is None:
+                break  # 最终报告已产出，多轮结束
+            history_lines.append(f"[助手] {DECISION_MARKER} {question}")
+            if round_no < len(prompts):
+                budget -= 1  # sim-user 消耗预算（防病态多问吃满调用）
+                try:
+                    reply = call_claude_raw(
+                        SIM_USER_PROMPT.format(material=prompts[round_no],
+                                               question=question), cfg)
+                except Exception:
+                    reply = ""
+                reply = (reply or "").strip() or "按你的建议继续"
+            else:
+                # 素材耗尽：确定性兜底（不走 LLM），逼被测 Agent 收尾
+                reply = "无更多输入，请直接给出最终报告"
+            history_lines.append(f"[用户] {reply}")
+            round_no += 1
+        if evidence_on:
+            invoked = skill_invoked_from_events(session_events, skill_name)
+            if not invoked:
+                return 0.0, "skill 未触发（invoked=false，计为失败）", False
+        else:
+            invoked = None
         actual_rules, ok = extract_rules_from_report(out)
         if not ok:
-            return 0.0, "报告不可解析: 未找到规则清单 JSON（候选可能删掉了输出清单指令）"
+            return 0.0, "报告不可解析: 未找到规则清单 JSON（候选可能删掉了输出清单指令）", invoked
         expected = case.reference["expected_rules"]
         tp, missing, unexpected = reconcile(expected, actual_rules)
         score = f1_score(tp, len(expected), len(actual_rules),
@@ -304,7 +538,31 @@ def make_execute(cfg, call_claude_raw, skill_name: str):
             bits.append("误拦: " + ", ".join(unexpected))
         if not bits:
             bits.append("全部命中")
-        return score, "; ".join(bits)
+        return score, "; ".join(bits), invoked
+
+    return run_once
+
+
+def make_execute(cfg, call_claude_raw, skill_name: str,
+                 call_claude_stream: Optional[Callable] = None):
+    """execute(candidate_text, case) -> (score 0-1, feedback)（GEPA 回调契约）。
+
+    k 采样（replay_k，默认 3）：k=1 → run_once 直通（单次 F1 旧语义，零回归）；
+    k>1 → 主信号 score = pass^k（0/1），feedback 聚合 pass^k / pass@k / 逐轮
+    明细。证据门禁（invoked=False）的运行在 execute_k 内计为失败。cmd_evolve
+    既有 3 参调用自动落入 k 路径（cfg 默认 replay_k=3）；stream 通道缺省
+    None 时门禁关闭（文本模式）。
+    """
+    run_once = make_run_once(cfg, call_claude_raw, skill_name, call_claude_stream)
+    k = max(1, int(cfg.get("replay_k", 3) or 1))
+    threshold = float(cfg.get("replay_pass_threshold", 1.0))
+
+    def execute(candidate_text: str, case: G.Case) -> Tuple[float, str]:
+        if k <= 1:
+            score, feedback, _invoked = run_once(candidate_text, case)
+            return score, feedback
+        agg = execute_k(candidate_text, case, k, run_once, threshold=threshold)
+        return agg["pass_cap_k"], agg["feedback"]
 
     return execute
 
@@ -390,8 +648,11 @@ def script_baseline_f1(cfg, skill_name: str, cases: List[G.Case]) -> Tuple[float
     available = reg[skill_name]["scripts"]
     for case in cases:
         input_dir = Path(case.inputs["input_dir"])
-        # expected.md 的 check: 声明决定跑哪个注册脚本；未声明 → 全跑（兼容旧评估集）
-        check_name = parse_expected(input_dir / "expected.md")[0]
+        # expected.md 位于 case 目录（input/ 的父级）——check: 声明决定跑哪个
+        # 注册脚本；未声明 → 全跑（兼容旧评估集）。@date 2026-09-20 修正：
+        # 原先拼到 input/expected.md（不存在）使选择恒失效、全脚本误跑，
+        # 非声明脚本的 exit 2 制造重复错误行污染 dry-run 明细。
+        check_name = parse_expected(input_dir.parent / "expected.md")[0]
         scripts = [s for s in available if check_name is None or s.name == check_name]
         if not scripts:
             details.append({"case": case.id,
@@ -429,3 +690,206 @@ def script_baseline_f1(cfg, skill_name: str, cases: List[G.Case]) -> Tuple[float
                         "manual_rules": case.reference.get("manual_rules", []),
                         "score": round(score, 4)})
     return (total_f1 / len(cases) if cases else 0.0), details
+
+
+# ── 调用证据：stream-json 工具调用流（Comet 机制 ③，@date 2026-09-20）──────
+def _decision_question(out: str):
+    """从输出提取 DECISION_REQUEST 问题；无 marker → None（已是最终报告）。
+
+    marker 同一行其后的文本为问题；marker 存在但无可用文本时截断输出前
+    200 字符兜底（决策回合继续，避免卡死在含糊输出上）。
+    """
+    for line in out.splitlines():
+        if DECISION_MARKER in line:
+            q = line.split(DECISION_MARKER, 1)[1].strip()
+            if q:
+                return q
+    if DECISION_MARKER in out:
+        return out[:200]
+    return None
+
+
+def skill_invoked_from_events(events: List[dict], skill_name: str) -> bool:
+    """stream-json 工具调用事件流中技能是否被真实触发。
+
+    判据（blob = json.dumps(tool input)，子串匹配容忍路径写法差异）：
+    - Read/Bash 命中 skills/<skill>/SKILL.md 或 skills/<skill>/scripts/ 前缀
+    - Skill 工具调用（技能机制）命中技能名
+    """
+    for ev in events:
+        name = ev.get("name", "")
+        blob = json.dumps(ev.get("input", {}), ensure_ascii=False)
+        if name in ("Read", "Bash") and (
+                f"skills/{skill_name}/SKILL.md" in blob
+                or f"skills/{skill_name}/scripts/" in blob):
+            return True
+        if name == "Skill" and skill_name in blob:
+            return True
+    return False
+
+
+def call_claude_stream(prompt: str, cfg: dict) -> Tuple[str, List[dict]]:
+    """headless claude -p（stream-json）→ (最终文本, 工具调用事件列表)。
+
+    复刻 evo.py call_claude_raw 的防递归模式（env 去 CLAUDECODE + 子进程
+    标记 AR_SKILL_EVO_CHILD=1 + 空 hooks settings）。只预授权 Read：防止
+    检查脚本泄漏答案（Bash 事件照常收集作证据，但不主动授权）。
+    解析规则：assistant 消息 content 中 tool_use 块收集 (name, input)、
+    text 块拼接；result 消息的 result 字段优先作最终文本（无则回退
+    assistant 文本拼接）。prompt 经 stdin 传入（同 evo.py：长文本走 argv
+    会被 CLI 当选项解析）。
+    """
+    env = dict(os.environ)
+    env.pop("CLAUDECODE", None)          # 去 CC 注入面
+    env["AR_SKILL_EVO_CHILD"] = "1"      # 二次保险：即使 hooks 未禁，hook 脚本自会退出
+    proc = subprocess.run(
+        [str(cfg["claude_bin"]), "-p", "--settings", '{"hooks":{}}',
+         "--max-turns", "12", "--output-format", "stream-json", "--verbose",
+         "--allowedTools", "Read"],
+        capture_output=True, text=True, input=prompt,
+        timeout=int(cfg["claude_timeout"]), env=env)
+    events: List[dict] = []
+    texts: List[str] = []
+    final_text = ""
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            msg = json.loads(line)
+        except json.JSONDecodeError:
+            continue  # 非 JSON 行（CLI 横幅等）跳过
+        mtype = msg.get("type")
+        if mtype == "assistant":
+            for block in (msg.get("message") or {}).get("content") or []:
+                if block.get("type") == "tool_use":
+                    events.append({"name": block.get("name", ""),
+                                   "input": block.get("input", {})})
+                elif block.get("type") == "text":
+                    texts.append(block.get("text", ""))
+        elif mtype == "result":
+            final_text = msg.get("result") or ""
+    return final_text or "".join(texts), events
+
+
+def skill_content_hash(skill: str, root: Optional[Path] = None) -> str:
+    """技能内容指纹：SKILL.md + scripts/ 全部文件字节顺序拼接的 sha256。
+
+    文件集统一按仓库根相对 posix 路径字典序排序（SKILL.md 自然在前，确定性
+    可复现）；SKILL.md 缺失 → FileNotFoundError（技能内容不完整不应静默给出
+    可比对指纹）。
+    """
+    root = (root or _repo_root()).resolve()
+    skill_dir = root / "skills" / skill
+    skill_md = skill_dir / "SKILL.md"
+    if not skill_md.is_file():
+        raise FileNotFoundError(f"SKILL.md 不存在：{skill_md}")
+    files = [skill_md]
+    scripts_dir = skill_dir / "scripts"
+    if scripts_dir.is_dir():
+        files.extend(p for p in scripts_dir.rglob("*") if p.is_file())
+    files.sort(key=lambda p: p.relative_to(root).as_posix())
+    h = hashlib.sha256()
+    for p in files:
+        h.update(p.read_bytes())
+    return "sha256:" + h.hexdigest()
+
+
+def write_replay_evidence(skill: str, payload: dict, root: Optional[Path] = None) -> Path:
+    """写 replay 证据 JSON（schema=replay-evidence/1，跨路契约字段一字不改）。
+
+    路径：<root>/skills/skill-evo/artifacts/replay-evidence/<skill>.json；
+    generated_at 由本函数加盖（UTC 秒级 ISO8601）；pass_at_k / pass_cap_k
+    round 4；cases 为整数计数（任务书契约样例 "cases": 12，字段不得增删，
+    逐 case 明细走调用方 stdout）。artifacts/ 为未跟踪交付物
+    （.gitignore 未忽略，禁止 git add）。
+    """
+    root = (root or _repo_root()).resolve()
+    out_dir = root / "skills" / "skill-evo" / "artifacts" / "replay-evidence"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    doc = {
+        "schema": "replay-evidence/1",
+        "skill": skill,
+        "content_hash": payload["content_hash"],
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "k": payload["k"],
+        "pass_at_k": round(float(payload["pass_at_k"]), 4),
+        "pass_cap_k": round(float(payload["pass_cap_k"]), 4),
+        "invocation": {"skill_invoked": bool(payload["invocation"]["skill_invoked"]),
+                       "evidence": payload["invocation"]["evidence"]},
+        "cases": int(payload["cases"]),
+    }
+    path = out_dir / f"{skill}.json"
+    path.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8")
+    return path
+
+
+# ── dry-run 证据冒烟入口（零 LLM，CI 可跑）──────────────────────────────
+def cmd_evidence_dry_run(skill: str, cfg: dict, out_root: Optional[Path] = None) -> int:
+    """证据通道 dry-run 冒烟：不触 LLM，直接执行技能注册检查脚本产出指标。
+
+    每 case 一条运行：脚本明细 score ≥ replay_pass_threshold 记一次通过
+    （error 行无 score 记失败）；n=1 < k，pass@k 退化为 0/1；聚合
+    pass@k / pass^k = 逐 case 均值（单样本下两者同值）。skill_invoked=True、
+    evidence="dry-run"：dry-run 直接执行技能注册脚本，技能内容必然参与
+    （区别于 stream-json 实测通道）。返回退出码（评估集不足 → 1）。
+    """
+    # 默认评估集 = badcase/（拦截型）+ eval/（放行/混合型），对齐 evo.py cmd_evolve
+    skill_dir = _repo_root() / "skills" / skill
+    cases = []
+    for sub in ("badcase", "eval"):
+        d = skill_dir / sub
+        if d.is_dir():
+            cases += load_eval_set(skill, d, cfg, include_manual=True)
+    if len(cases) < int(cfg["replay_min_cases"]):
+        print(f"评估集不足：{len(cases)} < replay_min_cases={cfg['replay_min_cases']}")
+        return 1
+    k = max(1, int(cfg.get("replay_k", 3) or 1))
+    threshold = float(cfg.get("replay_pass_threshold", 1.0))
+    baseline, details = script_baseline_f1(cfg, skill, cases)
+    print(f"评估集：{len(cases)} cases（含人工补充规则）")
+    print(f"脚本基线（完美执行参照）F1 = {baseline:.3f}")
+    case_rows = []
+    pak_sum = cap_sum = 0.0
+    for d in details:
+        passed = d.get("score", 0.0) >= threshold
+        pak, _deg = pass_at_k(1, 1 if passed else 0, k)
+        cap = 1.0 if passed else 0.0
+        pak_sum += pak
+        cap_sum += cap
+        case_rows.append({"case": d["case"], "passed": passed,
+                          "score": d.get("score"), "error": d.get("error")})
+    n_cases = len(case_rows)
+    avg_pak = pak_sum / n_cases if n_cases else 0.0
+    avg_cap = cap_sum / n_cases if n_cases else 0.0
+    # content_hash 用真实仓根（指纹必须指向真实技能内容），仅写出重定向
+    content_hash = skill_content_hash(skill)
+    # 契约：cases 为整数计数（任务书样例 "cases": 12，C 路消费方依赖，
+    # 字段不得增删改名）——逐 case 明细走 stdout，不入 JSON。@date 2026-09-20
+    path = write_replay_evidence(skill, {
+        "content_hash": content_hash, "k": k,
+        "pass_at_k": avg_pak, "pass_cap_k": avg_cap,
+        "invocation": {"skill_invoked": True, "evidence": "dry-run"},
+        "cases": n_cases,
+    }, root=out_root)
+    print(f"pass@k = {avg_pak:.4f}（dry-run 单样本退化估计）")
+    print(f"pass^k = {avg_cap:.4f}（逐 case 通过率，单样本下与 pass@k 同值）")
+    print(f"evidence 已写入：{path}（cases={n_cases}）")
+    for row in case_rows:
+        if not row["passed"]:
+            print(f"  未过：{row['case']} score={row['score']} error={row['error']}")
+    return 0
+
+
+if __name__ == "__main__":
+    # 冒烟入口：python3 evo_replay.py <skill> —— dry-run 证据通道（零 LLM），
+    # 产出 artifacts/replay-evidence/<skill>.json。完整 LLM 运行的 evidence
+    # 写入需 evo.py cmd_evolve 接线 stream 通道（evo.py 在本波所有权清单外，
+    # 见 README「上报事项」）
+    import sys
+    from evo_config import load_config
+    if len(sys.argv) != 2:
+        print("用法: python3 evo_replay.py <skill>")
+        sys.exit(2)
+    sys.exit(cmd_evidence_dry_run(sys.argv[1], load_config()))

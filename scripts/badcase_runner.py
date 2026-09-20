@@ -127,7 +127,17 @@ def parse_expected(expected_path: Path):
 
 
 def parse_prompts(prompts_path: Path):
-    """解析 prompts.md，返回 (prompts, known_issues)。"""
+    """解析 prompts.md，返回 (prompts, known_issues)。
+
+    两种格式（@date 2026-09-20 双 Agent 扩展，与
+    skills/skill-evo/scripts/evo_replay.py 的 parse_prompts 同构）：
+    - 旧式纯 bullet：每行 `- 内容` 即一条 prompt（一个回合），行为与历史
+      版本逐字一致（零回归锚）
+    - `---` 围栏块：每个围栏块一条 prompt；块内有 bullet → 逐 bullet 一条
+      （bullet 恒等于回合）；无 bullet → 剥 `#` 标题行后整块压缩空白为一条
+    已知问题 section 先剥离再解析。prompts.md 无 YAML frontmatter，
+    ^---$ 行不与其分隔符冲突。
+    """
     if not prompts_path.is_file():
         return [], []
 
@@ -142,12 +152,28 @@ def parse_prompts(prompts_path: Path):
         # 从 text 中移除已知问题部分，避免解析到 prompts
         text = text[: km.start()] + text[km.end():]
 
-    prompts = []
-    for line in text.split("\n"):
-        line = line.strip()
-        if m := re.match(r"^[-*]\s+(.+)", line):
-            if prompt := m[1].strip():
-                prompts.append(prompt)
+    blocks = re.split(r"(?m)^---\s*$", text)
+    if len(blocks) > 1:
+        # 围栏模式：逐块 → prompt
+        prompts = []
+        for block in blocks:
+            bullets = [m[1].strip() for line in block.split("\n")
+                       if (m := re.match(r"^[-*]\s+(.+)", line.strip()))]
+            if bullets:
+                prompts.extend(b for b in bullets if b)
+            else:
+                body = "\n".join(l for l in block.split("\n")
+                                 if not l.strip().startswith("#"))
+                if compact := " ".join(body.split()):
+                    prompts.append(compact)
+    else:
+        # 无围栏 → 既有纯 bullet 行为（零回归）
+        prompts = []
+        for line in text.split("\n"):
+            line = line.strip()
+            if m := re.match(r"^[-*]\s+(.+)", line):
+                if prompt := m[1].strip():
+                    prompts.append(prompt)
 
     known_issues = []
     for line in known_section.split("\n"):
