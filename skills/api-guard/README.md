@@ -33,6 +33,7 @@ python3 scripts/api_check.py path/to/project/ --format json
 | 路径变量 | 禁止 path 中传 `{id}` 等唯一标识 |
 | 时间注解 | DTO 禁 `shape=NUMBER`（须 ISO 8601 pattern）；PO 禁任何日期注解 |
 | 映射注解 | 禁止 @RequestMapping(method=...)，须用 @PostMapping/@GetMapping 等具体注解 |
+| 软删过滤 | Mapper XML `<select>` 含 del_flag 列而 WHERE 无 `del_flag = 0` 判定（fail-open 形态识别） |
 
 ## 需人工补充的规则
 
