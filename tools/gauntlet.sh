@@ -251,13 +251,15 @@ else
     # （shebang #!/usr/bin/env bash；含数组/here-string/进程替换等 bash 专有语法，
     # 如 coverage.sh 的 MVN 数组与 install.sh:139 的 < <()），sh -n 在 dash 等
     # 真正的 POSIX /bin/sh 上会假红——按解释器走 bash -n
-    # shellcheck disable=SC2016  # $1 由内层 sh 展开
+    # shellcheck disable=SC2016  # $1 由内层 sh 展开（外层单引号防本层展开）
+    _syn_git_bashn="tools/git/install.sh tools/git/lefthook/coverage.sh \
+        tools/git/lefthook/commitmsg-check.sh tools/git/lefthook/run-tests.sh \
+        tools/git/lefthook/sourcery-gate.sh tools/git/lefthook/mutation-gate.sh \
+        tools/git/lefthook/coderabbit-gate.sh tools/git/lefthook/pre-push-delete-guard.sh \
+        tools/git/lefthook/spec-check.sh"
+    # shellcheck disable=SC2016  # 同上
     run_layer syntax-git-dist-bash-n sh -c 'for f in $1; do bash -n "$f" || exit 1; done' \
-        sh 'tools/git/install.sh tools/git/lefthook/coverage.sh \
-            tools/git/lefthook/commitmsg-check.sh tools/git/lefthook/run-tests.sh \
-            tools/git/lefthook/sourcery-gate.sh tools/git/lefthook/mutation-gate.sh \
-            tools/git/lefthook/coderabbit-gate.sh tools/git/lefthook/pre-push-delete-guard.sh \
-            tools/git/lefthook/spec-check.sh'
+        sh "$_syn_git_bashn"
     # lint 范围只含本仓 tools/ 脚本：hooks/ 属既有代码，其基线告警不属本门范围
     # （豁免保留）；tools/git/（install.sh + 全部 8 钩子）2026-09-20 纳入——分发面：
     # 脚本随 install.sh 分发给下游仓直接消费，缺陷随分发放大，须与仓内脚本同
