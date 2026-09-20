@@ -9,10 +9,12 @@
   却返回 level=2 → 0.4.1。
 
 行为：
-  0. 评测证据门禁（先行，fail-closed）：每个含 scripts/ 的 skill 必须携带与
-     最新内容 hash 绑定的 replay-eval 证据（skills/skill-evo/artifacts/
+  0. 评测证据门禁（先行，fail-closed）：登记集 EVIDENCE_ENROLLED 内的 skill 必须
+     携带与最新内容 hash 绑定的 replay-eval 证据（skills/skill-evo/artifacts/
      replay-evidence/<skill>.json）；缺失 / 内容漂移 / schema 不识别 /
-     字段损坏一律拦截（exit 2）。唯一逃逸 RELEASE_EVIDENCE_SKIP=1 仅限测试。
+     字段损坏一律拦截（exit 2）。登记集初始为空（政策见常量定义处）；
+     --verify-evidence 子命令仍按全量 scope 审计。唯一逃逸
+     RELEASE_EVIDENCE_SKIP=1 仅限测试。
   1. 按仓库惯例独立计算期望 bump（常规语义，无 preMajor 降级）
   2. catv --dry-run 取工具目标版本
   3. 一致 → 原生执行；不一致 → 打印原因并 --release-as <期望> 纠偏执行
@@ -225,6 +227,17 @@ def _validate_evidence(ev: object, skill: str, expect_hash: str) -> list[str]:
     return errs
 
 
+# 发布门禁的证据登记集：decide() 只对登记在册的 skill 执行证据校验。
+# 登记政策：某 skill 首次提交「真实 LLM replay 证据」后（skills/skill-evo/
+# artifacts/replay-evidence/<skill>.json；dry-run 冒烟证据只证脚本基线，
+# 不算数），把该 skill 名加入本元组。
+# 初始为空的裁决（2026-09-21 集成期）：verify_skill_evidence 默认 scope 是
+# skills/ 下全部含 scripts/ 的 skill（现仓 8 个），但评估基础设施仅 ddl-guard
+# 有 case 集——按默认面会让下一次发布必 exit 2 且唯一逃逸是被禁的 skip 开关。
+# 故发布路径按登记集驱动（门已就位，随首个真实证据登记而生效）；
+# --verify-evidence 诊断入口保持全量 scope 不变。
+EVIDENCE_ENROLLED: tuple[str, ...] = ()
+
 def verify_skill_evidence(repo_root: Path = REPO,
                           skills: list[str] | None = None) -> int:
     """发布门禁：技能内容 hash ↔ 评测证据绑定校验（fail-closed）。
@@ -289,7 +302,13 @@ def verify_skill_evidence(repo_root: Path = REPO,
 
 
 def decide(check_only: bool = False) -> int:
-    rc = verify_skill_evidence()  # 证据先行于版本语义（fail-closed，先于 catv）
+    if EVIDENCE_ENROLLED:
+        rc = verify_skill_evidence(skills=sorted(EVIDENCE_ENROLLED))
+    else:
+        print("ℹ 评测证据门：登记集 EVIDENCE_ENROLLED 为空——门已就位，"
+              "首个真实 replay 证据提交后登记 skill 名即生效"
+              "（--verify-evidence 可全量审计）")
+        rc = 0
     if rc != 0:
         return rc
     base = latest_stable_tag()

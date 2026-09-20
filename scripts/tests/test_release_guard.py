@@ -260,17 +260,35 @@ class TestEscapeHatch:
 
 
 class TestDecideIntegration:
-    """接入点：证据校验先于版本语义（先于 git/tag/catv）。"""
+    """接入点：证据校验先于版本语义（先于 git/tag/catv），按登记集驱动。"""
 
     def test_evidence_failure_short_circuits_before_git(self, monkeypatch):
+        monkeypatch.setattr(release_guard, "EVIDENCE_ENROLLED", ("api-guard",))
+
         def _boom():
             raise AssertionError("版本语义（git/tag）不应在证据门禁失败后执行")
+
+        def _fail(**kw):
+            # 发布路径只校验登记集内的 skill（显式 scope 传入）
+            assert kw == {"skills": ["api-guard"]}
+            return 2
+
         monkeypatch.setattr(release_guard, "latest_stable_tag", _boom)
-        monkeypatch.setattr(release_guard, "verify_skill_evidence", lambda: 2)
+        monkeypatch.setattr(release_guard, "verify_skill_evidence", _fail)
         assert release_guard.decide() == 2
 
     def test_decide_proceeds_to_existing_semantics_on_pass(self, monkeypatch):
-        monkeypatch.setattr(release_guard, "verify_skill_evidence", lambda: 0)
+        monkeypatch.setattr(release_guard, "EVIDENCE_ENROLLED", ("api-guard",))
+        monkeypatch.setattr(release_guard, "verify_skill_evidence",
+                            lambda **kw: 0)
         monkeypatch.setattr(release_guard, "latest_stable_tag", lambda: None)
         monkeypatch.setattr(release_guard, "interval_commits", lambda base: [])
         assert release_guard.decide() == 1  # 既有行为：空区间无可发布内容 → 拒绝
+
+    def test_empty_enrollment_skips_gate_with_note(self, monkeypatch, capsys):
+        # 登记集为空（初始态）：门已就位但不强制不可满足的证据要求，直接进版本语义
+        monkeypatch.setattr(release_guard, "EVIDENCE_ENROLLED", ())
+        monkeypatch.setattr(release_guard, "latest_stable_tag", lambda: None)
+        monkeypatch.setattr(release_guard, "interval_commits", lambda base: [])
+        assert release_guard.decide() == 1
+        assert "EVIDENCE_ENROLLED" in capsys.readouterr().out
