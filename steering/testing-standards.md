@@ -192,6 +192,21 @@ inclusion: always
 - **构建工具陈旧增量状态的海量假报错**：maven-compiler-plugin 陈旧增量可产出海量 Lombok 报错，`mvn clean test-compile` 重建后真实错误可能骤减。报错规模与变更规模失配时先 clean 归因再修
 - **IDE 错误桩 class 干扰测试**：`Unresolved compilation problems` 是 IntelliJ 编译出错时仍写入 `target/test-classes` 的错误桩特征（javac 不允许这种 class），跑测试前 clean；配套解析坑：surefire XML `<testsuite tests="0">` 可内含全部通过的 testcase，解析门禁以 testcase 计数为准而非 testsuite 属性
 
+## 并行测试门（工厂 parallel-gate，ADR-016）
+
+- **段间并行的准入**：无共享可变状态的段才进 `parallel_gate.segments`
+  （独立工作目录/端口/临时文件）；顺序敏感段（依赖前段产物，如
+  doc-freshness 类）留宿主串行尾段，靠「并行段全绿后再跑」保序
+- **段内并行缺省 off**：`intra:"auto"` 逐段显式 opt-in，只注保守档参数
+  （模块/fork/worker 级分发，如 maven `-T 1C -DforkCount=1C
+  -DreuseForks=true`）；禁线程交错类参数（`-Dparallel=methods` 类顺序
+  敏感放大器）；段内测试自身必须无顺序依赖
+- **不虚计功**：框架默认已并行的栈（vitest/go/cargo）零附加参数并注记
+  声明；无 CLI 保守参数的栈（phpunit/dotnet）注记串行，提速手段属仓面
+  配置（paratest/xunit.runner.json）
+- **失败语义**：不短路，全段跑完统一裁决；失败段日志保留可回放——
+  并行化不得吞证据
+
 ## 变异测试纪律
 
 - 变异数字本身不是证据：击杀率达标后须抽样手动复放（注入变异 → 测试红 → 还原 → md5 校验闭环）确认击杀真实；`mvn -q` 下 Maven 增量编译可能不重编改动的 main 类，变异 class 未生效会产出「测试全绿」假象——复放前必须 touch 源文件并确认 `Compiling … source files` 日志行，否则击杀证据无效（2026-09-01 实证：unbindApi BooleanTrueReturn 补杀一度被误判存活）
