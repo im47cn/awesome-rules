@@ -176,6 +176,18 @@ if [ -z "$PY" ]; then
     exit 2
 fi
 
+# pytest-xdist（软依赖，缺席即长层降级串行；安装 pip install pytest-xdist）。
+# 仅长层使用（段内 >5s 实测）：pytest-factory 43s→11s、pytest-scripts
+# 7.3s→3.3s、pytest-ddl-guard 10.9s→6.3s；秒级层 spawn 开销倒挂
+#（api-guard 0.32s→0.56s 实测）不并行。cov 层 xdist 合并无损：实测
+# api-guard 100%、ddl-guard 96.12%，均过 --cov-fail-under 阈。
+XDIST_ARGS=""
+if "$PY" -c 'import xdist' >/dev/null 2>&1; then
+    XDIST_ARGS="-n auto"
+else
+    echo "ℹ️ 未装 pytest-xdist：长层降级串行（pip install pytest-xdist 提速）"
+fi
+
 # ── 陈旧产物清理 ───────────────────────────────────────────────────────
 # 上次运行的 .coverage / __pycache__ 既是 must-not 扫描的 grep 噪音，
 # 也可能被当成新结果读取——启动即清，不读取任何先前输出。
@@ -198,19 +210,22 @@ else
     # shellcheck disable=SC2086  # 层目录按词展开
     require_dir $LAYER_DIRS
 
-    run_layer pytest-scripts "$PY" -m pytest scripts -q
+    # shellcheck disable=SC2086  # XDIST_ARGS 按词展开（空则消隐）
+    run_layer pytest-scripts "$PY" -m pytest scripts -q $XDIST_ARGS
     # 范围 = .factory/tests（与 scripts/run_tests.sh 同口径）：此前扫整棵
     # .factory，工厂链 worktree（.factory/worktrees/<issue>，gitignored 的
     # 全仓检出）被卷入收集即炸（issue #166 实证：嵌套仓同名模块导入失败）。
     # 已随 PR #167 落库（同型收窄），此处注释沿用 WIP 措辞——合并后语义一致。
-    run_layer pytest-factory "$PY" -m pytest .factory/tests -q
+    # shellcheck disable=SC2086  # 同上
+    run_layer pytest-factory "$PY" -m pytest .factory/tests -q $XDIST_ARGS
     # 3 个带 --cov 的套件各写独立 COVERAGE_FILE（.coverage.<suite>）：既保各套件
     # 自身 --cov-fail-under 的独立评估面不被跨套件数据稀释（评审 F1），又供
     # diff-cover 层 combine 汇总（分产物合计，单套件产物会漏掉其余两个的变更行）
     run_layer pytest-api-guard env COVERAGE_FILE="$PWD/.coverage.api-guard" \
         "$PY" -m pytest skills/api-guard/scripts -q
+    # shellcheck disable=SC2086  # 同上
     run_layer pytest-ddl-guard env COVERAGE_FILE="$PWD/.coverage.ddl-guard" \
-        "$PY" -m pytest skills/ddl-guard/scripts -q
+        "$PY" -m pytest skills/ddl-guard/scripts -q $XDIST_ARGS
     run_layer pytest-arch-guard env COVERAGE_FILE="$PWD/.coverage.arch-guard" \
         "$PY" -m pytest skills/arch-guard/scripts -q
     run_layer pytest-impact-guard "$PY" -m pytest skills/impact-guard/scripts/tests -q

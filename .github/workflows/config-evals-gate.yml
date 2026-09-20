@@ -57,7 +57,8 @@ jobs:
       # diff-cover 层（NC19/NC19b）与 doctor T5 均需 coverage+diff_cover，
       # CI 未预装会 fail-closed 拒判。
       - name: Install pytest deps
-        run: pip install pytest pytest-cov diff-cover
+        # pytest-xdist：gauntlet 长层 -n auto 并行（软依赖，缺席自动降级串行）
+        run: pip install pytest pytest-cov diff-cover pytest-xdist
 
       # gauntlet lint-shellcheck 层需要 shellcheck；macOS runner 不自带
       # （ubuntu runner 自带，本地 mac 亦需 brew 安装）。
