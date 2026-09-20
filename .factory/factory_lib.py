@@ -1377,8 +1377,8 @@ def run_parallel_gate(
                 failed.append(seg["tag"])
     except BaseException:
         # 中断（KeyboardInterrupt/信号）也要让取证路径可观测，不留哑尸体：
-        # 逐组 SIGTERM → 限宽等待 → SIGKILL → 收割直接子进程；清理自身
-        # 的异常被吞，不得覆盖原始异常
+        # 逐组 SIGTERM → 限宽等待 → SIGKILL → 收割直接子进程。限宽窗内的
+        # 二次中断与超时同路（升级 SIGKILL），清理异常不外抛、不覆盖原始异常
         print(f"⚠️ 并行门中断，段日志保留: {log_dir}", file=sys.stderr)
         for _i, p in running:
             _kill_group(p.pid, signal.SIGTERM)
@@ -1386,7 +1386,7 @@ def run_parallel_gate(
         for _i, p in running:
             try:
                 p.wait(timeout=max(0.0, deadline - time.monotonic()))
-            except subprocess.TimeoutExpired:
+            except BaseException:   # TimeoutExpired 与限宽窗内二次中断同路：升级收割
                 _kill_group(p.pid, signal.SIGKILL)
                 try:
                     p.wait()

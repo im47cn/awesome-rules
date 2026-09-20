@@ -44,6 +44,7 @@ PY="${PYTHON:-python3}"
 # --failed-tags 文件（每行尾带 \n，供 read -r 逐行回收）。PY 经 PYTHON
 # env 传递（编排器内 $PY 词替换）。
 FAILED=()  # 先于 trap 注册（set -u 下 trap 引用 ${#FAILED[@]}，提前退出不 unbound）
+rc=0  # 先于 trap 注册：trap 串内 rc=$? 对 shellcheck 静态不可见（SC2154 消音，同上先例）
 trap 'rc=$?; if [ $rc -ne 0 ] || [ "${#FAILED[@]}" -gt 0 ]; then
   echo "❌ run_tests 失败 (rc=$rc)" >&2
 fi' EXIT

@@ -458,6 +458,35 @@ class TestRunParallelGate:
                           "while :; do sleep 30; done"}]})
         _assert_dead(int(pid_file.read_text()))
 
+    def test_second_interrupt_during_grace_still_reaps_and_raises_original(
+            self, tmp_path, capsys, monkeypatch):
+        """限宽窗内二次中断：升级 SIGKILL 收割，原始异常照抛（不被顶替）。"""
+        pid_file = tmp_path / "twice.pid"
+
+        class _SecondCtrlC(BaseException):
+            pass
+
+        fired = []
+
+        def _ctrl_c_twice(secs):
+            # 第 1 次中断主循环轮询；第 2 次落进清理 p.wait 的限宽窗——
+            # 未同路升级的清理会从 wait 逃逸，跳过 SIGKILL/收割并顶替原始异常
+            if pid_file.exists() and len(fired) < 2:
+                fired.append(1)
+                if len(fired) == 1:
+                    raise KeyboardInterrupt
+                raise _SecondCtrlC()
+            _REAL_SLEEP(min(secs, 0.05))
+
+        monkeypatch.setattr(fl.time, "sleep", _ctrl_c_twice)
+        with pytest.raises(KeyboardInterrupt):
+            fl.run_parallel_gate(repo_root=tmp_path, cfg={"workers": 0, "segments": [
+                {"tag": "twice",
+                 "shell": f"echo $$ > '{pid_file}'; trap '' TERM; "
+                          "while :; do sleep 30; done"}]})
+        assert "并行门中断，段日志保留" in capsys.readouterr().err
+        _assert_dead(int(pid_file.read_text()))
+
 
 # ───────────────────────── CLI（main parallel-gate） ─────────────────────────
 
