@@ -27,8 +27,7 @@ import factory_lib as fl
 
 
 def _argv_seg(tag, code, *extra_words, **extra):
-    seg = {"tag": tag, "argv": ["$PY", "-c", code, *extra_words]} | extra
-    return seg
+    return {"tag": tag, "argv": ["$PY", "-c", code, *extra_words]} | extra
 
 
 # ───────────────────────── parallel_gate_cfg ─────────────────────────
