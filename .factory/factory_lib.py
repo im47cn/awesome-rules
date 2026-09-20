@@ -8,7 +8,7 @@
    evidence_suites 保证触及的 skills 套件必产出 verbose 证据段。
 3. 熔断判定曾藏于 dispatch.sh heredoc，无法独立验证边界（跨天/重置/上限）。
 4. dispatch 进程编排（后台链/wait/并发槽/硬锁）曾为 bash 进程原语，缺陷类
-   聚集（decisions.md ADR-002）；2026-08-24 下沉本文件（ADR-005）。
+   聚集（docs/adr/ADR-002-a3-maintenance-ledger.md）；2026-08-24 下沉本文件（ADR-005）。
 
 CLI:
   factory_lib.py parse   <logfile> <outjson> <allowed-csv>   # 解析 agent 输出 JSON
@@ -572,7 +572,7 @@ def reject_receipt(triage: dict) -> str:
     return "\n".join(lines)
 
 # ═════════════════════════════════════════════════════════════════════
-# dispatch 进程编排（2026-08-24 自 dispatch.sh 下沉，decisions.md ADR-005）
+# dispatch 进程编排（2026-08-24 自 dispatch.sh 下沉，docs/adr/ADR-005-dispatch-orchestration-python.md）
 #
 # 动机：ADR-002 记账的缺陷类——jobs 表/wait 落空（0d947f60）、管道吞码
 # （61c119c2）、管道早退（a4d81930）、trap 吞错（c749ac5e）——全部是
