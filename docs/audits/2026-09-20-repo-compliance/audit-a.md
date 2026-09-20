@@ -138,7 +138,7 @@ cd /tmp/ar-audit && grep -n '不超过50个字符' tools/git/commit-template.txt
 **问题描述**：README 描述数据库规范「按【强制】【推荐】分级」（两级），该规范自述三级（含【参考】，全文 2 处实际使用）。同为 README:68 的前端规范两级描述经核实属实（12 强制/10 推荐/0 参考），故本条为孤立事实错误。
 
 **证据摘录**：
-- README:62「| [数据库设计规范](steering/database-design-specification.md) | MySQL DDL/DML 设计标准：表、字段、索引、注释、SQL 语句，按【强制】【推荐】分级 |」
+- README:62「| `数据库设计规范(steering/database-design-specification.md)` | MySQL DDL/DML 设计标准：表、字段、索引、注释、SQL 语句，按【强制】【推荐】分级 |」
 - db:8「规则按约束力分为【强制】（必须遵守）、【推荐】（尽可能遵守）与【参考】（提示性说明，如 `''` 与 `NULL` 的语义差异）。」
 
 **复现命令**：
@@ -152,7 +152,7 @@ cd /tmp/ar-audit && sed -n '62p' README.md && sed -n '8p' steering/database-desi
 
 **问题描述**：「按维度拆分为 10 个文件」计数错误：gtsp 维度文件实为 9——括号内 10 个维度名中「项目结构、分层架构」同属 01-project-structure.md 一个文件；目录内第 10 个文件是总入口 README（gtsp/README 索引表 9 行）。与 CLAUDE.md:32「文档不写易腐数字……改写为可执行命令让事实自证」元规则精神相悖。
 
-**证据摘录**：README:73「Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分为 10 个文件（项目结构、分层架构、命名、Feign、MyBatis、日志、异常、配置、注释、CR 清单）。总入口：[steering/gtsp/README.md](steering/gtsp/README.md)。」
+**证据摘录**：README:73「Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分为 10 个文件（项目结构、分层架构、命名、Feign、MyBatis、日志、异常、配置、注释、CR 清单）。总入口：`steering/gtsp/README.md`。」
 
 **复现命令**：
 ```bash
@@ -166,7 +166,7 @@ grep -c '0[0-9]-' steering/gtsp/README.md   # → 9（索引表行数）
 
 **问题描述**：「审查技能（触发式）」清单缺 `/contract-guard`：README:90、hooks/load-steering.sh:89 以及 review-report-standards.md:9（适用范围段）均含该技能，CLAUDE.md 是唯一漏项的清单（仅列 ddl/api/arch/impact 四 guard + doc-gen）。
 
-**证据摘录**：CLAUDE.md:13-19 清单止于「- `/impact-guard` — …」「- `doc-gen` — …」；README:90「| [contract-guard](skills/contract-guard/SKILL.md) | 跨仓契约兼容性设计与审查（japicmp + 下游编译门禁，配 steering 跨仓契约规范） |」
+**证据摘录**：CLAUDE.md:13-19 清单止于「- `/impact-guard` — …」「- `doc-gen` — …」；README:90「| `contract-guard(skills/contract-guard/SKILL.md)` | 跨仓契约兼容性设计与审查（japicmp + 下游编译门禁，配 steering 跨仓契约规范） |」
 
 **复现命令**：
 ```bash
@@ -255,7 +255,7 @@ cd /tmp/ar-audit && grep -n '含 5 个必含字段' steering/database-design-spe
 
 **问题描述**：Assembler 行「见 01 §7」指针落空：01 §7「分层职责与依赖方向」职责表无 Assembler 条目（仅 Controller/AppService/DomainService/Repository 接口/RepositoryImpl/Mapper 六行）；Assembler 实际定义在 01:49（§4 模块表）与 01:193（§17 返回规约）。对照同文件 :25 Converter「见 01 §7」成立（§7 表 RepositoryImpl 行含「PO↔Entity 转换」），证明该指针本可指对。
 
-**证据摘录**：02:17「| 装配器 | `Assembler` | app.application.assembler | `OrderCreateAssembler`（Entity↔DTO 转换，见 [01](01-project-structure.md) §7） |」
+**证据摘录**：02:17「| 装配器 | `Assembler` | app.application.assembler | `OrderCreateAssembler`（Entity↔DTO 转换，见 `01(01-project-structure.md)` §7） |」
 
 **复现命令**：
 ```bash
