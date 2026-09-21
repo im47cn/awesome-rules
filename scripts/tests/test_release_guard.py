@@ -162,6 +162,44 @@ class TestContentHashContract:
         run.rename(run.with_name("other.py"))
         assert compute_content_hash(tmp_path, "demo") != before
 
+    def test_derived_artifacts_do_not_disturb_hash(self, tmp_path):
+        # 2026-09-21 plugin_lock 全红事故回归：重锁时工作区里 pytest 留下的
+        # .pytest_cache（纯文本，静默入哈希）污染了 6 个 skill 的锁定指纹，
+        # fresh clone 上 check 必红。派生产物必须完全排除在文件面之外。
+        make_skill(tmp_path, "demo")
+        before = compute_content_hash(tmp_path, "demo")
+        scripts = tmp_path / "skills" / "demo" / "scripts"
+        (scripts / ".pytest_cache").mkdir()
+        (scripts / ".pytest_cache" / "lastfailed").write_text(
+            '{"tests/test_run.py::test_x": true}', encoding="utf-8")
+        (scripts / "__pycache__").mkdir()
+        (scripts / "__pycache__" / "run.cpython-314.pyc").write_bytes(
+            b"\xcb\x0d\x0d\x0a")
+        (scripts / ".DS_Store").write_bytes(b"\x00\x00\x00Bud1")
+        nested = scripts / "sub" / "__pycache__"
+        nested.mkdir(parents=True)
+        (nested / "x.cpython-314.pyc").write_bytes(b"\xff\xfe")
+        assert compute_content_hash(tmp_path, "demo") == before
+        # 排除不得误伤合法文件：新增正常脚本仍必须改变哈希
+        (scripts / "sub" / "real.py").write_text("z = 3\n", encoding="utf-8")
+        assert compute_content_hash(tmp_path, "demo") != before
+
+    def test_checkout_under_derived_dir_not_blanket_excluded(self, tmp_path):
+        # Sourcery 评审回归（#229，2026-09-21）：_is_derived 只看 scripts_dir
+        # 内相对段——仓库检出到名为 __pycache__ 的目录下时，scripts/** 不
+        # 得因绝对路径祖先段命中被整体排除（否则脚本变更对锁与证据门不可见）。
+        hostile = tmp_path / "__pycache__" / "repo"
+        hostile.mkdir(parents=True)
+        make_skill(hostile, "demo")
+        make_skill(tmp_path, "demo")
+        assert (compute_content_hash(hostile, "demo")
+                == compute_content_hash(tmp_path, "demo"))
+        # 恶意检出路径下排除不得误伤：脚本变更仍必须改变哈希
+        run = hostile / "skills" / "demo" / "scripts" / "run.py"
+        run.write_text("print('changed')\n", encoding="utf-8")
+        assert (compute_content_hash(hostile, "demo")
+                != compute_content_hash(tmp_path, "demo"))
+
     def test_discovery_only_skills_with_scripts(self, tmp_path):
         make_skill(tmp_path, "alpha")
         make_skill(tmp_path, "beta")
@@ -253,7 +291,8 @@ class TestEvidenceGateFailClosed:
         assert verify_skill_evidence(tmp_path) == 2
 
     def test_non_utf8_content_blocked_cleanly(self, tmp_path, capsys):
-        # .DS_Store / __pycache__ 等二进制混入 scripts/** → 干净拦截（非 traceback）
+        # 未知二进制（不在派生产物排除清单内，如误提交的 .bin）混入
+        # scripts/** → 干净拦截（非 traceback）
         make_skill(tmp_path, "sourcery-autofix")
         write_evidence(tmp_path, "sourcery-autofix")
         (tmp_path / "skills" / "sourcery-autofix" / "scripts"

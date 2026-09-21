@@ -16,13 +16,14 @@
     "hooks/hooks.json": "5d2b3580caff3286ee3a7464f1be70daa6ca5de0"
   },
   "evidence": {
-    "api-guard": "sha256:948c8ec28679f813491a145f1f59ba158c065d303f8c2f93a89352d2f758dbb9",
-    "arch-guard": "sha256:bfda75f326d4ec8790917ae7657efcbd5b952d25f22ba5804363c310f3b9b164",
+    "api-guard": "sha256:6abadc5b72455480fbc7ee8edd78388fe0df34afeaf6ddc0bedf673cd0e42975",
+    "arch-guard": "sha256:3df1914e127b8d9bddb90c448b95bcac4366b7dd94e5bdd9cda3de4de09d8fc0",
     "contract-guard": "sha256:17d3704dc3300245679080f1ed60460420414c346e69b86b2f1259ac88c7589f",
-    "ddl-guard": "sha256:4e26370a09974c8277171a022f830ef8f6feeb2876494bdea797d0e6605630ab",
-    "doc-gen": "sha256:fd80126fd991a3a32b83e57ba78f4a82ece789a7728e400c49dea165936214f0",
-    "impact-guard": "sha256:57c8ceb64dbe081b27537cc63ea0f0322ce08f022a2e3e02fc7e6f4bf9e011dd",
-    "skill-evo": "sha256:32887c8d81c767b984cd3f1e89ce9b1a4ac47c81f75c12d8778fb611cc4eda65",
+    "ddl-guard": "sha256:08b26ca7cdba1a0985c9134696ae7f280614f0579f6773bb77db2499ef7132c2",
+    "doc-gen": "sha256:dce9066c667a9a32199ccd68663d2303317c3a9ee0fd3fedfffb03943164fe51",
+    "impact-guard": "sha256:3d39decbfa6822eea1e7269e9c48ba4fd0ea013fe8216527237f2ddcb28e6b18",
+    "skill-evo": "sha256:ccb7a8644a81c98e6ba063e4a27efd29d5aa16008bdb82320e767f82206d6044",
+    "task-flow": "sha256:653d7f3d280c1c3e0255a63d3293511d4b3af72057b4ef9b7a230eb9a614243e",
     "work-report": "sha256:f0207bf9db034e059e83bbd57c78ded688ed63c05e82164bf8e81c43be08e9cb"
   }
 }
