@@ -153,6 +153,10 @@ def _is_derived(path: Path) -> bool:
     计入哈希会让指纹随工作区卫生状况漂移（2026-09-21 plugin_lock
     全红事故：重锁时缓存被静默吞入锁定值）。其余未知二进制不在排除
     之列，仍由读取期 UTF-8 校验干净拦截。
+
+    path 须为枚举根（scripts_dir）内的相对路径：检出位置的祖先段不
+    参与匹配——仓库检出到名为 __pycache__ 等派生产物目录下时，
+    scripts/** 不得被整体误判排除（Sourcery #229 评审，2026-09-21）。
     """
     return (any(part in _DERIVED_PARTS for part in path.parts)
             or path.suffix in _DERIVED_SUFFIXES)
@@ -170,8 +174,9 @@ def skill_source_files(repo_root: Path, skill: str) -> list[Path]:
     files = [base / "SKILL.md"]
     scripts_dir = base / "scripts"
     if scripts_dir.is_dir():
-        files.extend(p for p in scripts_dir.rglob("*")
-                     if p.is_file() and not _is_derived(p))
+        files.extend(
+            p for p in scripts_dir.rglob("*")
+            if p.is_file() and not _is_derived(p.relative_to(scripts_dir)))
     return sorted(
         (p for p in files if p.is_file()),
         key=lambda p: p.relative_to(repo_root).as_posix())

@@ -184,6 +184,22 @@ class TestContentHashContract:
         (scripts / "sub" / "real.py").write_text("z = 3\n", encoding="utf-8")
         assert compute_content_hash(tmp_path, "demo") != before
 
+    def test_checkout_under_derived_dir_not_blanket_excluded(self, tmp_path):
+        # Sourcery 评审回归（#229，2026-09-21）：_is_derived 只看 scripts_dir
+        # 内相对段——仓库检出到名为 __pycache__ 的目录下时，scripts/** 不
+        # 得因绝对路径祖先段命中被整体排除（否则脚本变更对锁与证据门不可见）。
+        hostile = tmp_path / "__pycache__" / "repo"
+        hostile.mkdir(parents=True)
+        make_skill(hostile, "demo")
+        make_skill(tmp_path, "demo")
+        assert (compute_content_hash(hostile, "demo")
+                == compute_content_hash(tmp_path, "demo"))
+        # 恶意检出路径下排除不得误伤：脚本变更仍必须改变哈希
+        run = hostile / "skills" / "demo" / "scripts" / "run.py"
+        run.write_text("print('changed')\n", encoding="utf-8")
+        assert (compute_content_hash(hostile, "demo")
+                != compute_content_hash(tmp_path, "demo"))
+
     def test_discovery_only_skills_with_scripts(self, tmp_path):
         make_skill(tmp_path, "alpha")
         make_skill(tmp_path, "beta")
