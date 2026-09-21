@@ -97,7 +97,7 @@ def _now() -> str:
 
 def _atomic_write(path: Path, text: str) -> None:
     """同目录临时文件 + os.replace，避免半截写入。"""
-    tmp = path.with_name(path.name + f".tmp{os.getpid()}")
+    tmp = path.with_name(f"{path.name}.tmp{os.getpid()}")
     try:
         tmp.write_text(text, encoding="utf-8")
         os.replace(tmp, path)
@@ -106,20 +106,22 @@ def _atomic_write(path: Path, text: str) -> None:
             tmp.unlink()
         except OSError:
             pass
-        raise TaskflowError(f"写入 {path} 失败：{exc}")
+        raise TaskflowError(f"写入 {path} 失败：{exc}") from exc
 
 
 def _strip_quotes(value: str) -> str:
     # 双引号标量按 JSON 解码——与 _render_yaml 的标题渲染对称（json.dumps 的转义
     # 可原样读回）；非 JSON 转义时退回裸剥，兼容人工手写的引号包裹值。
-    if len(value) >= 2 and value[0] == value[-1] == '"':
-        try:
-            decoded = json.loads(value)
-        except json.JSONDecodeError:
+    if len(value) >= 2 and value[0] == value[-1]:
+        quote = value[0]
+        if quote == '"':
+            try:
+                decoded = json.loads(value)
+            except json.JSONDecodeError:
+                return value[1:-1]
+            return decoded if isinstance(decoded, str) else value[1:-1]
+        if quote == "'":
             return value[1:-1]
-        return decoded if isinstance(decoded, str) else value[1:-1]
-    if len(value) >= 2 and value[0] == value[-1] == "'":
-        return value[1:-1]
     return value
 
 
@@ -251,9 +253,8 @@ def _load_yaml(project: Path) -> dict:
     try:
         raw = _parse_simple_yaml(path.read_text(encoding="utf-8"), rel)
     except OSError as exc:
-        raise TaskflowError(f"读取 {rel} 失败：{exc}")
-    unknown = sorted(set(raw) - {"task", "stage", "specs", "artifacts"})
-    if unknown:
+        raise TaskflowError(f"读取 {rel} 失败：{exc}") from exc
+    if unknown := sorted(set(raw) - {"task", "stage", "specs", "artifacts"}):
         raise TaskflowError(
             f"{rel} 存在未识别的顶层键：{'、'.join(unknown)}；本 CLI 只识别 "
             f"task / stage / specs / artifacts（拼错的键会静默使声明失效，故 fail-closed 拒绝）"
@@ -283,9 +284,9 @@ def _load_state(project: Path) -> dict:
     try:
         state = json.loads(path.read_text(encoding="utf-8"))
     except OSError as exc:
-        raise TaskflowError(f"读取 {rel} 失败：{exc}")
+        raise TaskflowError(f"读取 {rel} 失败：{exc}") from exc
     except json.JSONDecodeError as exc:
-        raise TaskflowError(f"{rel} 不是合法 JSON（状态损坏，拒绝继续）：{exc}")
+        raise TaskflowError(f"{rel} 不是合法 JSON（状态损坏，拒绝继续）：{exc}") from exc
     if not isinstance(state, dict):
         raise TaskflowError(f"{rel} 顶层必须是 JSON 对象（状态损坏）")
     if state.get("schema") != STATE_SCHEMA:
@@ -309,7 +310,7 @@ def _read_events(project: Path):
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise TaskflowError(f"读取 {rel} 失败：{exc}")
+        raise TaskflowError(f"读取 {rel} 失败：{exc}") from exc
     good, problems = [], []
     for lineno, line in enumerate(text.splitlines(), 1):
         if not line.strip():
@@ -322,8 +323,7 @@ def _read_events(project: Path):
         if not isinstance(event, dict):
             problems.append(f"第 {lineno} 行不是 JSON 对象")
             continue
-        missing = [k for k in ("ts", "event", "from", "to", "detail") if k not in event]
-        if missing:
+        if missing := [k for k in ("ts", "event", "from", "to", "detail") if k not in event]:
             problems.append(f"第 {lineno} 行缺少字段：{'/'.join(missing)}")
             continue
         if event["event"] not in EVENT_NAMES:
@@ -350,7 +350,7 @@ def _append_event(project: Path, event: str, frm: str, to: str, detail: str) -> 
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(line + "\n")
     except OSError as exc:
-        raise TaskflowError(f"追加审计事件失败（{STATE_DIR}/{EVENTS_NAME}）：{exc}")
+        raise TaskflowError(f"追加审计事件失败（{STATE_DIR}/{EVENTS_NAME}）：{exc}") from exc
 
 
 def _write_state(project: Path, state: dict) -> None:
@@ -367,7 +367,7 @@ def _set_yaml_stage(project: Path, stage: str) -> None:
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise TaskflowError(f"读取 {rel} 失败：{exc}")
+        raise TaskflowError(f"读取 {rel} 失败：{exc}") from exc
     lines = text.splitlines()
     hits = [i for i, line in enumerate(lines) if re.match(r"^stage:\s*\S", line)]
     if len(hits) != 1:
@@ -524,7 +524,7 @@ def _run_script_gate(path: Path, project: Path) -> tuple:
         return True, "通过（exit 0）"
     tail = " ".join((proc.stderr or proc.stdout or "").split())
     if len(tail) > 160:
-        tail = tail[:160] + "…"
+        tail = f"{tail[:160]}…"
     return False, f"执行失败（exit {proc.returncode}）" + (f"：{tail}" if tail else "")
 
 
@@ -587,7 +587,7 @@ def _brief(record: dict, ok: bool = False) -> str:
     failures = [f"{s['path']}（{s['detail']}）" for s in record["specs"] if not s["exists"]]
     failures += [f"{a['path']}（{a['detail']}）" for a in record["artifacts"] if not a["ok"]]
     text = "；".join(failures)
-    return text if len(text) <= 200 else text[:200] + "…"
+    return text if len(text) <= 200 else f"{text[:200]}…"
 
 
 # -- 公共前置 -----------------------------------------------------------------
@@ -631,8 +631,7 @@ def _precheck(args) -> tuple:
     stage = state["stage"]
     if stage == TERMINAL:
         raise TaskflowError(f"任务已归档（{TERMINAL} 为终态，状态目录只读）：不再执行门禁校验或推进")
-    items = yml["artifacts"].get(stage, [])
-    if not items:
+    if not (items := yml["artifacts"].get(stage, [])):
         raise TaskflowError(
             f"阶段 {stage} 未声明任何产物（{STATE_DIR}/{YAML_NAME} 的 artifacts:）"
             f"——门禁产物驱动要求至少一项，拒绝继续"
@@ -683,7 +682,7 @@ def cmd_init(args) -> int:
     try:
         sdir.mkdir()
     except OSError as exc:
-        raise TaskflowError(f"创建 {STATE_DIR}/ 失败：{exc}（请检查项目目录权限）")
+        raise TaskflowError(f"创建 {STATE_DIR}/ 失败：{exc}（请检查项目目录权限）") from exc
     try:
         _atomic_write(sdir / YAML_NAME, _render_yaml(task_id, title, now))
         _write_state(
@@ -695,13 +694,13 @@ def cmd_init(args) -> int:
         raise TaskflowError(
             f"{exc}。初始化按「人读层 → 机器层 → 审计层」三步写入，中途失败会留下残缺 "
             f"{STATE_DIR}/；请人工核对目录内容，无法补齐时删除该目录后重新 `taskflow.py init`"
-        )
+        ) from exc
     print(f"✅ 已初始化任务 {task_id}（{title}）")
     print(f"项目：{project}")
     print(f"状态目录：{STATE_DIR}/（三层：{YAML_NAME} / {STATE_NAME} / {EVENTS_NAME}）")
     print(f"当前阶段：{STAGES[0]}（{STAGE_SEQ}）")
     print("下一步：")
-    print("  1) 创建本阶段产物（声明见 " + f"{STATE_DIR}/{YAML_NAME} 的 artifacts:）：")
+    print(f"  1) 创建本阶段产物（声明见 {STATE_DIR}/{YAML_NAME} 的 artifacts:）：")
     for item in DEFAULT_ARTIFACTS:
         if item[0] == STAGES[0]:
             print(f"     - [{item[1]}] {item[2]}")
@@ -717,7 +716,7 @@ def _render_yaml(task_id: str, title: str, created: str) -> str:
         f"  id: {task_id}",
         f"  title: {json.dumps(title, ensure_ascii=False)}",
         f"  created: {created}",
-        f"# stage 由 CLI 在推进时同步写入；手工修改须与机器层/审计层同时一致（resume 校验三层）。",
+        "# stage 由 CLI 在推进时同步写入；手工修改须与机器层/审计层同时一致（resume 校验三层）。",
         f"stage: {STAGES[0]}",
         "# 追加绑定的规范清单（格式：`- 阶段 | 相对路径`）；先按本仓根解析，其次用户项目根。",
         "# 技能内置的阶段绑定（design → 数据库设计 + API 契约冻结；verify → 测试规范）不可由此移除。",
@@ -802,16 +801,14 @@ def cmd_status(args) -> int:
     if payload["consistent"]:
         print(f"三层对账：一致（yaml={consistency['yaml_stage']} state={consistency['state_stage']} jsonl={consistency['jsonl_stage']}）")
     else:
-        print("三层对账：⚠ 不一致 —— " + "；".join(consistency["problems"]))
+        print(f"三层对账：⚠ 不一致 —— {'；'.join(consistency['problems'])}")
         print("  修复指引：运行 `taskflow.py resume`")
     print(f"当前阶段产物（相对项目根，共 {len(payload['artifacts'])} 项）：")
     if not payload["artifacts"]:
-        print("  （未声明 —— 门禁将拒绝推进，请在 " + f"{STATE_DIR}/{YAML_NAME} 的 artifacts: 声明）")
+        print(f"  （未声明 —— 门禁将拒绝推进，请在 {STATE_DIR}/{YAML_NAME} 的 artifacts: 声明）")
     for art in payload["artifacts"]:
         last = art["last_result"]
-        last_text = "未校验" if not last else (
-            f"{'通过' if last['ok'] else '未通过'}（{last['detail']}）@{last['checked_at']}"
-        )
+        last_text = f"{'通过' if last['ok'] else '未通过'}（{last['detail']}）@{last['checked_at']}" if last else "未校验"
         print(f"  - [{art['kind']}] {art['path']}    上次校验：{last_text}")
     print("绑定规范（当前阶段）：")
     if not payload["specs"]:
@@ -834,7 +831,7 @@ def cmd_verify(args) -> int:
     if passed:
         _append_event(project, "gate", stage, stage, "门禁通过（预检，未推进）")
     else:
-        _append_event(project, "gate", stage, stage, "门禁未通过（预检）：" + _brief(record))
+        _append_event(project, "gate", stage, stage, f"门禁未通过（预检）：{_brief(record)}")
     if args.format == "json":
         print(
             json.dumps(
@@ -874,12 +871,12 @@ def cmd_advance(args) -> int:
     try:
         _write_state(project, state)
         _set_yaml_stage(project, nxt)
-        _append_event(project, "advance", stage, nxt, "门禁通过：" + _brief(record, ok=True))
+        _append_event(project, "advance", stage, nxt, f"门禁通过：{_brief(record, ok=True)}")
     except (TaskflowError, OSError) as exc:
         raise TaskflowError(
             f"{exc}。推进按「机器层 → 人读层 → 审计层」三步写入，中途失败会留下三层漂移；"
             f"请运行 `taskflow.py resume` 复核并按修复指引校正"
-        )
+        ) from exc
     _print_gate_report(record)
     print(f"✅ 已推进：{stage} → {nxt}（进入于 {state['entered_at']}）")
     if nxt == TERMINAL:
@@ -974,7 +971,7 @@ def cmd_audit(args) -> int:
                 print(f"  - {violation}")
     if problems:
         return EXIT_ERROR
-    return EXIT_OK if not violations else EXIT_GATE
+    return EXIT_GATE if violations else EXIT_OK
 
 
 # -- 入口 ---------------------------------------------------------------------
@@ -1012,7 +1009,7 @@ def _build_parser(cmd: str) -> argparse.ArgumentParser:
     if cmd == "init":
         parser.add_argument("--title", default="", help="任务标题（缺省用项目目录名）")
         parser.add_argument("--id", default="", help="任务 id（缺省 TF-YYYYMMDD-<6位十六进制>）")
-    if cmd in ("status", "verify", "resume", "audit"):
+    if cmd in {"status", "verify", "resume", "audit"}:
         parser.add_argument(
             "--format", choices=("text", "json"), default="text", help="输出格式（默认 text）"
         )
@@ -1027,8 +1024,7 @@ def _usage() -> str:
         "",
         "子命令：",
     ]
-    for name, (_, desc) in COMMANDS.items():
-        lines.append(f"  {name:<8} {desc}")
+    lines += [f"  {name:<8} {desc}" for name, (_, desc) in COMMANDS.items()]
     lines += [
         "",
         f"状态机：{STAGE_SEQ}（archive 为终态只读）",
