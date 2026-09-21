@@ -61,10 +61,11 @@ def latest_stable_tag() -> str | None:
             ["git", "merge-base", "--is-ancestor", t, "HEAD"],
             cwd=REPO,
             capture_output=True,
-        ).returncode
-        == 0
+        ).returncode == 0
     ]:
-        return sorted(reachable, key=lambda t: tuple(int(x) for x in t[1:].split(".")))[-1]
+        return sorted(
+            reachable, key=lambda t: tuple(int(x) for x in t[1:].split("."))
+        )[-1]
     else:
         return None
 
