@@ -153,9 +153,9 @@ def parse_prompts(prompts_path: Path):
         text = text[: km.start()] + text[km.end():]
 
     blocks = re.split(r"(?m)^---\s*$", text)
+    prompts = []
     if len(blocks) > 1:
         # 围栏模式：逐块 → prompt
-        prompts = []
         for block in blocks:
             bullets = [m[1].strip() for line in block.split("\n")
                        if (m := re.match(r"^[-*]\s+(.+)", line.strip()))]
@@ -168,7 +168,6 @@ def parse_prompts(prompts_path: Path):
                     prompts.append(compact)
     else:
         # 无围栏 → 既有纯 bullet 行为（零回归）
-        prompts = []
         for line in text.split("\n"):
             line = line.strip()
             if m := re.match(r"^[-*]\s+(.+)", line):
