@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [0.7.1](https://github.com/im47cn/awesome-rules/compare/v0.7.0...v0.7.1) (2026-09-21)
+
+### 📝 文档
+
+* **dist:** 平台分发矩阵 platform-matrix 入库 + gtsp README 编号对照增补 ([e20e350](https://github.com/im47cn/awesome-rules/commit/e20e3508627900d351b9c9006a1f0cab15af72cf)), references [6/#7](https://github.com/im47cn/awesome-rules/issues/7)
+* **readme:** 登记 platform-matrix 分发矩阵文档行 ([94d26fb](https://github.com/im47cn/awesome-rules/commit/94d26fb15238be3227b19b9930bbef99a670ccf8))
 ## [0.7.0](https://github.com/im47cn/awesome-rules/compare/v0.6.0...v0.7.0) (2026-09-20)
 
 ### ✨ 新功能

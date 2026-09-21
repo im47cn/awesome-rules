@@ -39,6 +39,7 @@ awesome-rules/
 │   └── plugin_lock.py                 # 插件安装入口 blob 锁定（zero-regression 门禁）
 ├── docs/                              # 文档
 │   ├── ai-coding-tools-setup.md       # 插件安装指南
+│   ├── platform-matrix.md             # 平台分发矩阵（三源交叉基线，漂移上报锚点）
 │   └── design/                        # 技能设计文档（doc-gen 可信化 / impact-guard）
 ├── CONTRIBUTING.md                    # 贡献指南
 ├── .claude-plugin/                    # Claude Code 插件清单
