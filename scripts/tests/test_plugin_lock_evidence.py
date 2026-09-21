@@ -109,6 +109,24 @@ class TestMalformedOrUnreadable:
         errs = P.check_evidence_lock(P.load_lock())
         assert len(errs) == 1 and "evidence 节格式非法" in errs[0]
 
+    def test_falsy_non_dict_evidence_rejected_not_skipped(self, lockrepo):
+        """falsy 非 dict 节（[]/""/0/false/null）：报格式错，不得混同缺节跳过。"""
+        P.update()
+        for bad in ([], "", 0, False, None):
+            data = json.loads(P.LOCK_FILE.read_text(encoding="utf-8"))
+            data["evidence"] = bad
+            P.LOCK_FILE.write_text(json.dumps(data), encoding="utf-8")
+            errs = P.check_evidence_lock(P.load_lock())
+            assert len(errs) == 1 and "evidence 节格式非法" in errs[0], bad
+
+    def test_empty_dict_evidence_tolerated(self, lockrepo):
+        """空 dict 节：无指纹可校验，容错跳过（save_lock 对空 evidence 不写节）。"""
+        P.update()
+        data = json.loads(P.LOCK_FILE.read_text(encoding="utf-8"))
+        data["evidence"] = {}
+        P.LOCK_FILE.write_text(json.dumps(data), encoding="utf-8")
+        assert P.check_evidence_lock(P.load_lock()) == []
+
     def test_non_utf8_content_clean_error(self, lockrepo):
         """技能内容不可读：归入错误清单而非崩溃。"""
         P.update()

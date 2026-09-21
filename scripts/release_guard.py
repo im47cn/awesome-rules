@@ -14,7 +14,9 @@
      replay-evidence/<skill>.json）；缺失 / 内容漂移 / schema 不识别 /
      字段损坏一律拦截（exit 2）。登记集初始为空（政策见常量定义处）；
      --verify-evidence 子命令仍按全量 scope 审计。唯一逃逸
-     RELEASE_EVIDENCE_SKIP=1 仅限测试。
+     RELEASE_EVIDENCE_SKIP=1 仅限测试注入（allow_skip=True 参数 +
+     环境变量同时成立才生效；decide()/--verify-evidence 生产入口
+     一律不传 allow_skip，环境变量在发布路径不产生任何放行效果）。
   1. 按仓库惯例独立计算期望 bump（常规语义，无 preMajor 降级）
   2. catv --dry-run 取工具目标版本
   3. 一致 → 原生执行；不一致 → 打印原因并 --release-as <期望> 纠偏执行
@@ -121,8 +123,9 @@ def interval_commits(base: str | None) -> list[dict]:
 # 评测证据门禁（Comet 借鉴点 #4，@date 2026-09-20）
 # 发布物 = 技能内容；技能内容变更必须携带对应 replay-eval 证据才能过发布门。
 # 契约（与 B 路 skill-evo 产出统一，一字不差，冲突必须上报）：
-#   content_hash = sha256( skills/<skill>/SKILL.md 与 skills/<skill>/scripts/**
-#                          按路径字典序逐文件 UTF-8 内容顺序拼接 )
+#   content_hash = sha256( 逐文件摘要清单；条目 = "<文件内容 sha256 hex>␣␣<skill 内相对 posix 路径>\n"，
+#                          按路径字典序排列后整体拼接——路径与边界参与哈希，
+#                          文件改名/增删/跨文件内容重排（"ab"+"c" vs "a"+"bc"）均改变 hash )
 #   evidence     = skills/skill-evo/artifacts/replay-evidence/<skill>.json
 # ---------------------------------------------------------------------------
 
@@ -148,12 +151,20 @@ def skill_source_files(repo_root: Path, skill: str) -> list[Path]:
 
 
 def compute_content_hash(repo_root: Path, skill: str) -> str:
-    """契约 content_hash：逐文件 UTF-8 内容顺序拼接后整体 sha256。
+    """契约 content_hash：逐文件摘要清单（sha256sum 风格）整体 sha256。
 
-    非 UTF-8 文件在读取期直接抛错（由调用方归入拦截），不静默降级。
+    manifest 条目 = "{文件内容 sha256 hex}  {skill 内相对 posix 路径}\\n"，
+    按 skill_source_files 的路径字典序逐条拼接后整体取 sha256。路径与
+    边界参与哈希：文件改名、增删、跨文件内容重排（如 "ab"+"c" vs
+    "a"+"bc"）都会改变 hash。非 UTF-8 文件在读取期直接抛错（由调用方
+    归入拦截），不静默降级。
     """
-    parts = [p.read_text(encoding="utf-8") for p in skill_source_files(repo_root, skill)]
-    return "sha256:" + hashlib.sha256("".join(parts).encode("utf-8")).hexdigest()
+    base = repo_root / "skills" / skill
+    manifest = "".join(
+        f"{hashlib.sha256(p.read_text(encoding='utf-8').encode('utf-8')).hexdigest()}"
+        f"  {p.relative_to(base).as_posix()}\n"
+        for p in skill_source_files(repo_root, skill))
+    return "sha256:" + hashlib.sha256(manifest.encode("utf-8")).hexdigest()
 
 
 def discover_evidence_skills(repo_root: Path) -> list[str]:
@@ -239,18 +250,22 @@ def _validate_evidence(ev: object, skill: str, expect_hash: str) -> list[str]:
 EVIDENCE_ENROLLED: tuple[str, ...] = ()
 
 def verify_skill_evidence(repo_root: Path = REPO,
-                          skills: list[str] | None = None) -> int:
+                          skills: list[str] | None = None,
+                          *, allow_skip: bool = False) -> int:
     """发布门禁：技能内容 hash ↔ 评测证据绑定校验（fail-closed）。
 
     校验面：默认 skills/ 下所有含 scripts/ 的 skill，或参数/锁清单指定集。
     返回码：0 = 全部通过（输出 skill → hash 前 12 位 → pass_cap_k 核对清单）；
             2 = 拦截（证据缺失 / 内容漂移 / schema 不识别 / JSON·字段损坏）。
-    唯一逃逸：RELEASE_EVIDENCE_SKIP=1（仅限测试环境，stderr 醒目警告）——
-    除此之外无任何静默放行路径。
+    唯一逃逸：allow_skip=True（仅限测试注入）且 RELEASE_EVIDENCE_SKIP=1
+    ——stderr 醒目警告；decide()/--verify-evidence 生产入口一律不传
+    allow_skip，环境变量在发布路径不产生任何放行效果——除此之外无任何
+    静默放行路径。
     """
-    if os.environ.get(_SKIP_ENV) == "1":
+    if allow_skip and os.environ.get(_SKIP_ENV) == "1":
         print(f"⚠⚠⚠ 警告：{_SKIP_ENV}=1 —— 已跳过评测证据门禁！"
-              "该开关仅限测试环境，禁止用于正式发布。", file=sys.stderr)
+              "该开关仅限测试注入（allow_skip=True + 环境变量同时成立），"
+              "生产入口不受其影响。", file=sys.stderr)
         return 0
 
     scope = skills if skills is not None else discover_evidence_skills(repo_root)
@@ -269,6 +284,10 @@ def verify_skill_evidence(repo_root: Path = REPO,
             continue
         try:
             ev = json.loads(ev_file.read_text(encoding="utf-8"))
+        except OSError as e:
+            # 证据文件存在但不可读（权限等）：归入干净拦截而非 traceback
+            errors.append(f"{skill}: 证据文件不可读（{type(e).__name__}: {e}）")
+            continue
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             errors.append(f"{skill}: 证据 JSON 损坏（{e}）")
             continue

@@ -133,9 +133,34 @@ class TestContentHashContract:
         sub = tmp_path / "skills" / "demo" / "scripts" / "sub"
         sub.mkdir()
         (sub / "b.py").write_text("y = 2\n", encoding="utf-8")
-        # SKILL.md（大写 S）路径字典序先于 scripts/**；逐文件 UTF-8 拼接后整体 sha256
-        expect = hashlib.sha256("# 标题\nx = 1\ny = 2\n".encode("utf-8")).hexdigest()
+        # manifest 契约：条目 "{sha256(文件内容)hex}  {skill 内相对 posix 路径}\n"
+        # 按 skill_source_files 的路径字典序逐条拼接后整体 sha256
+        # （SKILL.md 大写 S 先于 scripts/**）
+        def _entry(content, rel):
+            return (hashlib.sha256(content.encode("utf-8")).hexdigest()
+                    + "  " + rel + "\n")
+        manifest = (_entry("# 标题\n", "SKILL.md")
+                    + _entry("x = 1\n", "scripts/run.py")
+                    + _entry("y = 2\n", "scripts/sub/b.py"))
+        expect = hashlib.sha256(manifest.encode("utf-8")).hexdigest()
         assert compute_content_hash(tmp_path, "demo") == f"sha256:{expect}"
+
+    def test_concat_boundary_collision_impossible(self, tmp_path):
+        # 跨文件拼接歧义回归（CodeRabbit 2026-09-21）：旧算法 "ab"+"c" 与
+        # "a"+"bc" 内容拼接相同 → hash 相同；manifest 化后必须区分
+        make_skill(tmp_path, "one", body="ab", script="c")
+        make_skill(tmp_path, "two", body="a", script="bc")
+        assert (compute_content_hash(tmp_path, "one")
+                != compute_content_hash(tmp_path, "two"))
+
+    def test_rename_changes_hash(self, tmp_path):
+        # 路径参与哈希回归：同内容改名（scripts/run.py → scripts/other.py）
+        # 必须漂移（旧算法对单脚本改名不敏感）
+        make_skill(tmp_path, "demo")
+        before = compute_content_hash(tmp_path, "demo")
+        run = tmp_path / "skills" / "demo" / "scripts" / "run.py"
+        run.rename(run.with_name("other.py"))
+        assert compute_content_hash(tmp_path, "demo") != before
 
     def test_discovery_only_skills_with_scripts(self, tmp_path):
         make_skill(tmp_path, "alpha")
@@ -236,6 +261,14 @@ class TestEvidenceGateFailClosed:
         assert verify_skill_evidence(tmp_path) == 2
         err = capsys.readouterr().err
         assert "sourcery-autofix" in err and "UTF-8" in err
+    def test_unreadable_evidence_blocked_cleanly(self, tmp_path, capsys):
+        # 证据文件存在但不可读（权限）：归入错误清单而非 traceback（exit 码语义不混淆）
+        make_skill(tmp_path, "api-guard")
+        p = write_evidence(tmp_path, "api-guard")
+        p.chmod(0o000)
+        assert verify_skill_evidence(tmp_path) == 2
+        err = capsys.readouterr().err
+        assert "api-guard" in err and "不可读" in err
 
     def test_explicit_scope_partial_failure(self, tmp_path, capsys):
         make_skill(tmp_path, "api-guard")
@@ -254,9 +287,18 @@ class TestEscapeHatch:
     def test_skip_env_passes_with_loud_warning(self, tmp_path, capsys, monkeypatch):
         make_skill(tmp_path, "api-guard")  # 无证据本应拦
         monkeypatch.setenv("RELEASE_EVIDENCE_SKIP", "1")
-        assert verify_skill_evidence(tmp_path) == 0
+        assert verify_skill_evidence(tmp_path, allow_skip=True) == 0
         err = capsys.readouterr().err
         assert "RELEASE_EVIDENCE_SKIP" in err and "警告" in err
+
+    def test_skip_env_powerless_without_test_injection(self, tmp_path, capsys,
+                                                       monkeypatch):
+        # 生产语义（CodeRabbit 2026-09-21）：不传 allow_skip（即 decide()/
+        # --verify-evidence 的调用形状）时，环境变量不产生任何放行效果
+        make_skill(tmp_path, "api-guard")  # 无证据
+        monkeypatch.setenv("RELEASE_EVIDENCE_SKIP", "1")
+        assert verify_skill_evidence(tmp_path) == 2
+        assert "缺失" in capsys.readouterr().err
 
 
 class TestDecideIntegration:

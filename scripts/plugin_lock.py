@@ -144,13 +144,17 @@ def check_evidence_lock(lock_data: dict) -> list[str]:
     （存在性 / schema / hash 匹配）归 release_guard.verify_skill_evidence，
     两者互补、不重复实现。
     """
-    locked_ev = lock_data.get("evidence") or {}
-    if not locked_ev:
+    if "evidence" not in lock_data:
+        # 旧锁文件无 evidence 节：完全跳过（向后兼容）
         return []
+    locked_ev = lock_data["evidence"]
     if not isinstance(locked_ev, dict):
-        # 手改锁文件的非 dict 真值节：干净报错而非 TypeError 崩溃
+        # 手改锁文件的非 dict 节（含 []/""/0/false/null 等 falsy 值）：
+        # 干净报错而非 TypeError 崩溃，也不得混同缺节静默跳过
         return ["锁文件 evidence 节格式非法（期望 skill→hash 映射，"
                 f"实际 {type(locked_ev).__name__}）——运行 --update 重新生成"]
+    if not locked_ev:
+        return []
     errors = []
     current = set(release_guard.discover_evidence_skills(REPO_ROOT))
     for skill in sorted(locked_ev):
