@@ -506,6 +506,8 @@ def _run_script_gate(path: Path, project: Path) -> tuple:
     else:
         return False, "不可执行（非 .py 且无执行权限）"
     try:
+        # argv 列表形式且不启用 shell：无注入面（含空格/元字符的路径按单参数
+        # 传递）；shlex 转义仅适用于 shell=True 的字符串拼接，此处不适用
         proc = subprocess.run(
             cmd,
             cwd=str(project),
