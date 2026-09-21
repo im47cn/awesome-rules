@@ -9,6 +9,9 @@ git blob SHA）。awesome-rules 无 npm 产物，发布物 = 各 AI 工具的插
 - 每个入口文件以 `git hash-object`（内容 blob SHA）锁定于 scripts/plugin-lock.json
 - check：内容漂移 / 文件缺失 / 目录内出现未锁定的新清单 → 非零退出（exit 1）
 - --update：有意变更后刷新锁定值（需随变更一起提交）
+- 锁清单可选纳入 evidence 指纹节（skill → content_hash）：check 时校验技能
+  内容漂移；旧锁文件无该节则跳过（向后兼容）。算法与 release_guard
+  评测证据门禁同一实现源（sibling import，不复制实现）
 
 用法:
   python3 scripts/plugin_lock.py            # check（默认）
@@ -23,6 +26,10 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
+# content_hash 单一真相源在 release_guard（同目录 sibling import），禁止复制实现
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import release_guard  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LOCK_FILE = Path(__file__).resolve().parent / "plugin-lock.json"
@@ -102,12 +109,15 @@ def load_lock() -> dict:
     return {}
 
 
-def save_lock(entries: dict) -> None:
+def save_lock(entries: dict, evidence: dict | None = None) -> None:
+    """evidence 为可选节：空/缺省时不写入（保持旧锁文件形状）。"""
+    data = {"description": "安装入口清单 blob 锁定（zero-regression 模式）；"
+                           "有意变更后运行 scripts/plugin_lock.py --update 刷新",
+            "files": dict(sorted(entries.items()))}
+    if evidence:
+        data["evidence"] = dict(sorted(evidence.items()))
     LOCK_FILE.write_text(json.dumps(
-        {"description": "安装入口清单 blob 锁定（zero-regression 模式）；"
-                        "有意变更后运行 scripts/plugin_lock.py --update 刷新",
-         "files": dict(sorted(entries.items()))},
-        ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def update() -> int:
@@ -116,14 +126,62 @@ def update() -> int:
         h = _file_hash(REPO_ROOT / rel)
         if h:
             entries[rel] = h
-    save_lock(entries)
+    ev = {s: release_guard.compute_content_hash(REPO_ROOT, s)
+          for s in release_guard.discover_evidence_skills(REPO_ROOT)}
+    save_lock(entries, ev)
     print(f"✅ 已锁定 {len(entries)} 个安装入口 → {LOCK_FILE}")
+    if ev:
+        print(f"   另含 {len(ev)} 条 evidence 指纹（技能内容 hash，"
+              "与 release_guard 评测证据门禁同一算法源）")
     print("   锁定文件需随清单变更一起提交")
     return 0
 
 
+def check_evidence_lock(lock_data: dict) -> list[str]:
+    """evidence 指纹节校验（可选节：旧锁文件无此节 → 空清单，向后兼容）。
+
+    指纹只锁"技能内容 ↔ 重锁时点"的漂移；证据文件本身的绑定校验
+    （存在性 / schema / hash 匹配）归 release_guard.verify_skill_evidence，
+    两者互补、不重复实现。
+    """
+    if "evidence" not in lock_data:
+        # 旧锁文件无 evidence 节：完全跳过（向后兼容）
+        return []
+    locked_ev = lock_data["evidence"]
+    if not isinstance(locked_ev, dict):
+        # 手改锁文件的非 dict 节（含 []/""/0/false/null 等 falsy 值）：
+        # 干净报错而非 TypeError 崩溃，也不得混同缺节静默跳过
+        return ["锁文件 evidence 节格式非法（期望 skill→hash 映射，"
+                f"实际 {type(locked_ev).__name__}）——运行 --update 重新生成"]
+    if not locked_ev:
+        return []
+    errors = []
+    current = set(release_guard.discover_evidence_skills(REPO_ROOT))
+    for skill in sorted(locked_ev):
+        h = str(locked_ev[skill])
+        if skill not in current:
+            errors.append(f"evidence 指纹悬空: {skill}"
+                          "（skill 已删除/改名——运行 --update 刷新）")
+            continue
+        try:
+            actual = release_guard.compute_content_hash(REPO_ROOT, skill)
+        except (UnicodeDecodeError, OSError) as e:
+            errors.append(f"{skill}: 内容不可读或非 UTF-8，无法计算指纹"
+                          f"（{type(e).__name__}）")
+            continue
+        if actual != h:
+            errors.append(f"skill 内容漂移（evidence 指纹）: {skill}\n    "
+                          f"锁定 {h[:19]}… 实际 {actual[:19]}…"
+                          "（有意变更请 --update 并重跑 replay-eval）")
+    for skill in sorted(current - set(locked_ev)):
+        errors.append(f"未纳入 evidence 锁定: {skill}"
+                      "（新增含 scripts/ 的 skill——运行 --update 或确认其合法性）")
+    return errors
+
+
 def check() -> int:
-    locked = load_lock().get("files")
+    lock_data = load_lock()
+    locked = lock_data.get("files")
     if not locked:
         print("❌ 锁定文件缺失或为空，先运行: python3 scripts/plugin_lock.py --update",
               file=sys.stderr)
@@ -152,7 +210,11 @@ def check() -> int:
                           f"实际 {str(actual)[:16]}…"
                           f"（有意变更请 --update，意外漂移请排查）")
 
-    # 4. 版本一致性：委托 tools/check_plugin_versions（单一真相源）。
+    # 4. evidence 指纹节（可选）：技能内容漂移检测；旧锁文件无此节 → 跳过
+    #    （向后兼容），算法与 release_guard 评测证据门禁同一实现源。
+    errors.extend(check_evidence_lock(lock_data))
+
+    # 5. 版本一致性：委托 tools/check_plugin_versions（单一真相源）。
     #    本脚本原有一份独立的版本比对逻辑，与 gauntlet plugin-versions
     #    层是同一不变量的两处实现——清单增删要改两处、必然漂移。委托后
     #    语义还更强（tracked 面未登记清单硬失败 / 未跟踪发布面漂移 /

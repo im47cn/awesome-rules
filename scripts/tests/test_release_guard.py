@@ -1,11 +1,17 @@
-"""release_guard 防呆逻辑单测——根因为 catv 0.x preMajor 与仓库惯例冲突。"""
+"""release_guard 防呆逻辑单测——catv 0.x preMajor 纠偏 + 评测证据门禁（fail-closed）。"""
 
+import hashlib
+import json
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from release_guard import bump_version, expected_bump, parse_catv_target
+import release_guard
+from release_guard import (bump_version, compute_content_hash,
+                           discover_evidence_skills, expected_bump,
+                           parse_catv_target, verify_skill_evidence)
 
 
 def C(header, body=""):
@@ -73,3 +79,258 @@ class TestRootCauseScenario:
         assert parse_catv_target(
             "✔ bumping version in package.json from 0.4.0 to 0.4.1"
         ) == "0.4.1"
+
+
+# ---------------------------------------------------------------------------
+# 评测证据门禁（@date 2026-09-20）：fixture 为 tmp 仓（conftest 已剥 GIT_*），
+# evidence 文件按 B 路 replay-evidence/1 契约自造——B 的实际产物不在本 worktree。
+# ---------------------------------------------------------------------------
+
+SKILL_BODY = "# 用法\n示例技能正文\n"
+SCRIPT_BODY = "print('hi')\n"
+
+
+def make_skill(repo, name, body=SKILL_BODY, script=SCRIPT_BODY):
+    d = repo / "skills" / name
+    (d / "scripts").mkdir(parents=True)
+    (d / "SKILL.md").write_text(body, encoding="utf-8")
+    (d / "scripts" / "run.py").write_text(script, encoding="utf-8")
+
+
+def write_evidence(repo, name, **over):
+    """B 路 replay-evidence/1 契约格式的 fixture；over 值 None 表示删除该键。
+
+    参数名刻意用 name：契约字段 skill 需能经 **over 覆盖（同名参数会截胡）。
+    """
+    ev = {
+        "schema": "replay-evidence/1",
+        "skill": name,
+        "content_hash": compute_content_hash(repo, name),
+        "generated_at": "2026-09-20T10:00:00+08:00",
+        "k": 3,
+        "pass_at_k": 0.83,
+        "pass_cap_k": 0.67,
+        "invocation": {"skill_invoked": True, "evidence": "stream-json"},
+        "cases": 12,
+    }
+    for key, val in over.items():
+        if val is None:
+            ev.pop(key, None)
+        else:
+            ev[key] = val
+    p = (repo / "skills" / "skill-evo" / "artifacts"
+         / "replay-evidence" / f"{name}.json")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(ev, ensure_ascii=False), encoding="utf-8")
+    return p
+
+
+class TestContentHashContract:
+    """跨路契约钉死：content_hash 算法漂移（本路或 B 路）必须在此红。"""
+
+    def test_algorithm_pinned(self, tmp_path):
+        make_skill(tmp_path, "demo", body="# 标题\n", script="x = 1\n")
+        sub = tmp_path / "skills" / "demo" / "scripts" / "sub"
+        sub.mkdir()
+        (sub / "b.py").write_text("y = 2\n", encoding="utf-8")
+        # manifest 契约：条目 "{sha256(文件内容)hex}  {skill 内相对 posix 路径}\n"
+        # 按 skill_source_files 的路径字典序逐条拼接后整体 sha256
+        # （SKILL.md 大写 S 先于 scripts/**）
+        def _entry(content, rel):
+            return (hashlib.sha256(content.encode("utf-8")).hexdigest()
+                    + "  " + rel + "\n")
+        manifest = (_entry("# 标题\n", "SKILL.md")
+                    + _entry("x = 1\n", "scripts/run.py")
+                    + _entry("y = 2\n", "scripts/sub/b.py"))
+        expect = hashlib.sha256(manifest.encode("utf-8")).hexdigest()
+        assert compute_content_hash(tmp_path, "demo") == f"sha256:{expect}"
+
+    def test_concat_boundary_collision_impossible(self, tmp_path):
+        # 跨文件拼接歧义回归（CodeRabbit 2026-09-21）：旧算法 "ab"+"c" 与
+        # "a"+"bc" 内容拼接相同 → hash 相同；manifest 化后必须区分
+        make_skill(tmp_path, "one", body="ab", script="c")
+        make_skill(tmp_path, "two", body="a", script="bc")
+        assert (compute_content_hash(tmp_path, "one")
+                != compute_content_hash(tmp_path, "two"))
+
+    def test_rename_changes_hash(self, tmp_path):
+        # 路径参与哈希回归：同内容改名（scripts/run.py → scripts/other.py）
+        # 必须漂移（旧算法对单脚本改名不敏感）
+        make_skill(tmp_path, "demo")
+        before = compute_content_hash(tmp_path, "demo")
+        run = tmp_path / "skills" / "demo" / "scripts" / "run.py"
+        run.rename(run.with_name("other.py"))
+        assert compute_content_hash(tmp_path, "demo") != before
+
+    def test_discovery_only_skills_with_scripts(self, tmp_path):
+        make_skill(tmp_path, "alpha")
+        make_skill(tmp_path, "beta")
+        (tmp_path / "skills" / "plain").mkdir()  # 无 scripts/ → 不在校验面
+        (tmp_path / "skills" / "loose.md").write_text("x")  # 散文件 → 忽略
+        assert discover_evidence_skills(tmp_path) == ["alpha", "beta"]
+
+
+class TestEvidenceGateQuadrants:
+    """fail-closed 四象限：匹配放行 / hash 不匹配拦 / 证据缺失拦 / schema 不识别拦。"""
+
+    def test_match_passes_with_checklist(self, tmp_path, capsys):
+        make_skill(tmp_path, "api-guard")
+        write_evidence(tmp_path, "api-guard")
+        assert verify_skill_evidence(tmp_path) == 0
+        out = capsys.readouterr().out
+        # 契约清单格式钉死：skill → hash 前 12 位（sha256:+12hex）→ pass_cap_k
+        assert re.search(r"api-guard\s+sha256:[0-9a-f]{12}\s+pass_cap_k=0\.67", out)
+
+    def test_hash_mismatch_blocked(self, tmp_path, capsys):
+        make_skill(tmp_path, "api-guard")
+        write_evidence(tmp_path, "api-guard", content_hash="sha256:" + "0" * 64)
+        assert verify_skill_evidence(tmp_path) == 2
+        err = capsys.readouterr().err
+        assert "api-guard" in err and "漂移" in err
+
+    def test_content_drift_blocked(self, tmp_path, capsys):
+        make_skill(tmp_path, "arch-guard")
+        write_evidence(tmp_path, "arch-guard")
+        (tmp_path / "skills" / "arch-guard" / "SKILL.md").write_text("# 改动\n")
+        assert verify_skill_evidence(tmp_path) == 2
+        assert "漂移" in capsys.readouterr().err
+
+    def test_missing_evidence_blocked(self, tmp_path, capsys):
+        make_skill(tmp_path, "ddl-guard")
+        assert verify_skill_evidence(tmp_path) == 2
+        err = capsys.readouterr().err
+        assert "ddl-guard" in err and "缺失" in err
+        assert "replay-evidence/ddl-guard.json" in err
+
+    def test_unknown_schema_blocked(self, tmp_path, capsys):
+        make_skill(tmp_path, "api-guard")
+        write_evidence(tmp_path, "api-guard", schema="replay-evidence/2")
+        assert verify_skill_evidence(tmp_path) == 2
+        assert "schema" in capsys.readouterr().err
+
+
+class TestEvidenceGateFailClosed:
+    """契约其余拦截语义：JSON 损坏 / 字段缺失 / 类型不符 / 时间戳 / 指定集。"""
+
+    def test_broken_json_blocked(self, tmp_path, capsys):
+        make_skill(tmp_path, "doc-gen")
+        p = (tmp_path / "skills" / "skill-evo" / "artifacts"
+             / "replay-evidence" / "doc-gen.json")
+        p.parent.mkdir(parents=True)
+        p.write_text("{not json", encoding="utf-8")
+        assert verify_skill_evidence(tmp_path) == 2
+        assert "损坏" in capsys.readouterr().err
+
+    def test_missing_field_blocked(self, tmp_path):
+        make_skill(tmp_path, "impact-guard")
+        write_evidence(tmp_path, "impact-guard", k=None)
+        assert verify_skill_evidence(tmp_path) == 2
+
+    def test_wrong_type_blocked(self, tmp_path):
+        make_skill(tmp_path, "impact-guard")
+        write_evidence(tmp_path, "impact-guard", pass_cap_k="0.67")
+        assert verify_skill_evidence(tmp_path) == 2
+
+    def test_bool_not_int_blocked(self, tmp_path):
+        # bool 是 int 子类，字段校验必须排除
+        make_skill(tmp_path, "impact-guard")
+        write_evidence(tmp_path, "impact-guard", cases=True)
+        assert verify_skill_evidence(tmp_path) == 2
+
+    def test_bad_iso8601_blocked(self, tmp_path):
+        make_skill(tmp_path, "impact-guard")
+        write_evidence(tmp_path, "impact-guard", generated_at="2026-13-45 99:99")
+        assert verify_skill_evidence(tmp_path) == 2
+
+    def test_z_suffix_iso8601_accepted(self, tmp_path):
+        make_skill(tmp_path, "impact-guard")
+        write_evidence(tmp_path, "impact-guard", generated_at="2026-09-20T02:00:00Z")
+        assert verify_skill_evidence(tmp_path) == 0
+
+    def test_skill_field_mismatch_blocked(self, tmp_path):
+        make_skill(tmp_path, "impact-guard")
+        write_evidence(tmp_path, "impact-guard", skill="other-skill")
+        assert verify_skill_evidence(tmp_path) == 2
+
+    def test_non_utf8_content_blocked_cleanly(self, tmp_path, capsys):
+        # .DS_Store / __pycache__ 等二进制混入 scripts/** → 干净拦截（非 traceback）
+        make_skill(tmp_path, "sourcery-autofix")
+        write_evidence(tmp_path, "sourcery-autofix")
+        (tmp_path / "skills" / "sourcery-autofix" / "scripts"
+         / "blob.bin").write_bytes(b"\xff\xfe\x00")
+        assert verify_skill_evidence(tmp_path) == 2
+        err = capsys.readouterr().err
+        assert "sourcery-autofix" in err and "UTF-8" in err
+    def test_unreadable_evidence_blocked_cleanly(self, tmp_path, capsys):
+        # 证据文件存在但不可读（权限）：归入错误清单而非 traceback（exit 码语义不混淆）
+        make_skill(tmp_path, "api-guard")
+        p = write_evidence(tmp_path, "api-guard")
+        p.chmod(0o000)
+        assert verify_skill_evidence(tmp_path) == 2
+        err = capsys.readouterr().err
+        assert "api-guard" in err and "不可读" in err
+
+    def test_explicit_scope_partial_failure(self, tmp_path, capsys):
+        make_skill(tmp_path, "api-guard")
+        make_skill(tmp_path, "arch-guard")
+        write_evidence(tmp_path, "api-guard")  # arch-guard 无证据
+        assert verify_skill_evidence(tmp_path, skills=["arch-guard"]) == 2
+        err = capsys.readouterr().err
+        assert "arch-guard" in err and "api-guard" not in err
+
+    def test_empty_scope_passes_with_note(self, tmp_path, capsys):
+        assert verify_skill_evidence(tmp_path) == 0
+        assert "无可校验对象" in capsys.readouterr().out
+
+
+class TestEscapeHatch:
+    def test_skip_env_passes_with_loud_warning(self, tmp_path, capsys, monkeypatch):
+        make_skill(tmp_path, "api-guard")  # 无证据本应拦
+        monkeypatch.setenv("RELEASE_EVIDENCE_SKIP", "1")
+        assert verify_skill_evidence(tmp_path, allow_skip=True) == 0
+        err = capsys.readouterr().err
+        assert "RELEASE_EVIDENCE_SKIP" in err and "警告" in err
+
+    def test_skip_env_powerless_without_test_injection(self, tmp_path, capsys,
+                                                       monkeypatch):
+        # 生产语义（CodeRabbit 2026-09-21）：不传 allow_skip（即 decide()/
+        # --verify-evidence 的调用形状）时，环境变量不产生任何放行效果
+        make_skill(tmp_path, "api-guard")  # 无证据
+        monkeypatch.setenv("RELEASE_EVIDENCE_SKIP", "1")
+        assert verify_skill_evidence(tmp_path) == 2
+        assert "缺失" in capsys.readouterr().err
+
+
+class TestDecideIntegration:
+    """接入点：证据校验先于版本语义（先于 git/tag/catv），按登记集驱动。"""
+
+    def test_evidence_failure_short_circuits_before_git(self, monkeypatch):
+        monkeypatch.setattr(release_guard, "EVIDENCE_ENROLLED", ("api-guard",))
+
+        def _boom():
+            raise AssertionError("版本语义（git/tag）不应在证据门禁失败后执行")
+
+        def _fail(**kw):
+            # 发布路径只校验登记集内的 skill（显式 scope 传入）
+            assert kw == {"skills": ["api-guard"]}
+            return 2
+
+        monkeypatch.setattr(release_guard, "latest_stable_tag", _boom)
+        monkeypatch.setattr(release_guard, "verify_skill_evidence", _fail)
+        assert release_guard.decide() == 2
+
+    def test_decide_proceeds_to_existing_semantics_on_pass(self, monkeypatch):
+        monkeypatch.setattr(release_guard, "EVIDENCE_ENROLLED", ("api-guard",))
+        monkeypatch.setattr(release_guard, "verify_skill_evidence",
+                            lambda **kw: 0)
+        monkeypatch.setattr(release_guard, "latest_stable_tag", lambda: None)
+        monkeypatch.setattr(release_guard, "interval_commits", lambda base: [])
+        assert release_guard.decide() == 1  # 既有行为：空区间无可发布内容 → 拒绝
+
+    def test_empty_enrollment_skips_gate_with_note(self, monkeypatch, capsys):
+        # 登记集为空（初始态）：门已就位但不强制不可满足的证据要求，直接进版本语义
+        monkeypatch.setattr(release_guard, "EVIDENCE_ENROLLED", ())
+        monkeypatch.setattr(release_guard, "latest_stable_tag", lambda: None)
+        monkeypatch.setattr(release_guard, "interval_commits", lambda base: [])
+        assert release_guard.decide() == 1
+        assert "EVIDENCE_ENROLLED" in capsys.readouterr().out
