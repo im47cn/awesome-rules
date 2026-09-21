@@ -188,9 +188,9 @@ def parse_prompts(prompts_path: Path) -> Tuple[List[str], List[str]]:
         text = text[: km.start()] + text[km.end():]
 
     blocks = re.split(r"(?m)^---\s*$", text)
+    prompts = []
     if len(blocks) > 1:
         # 围栏模式：逐块 → prompt
-        prompts = []
         for block in blocks:
             bullets = [m[1].strip() for line in block.split("\n")
                        if (m := re.match(r"^[-*]\s+(.+)", line.strip()))]
@@ -203,7 +203,6 @@ def parse_prompts(prompts_path: Path) -> Tuple[List[str], List[str]]:
                     prompts.append(compact)
     else:
         # 无围栏 → 既有纯 bullet 行为（零回归）
-        prompts = []
         for line in text.split("\n"):
             line = line.strip()
             if m := re.match(r"^[-*]\s+(.+)", line):
@@ -309,8 +308,7 @@ def pass_at_k(n: int, c: int, k: int) -> Tuple[float, bool]:
     标注（feedback / 证据 JSON 中显示为「退化估计」）；n≤0 → (0.0, True)。
     c 夹取 [0,n]；n==k 且 c>0 时经下方守卫返回 1.0（无偏）。
     """
-    n = int(n)
-    c = max(0, min(int(c), n))
+    c = max(0, min(c, n))
     if n <= 0:
         return 0.0, True
     if n < k:
@@ -346,7 +344,7 @@ def execute_k(candidate: str, case: G.Case, k: int, run_once: Callable,
         runs.append({"score": score, "feedback": feedback, "invoked": invoked})
         passes.append(score >= threshold and invoked is not False)
     n = len(passes)
-    c = sum(1 for p in passes if p)
+    c = sum(passes)
     pak, degenerate = pass_at_k(n, c, k)
     cap = pass_cap_k(passes)
     if k <= 1:
@@ -358,8 +356,7 @@ def execute_k(candidate: str, case: G.Case, k: int, run_once: Callable,
     pak_txt = f"pass@k={pak:.3f}" + ("（退化估计）" if degenerate else "")
     bits = [f"pass^k={c}/{k}", pak_txt,
             "单次F1=" + ",".join(f"{r['score']:.3f}" for r in runs)]
-    missed = [str(i + 1) for i, r in enumerate(runs) if r["invoked"] is False]
-    if missed:
+    if missed := [str(i + 1) for i, r in enumerate(runs) if r["invoked"] is False]:
         bits.append("未触发轮次=[" + ",".join(missed) + "]")
     bits.extend(f"r{i+1}: {r['feedback']}" for i, r in enumerate(runs))
     return {"runs": runs, "passes": passes, "pass_at_k": pak,
@@ -701,12 +698,9 @@ def _decision_question(out: str):
     """
     for line in out.splitlines():
         if DECISION_MARKER in line:
-            q = line.split(DECISION_MARKER, 1)[1].strip()
-            if q:
+            if q := line.split(DECISION_MARKER, 1)[1].strip():
                 return q
-    if DECISION_MARKER in out:
-        return out[:200]
-    return None
+    return out[:200] if DECISION_MARKER in out else None
 
 
 def skill_invoked_from_events(events: List[dict], skill_name: str) -> bool:
@@ -792,7 +786,7 @@ def skill_content_hash(skill: str, root: Optional[Path] = None) -> str:
     h = hashlib.sha256()
     for p in files:
         h.update(p.read_bytes())
-    return "sha256:" + h.hexdigest()
+    return f"sha256:{h.hexdigest()}"
 
 
 def write_replay_evidence(skill: str, payload: dict, root: Optional[Path] = None) -> Path:

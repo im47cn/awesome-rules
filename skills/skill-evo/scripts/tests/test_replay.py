@@ -815,9 +815,10 @@ def test_dual_agent_sim_user_and_history_replay():
         calls.append(prompt)
         if len(calls) == 1:
             return "审查中。\nDECISION_REQUEST: 表 t 是否有外键？"
-        if len(calls) == 2:
+        elif len(calls) == 2:
             return "没有外键"
-        return '{"rules": ["禁用类型"]}'
+        else:
+            return '{"rules": ["禁用类型"]}'
 
     run_once = R.make_run_once({"replay_dual_agent": True}, fake_raw, "ddl-guard")
     score, fb, invoked = run_once("候选", _da_case(expected=["禁用类型"]))
@@ -855,9 +856,10 @@ def test_dual_agent_sim_user_empty_reply_fallback():
         calls.append(prompt)
         if len(calls) == 1:
             return "DECISION_REQUEST: 用哪种命名规范？"
-        if len(calls) == 2:
+        elif len(calls) == 2:
             return "   "                               # sim-user 空应答
-        return '{"rules": []}'
+        else:
+            return '{"rules": []}'
 
     run_once = R.make_run_once({"replay_dual_agent": True}, fake_raw, "ddl-guard")
     score, fb, _inv = run_once("候选", _da_case())
@@ -875,7 +877,7 @@ def test_skill_content_hash_deterministic_order(tmp_path):
     (skill / "scripts" / "a.py").write_bytes(b"C")
     (skill / "scripts" / "b.py").write_bytes(b"B")
     # 字典序 SKILL.md < scripts/a.py < scripts/b.py，字节顺序拼接
-    want = "sha256:" + hashlib.sha256(b"A" + b"C" + b"B").hexdigest()
+    want = f"sha256:{hashlib.sha256(b'A' + b'C' + b'B').hexdigest()}"
     assert R.skill_content_hash("demo", root=tmp_path) == want
     # SKILL.md 缺失 → fail-closed
     (skill / "SKILL.md").unlink()
