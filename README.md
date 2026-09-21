@@ -29,6 +29,7 @@ awesome-rules/
 │   ├── alibabacloud-devops/           # 云效 DevOps 工具集
 │   ├── tokensave-mcp/                 # tokensave 图谱专项能力（mcporter 代理）
 │   ├── skill-evo/                     # 会话经验自动总结与规范进化（Hermes 式自进化闭环）
+│   ├── task-flow/                     # 五阶段门驱任务工作流（三层状态可恢复）
 │   ├── code-review/                   # 两轴代码审查（规范轴+规格轴并行子代理，聚合抽验）
 │   └── sourcery-autofix/              # Sourcery AI 审查自动修复（fix→测试→过目→闭环）
 ├── arch-hawkeye/                      # 架构鹰眼：全局架构观测与治理（消费 doc-gen manifest）
@@ -90,6 +91,7 @@ Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分�
 | [alibabacloud-devops](skills/alibabacloud-devops/SKILL.md) | 阿里云云效 DevOps 工具集（Codeup/流水线/工作项，mcporter 代理） |
 | [tokensave-mcp](skills/tokensave-mcp/SKILL.md) | tokensave 代码图谱专项能力（测试覆盖/dead code/rename 安全网，mcporter 代理；常规发现走 codebase-memory-mcp） |
 | [skill-evo](skills/skill-evo/README.md) | 会话经验自动总结与规范进化：CC/omp 会话结束自动提炼经验生成提案，人工审核应用；GEPA 引擎进化自身（Hermes 式自进化闭环） |
+| [task-flow](skills/task-flow/README.md) | 五阶段门驱任务工作流运行时：requirements→design→implement→verify→archive 状态机 + 三层状态（yaml/run-state/events）+ resume 一致性探针 + audit 重放校验（纯 stdlib 零依赖） |
 | [contract-guard](skills/contract-guard/SKILL.md) | 跨仓契约兼容性设计与审查（japicmp + 下游编译门禁，配 steering 跨仓契约规范） |
 | [code-review](skills/code-review/README.md) | 两轴代码审查（规范轴+规格轴并行子代理+聚合抽验，GitHub/云效适配） |
 | [sourcery-autofix](skills/sourcery-autofix/SKILL.md) | Sourcery AI 审查自动修复：fix→全量测试→diff 人过目→剩余项闭环（配 lefthook pre-push opt-in 硬闸） |

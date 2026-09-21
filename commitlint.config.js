@@ -20,7 +20,7 @@ module.exports = {
     //    下游通用子集，不要求同步）
     'scope-enum': [1, 'always', [
       'api', 'db', 'ui', 'ci',          // 业务域
-      'alibabacloud-devops', 'api-guard', 'arch-guard', 'code-review', 'contract-guard', 'ddl-guard', 'doc-gen', 'impact-guard', 'skill-evo', 'sourcery-autofix', 'tokensave-mcp', 'work-report',  // 技能
+      'alibabacloud-devops', 'api-guard', 'arch-guard', 'code-review', 'contract-guard', 'ddl-guard', 'doc-gen', 'impact-guard', 'skill-evo', 'sourcery-autofix', 'task-flow', 'tokensave-mcp', 'work-report',  // 技能
       'arch-hawkeye', 'tools', 'scripts', 'docs', 'deps', 'release', 'dependency', 'task-package',  // 工程
     ]],
 
