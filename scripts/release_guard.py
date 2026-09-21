@@ -54,16 +54,19 @@ def sh(*args: str, cwd: Path = REPO) -> str:
 def latest_stable_tag() -> str | None:
     """HEAD 可达的最新 v* semver tag（与 catv skipUnstable 语义对齐）。"""
     tags = [t for t in sh("git", "tag", "-l", "v*").splitlines() if _SEMVER_RE.match(t)]
-    reachable = [
-        t for t in tags
+    if reachable := [
+        t
+        for t in tags
         if subprocess.run(
             ["git", "merge-base", "--is-ancestor", t, "HEAD"],
-            cwd=REPO, capture_output=True,
-        ).returncode == 0
-    ]
-    if not reachable:
+            cwd=REPO,
+            capture_output=True,
+        ).returncode
+        == 0
+    ]:
+        return sorted(reachable, key=lambda t: tuple(int(x) for x in t[1:].split(".")))[-1]
+    else:
         return None
-    return sorted(reachable, key=lambda t: tuple(int(x) for x in t[1:].split(".")))[-1]
 
 
 def current_version() -> str:
@@ -104,7 +107,7 @@ def bump_version(base: str, bump: str) -> str:
 def parse_catv_target(dry_output: str) -> str | None:
     """从 catv dry-run 输出抓目标版本：`bumping version in package.json from A to B`。"""
     m = re.search(r"bumping version in package\.json from \S+ to (\S+)", dry_output)
-    return m.group(1) if m else None
+    return m[1] if m else None
 
 
 def interval_commits(base: str | None) -> list[dict]:
@@ -126,6 +129,8 @@ def interval_commits(base: str | None) -> list[dict]:
 #   content_hash = sha256( 逐文件摘要清单；条目 = "<文件内容 sha256 hex>␣␣<skill 内相对 posix 路径>\n"，
 #                          按路径字典序排列后整体拼接——路径与边界参与哈希，
 #                          文件改名/增删/跨文件内容重排（"ab"+"c" vs "a"+"bc"）均改变 hash )
+#   文件面       = SKILL.md + scripts/**，排除派生产物（.pytest_cache/、__pycache__/、
+#                  *.pyc、.DS_Store）——本地测试生灭物不得扰动指纹（2026-09-21 事故）
 #   evidence     = skills/skill-evo/artifacts/replay-evidence/<skill>.json
 # ---------------------------------------------------------------------------
 
@@ -135,8 +140,28 @@ _CONTENT_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SKIP_ENV = "RELEASE_EVIDENCE_SKIP"
 
 
+_DERIVED_PARTS = frozenset({".pytest_cache", "__pycache__", ".DS_Store"})
+_DERIVED_SUFFIXES = (".pyc",)
+
+
+def _is_derived(path: Path) -> bool:
+    """派生产物判定：任一路径段命中缓存/系统目录名，或 *.pyc 后缀。
+
+    这些文件随本地测试运行生灭（pytest 写 .pytest_cache/、解释器写
+    __pycache__/*.pyc、Finder 写 .DS_Store），不属于 skill 源文件面，
+    计入哈希会让指纹随工作区卫生状况漂移（2026-09-21 plugin_lock
+    全红事故：重锁时缓存被静默吞入锁定值）。其余未知二进制不在排除
+    之列，仍由读取期 UTF-8 校验干净拦截。
+    """
+    return (any(part in _DERIVED_PARTS for part in path.parts)
+            or path.suffix in _DERIVED_SUFFIXES)
+
+
 def skill_source_files(repo_root: Path, skill: str) -> list[Path]:
     """参与 content_hash 的文件面：SKILL.md + scripts/**（路径字典序）。
+
+    scripts/** 排除派生产物（_is_derived，含嵌套路径段）：指纹只反映
+    源文件，跨机器、跨工作区卫生状况确定。
 
     排序键为仓库相对 POSIX 路径（同前缀下 SKILL.md 因大写 S 先于 scripts/）。
     """
@@ -144,7 +169,8 @@ def skill_source_files(repo_root: Path, skill: str) -> list[Path]:
     files = [base / "SKILL.md"]
     scripts_dir = base / "scripts"
     if scripts_dir.is_dir():
-        files.extend(p for p in scripts_dir.rglob("*") if p.is_file())
+        files.extend(p for p in scripts_dir.rglob("*")
+                     if p.is_file() and not _is_derived(p))
     return sorted(
         (p for p in files if p.is_file()),
         key=lambda p: p.relative_to(repo_root).as_posix())
@@ -183,8 +209,7 @@ def evidence_path(repo_root: Path, skill: str) -> Path:
 def _check_iso8601(ts: str) -> bool:
     # Python 3.9 fromisoformat 不认 Z 后缀，先归一化为 +00:00
     try:
-        datetime.datetime.fromisoformat(
-            ts[:-1] + "+00:00" if ts.endswith("Z") else ts)
+        datetime.datetime.fromisoformat(f"{ts[:-1]}+00:00" if ts.endswith("Z") else ts)
         return True
     except ValueError:
         return False
@@ -221,10 +246,11 @@ def _validate_evidence(ev: object, skill: str, expect_hash: str) -> list[str]:
     k = ev.get("k")
     if not isinstance(k, int) or isinstance(k, bool) or k < 1:
         errs.append(f"{skill}: k 字段缺失或类型不符（期望正整数，实际 {k!r}）")
-    for f in ("pass_at_k", "pass_cap_k"):
-        if not _is_prob(ev.get(f)):
-            errs.append(f"{skill}: {f} 字段缺失或类型不符"
-                        f"（期望 [0,1] 数值，实际 {ev.get(f)!r}）")
+    errs.extend(
+        f"{skill}: {f} 字段缺失或类型不符（期望 [0,1] 数值，实际 {ev.get(f)!r}）"
+        for f in ("pass_at_k", "pass_cap_k")
+        if not _is_prob(ev.get(f))
+    )
     inv = ev.get("invocation")
     if (not isinstance(inv, dict)
             or not isinstance(inv.get("skill_invoked"), bool)
@@ -294,14 +320,14 @@ def verify_skill_evidence(repo_root: Path = REPO,
         try:
             expect = compute_content_hash(repo_root, skill)
         except (UnicodeDecodeError, OSError) as e:
-            # scripts/** 混入二进制/缓存文件（.DS_Store、__pycache__ 等）
-            # 必须归入干净拦截，而非 traceback 崩溃（exit 码语义不混淆）
+            # scripts/** 混入未知二进制（派生产物已在 skill_source_files
+            # 排除，此处剩如误提交的 .bin）必须归入干净拦截，而非
+            # traceback 崩溃（exit 码语义不混淆）
             errors.append(f"{skill}: 内容不可读或非 UTF-8，无法计算 "
                           f"content_hash（{type(e).__name__}）——排查 "
                           "scripts/ 下的二进制/缓存文件后重试")
             continue
-        errs = _validate_evidence(ev, skill, expect)
-        if errs:
+        if errs := _validate_evidence(ev, skill, expect):
             errors.extend(errs)
         else:
             checklist.append((skill, expect, ev.get("pass_cap_k")))
