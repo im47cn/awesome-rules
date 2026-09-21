@@ -499,24 +499,23 @@ def _check_doc(path: Path) -> tuple:
 def _run_script_gate(path: Path, project: Path) -> tuple:
     if not path.is_file():
         return False, "脚本不存在"
-    if path.suffix == ".py":
-        cmd = [sys.executable, str(path)]
-    elif os.access(str(path), os.X_OK):
-        cmd = [str(path)]
-    else:
+    if path.suffix != ".py" and not os.access(str(path), os.X_OK):
         return False, "不可执行（非 .py 且无执行权限）"
     try:
-        # argv 列表形式且不启用 shell：无注入面（含空格/元字符的路径按单参数
-        # 传递）；shlex 转义仅适用于 shell=True 的字符串拼接，此处不适用
-        proc = subprocess.run(
-            cmd,
-            cwd=str(project),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=GATE_TIMEOUT_S,
-        )
+        # argv 列表字面量内联于调用点且不启用 shell（对齐全仓 subprocess 约定）：
+        # 无注入面，含空格/元字符的路径按单参数传递；shlex 转义仅适用 shell=True
+        if path.suffix == ".py":
+            proc = subprocess.run(
+                [sys.executable, str(path)],
+                cwd=str(project), capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=GATE_TIMEOUT_S,
+            )
+        else:
+            proc = subprocess.run(
+                [str(path)],
+                cwd=str(project), capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=GATE_TIMEOUT_S,
+            )
     except subprocess.TimeoutExpired:
         return False, f"执行超时（>{GATE_TIMEOUT_S}s）"
     except OSError as exc:
