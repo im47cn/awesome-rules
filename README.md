@@ -138,7 +138,7 @@ Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分�
 | [GEPA](docs/research/gepa.md) | Genetic-Pareto 反思进化引擎 → 已落地 skills/skill-evo/scripts/evo_gepa.py；v2/ICLR 2026 Oral 增量待裁决 |
 | [SkillOpt](docs/research/skillopt.md) | Sleep replay 确定性打分 + 反 Goodhart 门控 → 已落地 replay-eval |
 | [任务包模板对照实验](docs/research/taskpkg-ab-experiment.md) | FIVE vs CONTRACT 四轮预注册实验：触发器特异性消误报（R2），但纸面触发器对静默侵犯无执行力（R3，有条款臂漏报）→ 守护机械化，L1/L2/L3 分层防御（已落地规范包） |
-| [Comet](docs/research/comet.md) | Agent Skill Harness 双工作流运行时：pass@k/pass^k 评估分离 / 发布门禁绑定草稿 hash / 三层状态可恢复（均未裁决，文档级） |
+| [Comet](docs/research/comet.md) | Agent Skill Harness 双工作流运行时：pass@k/pass^k 评估分离 / 发布门禁绑定草稿 hash / 三层状态可恢复 → 借鉴点 #1-5、#7 已落地（task-flow / evo_replay 三件套 / release_guard 证据门 / platform-matrix），#6 部分已有（单源多清单替代双目录复制） |
 
 ## 安装
 
