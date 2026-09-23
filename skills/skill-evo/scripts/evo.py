@@ -449,7 +449,14 @@ def cmd_evolve(args) -> int:
             print("   采纳方式见提案正文（人工替换 skills/<skill>/SKILL.md 全文）")
         else:
             print("未达提案阈值（holdout 改善 ≤ 0.2 或 baseline 仍最优），仅存报告")
-        return 0
+        # 部署态证据 pass（Comet 机制 ③ 收口，@date 2026-09-23）：GEPA 变异筛选
+        # 保持文本通道（候选需内嵌文本打分；证据模式只测部署态——见 README
+        # 评估协议）；完整运行后在部署态跑 stream-json 实测并落 evidence JSON
+        # （release_guard 登记集消费的真实证据来源，dry-run 冒烟证据不算数）。
+        if not bool(cfg.get("replay_evidence", True)):
+            print("replay_evidence=False：跳过部署态证据 pass（kill switch）")
+            return 0
+        return R.cmd_evidence_llm(args.skill, cfg, call_claude_raw)
     # v2 默认链路：进化 skill-evo 自身 SYSTEM_PROMPT（标注源 = applied/rejected 提案）
     import evo_evolve as V
     train, holdout = V.build_dataset(cfg)
