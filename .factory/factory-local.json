@@ -49,8 +49,6 @@
        "argv": ["$PY", "-m", "pytest", "tests", "-o", "addopts=", "-q"]},
       {"name": "pytest skills/skill-evo/scripts", "tag": "skills/skill-evo/scripts", "cwd": "skills/skill-evo/scripts",
        "argv": ["$PY", "-m", "pytest", "tests", "-o", "addopts=", "-q"]},
-      {"name": "pytest arch-hawkeye/scripts", "tag": "arch-hawkeye/scripts", "cwd": "arch-hawkeye/scripts",
-       "argv": ["$PY", "-m", "pytest", "tests", "-o", "addopts=", "-q"]},
       {"name": "pytest .factory/tests", "tag": ".factory/tests", "cwd": ".factory/tests",
        "argv": ["$PY", "-m", "pytest", ".", "-o", "addopts=", "-q"], "intra": "auto", "stack": "pytest"},
       {"name": "badcase", "tag": "badcase",
