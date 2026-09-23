@@ -22,11 +22,21 @@ _SHARED = Path(__file__).resolve().parent.parent.parent / "_shared"
 if str(_SHARED) not in sys.path:
     sys.path.insert(0, str(_SHARED))
 
+# 缩略词规范模块（同目录 abbreviations.py）
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
 from guard_lib import (  # noqa: E402
     MYSQL_RESERVED,
     Severity,
     find_files,
     run_gate,
+)
+from abbreviations import (  # noqa: E402
+    LONG_TO_SHORT,
+    iter_abbrev_violations,
+    strip_index_prefix,
 )
 
 
@@ -108,12 +118,9 @@ GENERIC_FIELD_NAMES = {
 }
 
 # ── 缩写字典：未规范化写法 → 标准缩写（与规范附录同步）──────────────────
+# 数据源：本目录 abbreviations.py（LONG_TO_SHORT）。如需扩展仅修改该模块。
 # 注意：标准缩写不得为 MySQL 保留字（如 desc），否则建议本身即触发强制违规
-ABBREVIATION_DICT = {
-    "direction": "dir", "message": "msg", "config": "cfg",
-    "information": "info", "number": "no", "count": "cnt", "image": "img",
-    "telephone": "tel", "address": "addr", "password": "pwd", "method": "mtd",
-}
+ABBREVIATION_DICT = LONG_TO_SHORT
 
 # ── 日志/流水表标识（表名含此子串者豁免更新人字段）─────────────────────
 LOG_TABLE_TAGS = ("_log", "_flow", "_journal")
@@ -126,15 +133,34 @@ def _is_log_table(name: str) -> bool:
 
 
 def _check_abbreviation(name: str, owner: str, issues: list, kind: str = "字段"):
-    """检测名称分词是否命中缩写字典的未规范化写法，提示改用标准缩写。"""
-    for part in name.lower().split("_"):
-        if part in ABBREVIATION_DICT:
-            std = ABBREVIATION_DICT[part]
-            issues.append(Issue(
-                table=owner, severity=Severity.RECOMMENDED, rule="缩写未规范化",
-                location=f"{kind}:{name}", description=f"{kind} '{name}' 含未规范化写法 '{part}'",
-                suggestion=f"建议使用标准缩写 '{part}' → '{std}'",
-            ))
+    """检测名称分词是否命中缩写字典的未规范化写法。
+
+    数据源：abbreviations.LONG_TO_SHORT（长写法 → 标准缩写）。
+
+    【强制级别：公司数据治理要求】命中即报 Severity.MANDATORY，ddl_check.py
+    退出码 1（CI 拦截）。已用标准缩写时不触发（value 不在反向检查范围）。
+    """
+    for part, std in iter_abbrev_violations(name):
+        issues.append(Issue(
+            table=owner, severity=Severity.MANDATORY, rule="缩写未规范化",
+            location=f"{kind}:{name}", description=f"{kind} '{name}' 含未规范化写法 '{part}'",
+            suggestion=f"改用标准缩写 '{part}' → '{std}'",
+        ))
+
+
+def _check_index_abbreviation(idx: IndexInfo, issues: list):
+    """索引名缩写检查：去掉 ix_/uk_ 前缀后对剩余分词做反向命中检查。
+
+    【强制级别：公司数据治理要求】命中即报 Severity.MANDATORY。
+    """
+    body = strip_index_prefix(idx.name)
+    for part, std in iter_abbrev_violations(body):
+        issues.append(Issue(
+            table=idx.name, severity=Severity.MANDATORY, rule="索引缩写未规范化",
+            location=f"索引:{idx.name}",
+            description=f"索引 '{idx.name}' 主体分词 '{part}' 含未规范化写法",
+            suggestion=f"改用标准缩写 '{part}' → '{std}'，并同步索引名",
+        ))
 
 
 # ── 全角字符范围检测 ────────────────────────────────────────────────────
@@ -894,7 +920,7 @@ def check_index_naming(table: TableInfo, issues: list):
         if len(idx.name) > 64:
             issues.append(Issue(
                 table=table.name, severity=Severity.MANDATORY, rule="索引名长度",
-                location=f"表:{table.name} 索引:{idx.name}", 
+                location=f"表:{table.name} 索引:{idx.name}",
                 description=f"索引名长度 {len(idx.name)} 超过 64",
                 suggestion="索引名长度不超过 64",
             ))
@@ -903,7 +929,7 @@ def check_index_naming(table: TableInfo, issues: list):
         if idx.is_unique and not idx.name.lower().startswith("uk_"):
             issues.append(Issue(
                 table=table.name, severity=Severity.MANDATORY, rule="唯一索引命名",
-                location=f"表:{table.name} 索引:{idx.name}", 
+                location=f"表:{table.name} 索引:{idx.name}",
                 description=f"唯一索引 '{idx.name}' 未以 uk_ 开头",
                 suggestion="唯一索引命名规则: uk_字段列表",
             ))
@@ -915,6 +941,38 @@ def check_index_naming(table: TableInfo, issues: list):
                 location=f"表:{table.name} 索引:{idx.name}",
                 description=f"普通索引 '{idx.name}' 未以 ix_ 开头",
                 suggestion="普通索引命名规则: ix_字段列表",
+            ))
+
+        # 索引主体分词缩写（推荐级）
+        _check_index_abbreviation(idx, issues)
+
+
+def check_index_contains_columns(table: TableInfo, issues: list):
+    """索引名由所包含字段的全名称拼接而成，不允许缩写字段名。
+
+    例：`ix_mch_id_msg_type_status (mch_id, msg_type, status)` 合法；
+    `ix_mch_msg_type_status (mch_id, msg_type, status)` 违规——`mch_id` 被
+    缩写为 `mch`。实现上即：字段的所有分词（`mch`, `id`）必须都在索引
+    主体（去掉 `ix_`/`uk_` 前缀）中出现。
+    """
+    for idx in table.indexes:
+        if idx.name == "PRIMARY":
+            continue
+
+        body_parts = set(strip_index_prefix(idx.name).split("_"))
+        missing: list[str] = []
+        for col in idx.columns:
+            for part in col.lower().split("_"):
+                if part and part not in body_parts:
+                    missing.append(f"{col}→{part}")
+        if missing:
+            issues.append(Issue(
+                table=table.name,
+                severity=Severity.MANDATORY,
+                rule="索引名未包含全部字段",
+                location=f"表:{table.name} 索引:{idx.name}",
+                description=f"索引 '{idx.name}' 未完整包含字段名（缺失分词: {', '.join(missing)}）",
+                suggestion="索引名由字段全名称按 ix_<field1>_<field2>... 拼接而成，不允许缩写字段名",
             ))
 
 
@@ -1049,6 +1107,7 @@ def check_file(file_path: str) -> list:
             check_varchar_length(field, table.name, issues)
 
         check_index_naming(table, issues)
+        check_index_contains_columns(table, issues)
         check_unique_hint(table, issues)
         check_index_on_id(table, issues)
         check_index_count(table, issues)

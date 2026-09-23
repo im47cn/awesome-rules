@@ -194,6 +194,8 @@ python3 scripts/sql_check.py [--format json]
 
 - 退出码：`0`=通过，`1`=有强制问题，`2`=运行错误
 - `sql_check.py` 自动扫描 mapper XML（解析 `<if>`/`<where>`/`<foreach>` 等动态标签和 `<include>` 引用）以及 MyBatis-Plus `@TableName` 注解的 PO 类（检查表名/字段命名规范、必含字段）
+- `ddl_check.py` 内置缩写字典（`scripts/abbreviations.py`），对**字段名/表名/索引名**做长写法 → 标准缩写的反向检查（**强制级别：公司数据治理要求**），扩展字典仅修改 `abbreviations.py`
+- `ddl_check.py` 强制检查**索引名包含全部字段名**（规则 `索引名未包含全部字段`）：索引名称由所包含字段的全名称按 `ix_<field1>_<field2>...` 拼接而成，字段名不允许任何缩写（如把 `mch_id` 缩写为 `mch`）
 
 ### 第 2 步：读取待审查文件
 

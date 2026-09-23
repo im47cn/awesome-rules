@@ -20,6 +20,52 @@
 | 补充信息必要性 | 圆括号内容须为必要补充；冗余或让含义混淆的不写 | 审查注释中圆括号内容是否为必要补充。例如「订单状态[10-待支付,20-已支付,30-已完成]」是必要的，但「订单编号(订单号)」中括号内容冗余，应改为「订单编号」 |
 | 字段与注释对应 | 字段名与注释含义对应、词汇对应 | 审查字段名和注释是否语义一致。例如字段 `contact_mobile` 注释应为「联系人手机号」而非「联系手机」，字段 `order_no` 注释应为「订单编号」而非「订单号」 |
 
+## 缩略词规范【强制：公司数据治理要求】
+
+脚本 `ddl_check.py` 自动检查字段名/表名/索引名是否命中缩写字典的"长写法"分词，
+强制要求改用项目约定的标准缩写。命中即报 `Severity.MANDATORY`，退出码 1
+（CI 拦截）。字典源：`scripts/abbreviations.py`（`LONG_TO_SHORT`，全量入库
+公司数据治理粘贴表 1302+ 条）。
+
+**按中文语义推断缩写**：扩展字典时应先确定中文含义，再选定对应英文长写法与
+标准缩写，构成"中文 → 英文 → 缩写"三段式映射。如：
+
+| 中文 | 英文长写法 | 标准缩写 |
+|---|---|---|
+| 订阅 | subscribe / subscription | subscr |
+| 凭证 | voucher | vou |
+| 映射 | mapping | mapp |
+| 鉴权 | authentication | aut |
+| 验证 | verification | verf |
+
+| 类别 | 操作指引 |
+|---|---|
+| 字典维护 | 通用元词全量维护在 `abbreviations.py`；粘贴表 3014 行已全部入库（按英文单词拆分频次 mode 选取）。新增条目按相同粒度追加 |
+| 字段命名 | 分词命中字典 key（如 `mapping`、`authentication`、`verification`、`description`）→ **必须**改用 value（`mapp`、`aut`、`verf`、`dscr`）；已用标准缩写不报错 |
+| 表名 | 同字段名规则；如 `wop_callback_subscription` 应改为 `wop_callback_subscr` |
+| 索引命名 | 索引名去掉 `ix_`/`uk_` 前缀后做同样检查；命中时强制要求改用标准缩写并同步索引名 |
+| 已知偏差 | 粘贴表存在少量语义错配（如 `accept → accept_bank`、`phone → phbook`、`electronic → fdei` 等），系拆词副作用，不在本规则处理范围；如需修订，对应英文 key 在 `abbreviations.py` 中手工覆盖即可 |
+
+字典维护示例：
+
+```python
+# scripts/abbreviations.py
+LONG_TO_SHORT = {
+    "mapping": "mapp",          #  映射（项目规定）
+    "voucher": "vou",           #  凭证（项目规定）
+    "subscribe": "subscr",      #  订阅（按中文语义）
+    ...
+}
+```
+
+## 索引命名【强制】
+
+| 规则 | 要点 | 操作指引 |
+|---|---|---|
+| 索引名前缀 | 普通索引 `ix_` / 唯一索引 `uk_`（脚本已检查） | 审查所有索引是否以正确前缀开头 |
+| 索引名长度 | 不超过 64 字符（脚本已检查） | 审查索引名长度，避免过长 |
+| **索引名包含全部字段名** | 索引名称由所包含字段的全名称按 `ix_<field1>_<field2>...` 拼接而成，字段名不允许任何缩写 | 审查每个索引的主体分词是否覆盖其引用字段的所有分词。例如：<br>✅ `KEY ix_mch_id_msg_type_status (mch_id, msg_type, status)`<br>❌ `KEY ix_mch_msg_type_status (mch_id, msg_type, status)`（`mch_id` 被缩写为 `mch`）<br>❌ `UNIQUE KEY uk_cred (cred_id)`（`cred_id` 被缩写为 `cred`，应改为 `uk_cred_id`） |
+
 ## 设计合理性【推荐】
 
 | 规则 | 要点 | 操作指引 |
@@ -56,6 +102,7 @@
 5. **字段类型**：是否使用禁用类型？（脚本已检查）
 6. **必含字段**：是否包含 id/creator_id/create_time/last_updater_id/last_update_time？（脚本已检查）
 7. **逻辑删除**：是否统一使用 `del_flag`？注释格式是否为 `删除标志[0-否,1-是]`？（脚本已检查）
-8. **索引**：命名是否符合 `ix_`/`uk_` 规范？（脚本已检查）
-9. **索引有效性**：是否通过 EXPLAIN 验证？（需人工运行）
-10. **设计合理性**：字段数量 ≤ 40？单行 ≤ 8020 字节？NOT NULL + 默认值？字符串长度合理？
+8. **索引**：命名是否符合 `ix_`/`uk_` 规范？索引名是否包含全部字段的完整名？（脚本已检查）
+9. **缩略词**：字段名/索引名分词是否命中 `abbreviations.py` 的未规范化写法？（脚本已检查）
+10. **索引有效性**：是否通过 EXPLAIN 验证？（需人工运行）
+11. **设计合理性**：字段数量 ≤ 40？单行 ≤ 8020 字节？NOT NULL + 默认值？字符串长度合理？

@@ -259,6 +259,156 @@ def test_abbreviation_std_ok():
     assert all(i.rule != "缩写未规范化" for i in issues)
 
 
+def test_abbreviation_extended_dict_mapping():
+    """扩展字典条目（mapping → mapp）字段级检测。"""
+    issues = _issues_for(_ddl_with_field("mapping_id varchar(32) COMMENT '映射唯一键'"))
+    assert any(
+        i.rule == "缩写未规范化" and "mapping" in i.description and "mapp" in i.suggestion
+        for i in issues
+    )
+
+
+def test_abbreviation_extended_dict_authentication():
+    """扩展字典条目（authentication → aut）字段级检测。"""
+    issues = _issues_for(_ddl_with_field("authentication varchar(32) COMMENT '鉴权形态'"))
+    assert any(
+        i.rule == "缩写未规范化" and "authentication" in i.description and "aut" in i.suggestion
+        for i in issues
+    )
+
+
+def test_abbreviation_index_flagged():
+    """索引主体分词含未规范化写法（ix_mapping_id）→ 报索引缩写未规范化。"""
+    ddl = (
+        "CREATE TABLE t_demo_idx (\n"
+        "  id bigint COMMENT '主键',\n"
+        "  mapping_id varchar(32) COMMENT '映射唯一键',\n"
+        "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  KEY ix_mapping_id (mapping_id)\n"
+        ") COMMENT='demo';\n"
+    )
+    issues = _issues_for(ddl)
+    assert any(
+        i.rule == "索引缩写未规范化" and "mapping" in i.description and "mapp" in i.suggestion
+        for i in issues
+    )
+
+
+def test_abbreviation_index_std_ok():
+    """索引主体分词已用标准缩写（ix_mapp_id）→ 不报。"""
+    ddl = (
+        "CREATE TABLE t_demo_idx2 (\n"
+        "  id bigint COMMENT '主键',\n"
+        "  mapp_id varchar(32) COMMENT '映射唯一键',\n"
+        "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  KEY ix_mapp_id (mapp_id)\n"
+        ") COMMENT='demo';\n"
+    )
+    issues = _issues_for(ddl)
+    assert all(i.rule != "索引缩写未规范化" for i in issues)
+
+
+# ── 索引名包含字段名 ──────────────────────────────────────────────────
+
+def test_index_contains_columns_ok():
+    """索引名按 ix_<field1>_<field2>... 完整拼接 → 不报。"""
+    ddl = (
+        "CREATE TABLE t_idx_full (\n"
+        "  id bigint COMMENT '主键',\n"
+        "  mch_id varchar(32) COMMENT '商户id',\n"
+        "  msg_type varchar(64) COMMENT '消息类型',\n"
+        "  status varchar(16) COMMENT '状态',\n"
+        "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  KEY ix_mch_id_msg_type_status (mch_id, msg_type, status)\n"
+        ") COMMENT='demo';\n"
+    )
+    issues = _issues_for(ddl)
+    assert all(i.rule != "索引名未包含全部字段" for i in issues)
+
+
+def test_index_contains_columns_missing_part():
+    """索引名省略字段分词（ix_mch_msg_type_status 缺 `id`）→ 报强制。"""
+    ddl = (
+        "CREATE TABLE t_idx_short (\n"
+        "  id bigint COMMENT '主键',\n"
+        "  mch_id varchar(32) COMMENT '商户id',\n"
+        "  msg_type varchar(64) COMMENT '消息类型',\n"
+        "  status varchar(16) COMMENT '状态',\n"
+        "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  KEY ix_mch_msg_type_status (mch_id, msg_type, status)\n"
+        ") COMMENT='demo';\n"
+    )
+    issues = _issues_for(ddl)
+    assert any(
+        i.rule == "索引名未包含全部字段" and i.severity == Severity.MANDATORY
+        and "id" in i.description
+        for i in issues
+    )
+
+
+def test_index_contains_columns_uk_missing_part():
+    """唯一索引同样要求：uk_cred_id (cred_id) 合规；uk_cred (cred_id) 报。"""
+    ddl_bad = (
+        "CREATE TABLE t_idx_uk (\n"
+        "  id bigint COMMENT '主键',\n"
+        "  cred_id varchar(32) COMMENT '凭证id',\n"
+        "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  UNIQUE KEY uk_cred (cred_id)\n"
+        ") COMMENT='demo';\n"
+    )
+    issues = _issues_for(ddl_bad)
+    assert any(i.rule == "索引名未包含全部字段" for i in issues)
+
+    ddl_ok = ddl_bad.replace("UNIQUE KEY uk_cred (cred_id)", "UNIQUE KEY uk_cred_id (cred_id)")
+    issues_ok = _issues_for(ddl_ok)
+    assert all(i.rule != "索引名未包含全部字段" for i in issues_ok)
+
+
+# ── 中文语义缩写（订阅 subscribe → subscr）───────────────────────────────
+
+def test_abbreviation_subscription_table_flagged():
+    """表名含 subscription（订阅）→ 提示改用 subscr（按中文语义推断缩写）。"""
+    issues = _issues_for(
+        _ddl_with_field("ext varchar(50) COMMENT '扩展'", table="t_subscription_log")
+    )
+    assert any(
+        i.rule == "缩写未规范化" and "subscription" in i.description
+        and "subscr" in i.suggestion
+        for i in issues
+    )
+
+
+def test_abbreviation_subscribe_field_flagged():
+    """字段名含 subscribe（订阅）→ 提示改用 subscr。"""
+    issues = _issues_for(_ddl_with_field("subscribe_at datetime COMMENT '订阅时间'"))
+    assert any(
+        i.rule == "缩写未规范化" and "subscribe" in i.description
+        and "subscr" in i.suggestion
+        for i in issues
+    )
+
+
+def test_abbreviation_subscr_ok():
+    """已用 subscr → 不报。"""
+    issues = _issues_for(_ddl_with_field("subscr_at datetime COMMENT '订阅时间'"))
+    assert all(i.rule != "缩写未规范化" for i in issues)
+
+
 # ── 日志/流水表必含字段豁免 ─────────────────────────────────────────────────
 
 def test_log_table_exempt_updater_fields():
