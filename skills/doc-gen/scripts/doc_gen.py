@@ -193,8 +193,7 @@ def _scan_project(args):
     db_inferred = False
     if not ddl_tables:
         print("  ⚠ 未找到 .sql 文件，从代码推断...")
-        po_tables = POScanner(str(project_root)).scan(java_files)
-        if po_tables:
+        if po_tables := POScanner(str(project_root)).scan(java_files):
             tables = po_tables
             db_inferred = True
             print(f"  ✓ 从 PO 注解推断出 {len(tables)} 张表 (MyBatis-Plus)")
@@ -268,7 +267,7 @@ def _scan_project(args):
         checks["openapi"] = {"status": "ok", "paths": path_count}
     elif has_controllers:
         manifest.openapiSpecs["default"] = oapi_spec
-        print(f"  ⚠ 检测到 Controller 但未能提取端点，生成空 API 规范")
+        print("  ⚠ 检测到 Controller 但未能提取端点，生成空 API 规范")
         checks["openapi"] = {"status": "warn", "paths": 0}
     else:
         print("  ℹ 未检测到 Controller")
@@ -414,13 +413,12 @@ def _check_manifest_contract(manifest_dir: Path) -> dict:
     if index.get("schema_version") != 1:
         print("  ⚠ 旧版 manifest（无 schema_version），跳过 schema 校验")
         return {"status": "warn", "reason": "legacy manifest"}
-    errors = validate_manifest_dir(manifest_dir)
-    if errors:
-        print(f"❌ manifest 分片未通过 schema 契约:", file=sys.stderr)
+    if errors := validate_manifest_dir(manifest_dir):
+        print("❌ manifest 分片未通过 schema 契约:", file=sys.stderr)
         for e in errors[:20]:
             print(f"  {e}", file=sys.stderr)
         sys.exit(1)
-    print(f"  ✓ manifest 通过 schema 契约校验（schema_version=1）")
+    print("  ✓ manifest 通过 schema 契约校验（schema_version=1）")
     return {"status": "ok", "schemaVersion": 1}
 
 
@@ -481,7 +479,7 @@ def _build_from_manifest(manifest_path: str, output_dir: str):
                 json.dumps(manifest_data["openapiSpecs"], ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-            print(f"  ✓ 已写入 api-spec.json（来自旧版 openapiSpecs）")
+            print("  ✓ 已写入 api-spec.json（来自旧版 openapiSpecs）")
     else:
         print(f"❌ 无效的 manifest: {manifest_path}", file=sys.stderr)
         sys.exit(2)
@@ -533,7 +531,7 @@ def _diff_manifests(args):
 
     s = receipt["summary"]
     total = sum(sum(v.values()) for v in s.values())
-    print(f"🔀 架构演进 delta:")
+    print("🔀 架构演进 delta:")
     print(f"  基准 {_short_sha(receipt['base']['revision'])} → "
           f"当前 {_short_sha(receipt['head']['revision'])}")
     for dim, counts in s.items():
