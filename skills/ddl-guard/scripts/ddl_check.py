@@ -112,6 +112,13 @@ REQUIRED_FIELDS = {
     "last_update_time": {"type_pattern": r"datetime", "desc": "最后更新时间"},
 }
 
+# ── 缩写检查豁免字段名（公司规范字段名）────────────────────────────────
+# 这些字段名虽然命中缩写字典的某些分词，但作为项目规范字段名保留长写法
+# （避免 del_flag→del 等拆词副作用引起的误报）
+ABBREVIATION_EXEMPT_FIELDS = {
+    "del_flag",       # 逻辑删除标志（标准字段名）
+}
+
 # ── 泛化字段名（缺乏主体区分的单一名词，应加前缀）──────────────────────
 GENERIC_FIELD_NAMES = {
     "name", "code", "status", "type", "title", "content", "value", "remark", "count",
@@ -139,7 +146,13 @@ def _check_abbreviation(name: str, owner: str, issues: list, kind: str = "字段
 
     【强制级别：公司数据治理要求】命中即报 Severity.MANDATORY，ddl_check.py
     退出码 1（CI 拦截）。已用标准缩写时不触发（value 不在反向检查范围）。
+
+    豁免：必含字段名（id/creator_id/create_time/last_updater_id/last_update_time）
+    是公司基线硬性要求，字段名长度与写法已固化，缩写规则对此类字段名不做强制收敛。
+    其他规范字段名（如 del_flag）同样豁免。
     """
+    if name.lower() in REQUIRED_FIELDS or name.lower() in ABBREVIATION_EXEMPT_FIELDS:
+        return  # 必含字段名 / 规范字段名豁免缩写检查
     for part, std in iter_abbrev_violations(name):
         issues.append(Issue(
             table=owner, severity=Severity.MANDATORY, rule="缩写未规范化",
@@ -152,8 +165,45 @@ def _check_index_abbreviation(idx: IndexInfo, issues: list):
     """索引名缩写检查：去掉 ix_/uk_ 前缀后对剩余分词做反向命中检查。
 
     【强制级别：公司数据治理要求】命中即报 Severity.MANDATORY。
+
+    豁免：
+    1. 索引名主体由必含字段名拼接而成（如 ix_last_update_time、ix_creator_id）
+    2. 索引名主体含规范字段名 del_flag（与字段级豁免列表一致）
+    3. 整体名称匹配后，所有分词都在豁免集合中（含 REQUIRED_FIELDS ∪ ABBREVIATION_EXEMPT_FIELDS）
     """
     body = strip_index_prefix(idx.name)
+    parts = [p for p in body.split("_") if p]
+    if not parts:
+        return
+
+    # 豁免 1：索引名主体完全由必含字段名拼接（ix_last_update_time / ix_creator_id 等）
+    sorted_required = sorted(REQUIRED_FIELDS.keys(), key=len, reverse=True)
+    remaining = list(parts)
+    matched_required = []
+    while remaining:
+        matched = False
+        for rf in sorted_required:
+            rf_parts = rf.split("_")
+            if len(rf_parts) <= len(remaining) and remaining[:len(rf_parts)] == rf_parts:
+                matched_required.append(rf)
+                remaining = remaining[len(rf_parts):]
+                matched = True
+                break
+        if not matched:
+            break
+    if not remaining and matched_required:
+        return
+
+    # 豁免 2：所有分词都在豁免集合（必含字段名 ∪ 规范字段名）中
+    exempt_set = set(REQUIRED_FIELDS.keys()) | ABBREVIATION_EXEMPT_FIELDS
+    # 整体名称命中豁免
+    if idx.name.lower() in exempt_set:
+        return
+    # 所有分词都在豁免集合
+    if all(p in exempt_set for p in parts):
+        return
+
+    # 其余情况：复用 iter_abbrev_violations（已处理 self-mapping、reserved-value 豁免）
     for part, std in iter_abbrev_violations(body):
         issues.append(Issue(
             table=idx.name, severity=Severity.MANDATORY, rule="索引缩写未规范化",
@@ -726,17 +776,47 @@ def check_table_comment(table: TableInfo, issues: list):
 
 
 def check_required_fields(table: TableInfo, issues: list):
-    """Check for required system fields."""
-    field_names = {f.name.lower() for f in table.fields}
+    """Check for required system fields.
+
+    强制要求：每个表必须包含 id/creator_id/create_time/last_updater_id/
+    last_update_time 五个字段，且这四个非主键字段的**注释必须与规范完全一致**
+    （creator_id → 创建人id、create_time → 创建时间、last_updater_id →
+    最后更新人id、last_update_time → 最后更新时间）。日志/流水表仅强制
+    id 与 create_time，豁免更新人字段。
+    """
+    field_by_name = {f.name.lower(): f for f in table.fields}
 
     # 日志/流水表仅强制 id 与 create_time，豁免更新人字段
     required = {"id", "create_time"} if _is_log_table(table.name) else set(REQUIRED_FIELDS.keys())
     for req_name in required:
-        if req_name not in field_names:
+        if req_name not in field_by_name:
             issues.append(Issue(
                 table=table.name, severity=Severity.MANDATORY, rule="必含字段缺失",
                 location=f"表:{table.name}", description=f"缺少必含字段 '{req_name}'",
                 suggestion=f"新表必须包含字段: {req_name}",
+            ))
+            continue
+        # 已存在的字段：检查类型 + 注释是否完全一致
+        f = field_by_name[req_name]
+        spec = REQUIRED_FIELDS[req_name]
+        # 类型正则
+        if not re.search(spec["type_pattern"], f.type or "", re.IGNORECASE):
+            issues.append(Issue(
+                table=table.name, severity=Severity.MANDATORY, rule="必含字段定义不一致",
+                location=f"表:{table.name} 字段:{req_name}",
+                description=f"必含字段 '{req_name}' 类型 '{f.type}' 与规范不符",
+                suggestion=f"应匹配类型正则 '{spec['type_pattern']}'（示例：varchar(36) / datetime）",
+            ))
+        # 注释必须完全一致（空白不敏感：内部多余空格容错，对中文注释友好）
+        expected_comment = spec["desc"]
+        actual_comment = re.sub(r"\s+", "", f.comment or "")
+        expected_normalized = re.sub(r"\s+", "", expected_comment)
+        if actual_comment != expected_normalized:
+            issues.append(Issue(
+                table=table.name, severity=Severity.MANDATORY, rule="必含字段注释不一致",
+                location=f"表:{table.name} 字段:{req_name}",
+                description=f"必含字段 '{req_name}' 注释为 '{f.comment}'，与规范不符",
+                suggestion=f"必须改为规范注释 '{expected_comment}'",
             ))
 
 
@@ -843,6 +923,46 @@ def check_field_comment(field: FieldInfo, table_name: str, issues: list):
             suggestion="格式：中文名(补充信息)[枚举信息]，如 '父参数id(0=根,支持嵌套)'",
         ))
 
+    # R2: 取值范围 [k-v,...] 格式（COL033）
+    bracket_match = re.search(r"\[([^\[\]]*)\]", comment)
+    if bracket_match:
+        bracket_content = bracket_match.group(1).strip()
+        if bracket_content:
+            # 排除字符集：不允许多个 k-v 间无逗号（空格代替）、value 含括号或空白
+            kv_pattern = re.compile(
+                r"^[\w\u4e00-\u9fff]+[-=][^\[\],()\s]+(?:\s*,\s*[\w\u4e00-\u9fff]+[-=][^\[\],()\s]+)*\s*$"
+            )
+            if not kv_pattern.match(bracket_content):
+                issues.append(Issue(
+                    table=table_name, severity=Severity.MANDATORY, rule="注释取值范围格式",
+                    location=f"表:{table_name} 字段:{field.name}",
+                    description=f"取值范围 '[{bracket_content}]' 不符合 k-v 格式",
+                    suggestion="格式：[k1-v1,k2-v2,...]，如 [10-待支付,20-已支付,30-已完成]",
+                ))
+
+    # R3: 补充信息 () 语法粗略检查（COL034）
+    paren_match = re.search(r"\(([^()]*)\)", comment)
+    if paren_match:
+        paren_content = paren_match.group(1).strip()
+        # 补充信息不能为空
+        if not paren_content:
+            issues.append(Issue(
+                table=table_name, severity=Severity.MANDATORY, rule="补充信息为空",
+                location=f"表:{table_name} 字段:{field.name}",
+                description="补充信息圆括号内为空",
+                suggestion="补充信息应包含必要的额外说明，如 '父参数id(0=根)'",
+            ))
+        # 补充信息不能与字段名主体重复（粗略判断：若括号内包含字段名的完整翻译视为冗余）
+        # 精确语义判断（"订单编号(订单号)"中"订单号"是"订单编号"的同义重复）由 AI 兜底
+        main_text = comment.split("(", 1)[0].strip().split("[", 1)[0].strip()
+        if main_text and paren_content and paren_content == main_text:
+            issues.append(Issue(
+                table=table_name, severity=Severity.MANDATORY, rule="补充信息冗余",
+                location=f"表:{table_name} 字段:{field.name}",
+                description=f"补充信息 '({paren_content})' 与主标题 '{main_text}' 完全相同",
+                suggestion="补充信息应为必要的额外说明，不应与主标题重复",
+            ))
+
 
 def check_field_type(field: FieldInfo, table_name: str, issues: list):
     """Check for forbidden field types."""
@@ -943,7 +1063,7 @@ def check_index_naming(table: TableInfo, issues: list):
                 suggestion="普通索引命名规则: ix_字段列表",
             ))
 
-        # 索引主体分词缩写（推荐级）
+        # 索引主体分词缩写（强制级：公司数据治理要求）
         _check_index_abbreviation(idx, issues)
 
 

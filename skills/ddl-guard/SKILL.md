@@ -196,6 +196,28 @@ python3 scripts/sql_check.py [--format json]
 - `sql_check.py` 自动扫描 mapper XML（解析 `<if>`/`<where>`/`<foreach>` 等动态标签和 `<include>` 引用）以及 MyBatis-Plus `@TableName` 注解的 PO 类（检查表名/字段命名规范、必含字段）
 - `ddl_check.py` 内置缩写字典（`scripts/abbreviations.py`），对**字段名/表名/索引名**做长写法 → 标准缩写的反向检查（**强制级别：公司数据治理要求**），扩展字典仅修改 `abbreviations.py`
 - `ddl_check.py` 强制检查**索引名包含全部字段名**（规则 `索引名未包含全部字段`）：索引名称由所包含字段的全名称按 `ix_<field1>_<field2>...` 拼接而成，字段名不允许任何缩写（如把 `mch_id` 缩写为 `mch`）
+- `ddl_check.py` 检查注释格式：R2（取值范围 `[k-v,...]`）+ R3（补充信息 `()` 不能与主标题完全相同）
+
+### 第 2 步：AI 复核语义层
+
+脚本能做的是**确定性检查**（正则、字典查表）。涉及语义判断的规则**不写入脚本**，由 ZCode agent 在审查对话中执行：
+
+| 规则 | 检查方式 |
+|---|---|
+| 字段名拼写合规 | 脚本：字典查表 |
+| 必含字段存在性 | 脚本：必含字段表 |
+| 注释类型/长度/全角 | 脚本：正则 |
+| 注释取值范围 `[k-v]` 格式 | 脚本：正则 |
+| 补充信息 `()` 与主标题完全相同 | 脚本：字符串比对 |
+| **R1：注释主标题 = 字段英文名直译** | **ZCode agent 复核** |
+| **R3：补充信息 `()` 与主标题语义重复** | **ZCode agent 复核** |
+
+**为什么 AI 复核放在 agent 而非脚本里**：
+- ddl-guard 作为 ZCode 技能，AI 能力在 agent 这层就存在，不需要脚本自己调 LLM
+- 脚本通过 subprocess 调 LLM 绕过了 agent 的 context，结果还得让 agent 再解析，链路冗余
+- R1/R3 是语义判断，由 reviewer（人或 agent）基于规范文档判断更合适
+
+具体语义复核规则详见 [`ddl-manual-rules.md`](ddl-manual-rules.md) 的"注释格式规范"章节，agent 在审查 DDL 时应主动对照该章节执行语义层校验。
 
 ### 第 2 步：读取待审查文件
 

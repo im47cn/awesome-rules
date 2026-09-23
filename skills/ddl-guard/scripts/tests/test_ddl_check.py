@@ -141,15 +141,20 @@ def _issues_for(ddl_text):
 
 
 def _ddl_with_field(field_line, table="t_demo"):
-    """生成含指定字段行、其余必含字段齐全的最小 DDL。"""
+    """生成含指定字段行、其余必含字段齐全的最小 DDL。
+
+    必含字段使用规范名 + 规范注释（如 last_update_time → COMMENT '最后更新时间'）。
+    必含字段名豁免缩写检查（ddl_check.py: REQUIRED_FIELDS 硬编码豁免）。
+    """
     return (
         f"CREATE TABLE {table} (\n"
-        "  id bigint COMMENT '主键',\n"
+        "  id bigint COMMENT '主键id',\n"
         f"  {field_line},\n"
         "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人id',\n"
         "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
         "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
-        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间'\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]'\n"
         ") COMMENT='demo';\n"
     )
 
@@ -409,13 +414,501 @@ def test_abbreviation_subscr_ok():
     assert all(i.rule != "缩写未规范化" for i in issues)
 
 
+# ── 强制级别 / 新字典特征（公司数据治理要求）────────────────────────────
+
+def test_abbreviation_severity_is_mandatory():
+    """缩写未规范化 → Severity.MANDATORY（公司数据治理强制要求）。"""
+    issues = _issues_for(_ddl_with_field("mapping_id varchar(32) COMMENT '映射唯一键'"))
+    assert any(
+        i.rule == "缩写未规范化" and i.severity == Severity.MANDATORY
+        for i in issues
+    )
+
+
+def test_abbreviation_index_severity_is_mandatory():
+    """索引缩写未规范化 → Severity.MANDATORY。"""
+    ddl = (
+        "CREATE TABLE t_idx_abbrev (\n"
+        "  id bigint COMMENT '主键',\n"
+        "  mapping_id varchar(32) COMMENT '映射唯一键',\n"
+        "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  KEY ix_mapping_id (mapping_id)\n"
+        ") COMMENT='demo';\n"
+    )
+    issues = _issues_for(ddl)
+    assert any(
+        i.rule == "索引缩写未规范化" and i.severity == Severity.MANDATORY
+        for i in issues
+    )
+
+
+def test_abbreviation_paste_table_cargo():
+    """粘贴表条目 cargo → cgo：字段名含 cargo → 强制改用 cgo。"""
+    issues = _issues_for(_ddl_with_field("cargo_type varchar(32) COMMENT '货物类型'"))
+    assert any(
+        i.rule == "缩写未规范化" and "cargo" in i.description and "cgo" in i.suggestion
+        for i in issues
+    )
+
+
+def test_abbreviation_paste_table_vehicle():
+    """粘贴表条目 vehicle → veh：字段名含 vehicle → 强制改用 veh。"""
+    issues = _issues_for(_ddl_with_field("vehicle_id varchar(32) COMMENT '车辆id'"))
+    assert any(
+        i.rule == "缩写未规范化" and "vehicle" in i.description and "veh" in i.suggestion
+        for i in issues
+    )
+
+
+def test_abbreviation_paste_table_company():
+    """粘贴表条目 company → co：字段名含 company → 强制改用 co。"""
+    issues = _issues_for(_ddl_with_field("company_id varchar(32) COMMENT '公司id'"))
+    assert any(
+        i.rule == "缩写未规范化" and "company" in i.description and "co" in i.suggestion
+        for i in issues
+    )
+
+
+def test_abbreviation_paste_table_insurance():
+    """粘贴表条目 insurance → insu：字段名含 insurance → 强制改用 insu。"""
+    issues = _issues_for(_ddl_with_field("insurance_amount decimal(18,2) COMMENT '保险金额'"))
+    assert any(
+        i.rule == "缩写未规范化" and "insurance" in i.description and "insu" in i.suggestion
+        for i in issues
+    )
+
+
+def test_abbreviation_full_table_name_flagged():
+    """粘贴表全量入库：表名含 mapping → 强制改用 mapp。"""
+    issues = _issues_for(
+        _ddl_with_field("ext varchar(50) COMMENT '扩展'", table="t_mapping_log")
+    )
+    assert any(
+        i.rule == "缩写未规范化" and "表名" in i.location
+        and "mapping" in i.description and "mapp" in i.suggestion
+        for i in issues
+    )
+
+
+def test_abbreviation_index_body_flagged():
+    """索引名缩写：ix_cargo_type 含 cargo → 强制改用 cgo。"""
+    ddl = (
+        "CREATE TABLE t_idx_cargo (\n"
+        "  id bigint COMMENT '主键',\n"
+        "  cargo_type varchar(32) COMMENT '货物类型',\n"
+        "  cgo_id varchar(32) COMMENT '货物id',\n"
+        "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  KEY ix_cargo_type (cargo_type)\n"
+        ") COMMENT='demo';\n"
+    )
+    issues = _issues_for(ddl)
+    # 字段 cargo_type + 索引 ix_cargo_type 双触发
+    field_hits = [i for i in issues if i.rule == "缩写未规范化" and "cargo" in i.description]
+    index_hits = [i for i in issues if i.rule == "索引缩写未规范化" and "cargo" in i.description]
+    assert field_hits and index_hits
+
+
+def test_abbreviation_same_word_skip_ok():
+    """同字映射不入字典（用户最新指令）：phone 字段不报错（粘贴表中 phone→phone 已跳过）。"""
+    issues = _issues_for(_ddl_with_field("phone varchar(20) COMMENT '电话'"))
+    # 应不报 phone → 任何缩写 的违规
+    assert not any(
+        i.rule == "缩写未规范化" and "phone" in i.description
+        for i in issues
+    )
+
+
+def test_abbreviation_multi_word_phrase_not_split():
+    """多词短语不拆词副作用：字段名含 company 不应被映射到 insuco（来自 insurance company）。"""
+    issues = _issues_for(_ddl_with_field("company_id varchar(32) COMMENT '公司id'"))
+    # 应映射到 co 而不是 insuco
+    company_hit = next(
+        (i for i in issues if i.rule == "缩写未规范化" and "company" in i.description),
+        None,
+    )
+    assert company_hit is not None
+    assert "co" in company_hit.suggestion
+    assert "insuco" not in company_hit.suggestion
+
+
+def test_abbreviation_manual_fix_subscription():
+    """手工补全：subscription → subscr（粘贴表分号并列短语拆词副作用补全）。"""
+    issues = _issues_for(
+        _ddl_with_field("ext varchar(50) COMMENT '扩展'", table="t_subscription_log")
+    )
+    assert any(
+        i.rule == "缩写未规范化" and "subscription" in i.description
+        and "subscr" in i.suggestion
+        for i in issues
+    )
+
+
+# ── 必含字段一致性（公司基线硬性要求）───────────────────────────────
+
+def test_required_field_comment_mismatch_flagged():
+    """必含字段注释不一致 → 强制违规。"""
+    ddl = (
+        "CREATE TABLE t_demo (\n"
+        "  id bigint COMMENT '主键id',\n"
+        "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]'\n"
+        ") COMMENT='demo';\n"
+    )
+    issues = _issues_for(ddl)
+    assert any(
+        i.rule == "必含字段注释不一致" and i.severity == Severity.MANDATORY
+        and "creator_id" in i.description and "创建人id" in i.suggestion
+        for i in issues
+    )
+
+
+def test_required_field_type_mismatch_flagged():
+    """必含字段类型不一致（如 creator_id 用了 bigint 而非 varchar(36)）→ 强制违规。"""
+    ddl = (
+        "CREATE TABLE t_demo (\n"
+        "  id bigint COMMENT '主键id',\n"
+        "  creator_id bigint NOT NULL DEFAULT 0 COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]'\n"
+        ") COMMENT='demo';\n"
+    )
+    issues = _issues_for(ddl)
+    assert any(
+        i.rule == "必含字段定义不一致" and i.severity == Severity.MANDATORY
+        and "creator_id" in i.description
+        for i in issues
+    )
+
+
+def test_required_field_correct_ok():
+    """必含字段全部合规（名称+类型+注释完全一致）→ 不报。"""
+    ddl = (
+        "CREATE TABLE t_demo (\n"
+        "  id bigint COMMENT '主键id',\n"
+        "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]'\n"
+        ") COMMENT='demo';\n"
+    )
+    issues = _issues_for(ddl)
+    assert all(
+        i.rule not in ("必含字段缺失", "必含字段定义不一致", "必含字段注释不一致")
+        for i in issues
+    )
+
+
+def test_required_field_comment_whitespace_insensitive():
+    """必含字段注释比较空白不敏感：内部多余空格容错。"""
+    ddl = (
+        "CREATE TABLE t_demo (\n"
+        "  id bigint COMMENT '主键id',\n"
+        "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人 id',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]'\n"
+        ") COMMENT='demo';\n"
+    )
+    issues = _issues_for(ddl)
+    # 内部多一个空格应被容错
+    assert all(i.rule != "必含字段注释不一致" for i in issues)
+
+
+def test_required_field_exempt_from_abbreviation():
+    ddl = (
+        "CREATE TABLE t_demo (\n"
+        "  id bigint COMMENT '主键id',\n"
+        "  ext varchar(50) COMMENT '扩展',\n"
+        "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]'\n"
+        ") COMMENT='demo';\n"
+    )
+    issues = _issues_for(ddl)
+    update_hits = [
+        i for i in issues
+        if i.rule == "缩写未规范化" and "last_update_time" in i.description
+    ]
+    assert not update_hits
+
+
+def test_required_field_index_exempt_from_abbreviation():
+    """必含字段名豁免索引缩写检查：ix_last_update_time 含 update 分词不报错。"""
+    ddl = (
+        "CREATE TABLE t_demo (\n"
+        "  id bigint COMMENT '主键id',\n"
+        "  ext varchar(50) COMMENT '扩展',\n"
+        "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]',\n"
+        "  KEY ix_last_update_time (last_update_time)\n"
+        ") COMMENT='demo';\n"
+    )
+    issues = _issues_for(ddl)
+    # last_update_time 含 update 分词，会被字典命中；豁免逻辑生效
+    update_index_hits = [
+        i for i in issues
+        if i.rule == "索引缩写未规范化" and "update" in i.description
+    ]
+    assert not update_index_hits
+
+
+# ── 多义并列英文短语（consignor / cargo_owner → cgoer）────────────────
+
+def test_abbreviation_multi_eng_consignor():
+    """多义并列英文：consignor / cargo_owner 共享缩写 cgoer，consignor 字段触发。"""
+    issues = _issues_for(_ddl_with_field("consignor_id varchar(32) COMMENT '货主id'"))
+    assert any(
+        i.rule == "缩写未规范化" and "consignor" in i.description
+        and "cgoer" in i.suggestion
+        for i in issues
+    )
+
+
+def test_abbreviation_multi_eng_cargo_owner():
+    """多义并列英文：consignor / cargo_owner 共享缩写 cgoer，cargo_owner 整体字段触发。"""
+    issues = _issues_for(_ddl_with_field("cargo_owner varchar(32) COMMENT '货主'"))
+    assert any(
+        i.rule == "缩写未规范化" and "cargo_owner" in i.description
+        and "cgoer" in i.suggestion
+        for i in issues
+    )
+
+
+def test_abbreviation_multi_eng_subject_main_body():
+    """多义并列英文：subject/main body 共享缩写 subj/main_body。"""
+    issues = _issues_for(_ddl_with_field("subject_id varchar(32) COMMENT '主体id'"))
+    assert any(
+        i.rule == "缩写未规范化" and "subject" in i.description
+        and ("subj" in i.suggestion or "main_body" in i.suggestion)
+        for i in issues
+    )
+
+
+def test_abbreviation_carrier():
+    """carrier 同字映射：字段名 carrier 不报错（value 也是 carrier，项目标准业务名）。"""
+    issues = _issues_for(_ddl_with_field("carrier_id varchar(32) COMMENT '承运人id'"))
+    # carrier 字段已合规（value == key），不触发
+    carrier_hits = [
+        i for i in issues
+        if i.rule == "缩写未规范化" and "carrier" in i.description
+    ]
+    assert not carrier_hits
+
+
+# ── 规范字段名 del_flag 豁免（拆词副作用防护）──────────────────────
+
+def test_del_flag_exempt_from_abbreviation():
+    """del_flag 是规范字段名，豁免缩写检查（即使 flag 在字典中同字映射）。"""
+    ddl = (
+        "CREATE TABLE t_demo (\n"
+        "  id bigint COMMENT '主键id',\n"
+        "  ext varchar(50) COMMENT '扩展',\n"
+        "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]'\n"
+        ") COMMENT='demo';\n"
+    )
+    issues = _issues_for(ddl)
+    # del_flag 字段豁免，不应触发 flag 缩写违规
+    flag_hits = [
+        i for i in issues
+        if i.rule == "缩写未规范化" and "del_flag" in i.description
+    ]
+    assert not flag_hits
+
+
+# ── 手工补充：subscription → subscr（粘贴表分号并列短语拆词副作用补全）──
+
+def test_abbreviation_subscription_manual_fix():
+    """subscription → subscr（手工补充，Excel 中 subscribe 独立行但 subscription 缺失）。"""
+    issues = _issues_for(_ddl_with_field("subscription_id varchar(32) COMMENT '订阅id'"))
+    assert any(
+        i.rule == "缩写未规范化" and "subscription" in i.description
+        and "subscr" in i.suggestion
+        for i in issues
+    )
+
+
+# ── R2: 取值范围 [k-v,...] 格式（COL033）─────────────────────────────
+
+def test_comment_bracket_kv_format_ok():
+    """注释取值范围 [10-待支付,20-已支付] → 合规。"""
+    issues = _issues_for(_ddl_with_field("status tinyint COMMENT '订单状态[10-待支付,20-已支付,30-已完成]'"))
+    assert all(i.rule != "注释取值范围格式" for i in issues)
+
+
+def test_comment_bracket_kv_format_eq_ok():
+    """注释取值范围 [10=待支付,20=已支付] → 合规（= 也是合法分隔符）。"""
+    issues = _issues_for(_ddl_with_field("status tinyint COMMENT '订单状态[10=待支付,20=已支付]'"))
+    assert all(i.rule != "注释取值范围格式" for i in issues)
+
+
+def test_comment_bracket_kv_format_bad():
+    """注释取值范围 [待支付/已支付] → 违规（应用 k-v 格式）。"""
+    issues = _issues_for(_ddl_with_field("status tinyint COMMENT '订单状态[待支付/已支付]'"))
+    assert any(
+        i.rule == "注释取值范围格式" and i.severity == Severity.MANDATORY
+        for i in issues
+    )
+
+
+def test_comment_bracket_kv_format_missing_kv():
+    """注释取值范围 [状态] → 违规（缺少 k-v 对）。"""
+    issues = _issues_for(_ddl_with_field("status tinyint COMMENT '订单状态[状态]'"))
+    assert any(
+        i.rule == "注释取值范围格式"
+        for i in issues
+    )
+
+
+def test_comment_bracket_kv_format_space_between():
+    """注释取值范围 '10-待支付 20-已支付'（空格代替逗号）→ 违规。"""
+    issues = _issues_for(_ddl_with_field("status tinyint COMMENT '订单状态[10-待支付 20-已支付]'"))
+    assert any(
+        i.rule == "注释取值范围格式"
+        for i in issues
+    )
+
+
+def test_comment_bracket_kv_format_paren_in_value():
+    """注释取值范围含括号 '10-待支付(注)' → 违规。"""
+    issues = _issues_for(_ddl_with_field("status tinyint COMMENT '订单状态[10-待支付(注),20-已支付]'"))
+    assert any(
+        i.rule == "注释取值范围格式"
+        for i in issues
+    )
+
+
+# ── 高优 #1：缩写 value 是保留字的违规循环 ──────────────────────
+
+def test_abbreviation_reserved_value_exempt_character():
+    """character → char（char 是 MySQL 保留字）：豁免，避免违规循环。"""
+    issues = _issues_for(_ddl_with_field("character_id varchar(32) COMMENT '字符id'"))
+    # character 字段不报违规（因为改 char 又会触发保留字违规）
+    assert not any(
+        i.rule == "缩写未规范化" and "character" in i.description
+        for i in issues
+    )
+
+
+def test_abbreviation_reserved_value_exempt_delete():
+    """delete → del（del 是 Python 关键字）：豁免。"""
+    issues = _issues_for(_ddl_with_field("delete_flag tinyint COMMENT '删除标志'"))
+    assert not any(
+        i.rule == "缩写未规范化" and "delete" in i.description
+        for i in issues
+    )
+
+
+def test_abbreviation_reserved_value_exempt_number():
+    """number → no（no 是 MySQL 保留字）：豁免。"""
+    issues = _issues_for(_ddl_with_field("number_id varchar(32) COMMENT '编号id'"))
+    assert not any(
+        i.rule == "缩写未规范化" and "number" in i.description
+        for i in issues
+    )
+
+
+def test_abbreviation_reserved_value_index_exempt():
+    """索引中含保留字 value 的 key 也豁免：ix_number_id 不报。"""
+    ddl = (
+        "CREATE TABLE t_demo (\n"
+        "  id bigint COMMENT '主键id',\n"
+        "  number_id varchar(32) COMMENT '编号id',\n"
+        "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]',\n"
+        "  KEY ix_number_id (number_id)\n"
+        ") COMMENT='demo';\n"
+    )
+    issues = _issues_for(ddl)
+    assert not any(
+        i.rule == "索引缩写未规范化" and "number" in i.description
+        for i in issues
+    )
+
+
+# ── 中优 #5：_check_index_abbreviation 豁免扩展 ─────────────────────
+
+def test_index_abbreviation_with_del_flag_exempt():
+    """索引 ix_del_flag 不报缩写违规（del_flag 是规范字段名豁免列表）。"""
+    ddl = (
+        "CREATE TABLE t_demo (\n"
+        "  id bigint COMMENT '主键id',\n"
+        "  ext varchar(50) COMMENT '扩展',\n"
+        "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]',\n"
+        "  KEY ix_del_flag (del_flag)\n"
+        ") COMMENT='demo';\n"
+    )
+    issues = _issues_for(ddl)
+    assert not any(i.rule == "索引缩写未规范化" for i in issues)
+
+
+# ── R3: 补充信息 () 格式（COL034）──────────────────────────────────
+
+def test_comment_paren_redundant_flagged():
+    """补充信息与主标题完全相同 → 报"补充信息冗余"。"""
+    issues = _issues_for(_ddl_with_field("order_no varchar(36) COMMENT '订单编号(订单编号)'"))
+    assert any(
+        i.rule == "补充信息冗余" and i.severity == Severity.MANDATORY
+        for i in issues
+    )
+
+
+def test_comment_paren_empty_flagged():
+    """补充信息圆括号为空 → 报"补充信息为空"。"""
+    issues = _issues_for(_ddl_with_field("parent_id bigint COMMENT '父参数id()'"))
+    assert any(
+        i.rule == "补充信息为空" and i.severity == Severity.MANDATORY
+        for i in issues
+    )
+
+
+def test_comment_paren_meaningful_ok():
+    """补充信息含必要的额外说明 → 不报。"""
+    issues = _issues_for(_ddl_with_field("parent_id bigint COMMENT '父参数id(0=根,支持嵌套)'"))
+    assert all(
+        i.rule not in ("补充信息冗余", "补充信息为空")
+        for i in issues
+    )
+
+
+
+
+
 # ── 日志/流水表必含字段豁免 ─────────────────────────────────────────────────
 
 def test_log_table_exempt_updater_fields():
     """日志表缺 last_updater_id/last_update_time → 不报必含字段。"""
     ddl = (
         "CREATE TABLE call_log (\n"
-        "  id bigint COMMENT '主键',\n"
+        "  id bigint COMMENT '主键id',\n"
         "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
         "  content varchar(100) COMMENT '内容'\n"
         ") COMMENT='日志表';\n"
