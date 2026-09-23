@@ -94,8 +94,10 @@ prompt 不嵌候选文本，改为指令 Agent 用 Read 工具完整读取部署
 pass_at_k/pass_cap_k/invocation/cases（整数计数）`；逐 case 明细走 CLI stdout。
 写入方两个：dry-run 冒烟入口（零 LLM）与 `evo.py evolve --skill` GEPA 结束后
 的部署态证据 pass（stream-json 实测 `cmd_evidence_llm`；`replay_evidence=False`
-跳过）。证据 JSON 落地 ≠ 技能合格：登记与消费由 release_guard `EVIDENCE_ENROLLED`
-驱动（见 ../../scripts/release_guard.py）。
+跳过）。dry-run 载荷拒绝覆写既有 stream-json 证据（或无法核验的既有文件），
+fail-closed——防本地冒烟静默抹掉 k×cases LLM 成本（已提交证据可 checkout
+恢复）。证据 JSON 落地 ≠ 技能合格：登记与消费由 release_guard
+`EVIDENCE_ENROLLED` 驱动（见 ../../scripts/release_guard.py）。
 
 ```bash
 python3 skills/skill-evo/scripts/evo_replay.py ddl-guard   # 证据 dry-run 冒烟（零 LLM，CI 可跑）

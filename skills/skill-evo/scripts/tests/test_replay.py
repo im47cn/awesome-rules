@@ -1099,3 +1099,30 @@ def test_cmd_evolve_replay_evidence_kill_switch(tmp_path, monkeypatch):
     sys = types.SimpleNamespace(
         skill="ddl-guard", eval="", budget=None, seed=0, dry_run=False)
     assert evo.cmd_evolve(sys) == 0
+
+
+def test_dry_run_refuses_overwrite_stream_evidence(tmp_path, monkeypatch, capsys):
+    """真实 stream-json 证据落盘后，dry-run 冒烟拒绝覆写（fail-closed：
+    未提交的 k×cases LLM 成本被抹掉不可恢复）；dry-run→dry-run 幂等不受影响。"""
+    import json
+    import evo_replay
+    monkeypatch.setattr(evo_replay.subprocess, "run", _ev_fake_run)
+    cfg = {"replay_min_cases": 8, "replay_k": 1, "replay_pass_threshold": 1.0}
+    # 先落一份真实证据（write_replay_evidence 直写最小合法 payload，
+    # 形态等价 cmd_evidence_llm 产物）
+    path = evo_replay.write_replay_evidence("ddl-guard", {
+        "content_hash": "sha256:deadbeef", "k": 1,
+        "pass_at_k": 1.0, "pass_cap_k": 1.0,
+        "invocation": {"skill_invoked": True, "evidence": "stream-json"},
+        "cases": 12,
+    }, root=tmp_path)
+    # dry-run 冒烟 → 拒绝覆写，原文件原封不动
+    assert evo_replay.cmd_evidence_dry_run("ddl-guard", cfg, out_root=tmp_path) == 1
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    assert doc["invocation"] == {"skill_invoked": True, "evidence": "stream-json"}
+    assert doc["content_hash"] == "sha256:deadbeef"
+    assert "拒绝覆写" in capsys.readouterr().out
+    # 移除真实证据（模拟人工确认）后，dry-run→dry-run 幂等冒烟恢复可用
+    path.unlink()
+    assert evo_replay.cmd_evidence_dry_run("ddl-guard", cfg, out_root=tmp_path) == 0
+    assert evo_replay.cmd_evidence_dry_run("ddl-guard", cfg, out_root=tmp_path) == 0

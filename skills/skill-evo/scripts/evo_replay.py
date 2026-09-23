@@ -797,7 +797,9 @@ def write_replay_evidence(skill: str, payload: dict, root: Optional[Path] = None
     round 4；cases 为整数计数（任务书契约样例 "cases": 12，字段不得增删，
     逐 case 明细走调用方 stdout）。artifacts/ 默认被 .gitignore 忽略，唯
     replay-evidence/ 豁免：仅登记入 release_guard EVIDENCE_ENROLLED 的真实
-    证据（stream-json）可入库，禁止 git add 未登记证据。
+    证据（stream-json）可入库，禁止 git add 未登记证据。dry-run 载荷拒绝
+    覆写既有 stream-json 证据（或无法核验的既有文件）：ValueError 上抛，
+    由调用方转退出码（fail-closed，防冒烟抹掉 k×cases LLM 成本）。
     """
     root = (root or _repo_root()).resolve()
     out_dir = root / "skills" / "skill-evo" / "artifacts" / "replay-evidence"
@@ -815,6 +817,21 @@ def write_replay_evidence(skill: str, payload: dict, root: Optional[Path] = None
         "cases": int(payload["cases"]),
     }
     path = out_dir / f"{skill}.json"
+    # fail-closed 守卫：dry-run 冒烟不得覆写真实证据（未提交的 stream-json
+    # 被抹掉不可恢复——k×cases LLM 成本作废）；既有文件无法核验时同样拒绝。
+    if path.exists() and payload["invocation"]["evidence"] == "dry-run":
+        protected = True  # 无法核验 → 按真实证据对待（宁可拒绝冒烟）
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+            protected = (existing.get("invocation", {})
+                         .get("evidence") == "stream-json")
+        except (OSError, ValueError):
+            pass
+        if protected:
+            raise ValueError(
+                f"拒绝覆写：{path} 已存在真实证据（stream-json 或无法核验），"
+                f"dry-run 冒烟不得破坏之；如确需重跑 dry-run，请先移除/备份"
+                f"该文件（已提交证据可 git checkout 恢复）")
     path.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n",
                     encoding="utf-8")
     return path
@@ -862,12 +879,16 @@ def cmd_evidence_dry_run(skill: str, cfg: dict, out_root: Optional[Path] = None)
     content_hash = skill_content_hash(skill)
     # 契约：cases 为整数计数（任务书样例 "cases": 12，C 路消费方依赖，
     # 字段不得增删改名）——逐 case 明细走 stdout，不入 JSON。@date 2026-09-20
-    path = write_replay_evidence(skill, {
-        "content_hash": content_hash, "k": k,
-        "pass_at_k": avg_pak, "pass_cap_k": avg_cap,
-        "invocation": {"skill_invoked": True, "evidence": "dry-run"},
-        "cases": n_cases,
-    }, root=out_root)
+    try:
+        path = write_replay_evidence(skill, {
+            "content_hash": content_hash, "k": k,
+            "pass_at_k": avg_pak, "pass_cap_k": avg_cap,
+            "invocation": {"skill_invoked": True, "evidence": "dry-run"},
+            "cases": n_cases,
+        }, root=out_root)
+    except ValueError as e:
+        print(f"evidence 未写入：{e}")
+        return 1
     print(f"pass@k = {avg_pak:.4f}（dry-run 单样本退化估计）")
     print(f"pass^k = {avg_cap:.4f}（逐 case 通过率，单样本下与 pass@k 同值）")
     print(f"evidence 已写入：{path}（cases={n_cases}）")
@@ -942,6 +963,7 @@ if __name__ == "__main__":
     # 产出 artifacts/replay-evidence/<skill>.json。完整 LLM 运行的 evidence
     # 由 evo.py cmd_evolve --skill 在 GEPA 结束后经 cmd_evidence_llm 接线
     # stream 通道产出（部署态实测）。
+    # 若目标已存在真实证据（stream-json 或无法核验）则拒绝覆写（退出码 1）。
     import sys
     from evo_config import load_config
     if len(sys.argv) != 2:
