@@ -766,6 +766,12 @@ def call_claude_stream(prompt: str, cfg: dict) -> Tuple[str, List[dict]]:
     return final_text or "".join(texts), events
 
 
+# 派生产物排除集（A 路 release_guard._DERIVED_PARTS 镜像，2026-09-24
+# PR #237 对齐口径：.coverage/.ruff_cache 系实测 push 拦截补录）。
+_DERIVED_PARTS = {".pytest_cache", "__pycache__", ".DS_Store",
+                  ".coverage", ".ruff_cache"}
+
+
 def skill_content_hash(skill: str, root: Optional[Path] = None) -> str:
     """技能内容指纹：SKILL.md + scripts/**（排除派生产物）的逐文件摘要清单。
 
@@ -786,15 +792,13 @@ def skill_content_hash(skill: str, root: Optional[Path] = None) -> str:
     skill_md = base / "SKILL.md"
     if not skill_md.is_file():
         raise FileNotFoundError(f"SKILL.md 不存在：{skill_md}")
-    derived_parts = {".pytest_cache", "__pycache__", ".DS_Store",
-                     ".coverage", ".ruff_cache"}
     files = [skill_md]
     scripts_dir = base / "scripts"
     if scripts_dir.is_dir():
         files.extend(
             p for p in scripts_dir.rglob("*")
             if p.is_file() and not (
-                any(part in derived_parts
+                any(part in _DERIVED_PARTS
                     for part in p.relative_to(scripts_dir).parts)
                 or p.suffix == ".pyc"))
     files.sort(key=lambda p: p.relative_to(root).as_posix())
