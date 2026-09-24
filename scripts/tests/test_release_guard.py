@@ -176,6 +176,12 @@ class TestContentHashContract:
         (scripts / "__pycache__" / "run.cpython-314.pyc").write_bytes(
             b"\xcb\x0d\x0d\x0a")
         (scripts / ".DS_Store").write_bytes(b"\x00\x00\x00Bud1")
+        # 2026-09-24 PR #237 push 被拦实证：coverage 写 .coverage（SQLite
+        # 二进制）、ruff 写 .ruff_cache/<ver>/<hash>，同属本地生灭物
+        (scripts / ".coverage").write_bytes(b"SQLite format 3\x00\xbb\xa1")
+        ruff = scripts / ".ruff_cache" / "0.16.8"
+        ruff.mkdir(parents=True)
+        (ruff / "11728694205254252146").write_bytes(b"\x00\x01\x02cache")
         nested = scripts / "sub" / "__pycache__"
         nested.mkdir(parents=True)
         (nested / "x.cpython-314.pyc").write_bytes(b"\xff\xfe")
