@@ -105,11 +105,11 @@ FORBIDDEN_TYPES = {
 
 # ── 必含字段 ────────────────────────────────────────────────────────────
 REQUIRED_FIELDS = {
-    "id": {"type_pattern": r"(int|bigint)", "desc": "主键id"},
-    "creator_id": {"type_pattern": r"varchar\s*\(\s*36\s*\)", "desc": "创建人id"},
-    "create_time": {"type_pattern": r"datetime", "desc": "创建时间"},
-    "last_updater_id": {"type_pattern": r"varchar\s*\(\s*36\s*\)", "desc": "最后更新人id"},
-    "last_update_time": {"type_pattern": r"datetime", "desc": "最后更新时间"},
+    "id": {"type_pattern": r"^(int|bigint)$", "desc": "主键id"},
+    "creator_id": {"type_pattern": r"^varchar\s*\(\s*36\s*\)$", "desc": "创建人id"},
+    "create_time": {"type_pattern": r"^datetime$", "desc": "创建时间"},
+    "last_updater_id": {"type_pattern": r"^varchar\s*\(\s*36\s*\)$", "desc": "最后更新人id"},
+    "last_update_time": {"type_pattern": r"^datetime$", "desc": "最后更新时间"},
 }
 
 # ── 缩写检查豁免字段名（公司规范字段名）────────────────────────────────
@@ -794,8 +794,9 @@ def check_required_fields(table: TableInfo, issues: list):
         # 已存在的字段：检查类型 + 注释是否完全一致
         f = field_by_name[req_name]
         spec = REQUIRED_FIELDS[req_name]
-        # 类型正则
-        if not re.search(spec["type_pattern"], f.type or "", re.IGNORECASE):
+        # 类型正则（type_pattern 自带 ^...$ 锚点,fullmatch 做完整字符串校验,
+        # 避免 `int` 误匹配 `point`、`datetime` 误匹配 `default` 等子串污染）
+        if not re.fullmatch(spec["type_pattern"], f.type or "", re.IGNORECASE):
             issues.append(Issue(
                 table=table.name, severity=Severity.MANDATORY, rule="必含字段定义不一致",
                 location=f"表:{table.name} 字段:{req_name}",
@@ -918,7 +919,7 @@ def check_field_comment(field: FieldInfo, table_name: str, issues: list):
             suggestion="格式：中文名(补充信息)[枚举信息]，如 '父参数id(0=根,支持嵌套)'",
         ))
 
-    # R2: 取值范围 [k-v,...] 格式（COL033）
+# R2: 取值范围 [k-v,...] 格式（COL033）
     bracket_match = re.search(r"\[([^\[\]]*)\]", comment)
     if bracket_match:
         bracket_content = bracket_match.group(1).strip()
@@ -1074,20 +1075,20 @@ def check_index_contains_columns(table: TableInfo, issues: list):
         if idx.name == "PRIMARY":
             continue
 
-        body_parts = set(strip_index_prefix(idx.name).split("_"))
-        missing: list[str] = []
-        for col in idx.columns:
-            for part in col.lower().split("_"):
-                if part and part not in body_parts:
-                    missing.append(f"{col}→{part}")
-        if missing:
+        # 精确拼接比较：索引名主体必须等于其列按声明顺序的全名拼接
+        # （原集合比较会接受顺序错乱或含额外 token 的索引名）
+        body = strip_index_prefix(idx.name)
+        expected = "_".join(col.lower() for col in idx.columns)
+        if body != expected:
             issues.append(Issue(
                 table=table.name,
                 severity=Severity.MANDATORY,
                 rule="索引名未包含全部字段",
                 location=f"表:{table.name} 索引:{idx.name}",
-                description=f"索引 '{idx.name}' 未完整包含字段名（缺失分词: {', '.join(missing)}）",
-                suggestion="索引名由字段全名称按 ix_<field1>_<field2>... 拼接而成，不允许缩写字段名",
+                description=(
+                    f"索引 '{idx.name}' 主体 '{body}' 不等于列顺序拼接 '{expected}'"
+                ),
+                suggestion="索引名由字段全名称按 ix_<field1>_<field2>... 顺序拼接而成，不允许缩写、调换顺序或含额外 token",
             ))
 
 

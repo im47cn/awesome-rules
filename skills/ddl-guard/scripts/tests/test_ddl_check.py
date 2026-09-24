@@ -1527,3 +1527,89 @@ def test_create_table_no_body_not_swallowing_paren_statement():
         "INSERT INTO t_x (a, b) VALUES (1, 2);\n"
     )
     assert "无建表语句" in {i.rule for i in issues}
+
+
+# ── Sourcery review bug 回归测试（PR #237 反馈） ────────────────────────────
+
+
+def test_required_field_type_fullmatch_substring_not_ok():
+    """Sourcery #1：必含字段类型正则用 fullmatch,避免 `int` 误匹配 `point`。
+
+    原实现 `re.search("(int|bigint)", ...)` 会让任何含 `int` 子串的类型通过,
+    现在 fullmatch 要求整段匹配,`id point` 应被报违规。
+    """
+    ddl = (
+        "CREATE TABLE t_demo (\n"
+        "  id point NOT NULL COMMENT '主键id',\n"  # type 含 `int` 子串但不是 int/bigint
+        "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]'\n"
+        ") COMMENT='demo';\n"
+    )
+    issues = _issues_for(ddl)
+    assert any(
+        i.rule == "必含字段定义不一致" and "id" in i.location
+        for i in issues
+    ), "fullmatch 应当把 id 的非 int/bigint 类型识别为违规"
+
+
+def test_abbreviation_composite_no_duplicate_violation():
+    """Sourcery #2：复合短语命中字典后,其覆盖的分词不再重复报告。
+
+    `cargo_owner` 命中 `cargo_owner → cgoer`（第一层）后,`cargo → cgo` 不应再报。
+    """
+    from abbreviations import iter_abbrev_violations
+    violations = iter_abbrev_violations("cargo_owner")
+    parts_hit = {p for p, _ in violations}
+    assert ("cargo_owner", "cgoer") in violations
+    assert "cargo" not in parts_hit, (
+        f"复合短语命中后,单词 cargo 不应再报;实际 violations={violations}"
+    )
+
+
+def test_index_name_strict_order_required():
+    """Sourcery #3：索引名必须按列声明顺序精确拼接,集合比较会放过乱序。"""
+    ddl = (
+        "CREATE TABLE t_demo (\n"
+        "  id bigint COMMENT '主键id',\n"
+        "  a varchar(36) NOT NULL DEFAULT '' COMMENT '字段a',\n"
+        "  b varchar(36) NOT NULL DEFAULT '' COMMENT '字段b',\n"
+        "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]',\n"
+        "  KEY ix_b_a (a, b)\n"  # 顺序错乱（声明是 a,b 但索引名是 b,a）
+        ") COMMENT='demo';\n"
+    )
+    issues = _issues_for(ddl)
+    assert any(
+        i.rule == "索引名未包含全部字段" and "ix_b_a" in i.location
+        for i in issues
+    ), "乱序索引名应被识别为违规"
+
+
+def test_index_name_extra_token_flagged():
+    """Sourcery #3 延伸：索引名含额外 token（如 `ix_a_b_extra`）也应被报。"""
+    ddl = (
+        "CREATE TABLE t_demo (\n"
+        "  id bigint COMMENT '主键id',\n"
+        "  a varchar(36) NOT NULL DEFAULT '' COMMENT '字段a',\n"
+        "  b varchar(36) NOT NULL DEFAULT '' COMMENT '字段b',\n"
+        "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]',\n"
+        "  KEY ix_a_b_extra (a, b)\n"
+        ") COMMENT='demo';\n"
+    )
+    issues = _issues_for(ddl)
+    assert any(i.rule == "索引名未包含全部字段" for i in issues)
+
+
+# Sourcery #4（R2 多个方括号）和 #5（R3 多个圆括号）经评审决定不修：
+# - 当前规则只校验首个 []/() 段,后续段被忽略
+# - 风险有限：实际 DDL 中出现多个 [k-v] 段的场景罕见,后续如需可独立 follow-up

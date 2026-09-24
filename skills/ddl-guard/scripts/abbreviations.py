@@ -1621,10 +1621,21 @@ def iter_abbrev_violations(name: str) -> list[tuple[str, str]]:
     raw_violations: list[tuple[str, str]] = []
     low = name.lower()
 
-    # 第一层：整体名称匹配（如 cargo_owner）
-    if low in LONG_TO_SHORT and LONG_TO_SHORT[low] != low:
-        if low not in KEYS_WITH_RESERVED_VALUE:
-            raw_violations.append((low, LONG_TO_SHORT[low]))
+    # 第一层：整体名称匹配（如 cargo_owner）。命中后整体名已被收敛,
+    # 第二层单词匹配要跳过该整体名覆盖的分词,避免 `cargo_owner → cgoer`
+    # 与 `cargo → cgo` 重复报告。
+    overall_matched = (
+        "_" in low
+        and low in LONG_TO_SHORT
+        and LONG_TO_SHORT[low] != low
+        and low not in KEYS_WITH_RESERVED_VALUE
+    )
+    if overall_matched:
+        raw_violations.append((low, LONG_TO_SHORT[low]))
+        # 整体名命中的所有分词,第二层跳过,避免重复报
+        overall_parts = set(low.split("_"))
+    else:
+        overall_parts = set()
 
     # 第二层：按 _ 拆分后单词匹配
     for part in low.split("_"):
@@ -1634,6 +1645,8 @@ def iter_abbrev_violations(name: str) -> list[tuple[str, str]]:
                 continue  # 跳过自我映射（key == value）
             if part in KEYS_WITH_RESERVED_VALUE:
                 continue  # 跳过 value 是保留字的 key（避免违规循环）
+            if part in overall_parts:
+                continue  # 整体名命中后,其覆盖的分词不再重复报
             raw_violations.append((part, std))
 
     # 去重：保留首次出现顺序
