@@ -899,14 +899,16 @@ def cmd_evidence_dry_run(skill: str, cfg: dict, out_root: Optional[Path] = None)
 
 
 def cmd_evidence_llm(skill: str, cfg: dict, call_claude_raw: Callable,
-                     out_root: Optional[Path] = None) -> int:
+                     out_root: Optional[Path] = None,
+                     eval_dirs: Optional[list] = None) -> int:
     """证据通道完整运行（LLM 实测）：部署态技能保真度评测 + evidence 写入。
 
     与 cmd_evidence_dry_run 同构（评估集 badcase+eval / include_manual / 阈值
     口径一致），区别仅在通道：每 case 经 make_run_once 走 call_claude_stream
     实测，工具调用流未出现指向本 skill 的事件即计失败（fail-closed）。GEPA
     变异筛选不适用本通道（证据模式只测部署态，见 _build_prompt）。调用方：
-    evo.py cmd_evolve --skill 在 GEPA 结束后接线（replay_evidence=False 跳过）。
+    evo.py cmd_evolve --skill 在 GEPA 结束后接线（replay_evidence=False 跳过），
+    经 eval_dirs 复用 --eval 解析出的评估集，保证证据口径与 GEPA 一致。
     invocation.evidence="stream-json"；skill_invoked 仅当全部采样真实触发。
     返回退出码（评估集不足 / 证据通道被 kill switch 关闭 → 1）。
     """
@@ -916,10 +918,11 @@ def cmd_evidence_llm(skill: str, cfg: dict, call_claude_raw: Callable,
     # 默认评估集 = badcase/（拦截型）+ eval/（放行/混合型），对齐 cmd_evidence_dry_run
     skill_dir = _repo_root() / "skills" / skill
     cases = []
-    for sub in ("badcase", "eval"):
-        d = skill_dir / sub
-        if d.is_dir():
-            cases += load_eval_set(skill, d, cfg, include_manual=True)
+    if eval_dirs is None:
+        eval_dirs = [skill_dir / sub for sub in ("badcase", "eval")
+                     if (skill_dir / sub).is_dir()]
+    for d in eval_dirs:
+        cases += load_eval_set(skill, d, cfg, include_manual=True)
     if len(cases) < int(cfg["replay_min_cases"]):
         print(f"评估集不足：{len(cases)} < replay_min_cases={cfg['replay_min_cases']}")
         return 1

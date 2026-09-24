@@ -450,8 +450,8 @@ def test_cmd_evolve_replay_full_run(tmp_path, monkeypatch):
     monkeypatch.setattr(evo_replay, "control_gate", lambda holdout: 0.0)
     ev_calls = []
 
-    def _ev_spy(skill, cfg, raw, out_root=None):
-        ev_calls.append(skill)
+    def _ev_spy(skill, cfg, raw, out_root=None, eval_dirs=None):
+        ev_calls.append((skill, eval_dirs))
         return 0
 
     monkeypatch.setattr(evo_replay, "cmd_evidence_llm", _ev_spy)
@@ -473,7 +473,9 @@ def test_cmd_evolve_replay_full_run(tmp_path, monkeypatch):
     pending = C.base_paths(C.load_config())["pending"]
     before = {f.name for f in pending.glob("*gepa-replay.md")}
     assert evo.cmd_evolve(sys) == 0
-    assert ev_calls == ["ddl-guard"]      # 完整运行后接线部署态证据 pass
+    # eval_dirs 透传：证据阶段与 GEPA 同源（防回归：--eval 不得在证据阶段被丢弃）
+    assert all(ev[0] == "ddl-guard" and ev[1] for ev in ev_calls)
+    assert len(ev_calls) == 1            # 完整运行后接线部署态证据 pass
     # 本次调用新增 1 个提案（差集）；不自动 apply/commit
     after = {f.name for f in pending.glob("*gepa-replay.md")}
     props = list(after - before)
@@ -523,8 +525,8 @@ def test_cmd_evolve_replay_no_improvement(tmp_path, monkeypatch):
     monkeypatch.setattr(evo_replay, "control_gate", lambda holdout: 0.0)
     ev_calls = []
 
-    def _ev_spy(skill, cfg, raw, out_root=None):
-        ev_calls.append(skill)
+    def _ev_spy(skill, cfg, raw, out_root=None, eval_dirs=None):
+        ev_calls.append((skill, eval_dirs))
         return 0
 
     monkeypatch.setattr(evo_replay, "cmd_evidence_llm", _ev_spy)
@@ -542,7 +544,7 @@ def test_cmd_evolve_replay_no_improvement(tmp_path, monkeypatch):
     sys = types.SimpleNamespace(
         skill="ddl-guard", eval="", budget=None, seed=0, dry_run=False)
     assert evo.cmd_evolve(sys) == 0
-    assert ev_calls == ["ddl-guard"]      # 无提案路径同样跑证据 pass
+    assert len(ev_calls) == 1 and ev_calls[0][0] == "ddl-guard"  # 无提案路径同样跑证据 pass
     after = {f.name for f in pending.glob("*gepa-replay.md")}
     assert after - before == set()   # 无新提案
 

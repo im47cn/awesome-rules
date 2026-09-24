@@ -456,7 +456,8 @@ def cmd_evolve(args) -> int:
         if not bool(cfg.get("replay_evidence", True)):
             print("replay_evidence=False：跳过部署态证据 pass（kill switch）")
             return 0
-        return R.cmd_evidence_llm(args.skill, cfg, call_claude_raw)
+        # eval_dirs 透传：证据阶段评估集与 GEPA 同源（--eval 不得在证据阶段被丢弃）
+        return R.cmd_evidence_llm(args.skill, cfg, call_claude_raw, eval_dirs=eval_dirs)
     # v2 默认链路：进化 skill-evo 自身 SYSTEM_PROMPT（标注源 = applied/rejected 提案）
     import evo_evolve as V
     train, holdout = V.build_dataset(cfg)
