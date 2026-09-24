@@ -1,6 +1,7 @@
 #!/bin/sh
 # gauntlet.sh 编排自测：证明层运行器的 fail-closed 语义真实存在。
 # 覆盖 SPEC 场景：全绿通过 / 任一层失败整体失败 / 层清单缺失硬失败 / 不读陈旧产物 /
+# 并发批语义（批内失败整门失败、批内其余层照常报告、批后层不执行 / 批全绿放行）/
 # doctor 自诊断（健康全 OK 且不改盘 / 坏解释器 FAIL 且汇总非零 / 未知模式硬失败 /
 # find_py 语法探针拒收过 import 桩但解析失败的假解释器 /
 # 语法探针执行期盲区：compile 过而模块级执行炸的文件被拦）。
@@ -152,6 +153,39 @@ if [ "$drc" -ne 0 ] && grep -q 'exec_fails.py' "$TMP/d9out"; then
     ok "T9 探针拦下 compile 过而执行炸的文件"
 else
     bad "T9 期望 rc!=0+exec_fails.py 被点名, 实际 rc=${drc}, 输出: $(cat "$TMP/d9out")"
+fi
+
+# ── T10 批语义负控制：批内失败 → 整体失败，批内其余层照常报告且输出回放，
+#    批后层不执行（fail-fast 粒度保持在批，见 gauntlet.sh 头注释）────────
+cat >"$TMP/l10" <<'EOF'
+run_layer pre true
+run_layer_bg bg-fail sh -c 'echo boom-from-bg; exit 7'
+run_layer_bg bg-ok true
+wait_layers
+run_layer never-reached true
+EOF
+run_gauntlet "$TMP/l10"
+if [ "$rc" -ne 0 ] && grep -q 'FAIL bg-fail（rc=7）' "$TMP/out" \
+    && grep -q 'boom-from-bg' "$TMP/out" && grep -q 'PASS bg-ok' "$TMP/out" \
+    && ! grep -q 'PASS never-reached' "$TMP/out"; then
+    ok "T10 批内失败：批内其余层照常报告，批后层不再执行"
+else
+    bad "T10 期望 rc!=0+FAIL bg-fail+boom-from-bg+PASS bg-ok+无 never-reached，实际 rc=${rc}, 输出: $(cat "$TMP/out")"
+fi
+
+# ── T11 批全绿正控制：批内层全 PASS，批后串行层照常执行 ─────────────────
+cat >"$TMP/l11" <<'EOF'
+run_layer_bg bg-one true
+run_layer_bg bg-two true
+wait_layers
+run_layer after true
+EOF
+run_gauntlet "$TMP/l11"
+if [ "$rc" -eq 0 ] && grep -q 'PASS bg-one' "$TMP/out" \
+    && grep -q 'PASS bg-two' "$TMP/out" && grep -q 'PASS after' "$TMP/out"; then
+    ok "T11 批全绿：批内层全 PASS 且批后串行层照常执行"
+else
+    bad "T11 期望 rc=0+bg-one/bg-two/after 全 PASS，实际 rc=${rc}, 输出: $(cat "$TMP/out")"
 fi
 
 # ── 汇总 ───────────────────────────────────────────────────────────────
