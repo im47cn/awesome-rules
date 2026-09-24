@@ -1,8 +1,17 @@
 #!/bin/sh
-# Gauntlet 入口：跑完所有层，第一个坏层即失败。
+# Gauntlet 入口：跑完所有层，第一个坏层即失败（并发批内＝第一个坏批）。
 # 语义契约：tools/test_gauntlet_orchestration.sh（编排自测）、
 # tools/test_gauntlet_checks.sh（检查器负控制）、
 # steering/testing-standards.md「自建关卡脚本的反作弊要求」。
+#
+# 层编排（2026-09-24）：默认清单 = 串行段 + 并发批 + 串行尾。批内层并发
+# 跑完（输出各落临时文件），wait_layers 按启动顺序回放并打 PASS/FAIL；
+# fail-fast 粒度保持在批：批内任一层失败 → 整门失败，批内其余已启动层
+# 照常报告（并发已启动，隐藏其输出反而丢证据），失败批之后的层不再执行。
+# 批内层必须互相独立（独立 COVERAGE_FILE / 密封临时仓）；orchestration-
+# self-test 跑嵌套 gauntlet 会做根级 .coverage*/__pycache__ 清理，必须
+# 串行先行，不得与 cov 套件同批。契约负控制：T2 串行 fail-fast、T10/T11
+# 批语义（tools/test_gauntlet_orchestration.sh）。
 #
 # doctor 模式（tools/gauntlet.sh doctor）：环境自诊断，不跑层、不清产物——
 # 逐项报告门禁层的外部依赖与层清单目录，跑门禁前先区分「环境坏了」与
@@ -57,6 +66,53 @@ run_layer() {
     echo "== ${_name}"
     "$@"
     echo "   PASS ${_name}"
+}
+
+# ── 并发批原语 ─────────────────────────────────────────────────────────
+# run_layer_bg <名> <命令...>：层入批并发启动（输出暂存 _batch_dir/<名>.out，
+# 首次使用时建临时目录并挂 EXIT 清理）；不在启动时打 PASS——判定与输出
+# 回放统一在 wait_layers。wait_layers：按启动顺序 wait 各层、回放输出、
+# 打 PASS/FAIL，批内任一失败返回非零（顶层裸调即整门退出），但批内其余
+# 层照常报告（见头注释批语义）。层名含连字符不可作变量名 → 名单/pid 清单
+# 按序并行存放，wait_layers 用 set -- 对位取 pid。
+_batch_dir=
+_batch_names=
+_batch_pids=
+
+run_layer_bg() {
+    _name=$1
+    shift
+    echo "== ${_name}"
+    if [ -z "$_batch_dir" ]; then
+        _batch_dir=$(mktemp -d) || exit 2
+        trap 'rm -rf "${_batch_dir:-}"' EXIT
+    fi
+    ( "$@" ) >"$_batch_dir/$_name.out" 2>&1 &
+    _batch_pids="$_batch_pids $!"
+    _batch_names="$_batch_names $_name"
+}
+
+wait_layers() {
+    _fail=0
+    # shellcheck disable=SC2086  # 批 pid/名单按词展开对位
+    set -- $_batch_pids
+    # shellcheck disable=SC2086  # 同上
+    for _name in $_batch_names; do
+        _pid=$1
+        shift
+        _rc=0
+        wait "$_pid" 2>/dev/null || _rc=$?
+        cat "$_batch_dir/$_name.out"
+        if [ "$_rc" -eq 0 ]; then
+            echo "   PASS $_name"
+        else
+            echo "   FAIL ${_name}（rc=${_rc}）"
+            _fail=$((_fail + 1))
+        fi
+    done
+    _batch_names=
+    _batch_pids=
+    [ "$_fail" -eq 0 ] || return 1
 }
 
 require_dir() {
@@ -191,8 +247,16 @@ fi
 # ── 陈旧产物清理 ───────────────────────────────────────────────────────
 # 上次运行的 .coverage / __pycache__ 既是 must-not 扫描的 grep 噪音，
 # 也可能被当成新结果读取——启动即清，不读取任何先前输出。
-find . -name '.coverage*' -type f -not -path './.git/*' -delete
-find . -name __pycache__ -type d -prune -not -path './.git/*' -exec rm -rf {} +
+# 剪枝 .git/.dev/node_modules/.venv/.factory/worktrees：.dev（并行会话
+# worktree 根）与 .factory/worktrees（gitignored 工厂链 worktree）内的
+# 缓存/产物属其他会话的运行时状态，跨 worktree 误删即损坏并行会话。
+# 注意不用 -delete：它隐含 -depth，会使 -prune 失效（剪枝落空）。
+find . \( -name .git -o -name .dev -o -name node_modules -o -name .venv \
+    -o -path ./.factory/worktrees \) -prune -o -name '.coverage*' -type f \
+    -exec rm -f {} +
+find . \( -name .git -o -name .dev -o -name node_modules -o -name .venv \
+    -o -path ./.factory/worktrees \) -prune -o -name __pycache__ -type d \
+    -prune -exec rm -rf {} +
 
 # ── 层清单 ─────────────────────────────────────────────────────────────
 # GAUNTLET_LAYERS_FILE：编排自测的受控入口（helpers 已就绪后 source），
@@ -201,37 +265,53 @@ if [ -n "${GAUNTLET_LAYERS_FILE:-}" ]; then
     # shellcheck disable=SC1090
     . "$GAUNTLET_LAYERS_FILE"
 else
+    # 串行先行（不得入批）：本层跑嵌套 gauntlet（T1-T11），嵌套实例的启动
+    # 清理会删根级 .coverage*/__pycache__——若与批内 cov 套件并发，会炸掉
+    # 外层 .coverage.{api,ddl,arch}-guard 产物（diff-cover 层 fail-closed 误红）。
     run_layer orchestration-self-test sh tools/test_gauntlet_orchestration.sh
-    run_layer checker-self-test sh tools/test_gauntlet_checks.sh
-    run_layer spec-check-self-test sh tools/test_spec_check.sh
-    run_layer delete-guard-self-test sh tools/test_pre-push-delete-guard.sh
-    run_layer dispatch-watch-self-test sh tools/test_dispatch_watch.sh
 
     # shellcheck disable=SC2086  # 层目录按词展开
     require_dir $LAYER_DIRS
 
+    # ── 并发批：自测层 + dispatch-watch + pytest 9 套件（2026-09-24）──
+    # 墙钟 = max(层) 而非 sum(层)：实测全门 84s→31s，其中批段 ≈15s
+    #（长极 = pytest-factory 553 例 ≈14.6s；9 个 pytest 层 sum≈62s，被批
+    # 并发压到单层 max）。批内层互相独立：自测层各用密封临时仓（顶层剥除
+    # GIT_*），3 个 cov 套件各写独立 COVERAGE_FILE（diff-cover 层批后
+    # combine）。批语义负控制：T10/T11。
+    # 并发先例：批内 8 个 pytest 套件组合 = scripts/run_tests.sh 并行门
+    # （ADR-016，段清单 .factory/factory-local.json parallel_gate.segments）
+    # 自 PR #212 起每次 pre-push 全量 fan-out 的生产验证同面（含 skill-evo
+    # /tmp 单写者、各段 mkdtemp 唯一命名约束，2026-09-20 段内复检固化）。
+    # 相对该先例的新增并发面仅二：scripts 套件入批、dispatch-watch 自测
+    # ∥ pytest（7 组案例各用 mktemp 独立仓）。
+    run_layer_bg checker-self-test sh tools/test_gauntlet_checks.sh
+    run_layer_bg spec-check-self-test sh tools/test_spec_check.sh
+    run_layer_bg delete-guard-self-test sh tools/test_pre-push-delete-guard.sh
+    run_layer_bg dispatch-watch-self-test sh tools/test_dispatch_watch.sh
     # shellcheck disable=SC2086  # XDIST_ARGS 按词展开（空则消隐）
-    run_layer pytest-scripts "$PY" -m pytest scripts -q $XDIST_ARGS
+    run_layer_bg pytest-scripts "$PY" -m pytest scripts -q $XDIST_ARGS
     # 范围 = .factory/tests（与 scripts/run_tests.sh 同口径）：此前扫整棵
     # .factory，工厂链 worktree（.factory/worktrees/<issue>，gitignored 的
     # 全仓检出）被卷入收集即炸（issue #166 实证：嵌套仓同名模块导入失败）。
     # 已随 PR #167 落库（同型收窄），此处注释沿用 WIP 措辞——合并后语义一致。
     # shellcheck disable=SC2086  # 同上
-    run_layer pytest-factory "$PY" -m pytest .factory/tests -q $XDIST_ARGS
+    run_layer_bg pytest-factory "$PY" -m pytest .factory/tests -q $XDIST_ARGS
     # 3 个带 --cov 的套件各写独立 COVERAGE_FILE（.coverage.<suite>）：既保各套件
     # 自身 --cov-fail-under 的独立评估面不被跨套件数据稀释（评审 F1），又供
     # diff-cover 层 combine 汇总（分产物合计，单套件产物会漏掉其余两个的变更行）
-    run_layer pytest-api-guard env COVERAGE_FILE="$PWD/.coverage.api-guard" \
+    run_layer_bg pytest-api-guard env COVERAGE_FILE="$PWD/.coverage.api-guard" \
         "$PY" -m pytest skills/api-guard/scripts -q
     # shellcheck disable=SC2086  # 同上
-    run_layer pytest-ddl-guard env COVERAGE_FILE="$PWD/.coverage.ddl-guard" \
+    run_layer_bg pytest-ddl-guard env COVERAGE_FILE="$PWD/.coverage.ddl-guard" \
         "$PY" -m pytest skills/ddl-guard/scripts -q $XDIST_ARGS
-    run_layer pytest-arch-guard env COVERAGE_FILE="$PWD/.coverage.arch-guard" \
+    run_layer_bg pytest-arch-guard env COVERAGE_FILE="$PWD/.coverage.arch-guard" \
         "$PY" -m pytest skills/arch-guard/scripts -q
-    run_layer pytest-impact-guard "$PY" -m pytest skills/impact-guard/scripts/tests -q
-    run_layer pytest-skill-evo "$PY" -m pytest skills/skill-evo/scripts/tests -q
-    run_layer pytest-doc-gen "$PY" -m pytest skills/doc-gen/scripts/tests -q
-    run_layer pytest-arch-hawkeye "$PY" -m pytest arch-hawkeye/scripts/tests -q
+    run_layer_bg pytest-impact-guard "$PY" -m pytest skills/impact-guard/scripts/tests -q
+    run_layer_bg pytest-skill-evo "$PY" -m pytest skills/skill-evo/scripts/tests -q
+    run_layer_bg pytest-doc-gen "$PY" -m pytest skills/doc-gen/scripts/tests -q
+    run_layer_bg pytest-arch-hawkeye "$PY" -m pytest arch-hawkeye/scripts/tests -q
+    wait_layers
     run_layer plugin-versions "$PY" tools/check_plugin_versions.py
     # 实现↔文档一致性（数字/清单/指向漂移，R1-R11 语义见脚本头注释）
     run_layer doc-freshness "$PY" tools/check_doc_freshness.py
