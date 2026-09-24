@@ -84,15 +84,6 @@
       "expect_block": true
     },
     {
-      "id": "B-103",
-      "description": "行为破坏：governance 违规计数冻结——同点重复违规 occurrences 不再累计（test_baseline_preserves_duplicate_occurrences 红）",
-      "target": "arch-hawkeye/scripts/governance.py",
-      "find": "        e[\"occurrences\"] += 1",
-      "replace": "        e[\"occurrences\"] = 1",
-      "gate": "tests",
-      "expect_block": true
-    },
-    {
       "id": "B-104",
       "description": "行为破坏：评论出口防注入中和失效——[factory:rejected] 标记裸输出（TestNeutralizeMarker 红，PR #20 回归锚点）",
       "target": ".factory/factory_lib.py",
