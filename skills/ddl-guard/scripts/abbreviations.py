@@ -1601,9 +1601,7 @@ KEYS_WITH_RESERVED_VALUE: set[str] = {
 def strip_index_prefix(name: str) -> str:
     """去掉索引名前缀 `ix_` / `uk_`，返回剩余分词字符串。"""
     low = name.lower()
-    if low.startswith(("uk_", "ix_")):
-        return low[3:]
-    return low
+    return low[3:] if low.startswith(("uk_", "ix_")) else low
 
 
 def iter_abbrev_violations(name: str) -> list[tuple[str, str]]:
