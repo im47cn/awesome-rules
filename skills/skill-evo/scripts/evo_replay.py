@@ -766,10 +766,11 @@ def call_claude_stream(prompt: str, cfg: dict) -> Tuple[str, List[dict]]:
     return final_text or "".join(texts), events
 
 
-# 派生产物排除集（A 路 release_guard._DERIVED_PARTS 镜像，2026-09-24
-# PR #237 对齐口径：.coverage/.ruff_cache 系实测 push 拦截补录）。
-_DERIVED_PARTS = {".pytest_cache", "__pycache__", ".DS_Store",
-                  ".coverage", ".ruff_cache"}
+# 派生产物排除集（A 路 release_guard 同名常量镜像，2026-09-24 对齐口径：
+# .coverage/.ruff_cache 系实测 push 拦截补录）。
+_DERIVED_PARTS = frozenset({".pytest_cache", "__pycache__", ".DS_Store",
+                            ".coverage", ".ruff_cache"})
+_DERIVED_SUFFIXES = (".pyc",)
 
 
 def skill_content_hash(skill: str, root: Optional[Path] = None) -> str:
@@ -800,7 +801,7 @@ def skill_content_hash(skill: str, root: Optional[Path] = None) -> str:
             if p.is_file() and not (
                 any(part in _DERIVED_PARTS
                     for part in p.relative_to(scripts_dir).parts)
-                or p.suffix == ".pyc"))
+                or p.suffix in _DERIVED_SUFFIXES))
     files.sort(key=lambda p: p.relative_to(root).as_posix())
     manifest = "".join(
         f"{hashlib.sha256(p.read_text(encoding='utf-8').encode('utf-8')).hexdigest()}"
