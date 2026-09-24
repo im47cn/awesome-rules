@@ -153,12 +153,11 @@ def _check_abbreviation(name: str, owner: str, issues: list, kind: str = "字段
     """
     if name.lower() in REQUIRED_FIELDS or name.lower() in ABBREVIATION_EXEMPT_FIELDS:
         return  # 必含字段名 / 规范字段名豁免缩写检查
-    for part, std in iter_abbrev_violations(name):
-        issues.append(Issue(
-            table=owner, severity=Severity.MANDATORY, rule="缩写未规范化",
-            location=f"{kind}:{name}", description=f"{kind} '{name}' 含未规范化写法 '{part}'",
-            suggestion=f"改用标准缩写 '{part}' → '{std}'",
-        ))
+    issues.extend(Issue(
+        table=owner, severity=Severity.MANDATORY, rule="缩写未规范化",
+        location=f"{kind}:{name}", description=f"{kind} '{name}' 含未规范化写法 '{part}'",
+        suggestion=f"改用标准缩写 '{part}' → '{std}'",
+    ) for part, std in iter_abbrev_violations(name))
 
 
 def _index_col_name(col: str) -> str:

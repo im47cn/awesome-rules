@@ -867,7 +867,7 @@ def test_index_abbreviation_with_del_flag_exempt():
         ") COMMENT='demo';\n"
     )
     issues = _issues_for(ddl)
-    assert not any(i.rule == "索引缩写未规范化" for i in issues)
+    assert all(i.rule != "索引缩写未规范化" for i in issues)
 
 
 # ── R3: 补充信息 () 格式（COL034）──────────────────────────────────
