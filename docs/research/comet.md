@@ -38,7 +38,7 @@ depth: 文档级（README 全文 + docs llms.txt 索引 + tech-blog + npm regist
 | --- | --- | --- | --- | --- |
 | 1 | pass@k（能力上限，HumanEval 无偏估计）与 pass^k（可靠性下限）分离 | replay-eval 给 GEPA 选择信号补「每次都能做对」维度，区别于「能做对一次」 | ✅ 文档级 | 已落地 → evo_replay execute_k（pass@k 无偏估计 + pass^k 主信号） |
 | 2 | 双 Agent 自动交互：被测 Agent 跑 Skill，另一 Agent 模拟用户在决策点应答，评测无人值守跑完多轮 | badcase_runner / replay-eval 的多轮交互场景自动化 | ✅ 文档级 | 已落地 → evo_replay 双 Agent 决策点多轮（预算封顶 + 确定性兜底） |
-| 3 | Skill 调用证据硬门禁：PreToolUse hook + stream-json 解析调用证据，未真正触发 Skill 的运行不计入评测（对照：仅加提示词触发率约 70%） | replay-eval 防「裸模型答对」污染进化信号；与 CONTRIBUTING 触发词领域限定纪律互补 | ✅ 文档级 | 已落地 → evo_replay stream-json 证据硬门禁（evolve 完整运行接线列后续） |
+| 3 | Skill 调用证据硬门禁：PreToolUse hook + stream-json 解析调用证据，未真正触发 Skill 的运行不计入评测（对照：仅加提示词触发率约 70%） | replay-eval 防「裸模型答对」污染进化信号；与 CONTRIBUTING 触发词领域限定纪律互补 | ✅ 文档级 | 已落地 → evo_replay stream-json 证据硬门禁 + evo.py evolve 部署态证据 pass（cmd_evidence_llm） |
 | 4 | 发布门禁绑定草稿 hash：eval 证据必须对应最新草稿 hash，旧 hash / 失败证据一律阻断 publish | release_guard / plugin_lock 之外增加「技能内容 hash ↔ 评测证据」绑定 | ✅ 文档级 | 已落地 → release_guard verify_skill_evidence（fail-closed，先于版本语义） |
 | 5 | 状态三层分层：用户可读 `.comet.yaml` / 机器 `run-state.json` / 追加审计 `state-events.jsonl` | 长任务技能（如 code-review 并行子代理）的中断恢复与审计 | ✅ 文档级 | 已落地 → skills/task-flow（三层状态 + resume 探针 + audit 重放） |
 | 6 | 编号规则文件双平台同步：`.claude/rules` 与 `.codex/rules` 同编号同语义，01 工作区安全、02 证据与验证置顶 | 跨平台规则分发的语义对齐约定与优先级排序法 | ✅ 文档级 | 部分已有（gtsp/ 0*.md 编号 + steering/gtsp/README.md 编号对照表；双目录同编号复制未采用——本仓单源多清单） |

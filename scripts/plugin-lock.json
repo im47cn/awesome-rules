@@ -22,7 +22,7 @@
     "ddl-guard": "sha256:9365683649df83941e43ec3b52d1d1783399bcf7202df4d88494b627db9e4bdd",
     "doc-gen": "sha256:dce9066c667a9a32199ccd68663d2303317c3a9ee0fd3fedfffb03943164fe51",
     "impact-guard": "sha256:3d39decbfa6822eea1e7269e9c48ba4fd0ea013fe8216527237f2ddcb28e6b18",
-    "skill-evo": "sha256:4876db5897dbd67b10187fa676b2aea355c0bb0ae832d7457c838fb8e6b320e0",
+    "skill-evo": "sha256:ae179b1a1c39c1eccec1ff46f4811104a145b11e78994af2098a1e6f5f39accd",
     "task-flow": "sha256:653d7f3d280c1c3e0255a63d3293511d4b3af72057b4ef9b7a230eb9a614243e",
     "work-report": "sha256:f0207bf9db034e059e83bbd57c78ded688ed63c05e82164bf8e81c43be08e9cb"
   }
