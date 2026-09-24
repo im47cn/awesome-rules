@@ -89,7 +89,8 @@ prompt 不嵌候选文本，改为指令 Agent 用 Read 工具完整读取部署
 
 证据产物（跨路契约，schema `replay-evidence/1`，未跟踪交付物）：
 `skills/skill-evo/artifacts/replay-evidence/<skill>.json`，字段顺序固定
-`schema/skill/content_hash（SKILL.md+scripts 字节级指纹）/generated_at/k/
+`schema/skill/content_hash（SKILL.md+scripts 逐文件摘要清单指纹，排除派生
+产物，与 release_guard 同一算法、双算对拍锚定）/generated_at/k/
 pass_at_k/pass_cap_k/invocation/cases（整数计数）`；逐 case 明细走 CLI stdout。
 
 ```bash

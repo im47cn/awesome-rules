@@ -876,9 +876,28 @@ def test_skill_content_hash_deterministic_order(tmp_path):
     (skill / "SKILL.md").write_bytes(b"A")
     (skill / "scripts" / "a.py").write_bytes(b"C")
     (skill / "scripts" / "b.py").write_bytes(b"B")
-    # 字典序 SKILL.md < scripts/a.py < scripts/b.py，字节顺序拼接
-    want = f"sha256:{hashlib.sha256(b'A' + b'C' + b'B').hexdigest()}"
+    # manifest（sha256sum 风格）：字典序 SKILL.md < scripts/a.py < scripts/b.py，
+    # 条目 = "<内容 sha256>  <skill 内相对 posix 路径>\n"，整体再取 sha256
+    # （与 A 路 release_guard.compute_content_hash 一字不差，2026-09-24 对齐）
+    manifest = "".join(
+        f"{hashlib.sha256(b).hexdigest()}  {rel}\n"
+        for b, rel in ((b"A", "SKILL.md"), (b"C", "scripts/a.py"),
+                       (b"B", "scripts/b.py")))
+    want = f"sha256:{hashlib.sha256(manifest.encode('utf-8')).hexdigest()}"
     assert R.skill_content_hash("demo", root=tmp_path) == want
+    # 派生产物不扰动指纹（A 路同口径：coverage/ruff/pytest/解释器生灭物）
+    (skill / "scripts" / ".coverage").write_bytes(b"SQLite format 3\x00")
+    (skill / "scripts" / ".ruff_cache" / "0.16.8").mkdir(parents=True)
+    (skill / "scripts" / ".ruff_cache" / "0.16.8" / "abc").write_bytes(b"\x00")
+    (skill / "scripts" / "__pycache__").mkdir()
+    (skill / "scripts" / "__pycache__" / "x.pyc").write_bytes(b"\xff\xfe")
+    (skill / "scripts" / ".pytest_cache").mkdir()
+    (skill / "scripts" / ".pytest_cache" / "c").write_bytes(b"\x00")
+    (skill / "scripts" / ".DS_Store").write_bytes(b"\x00\x00Bud1")
+    assert R.skill_content_hash("demo", root=tmp_path) == want
+    # 真实源文件增删 → hash 变化（路径与内容均参与）
+    (skill / "scripts" / "c.py").write_text("x", encoding="utf-8")
+    assert R.skill_content_hash("demo", root=tmp_path) != want
     # SKILL.md 缺失 → fail-closed
     (skill / "SKILL.md").unlink()
     try:

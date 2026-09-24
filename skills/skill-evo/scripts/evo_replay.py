@@ -767,26 +767,42 @@ def call_claude_stream(prompt: str, cfg: dict) -> Tuple[str, List[dict]]:
 
 
 def skill_content_hash(skill: str, root: Optional[Path] = None) -> str:
-    """技能内容指纹：SKILL.md + scripts/ 全部文件字节顺序拼接的 sha256。
+    """技能内容指纹：SKILL.md + scripts/**（排除派生产物）的逐文件摘要清单。
 
-    文件集统一按仓库根相对 posix 路径字典序排序（SKILL.md 自然在前，确定性
-    可复现）；SKILL.md 缺失 → FileNotFoundError（技能内容不完整不应静默给出
-    可比对指纹）。
+    与 A 路 scripts/release_guard.py compute_content_hash 契约统一、一字不差：
+    manifest 条目 = "{文件内容 sha256 hex}  {skill 内相对 posix 路径}\\n"，
+    按仓库根相对 posix 路径字典序逐条拼接后整体取 sha256。路径与边界参与
+    哈希：文件改名/增删/跨文件内容重排（"ab"+"c" vs "a"+"bc"）均改变 hash。
+    派生产物（.pytest_cache/、__pycache__/、*.pyc、.DS_Store、.coverage、
+    .ruff_cache/，2026-09-24 PR #237 对齐口径）不入指纹；非 UTF-8 文件
+    读取期直接抛错（fail-closed）；SKILL.md 缺失 → FileNotFoundError。
+
+    独立实现而非 import：技能脚本需自包含分发（消费仓安装面无仓库根
+    scripts/）。跨实现一致性由 scripts/tests/test_release_guard.py 的
+    A/B 双算对拍锚定（漂移即红）。
     """
     root = (root or _repo_root()).resolve()
-    skill_dir = root / "skills" / skill
-    skill_md = skill_dir / "SKILL.md"
+    base = root / "skills" / skill
+    skill_md = base / "SKILL.md"
     if not skill_md.is_file():
         raise FileNotFoundError(f"SKILL.md 不存在：{skill_md}")
+    derived_parts = {".pytest_cache", "__pycache__", ".DS_Store",
+                     ".coverage", ".ruff_cache"}
     files = [skill_md]
-    scripts_dir = skill_dir / "scripts"
+    scripts_dir = base / "scripts"
     if scripts_dir.is_dir():
-        files.extend(p for p in scripts_dir.rglob("*") if p.is_file())
+        files.extend(
+            p for p in scripts_dir.rglob("*")
+            if p.is_file() and not (
+                any(part in derived_parts
+                    for part in p.relative_to(scripts_dir).parts)
+                or p.suffix == ".pyc"))
     files.sort(key=lambda p: p.relative_to(root).as_posix())
-    h = hashlib.sha256()
-    for p in files:
-        h.update(p.read_bytes())
-    return f"sha256:{h.hexdigest()}"
+    manifest = "".join(
+        f"{hashlib.sha256(p.read_text(encoding='utf-8').encode('utf-8')).hexdigest()}"
+        f"  {p.relative_to(base).as_posix()}\n"
+        for p in files)
+    return f"sha256:{hashlib.sha256(manifest.encode('utf-8')).hexdigest()}"
 
 
 def write_replay_evidence(skill: str, payload: dict, root: Optional[Path] = None) -> Path:
