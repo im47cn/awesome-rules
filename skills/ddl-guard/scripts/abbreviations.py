@@ -21,7 +21,8 @@
 
 模块对外暴露：
 - LONG_TO_SHORT: 长写法 → 标准缩写（ddl_check.py 反向检查的命中表）
-- STANDARD_SHORT: 标准缩写集合（白名单，仅供未来"非标准缩写"扩展用）
+- KEYS_WITH_RESERVED_VALUE: value 是保留字的 key 豁免集（避免"长写法→保留字缩写"循环违规）
+- STANDARD_SHORT: 标准缩写集合（仅供未来"非标准缩写"扩展用，当前 ddl_check 未引用）
 
 【AI 兜底说明】
 字段英文名 → 中文注释的 1:1 直译校验涉及语义判断，不在脚本范围内。
@@ -1582,12 +1583,13 @@ LONG_TO_SHORT: dict[str, str] = {
 STANDARD_SHORT: set[str] = set(LONG_TO_SHORT.values())
 
 
-# ── value 保留字白名单 ────────────────────────────────────────────────
+# ── value 保留字的 key 豁免集 ─────────────────────────────────────────
 # 部分字典条目的 value 是 MySQL 保留字或 Python 关键字（如 character→char、
 # delete→del、number→no）。如果强制把字段名 `character` 改为 `char`，
 # `char` 本身又会触发 check_field_name 的 "保留字" 违规，造成无法满足两条
 # 相互冲突的强制规则的违规循环。此类条目跳过反向检查，视为"已合规"。
-RESERVED_VALUE_EXEMPT: set[str] = {
+# 注意：集合中存放的是 `LONG_TO_SHORT` 的 **key**（如 `character`），不是 value。
+KEYS_WITH_RESERVED_VALUE: set[str] = {
     # MySQL 保留字
     "across", "character", "december", "default", "delete", "enumerate",
     "inside", "loading", "number", "sets",
@@ -1621,7 +1623,7 @@ def iter_abbrev_violations(name: str) -> list[tuple[str, str]]:
 
     # 第一层：整体名称匹配（如 cargo_owner）
     if low in LONG_TO_SHORT and LONG_TO_SHORT[low] != low:
-        if low not in RESERVED_VALUE_EXEMPT:
+        if low not in KEYS_WITH_RESERVED_VALUE:
             raw_violations.append((low, LONG_TO_SHORT[low]))
 
     # 第二层：按 _ 拆分后单词匹配
@@ -1630,8 +1632,8 @@ def iter_abbrev_violations(name: str) -> list[tuple[str, str]]:
             std = LONG_TO_SHORT[part]
             if std == part:
                 continue  # 跳过自我映射（key == value）
-            if part in RESERVED_VALUE_EXEMPT:
-                continue  # 跳过 value 是保留字的条目（避免违规循环）
+            if part in KEYS_WITH_RESERVED_VALUE:
+                continue  # 跳过 value 是保留字的 key（避免违规循环）
             raw_violations.append((part, std))
 
     # 去重：保留首次出现顺序

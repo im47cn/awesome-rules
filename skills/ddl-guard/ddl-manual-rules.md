@@ -142,7 +142,7 @@ LONG_TO_SHORT = {
 |---|---|---|
 | 索引名前缀 | 普通索引 `ix_` / 唯一索引 `uk_`（脚本已检查） | 审查所有索引是否以正确前缀开头 |
 | 索引名长度 | 不超过 64 字符（脚本已检查） | 审查索引名长度，避免过长 |
-| **索引名包含全部字段名** | 索引名称由所包含字段的全名称按 `ix_<field1>_<field2>...` 拼接而成，字段名不允许任何缩写 | 审查每个索引的主体分词是否覆盖其引用字段的所有分词。例如：<br>✅ `KEY ix_mch_id_msg_type_status (mch_id, msg_type, status)`<br>❌ `KEY ix_mch_msg_type_status (mch_id, msg_type, status)`（`mch_id` 被缩写为 `mch`）<br>❌ `UNIQUE KEY uk_cred (cred_id)`（`cred_id` 被缩写为 `cred`，应改为 `uk_cred_id`） |
+| **索引名包含全部字段名** | 索引名称由所包含字段的全名称按 `ix_<field1>_<field2>...` 拼接而成，字段名不允许任何缩写 | 审查每个索引的主体分词是否覆盖其引用字段的所有分词。例如：<br>✅ `KEY ix_mch_id_msg_type_status (mch_id, msg_type, status)`<br>❌ `KEY ix_mch_msg_type_status (mch_id, msg_type, status)`（索引名缺少 `_id` 完整拼写，应改为 `ix_mch_id_msg_type_status`）<br>❌ `UNIQUE KEY uk_cred (cred_id)`（索引名缺少 `_id` 完整拼写，应改为 `uk_cred_id`） |
 
 ## 设计合理性【推荐】
 

@@ -198,6 +198,22 @@ python3 scripts/sql_check.py [--format json]
 - `ddl_check.py` 强制检查**索引名包含全部字段名**（规则 `索引名未包含全部字段`）：索引名称由所包含字段的全名称按 `ix_<field1>_<field2>...` 拼接而成，字段名不允许任何缩写（如把 `mch_id` 缩写为 `mch`）
 - `ddl_check.py` 检查注释格式：R2（取值范围 `[k-v,...]`）+ R3（补充信息 `()` 不能与主标题完全相同）
 
+#### 本版本新增 MANDATORY 规则清单
+
+下列规则在本 PR（v2 升级）中由 RECOMMENDED 升级为 MANDATORY（CI 拦截），已在 `ddl_check.py` 中强制启用：
+
+| 规则 | 触发场景 |
+|---|---|
+| `必含字段定义不一致` | 5 个必含字段（id/creator_id/create_time/last_updater_id/last_update_time）在各表间名称/类型不一致 |
+| `必含字段注释不一致` | 同上，注释不一致（空白不敏感比较） |
+| `索引缩写未规范化` | 索引主体分词命中 `LONG_TO_SHORT` 反向映射 |
+| `索引名未包含全部字段` | 索引名未按 `ix_<field1>_<field2>...` 拼接完整字段名（含 `_id` 后缀） |
+| `注释取值范围格式` | 注释中 `[k-v]` 段格式不符 |
+| `补充信息冗余` | 注释 `(...)` 补充信息与主标题完全相同 |
+| `补充信息为空` | 注释出现空括号 `()` |
+
+注：日志/流水表豁免 `last_updater_id/last_update_time` 必含项；`del_flag` 在 `ABBREVIATION_EXEMPT_FIELDS` 中豁免缩写检查。
+
 ### 第 2 步：AI 复核语义层
 
 脚本能做的是**确定性检查**（正则、字典查表）。涉及语义判断的规则**不写入脚本**，由 ZCode agent 在审查对话中执行：
@@ -219,7 +235,7 @@ python3 scripts/sql_check.py [--format json]
 
 具体语义复核规则详见 [`ddl-manual-rules.md`](ddl-manual-rules.md) 的"注释格式规范"章节，agent 在审查 DDL 时应主动对照该章节执行语义层校验。
 
-### 第 2 步：读取待审查文件
+### 第 3 步：读取待审查文件
 
 脚本自动扫描全部文件后，按以下原则读取：
 
@@ -230,14 +246,14 @@ python3 scripts/sql_check.py [--format json]
 > 优先使用 `codebase-memory-mcp` 的 `search_graph` / `get_code_snippet` 定位 SQL 文件和 PO 类。
 > 优先使用 `smart_outline` 查看结构。
 
-### 第 3 步：补充人工判断
+### 第 4 步：补充人工判断
 
 读取以下文档，逐表核对脚本无法覆盖的规则：
 
 - DDL 审查 → [`ddl-manual-rules.md`](ddl-manual-rules.md)
 - SQL 审查 → [`sql-manual-rules.md`](sql-manual-rules.md)
 
-### 第 4 步：输出报告
+### 第 5 步：输出报告
 
 将脚本自动检查结果与人工判断合并，输出完整审查报告；按
 [`../../steering/review-report-standards.md`](../../steering/review-report-standards.md)

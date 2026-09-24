@@ -168,8 +168,7 @@ def _check_index_abbreviation(idx: IndexInfo, issues: list):
 
     豁免：
     1. 索引名主体由必含字段名拼接而成（如 ix_last_update_time、ix_creator_id）
-    2. 索引名主体含规范字段名 del_flag（与字段级豁免列表一致）
-    3. 整体名称匹配后，所有分词都在豁免集合中（含 REQUIRED_FIELDS ∪ ABBREVIATION_EXEMPT_FIELDS）
+    2. 索引名主体所有分词都在豁免集合（必含字段名 ∪ 规范字段名 `del_flag`）中
     """
     body = strip_index_prefix(idx.name)
     parts = [p for p in body.split("_") if p]
@@ -196,10 +195,6 @@ def _check_index_abbreviation(idx: IndexInfo, issues: list):
 
     # 豁免 2：所有分词都在豁免集合（必含字段名 ∪ 规范字段名）中
     exempt_set = set(REQUIRED_FIELDS.keys()) | ABBREVIATION_EXEMPT_FIELDS
-    # 整体名称命中豁免
-    if idx.name.lower() in exempt_set:
-        return
-    # 所有分词都在豁免集合
     if all(p in exempt_set for p in parts):
         return
 
