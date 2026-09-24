@@ -194,8 +194,8 @@ python3 scripts/sql_check.py [--format json]
 
 - 退出码：`0`=通过，`1`=有强制问题，`2`=运行错误
 - `sql_check.py` 自动扫描 mapper XML（解析 `<if>`/`<where>`/`<foreach>` 等动态标签和 `<include>` 引用）以及 MyBatis-Plus `@TableName` 注解的 PO 类（检查表名/字段命名规范、必含字段）
-- `ddl_check.py` 内置缩写字典（`scripts/abbreviations.py`），对**字段名/表名/索引名**做长写法 → 标准缩写的反向检查（**强制级别：公司数据治理要求**），扩展字典仅修改 `abbreviations.py`
-- `ddl_check.py` 强制检查**索引名包含全部字段名**（规则 `索引名未包含全部字段`）：索引名称由所包含字段的全名称按 `ix_<field1>_<field2>...` 拼接而成，字段名不允许任何缩写（如把 `mch_id` 缩写为 `mch`）
+- `ddl_check.py` 内置缩写字典（`scripts/abbreviations.py`），对**字段名/表名/索引名**做长写法 → 标准缩写的反向检查（**强制级别：公司数据治理要求**），扩展字典仅修改 `abbreviations.py`；缩写 value 与 MySQL/Python 保留字冲突的 key 跳过反向检查（避免违规循环）
+- `ddl_check.py` 强制检查**索引名包含全部字段名**（规则 `索引名未包含全部字段`）：索引名称由所包含字段的全名称按 `<prefix>_<field1>_<field2>...` 拼接而成（prefix 为普通索引 `ix` / 唯一索引 `uk`），字段名不允许任何缩写（如把 `mch_id` 缩写为 `mch`）
 - `ddl_check.py` 检查注释格式：R2（取值范围 `[k-v,...]`）+ R3（补充信息 `()` 不能与主标题完全相同）
 
 #### 本版本新增 MANDATORY 规则清单
@@ -204,15 +204,15 @@ python3 scripts/sql_check.py [--format json]
 
 | 规则 | 触发场景 |
 |---|---|
-| `必含字段定义不一致` | 5 个必含字段（id/creator_id/create_time/last_updater_id/last_update_time）在各表间名称/类型不一致 |
+| `必含字段定义不一致` | 必含字段（id/creator_id/create_time/last_updater_id/last_update_time）在各表间名称/类型不一致 |
 | `必含字段注释不一致` | 同上，注释不一致（空白不敏感比较） |
 | `索引缩写未规范化` | 索引主体分词命中 `LONG_TO_SHORT` 反向映射 |
-| `索引名未包含全部字段` | 索引名未按 `ix_<field1>_<field2>...` 拼接完整字段名（含 `_id` 后缀） |
+| `索引名未包含全部字段` | 索引名未按 `<prefix>_<field1>_<field2>...` 拼接完整字段名（prefix 为普通索引 `ix` / 唯一索引 `uk`，含 `_id` 后缀） |
 | `注释取值范围格式` | 注释中 `[k-v]` 段格式不符 |
 | `补充信息冗余` | 注释 `(...)` 补充信息与主标题完全相同 |
 | `补充信息为空` | 注释出现空括号 `()` |
 
-注：日志/流水表豁免 `last_updater_id/last_update_time` 必含项；`del_flag` 在 `ABBREVIATION_EXEMPT_FIELDS` 中豁免缩写检查。
+注：日志/流水表豁免 `last_updater_id/last_update_time` 必含项；必含字段名与规范字段名（`del_flag`）在字段名与索引列缩写检查中豁免；缩写 value 与 MySQL/Python 保留字冲突的 key 跳过反向检查（避免违规循环）。
 
 ### 第 2 步：AI 复核语义层
 

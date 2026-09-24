@@ -1610,6 +1610,103 @@ def test_index_name_extra_token_flagged():
     assert any(i.rule == "索引名未包含全部字段" for i in issues)
 
 
-# Sourcery #4（R2 多个方括号）和 #5（R3 多个圆括号）经评审决定不修：
-# - 当前规则只校验首个 []/() 段,后续段被忽略
-# - 风险有限：实际 DDL 中出现多个 [k-v] 段的场景罕见,后续如需可独立 follow-up
+# ── 第二轮 review 回归（Sourcery #1/#4/#5 + CodeRabbit）───────────────────
+
+
+def test_id_type_allows_display_width():
+    """CodeRabbit：MySQL 5.7 SHOW CREATE TABLE 输出 bigint(20)/int(11)，
+    id 带显示宽度不算必含字段类型不一致（point 等非法类型仍被拒）。"""
+    ddl = (
+        "CREATE TABLE t_demo (\n"
+        "  id bigint(20) NOT NULL COMMENT '主键id',\n"
+        "  ext varchar(50) NOT NULL DEFAULT '' COMMENT '扩展',\n"
+        "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]'\n"
+        ") COMMENT='demo';\n"
+    )
+    issues = _issues_for(ddl)
+    assert all(i.rule != "必含字段定义不一致" for i in issues)
+
+
+def test_abbreviation_longest_match_composite_prefix():
+    """CodeRabbit：cargo_owner_id 应命中复合短语 cargo_owner → cgoer，
+    而不是拆词只报 cargo → cgo（会把整改误导成 cgo_owner_id）。"""
+    violations = ddl_check.iter_abbrev_violations("cargo_owner_id")
+    assert ("cargo_owner", "cgoer") in violations
+    assert all(part != "cargo" for part, _ in violations)
+
+
+def test_abbreviation_same_value_compound_not_split():
+    """CodeRabbit：同字复合 key（value_date/public_sea 是字典收录的标准名）
+    不应拆词误报 value → val / public → share。"""
+    assert ddl_check.iter_abbrev_violations("value_date") == []
+    assert ddl_check.iter_abbrev_violations("public_sea") == []
+
+
+def test_composite_index_with_required_field_no_conflict():
+    """CodeRabbit：组合索引（如 ix_mch_id_last_update_time）不再同时触发
+    索引缩写未规范化 与 索引名未包含全部字段 两条强制规则。"""
+    ddl = (
+        "CREATE TABLE t_demo (\n"
+        "  id bigint COMMENT '主键id',\n"
+        "  mch_id varchar(32) NOT NULL DEFAULT '' COMMENT '商户id',\n"
+        "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]',\n"
+        "  KEY ix_mch_id_last_update_time (mch_id, last_update_time)\n"
+        ") COMMENT='demo';\n"
+    )
+    issues = _issues_for(ddl)
+    assert all(i.rule != "索引缩写未规范化" for i in issues)
+    assert all(i.rule != "索引名未包含全部字段" for i in issues)
+
+
+def test_index_prefix_length_and_desc_modifier_ok():
+    """CodeRabbit：前缀索引 name(10) 与 DESC 修饰是合法 MySQL DDL，
+    不应误报 索引名未包含全部字段。"""
+    ddl = (
+        "CREATE TABLE t_demo (\n"
+        "  id bigint COMMENT '主键id',\n"
+        "  name varchar(64) NOT NULL DEFAULT '' COMMENT '名称',\n"
+        "  a varchar(36) NOT NULL DEFAULT '' COMMENT '字段a',\n"
+        "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]',\n"
+        "  KEY ix_name (name(10)),\n"
+        "  KEY ix_a (a DESC)\n"
+        ") COMMENT='demo';\n"
+    )
+    issues = _issues_for(ddl)
+    assert all(i.rule != "索引名未包含全部字段" for i in issues)
+
+
+def test_comment_multiple_bracket_segments_all_checked():
+    """Sourcery #4：注释含多个 [..] 段时逐段校验，后续格式错误段也应报。"""
+    issues = _issues_for(
+        _ddl_with_field(
+            "status varchar(16) NOT NULL DEFAULT '' COMMENT '状态[1-有效][待支付/已支付]'"
+        )
+    )
+    hits = [i for i in issues if i.rule == "注释取值范围格式"]
+    assert any("待支付/已支付" in i.description for i in hits)
+
+
+def test_comment_multiple_paren_segments_all_checked():
+    """Sourcery #5：注释含多个 (..) 段时逐段校验，后续空段/重复段也应报。"""
+    empty = _issues_for(
+        _ddl_with_field("parent_id bigint NOT NULL DEFAULT 0 COMMENT '父参数id(0=根)()'")
+    )
+    assert any(i.rule == "补充信息为空" for i in empty)
+    dup = _issues_for(
+        _ddl_with_field(
+            "order_no varchar(36) NOT NULL DEFAULT '' COMMENT '订单编号(备注)(订单编号)'"
+        )
+    )
+    assert any(i.rule == "补充信息冗余" for i in dup)

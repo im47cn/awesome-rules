@@ -105,7 +105,7 @@ FORBIDDEN_TYPES = {
 
 # ── 必含字段 ────────────────────────────────────────────────────────────
 REQUIRED_FIELDS = {
-    "id": {"type_pattern": r"^(int|bigint)$", "desc": "主键id"},
+    "id": {"type_pattern": r"^(int|bigint)(\s*\(\s*\d+\s*\))?$", "desc": "主键id"},
     "creator_id": {"type_pattern": r"^varchar\s*\(\s*36\s*\)$", "desc": "创建人id"},
     "create_time": {"type_pattern": r"^datetime$", "desc": "创建时间"},
     "last_updater_id": {"type_pattern": r"^varchar\s*\(\s*36\s*\)$", "desc": "最后更新人id"},
@@ -161,51 +161,41 @@ def _check_abbreviation(name: str, owner: str, issues: list, kind: str = "字段
         ))
 
 
+def _index_col_name(col: str) -> str:
+    """提取索引列定义中的列标识符，忽略前缀长度（`name(10)`）与 `DESC` 等修饰。"""
+    m = re.match(r"`?([A-Za-z0-9_]+)`?", col.strip())
+    return m[1].lower() if m else col.lower()
+
+
 def _check_index_abbreviation(idx: IndexInfo, issues: list):
-    """索引名缩写检查：去掉 ix_/uk_ 前缀后对剩余分词做反向命中检查。
+    """索引缩写检查：对索引引用的每个列名做反向命中检查。
 
     【强制级别：公司数据治理要求】命中即报 Severity.MANDATORY。
 
-    豁免：
-    1. 索引名主体由必含字段名拼接而成（如 ix_last_update_time、ix_creator_id）
-    2. 索引名主体所有分词都在豁免集合（必含字段名 ∪ 规范字段名 `del_flag`）中
+    逐列检查（而非拆索引名分词）：组合索引（如 ix_mch_id_last_update_time）
+    的必含字段列（如 last_update_time 含 `update` 分词）逐列豁免，避免与
+    `索引名未包含全部字段`（要求索引名按完整字段名拼接）两条强制规则互相矛盾。
+
+    豁免：列名属于必含字段名（REQUIRED_FIELDS）或规范字段名
+    （ABBREVIATION_EXEMPT_FIELDS，如 del_flag）。索引名与列名的一致性由
+    check_index_contains_columns 负责，此处只检查列名本身的缩写。
     """
-    body = strip_index_prefix(idx.name)
-    parts = [p for p in body.split("_") if p]
-    if not parts:
-        return
-
-    # 豁免 1：索引名主体完全由必含字段名拼接（ix_last_update_time / ix_creator_id 等）
-    sorted_required = sorted(REQUIRED_FIELDS.keys(), key=len, reverse=True)
-    remaining = list(parts)
-    matched_required = []
-    while remaining:
-        matched = False
-        for rf in sorted_required:
-            rf_parts = rf.split("_")
-            if len(rf_parts) <= len(remaining) and remaining[:len(rf_parts)] == rf_parts:
-                matched_required.append(rf)
-                remaining = remaining[len(rf_parts):]
-                matched = True
-                break
-        if not matched:
-            break
-    if not remaining and matched_required:
-        return
-
-    # 豁免 2：所有分词都在豁免集合（必含字段名 ∪ 规范字段名）中
     exempt_set = set(REQUIRED_FIELDS.keys()) | ABBREVIATION_EXEMPT_FIELDS
-    if all(p in exempt_set for p in parts):
-        return
-
-    # 其余情况：复用 iter_abbrev_violations（已处理 self-mapping、reserved-value 豁免）
-    for part, std in iter_abbrev_violations(body):
-        issues.append(Issue(
-            table=idx.name, severity=Severity.MANDATORY, rule="索引缩写未规范化",
-            location=f"索引:{idx.name}",
-            description=f"索引 '{idx.name}' 主体分词 '{part}' 含未规范化写法",
-            suggestion=f"改用标准缩写 '{part}' → '{std}'，并同步索引名",
-        ))
+    seen: set[tuple[str, str]] = set()
+    for col in idx.columns:
+        col_low = _index_col_name(col)
+        if col_low in exempt_set:
+            continue  # 必含字段 / 规范字段逐列豁免（支持组合索引）
+        for part, std in iter_abbrev_violations(col_low):
+            if (part, std) in seen:
+                continue  # 多列命中同一违规时去重
+            seen.add((part, std))
+            issues.append(Issue(
+                table=idx.name, severity=Severity.MANDATORY, rule="索引缩写未规范化",
+                location=f"索引:{idx.name}",
+                description=f"索引 '{idx.name}' 列 '{col_low}' 分词 '{part}' 含未规范化写法",
+                suggestion=f"改用标准缩写 '{part}' → '{std}'，并同步索引名",
+            ))
 
 
 # ── 全角字符范围检测 ────────────────────────────────────────────────────
@@ -919,39 +909,37 @@ def check_field_comment(field: FieldInfo, table_name: str, issues: list):
             suggestion="格式：中文名(补充信息)[枚举信息]，如 '父参数id(0=根,支持嵌套)'",
         ))
 
-# R2: 取值范围 [k-v,...] 格式（COL033）
-    bracket_match = re.search(r"\[([^\[\]]*)\]", comment)
-    if bracket_match:
+    # R2: 取值范围 [k-v,...] 格式（COL033）——所有 [..] 段逐一校验
+    kv_pattern = re.compile(
+        r"^[\w\u4e00-\u9fff]+[-=][^\[\],()\s]+(?:\s*,\s*[\w\u4e00-\u9fff]+[-=][^\[\],()\s]+)*\s*$"
+    )
+    for bracket_match in re.finditer(r"\[([^\[\]]*)\]", comment):
         bracket_content = bracket_match.group(1).strip()
-        if bracket_content:
-            # 排除字符集：不允许多个 k-v 间无逗号（空格代替）、value 含括号或空白
-            kv_pattern = re.compile(
-                r"^[\w\u4e00-\u9fff]+[-=][^\[\],()\s]+(?:\s*,\s*[\w\u4e00-\u9fff]+[-=][^\[\],()\s]+)*\s*$"
-            )
-            if not kv_pattern.match(bracket_content):
-                issues.append(Issue(
-                    table=table_name, severity=Severity.MANDATORY, rule="注释取值范围格式",
-                    location=f"表:{table_name} 字段:{field.name}",
-                    description=f"取值范围 '[{bracket_content}]' 不符合 k-v 格式",
-                    suggestion="格式：[k1-v1,k2-v2,...]，如 [10-待支付,20-已支付,30-已完成]",
-                ))
+        if not bracket_content:
+            continue
+        # 排除字符集：不允许多个 k-v 间无逗号（空格代替）、value 含括号或空白
+        if not kv_pattern.match(bracket_content):
+            issues.append(Issue(
+                table=table_name, severity=Severity.MANDATORY, rule="注释取值范围格式",
+                location=f"表:{table_name} 字段:{field.name}",
+                description=f"取值范围 '[{bracket_content}]' 不符合 k-v 格式",
+                suggestion="格式：[k1-v1,k2-v2,...]，如 [10-待支付,20-已支付,30-已完成]",
+            ))
 
-    # R3: 补充信息 () 语法粗略检查（COL034）
-    paren_match = re.search(r"\(([^()]*)\)", comment)
-    if paren_match:
+    # R3: 补充信息 () 语法粗略检查（COL034）——所有 (..) 段逐一校验
+    # 补充信息不能与字段名主体重复（粗略判断：若括号内包含字段名的完整翻译视为冗余）
+    # 精确语义判断（"订单编号(订单号)"中"订单号"是"订单编号"的同义重复）由 AI 兜底
+    main_text = comment.split("(", 1)[0].strip().split("[", 1)[0].strip()
+    for paren_match in re.finditer(r"\(([^()]*)\)", comment):
         paren_content = paren_match.group(1).strip()
-        # 补充信息不能为空
-        if not paren_content:
+        if not paren_content:  # 补充信息不能为空
             issues.append(Issue(
                 table=table_name, severity=Severity.MANDATORY, rule="补充信息为空",
                 location=f"表:{table_name} 字段:{field.name}",
                 description="补充信息圆括号内为空",
                 suggestion="补充信息应包含必要的额外说明，如 '父参数id(0=根)'",
             ))
-        # 补充信息不能与字段名主体重复（粗略判断：若括号内包含字段名的完整翻译视为冗余）
-        # 精确语义判断（"订单编号(订单号)"中"订单号"是"订单编号"的同义重复）由 AI 兜底
-        main_text = comment.split("(", 1)[0].strip().split("[", 1)[0].strip()
-        if main_text and paren_content and paren_content == main_text:
+        elif main_text and paren_content == main_text:
             issues.append(Issue(
                 table=table_name, severity=Severity.MANDATORY, rule="补充信息冗余",
                 location=f"表:{table_name} 字段:{field.name}",
@@ -1064,21 +1052,19 @@ def check_index_naming(table: TableInfo, issues: list):
 
 
 def check_index_contains_columns(table: TableInfo, issues: list):
-    """索引名由所包含字段的全名称拼接而成，不允许缩写字段名。
+    """索引名主体必须等于其列标识符按声明顺序的全名拼接，不允许缩写。
 
     例：`ix_mch_id_msg_type_status (mch_id, msg_type, status)` 合法；
     `ix_mch_msg_type_status (mch_id, msg_type, status)` 违规——`mch_id` 被
-    缩写为 `mch`。实现上即：字段的所有分词（`mch`, `id`）必须都在索引
-    主体（去掉 `ix_`/`uk_` 前缀）中出现。
+    缩写为 `mch`。比较为精确拼接（顺序与 token 集合都必须一致）；列标识符
+    提取时忽略前缀长度（`name(10)`）与 `ASC`/`DESC` 等索引修饰。
     """
     for idx in table.indexes:
         if idx.name == "PRIMARY":
             continue
 
-        # 精确拼接比较：索引名主体必须等于其列按声明顺序的全名拼接
-        # （原集合比较会接受顺序错乱或含额外 token 的索引名）
         body = strip_index_prefix(idx.name)
-        expected = "_".join(col.lower() for col in idx.columns)
+        expected = "_".join(_index_col_name(c) for c in idx.columns)
         if body != expected:
             issues.append(Issue(
                 table=table.name,
@@ -1088,7 +1074,7 @@ def check_index_contains_columns(table: TableInfo, issues: list):
                 description=(
                     f"索引 '{idx.name}' 主体 '{body}' 不等于列顺序拼接 '{expected}'"
                 ),
-                suggestion="索引名由字段全名称按 ix_<field1>_<field2>... 顺序拼接而成，不允许缩写、调换顺序或含额外 token",
+                suggestion="索引名由字段全名称按 <prefix>_<field1>_<field2>... 顺序拼接而成（prefix 为 ix/uk），不允许缩写、调换顺序或含额外 token",
             ))
 
 

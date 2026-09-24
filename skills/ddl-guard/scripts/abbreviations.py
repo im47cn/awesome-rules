@@ -1609,45 +1609,33 @@ def strip_index_prefix(name: str) -> str:
 
 
 def iter_abbrev_violations(name: str) -> list[tuple[str, str]]:
-    """对名称（含 `snake_case` 分词）逐分词检查，返回 [(命中分词, 标准缩写), ...]。
+    """对名称（含 `snake_case` 分词）做最长匹配检查，返回 [(命中分词, 标准缩写), ...]。
 
-    检查两层：
-    1. 整体名称是否命中字典 key（如 `cargo_owner` 直接命中 `cargo_owner → cgoer`）
-    2. 按 `_` 拆分后每个单词是否命中字典 key（如 `cargo` 命中 `cargo → cgo`）
+    按 `_` 拆分后从左到右扫描，每个位置优先尝试最长的多词短语命中字典 key
+    （如 `cargo_owner_id` 命中 `cargo_owner → cgoer`），命中后消费短语覆盖的
+    全部分词；无短语命中时退回单词匹配（如 `mapping_id` 命中 `mapping → mapp`）。
 
-    自我映射（key == value，如 `carrier → carrier`）跳过，视为已合规。
+    自我映射（key == value，如 `carrier → carrier`）与同字复合短语（如
+    `value_date → value_date`）不报违规，但同样消费其分词，避免
+    `value → val` 之类的拆词误报。
     返回结果去重：同一 (分词, value) 组合只返回一次。
     """
     raw_violations: list[tuple[str, str]] = []
-    low = name.lower()
+    parts = name.lower().split("_")
 
-    # 第一层：整体名称匹配（如 cargo_owner）。命中后整体名已被收敛,
-    # 第二层单词匹配要跳过该整体名覆盖的分词,避免 `cargo_owner → cgoer`
-    # 与 `cargo → cgo` 重复报告。
-    overall_matched = (
-        "_" in low
-        and low in LONG_TO_SHORT
-        and LONG_TO_SHORT[low] != low
-        and low not in KEYS_WITH_RESERVED_VALUE
-    )
-    if overall_matched:
-        raw_violations.append((low, LONG_TO_SHORT[low]))
-        # 整体名命中的所有分词,第二层跳过,避免重复报
-        overall_parts = set(low.split("_"))
-    else:
-        overall_parts = set()
-
-    # 第二层：按 _ 拆分后单词匹配
-    for part in low.split("_"):
-        if part in LONG_TO_SHORT:
-            std = LONG_TO_SHORT[part]
-            if std == part:
-                continue  # 跳过自我映射（key == value）
-            if part in KEYS_WITH_RESERVED_VALUE:
-                continue  # 跳过 value 是保留字的 key（避免违规循环）
-            if part in overall_parts:
-                continue  # 整体名命中后,其覆盖的分词不再重复报
-            raw_violations.append((part, std))
+    i = 0
+    while i < len(parts):
+        step = 1
+        # 最长优先：从整个剩余串向左收缩，尝试多词短语命中字典 key
+        for j in range(len(parts), i, -1):
+            phrase = "_".join(parts[i:j])
+            if phrase in LONG_TO_SHORT:
+                std = LONG_TO_SHORT[phrase]
+                if std != phrase and phrase not in KEYS_WITH_RESERVED_VALUE:
+                    raw_violations.append((phrase, std))
+                step = j - i  # 消费短语覆盖的全部分词（含同字映射，不拆词复报）
+                break
+        i += step
 
     # 去重：保留首次出现顺序
     seen = set()

@@ -51,24 +51,24 @@ status     tinyint      NOT NULL DEFAULT 10 COMMENT '订单状态[待支付/已�
 
 ## 必含字段一致性【强制：公司基线硬性要求】
 
-每个表必须包含以下 5 个字段，且**名称、类型、注释必须完全一致**：
+每个表必须包含以下必含字段，且**名称、类型、注释必须完全一致**：
 
 | 字段名 | 类型 | 注释 | 强制级别 |
 |---|---|---|---|
-| `id` | `bigint` | `主键id` | 必含（脚本已检查） |
+| `id` | `bigint`（允许 `int` 与显示宽度 `(N)`，如 `bigint(20)`） | `主键id` | 必含（脚本已检查） |
 | `creator_id` | `varchar(36)` | `创建人id` | 必含 + 类型/注释完全一致 |
 | `create_time` | `datetime` | `创建时间` | 必含 + 类型/注释完全一致 |
 | `last_updater_id` | `varchar(36)` | `最后更新人id` | 必含 + 类型/注释完全一致 |
 | `last_update_time` | `datetime` | `最后更新时间` | 必含 + 类型/注释完全一致 |
 
 脚本检查项（已实现）：
-- **必含字段缺失**：5 个字段名任何一个不存在 → `Severity.MANDATORY`
+- **必含字段缺失**：必含字段名任何一个不存在 → `Severity.MANDATORY`
 - **必含字段定义不一致**：类型不匹配正则（如 `creator_id` 不是 `varchar(36)`） → `Severity.MANDATORY`
 - **必含字段注释不一致**：注释文本与规范完全不一致（精确字符串比较，空白不敏感） → `Severity.MANDATORY`
 
 日志/流水表（表名含 `_log`/`_flow`/`_journal`）豁免 `last_updater_id`/`last_update_time` 必含项，但仍需满足 `id`/`create_time` 的注释一致性。
 
-**缩写规则豁免**：必含字段名是公司基线硬性要求（字段名长度与写法已固化），缩写强制收敛规则对 5 个必含字段名不做检查。索引名主体完全由必含字段名拼接而成（如 `ix_creator_id`、`ix_last_updater_id`）同样豁免缩写检查。
+**缩写规则豁免**：必含字段名是公司基线硬性要求（字段名长度与写法已固化），缩写强制收敛规则对必含字段名不做检查。索引缩写检查按列逐个进行，必含字段列与规范字段列（`del_flag`）同样豁免，组合索引（如 `ix_mch_id_last_update_time`）不受影响。
 
 规范 DDL 示例（精确字符串，复用即可）：
 
@@ -102,7 +102,9 @@ last_update_time datetime   NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT
 
 脚本 `ddl_check.py` 自动检查字段名/表名/索引名是否命中缩写字典的"长写法"分词，
 强制要求改用项目约定的标准缩写。命中即报 `Severity.MANDATORY`，退出码 1
-（CI 拦截）。字典源：`scripts/abbreviations.py`（`LONG_TO_SHORT`，全量入库
+（CI 拦截）。例外：缩写 value 为 MySQL/Python 保留字的 key 跳过反向检查
+（避免违规循环）；必含字段名与规范字段名（如 `del_flag`）豁免。字典源：
+`scripts/abbreviations.py`（`LONG_TO_SHORT`，全量入库
 公司数据治理 Excel 缩略词.xlsx 共 1534 条去重英文 key + 1 条手工补全）。
 
 **按中文语义推断缩写**：扩展字典时应先确定中文含义，再选定对应英文长写法与
@@ -142,7 +144,7 @@ LONG_TO_SHORT = {
 |---|---|---|
 | 索引名前缀 | 普通索引 `ix_` / 唯一索引 `uk_`（脚本已检查） | 审查所有索引是否以正确前缀开头 |
 | 索引名长度 | 不超过 64 字符（脚本已检查） | 审查索引名长度，避免过长 |
-| **索引名包含全部字段名** | 索引名称由所包含字段的全名称按 `ix_<field1>_<field2>...` 拼接而成，字段名不允许任何缩写 | 审查每个索引的主体分词是否覆盖其引用字段的所有分词。例如：<br>✅ `KEY ix_mch_id_msg_type_status (mch_id, msg_type, status)`<br>❌ `KEY ix_mch_msg_type_status (mch_id, msg_type, status)`（索引名缺少 `_id` 完整拼写，应改为 `ix_mch_id_msg_type_status`）<br>❌ `UNIQUE KEY uk_cred (cred_id)`（索引名缺少 `_id` 完整拼写，应改为 `uk_cred_id`） |
+| **索引名包含全部字段名** | 索引名称由所包含字段的全名称按 `<prefix>_<field1>_<field2>...` 拼接而成（prefix 为普通索引 `ix` / 唯一索引 `uk`），字段名不允许任何缩写 | 审查每个索引的主体分词是否覆盖其引用字段的所有分词。例如：<br>✅ `KEY ix_mch_id_msg_type_status (mch_id, msg_type, status)`<br>❌ `KEY ix_mch_msg_type_status (mch_id, msg_type, status)`（索引名缺少 `_id` 完整拼写，应改为 `ix_mch_id_msg_type_status`）<br>❌ `UNIQUE KEY uk_cred (cred_id)`（索引名缺少 `_id` 完整拼写，应改为 `uk_cred_id`） |
 
 ## 设计合理性【推荐】
 
@@ -178,7 +180,7 @@ LONG_TO_SHORT = {
 3. **字段名**：是否细化到属性级别？是否使用英文？是否无拼音？是否无泛化词？是否无复数？
 4. **字段注释**：是否完整？是否 ≤ 128 字符？是否无全角字符？是否与字段名语义对应？
 5. **字段类型**：是否使用禁用类型？（脚本已检查）
-6. **必含字段一致性**：是否包含 5 个必含字段？名称、类型、注释是否与规范完全一致？（脚本已检查；必含字段名豁免缩写检查）
+6. **必含字段一致性**：是否包含全部必含字段？名称、类型、注释是否与规范完全一致？（脚本已检查；必含字段名豁免缩写检查）
 7. **逻辑删除**：是否统一使用 `del_flag`？注释格式是否为 `删除标志[0-否,1-是]`？（脚本已检查）
 8. **索引**：命名是否符合 `ix_`/`uk_` 规范？索引名是否包含全部字段的完整名？（脚本已检查）
 9. **缩略词**：字段名/索引名分词是否命中 `abbreviations.py` 的未规范化写法？（脚本已检查）
