@@ -448,6 +448,13 @@ def test_cmd_evolve_replay_full_run(tmp_path, monkeypatch):
     import evo_replay
     monkeypatch.setattr(evo_replay.subprocess, "run", _fake_run)
     monkeypatch.setattr(evo_replay, "control_gate", lambda holdout: 0.0)
+    ev_calls = []
+
+    def _ev_spy(skill, cfg, raw, out_root=None, eval_dirs=None):
+        ev_calls.append((skill, eval_dirs))
+        return 0
+
+    monkeypatch.setattr(evo_replay, "cmd_evidence_llm", _ev_spy)
     import evo
     import evo_gepa as G
     # fake run_gepa：返回 best(c1 候选) + log 含 holdout 分数，模拟改善 > 0.2
@@ -466,6 +473,9 @@ def test_cmd_evolve_replay_full_run(tmp_path, monkeypatch):
     pending = C.base_paths(C.load_config())["pending"]
     before = {f.name for f in pending.glob("*gepa-replay.md")}
     assert evo.cmd_evolve(sys) == 0
+    # eval_dirs 透传：证据阶段与 GEPA 同源（防回归：--eval 不得在证据阶段被丢弃）
+    assert all(ev[0] == "ddl-guard" and ev[1] for ev in ev_calls)
+    assert len(ev_calls) == 1            # 完整运行后接线部署态证据 pass
     # 本次调用新增 1 个提案（差集）；不自动 apply/commit
     after = {f.name for f in pending.glob("*gepa-replay.md")}
     props = list(after - before)
@@ -513,6 +523,13 @@ def test_cmd_evolve_replay_no_improvement(tmp_path, monkeypatch):
     import evo_replay
     monkeypatch.setattr(evo_replay.subprocess, "run", _fake_run)
     monkeypatch.setattr(evo_replay, "control_gate", lambda holdout: 0.0)
+    ev_calls = []
+
+    def _ev_spy(skill, cfg, raw, out_root=None, eval_dirs=None):
+        ev_calls.append((skill, eval_dirs))
+        return 0
+
+    monkeypatch.setattr(evo_replay, "cmd_evidence_llm", _ev_spy)
     import evo
     import evo_config as C
     pending = C.base_paths(C.load_config())["pending"]
@@ -527,6 +544,7 @@ def test_cmd_evolve_replay_no_improvement(tmp_path, monkeypatch):
     sys = types.SimpleNamespace(
         skill="ddl-guard", eval="", budget=None, seed=0, dry_run=False)
     assert evo.cmd_evolve(sys) == 0
+    assert len(ev_calls) == 1 and ev_calls[0][0] == "ddl-guard"  # 无提案路径同样跑证据 pass
     after = {f.name for f in pending.glob("*gepa-replay.md")}
     assert after - before == set()   # 无新提案
 
@@ -978,3 +996,135 @@ def test_cmd_evidence_dry_run_writes_evidence(tmp_path, monkeypatch, capsys):
     # @date 2026-09-20 回归锚：check: 选择生效 → 无脚本误跑的 exit-2 错误明细
     # （原 input/expected.md 路径 bug 使全脚本误跑、exit 2 重复行）
     assert "exit 2" not in capsys.readouterr().out
+
+
+# ── 部署态证据 pass（cmd_evidence_llm + evolve 接线，LLM 通道 mock）────────
+def _ev_stream_fake(report='{"rules": []}', events=None):
+    """证据实测通道 fake：报告恒定 + 可注入工具调用事件（默认含本 skill Read）。"""
+
+    def fake_stream(prompt, cfg):
+        return (report, events if events is not None else
+                [{"name": "Read",
+                  "input": {"file_path": "/r/skills/ddl-guard/SKILL.md"}}])
+
+    return fake_stream
+
+
+def _ev_fake_run(cmd, capture_output=True, text=True, timeout=None):
+    return types.SimpleNamespace(stdout='[{"issues": []}]', returncode=0)
+
+
+def test_cmd_evidence_llm_writes_stream_evidence(tmp_path, monkeypatch):
+    import json
+    import evo_replay
+    monkeypatch.setattr(evo_replay.subprocess, "run", _ev_fake_run)
+    monkeypatch.setattr(evo_replay, "call_claude_stream", _ev_stream_fake())
+    cfg = {"replay_min_cases": 8, "replay_k": 1, "replay_pass_threshold": 1.0}
+    assert evo_replay.cmd_evidence_llm(
+        "ddl-guard", cfg, lambda p, c: "", out_root=tmp_path) == 0
+    path = (tmp_path / "skills" / "skill-evo" / "artifacts"
+            / "replay-evidence" / "ddl-guard.json")
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    assert doc["invocation"] == {"skill_invoked": True, "evidence": "stream-json"}
+    assert doc["k"] == 1 and doc["content_hash"].startswith("sha256:")
+    assert isinstance(doc["cases"], int) and doc["cases"] >= 8
+    # k=1 不变量：逐 case pass@1 == pass^1（均 0/1），均值必相等
+    assert doc["pass_at_k"] == doc["pass_cap_k"]
+    assert 0.0 <= doc["pass_at_k"] <= 1.0
+
+
+def test_cmd_evidence_llm_gate_fail_records_uninvoked(tmp_path, monkeypatch, capsys):
+    """门禁 fail-closed：stream 无本 skill 调用事件 → 全采样计失败，evidence
+    如实记录 skill_invoked=False / 双 0（不为跑通而放水）。"""
+    import json
+    import evo_replay
+    monkeypatch.setattr(evo_replay.subprocess, "run", _ev_fake_run)
+    monkeypatch.setattr(evo_replay, "call_claude_stream",
+                        _ev_stream_fake(events=[]))
+    cfg = {"replay_min_cases": 8, "replay_k": 1, "replay_pass_threshold": 1.0}
+    assert evo_replay.cmd_evidence_llm(
+        "ddl-guard", cfg, lambda p, c: "", out_root=tmp_path) == 0
+    path = (tmp_path / "skills" / "skill-evo" / "artifacts"
+            / "replay-evidence" / "ddl-guard.json")
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    assert doc["invocation"] == {"skill_invoked": False, "evidence": "stream-json"}
+    assert doc["pass_at_k"] == 0.0 and doc["pass_cap_k"] == 0.0
+    assert "skill 未触发" in capsys.readouterr().out
+
+
+def test_cmd_evidence_llm_insufficient_cases(tmp_path, monkeypatch):
+    import evo_replay
+    monkeypatch.setattr(evo_replay.subprocess, "run", _ev_fake_run)
+    monkeypatch.setattr(evo_replay, "call_claude_stream", _ev_stream_fake())
+    cfg = {"replay_min_cases": 999, "replay_k": 1, "replay_pass_threshold": 1.0}
+    assert evo_replay.cmd_evidence_llm(
+        "ddl-guard", cfg, lambda p, c: "", out_root=tmp_path) == 1
+    assert not (tmp_path / "skills" / "skill-evo" / "artifacts"
+                / "replay-evidence" / "ddl-guard.json").exists()
+
+
+def test_cmd_evidence_llm_kill_switch_refuses(tmp_path, monkeypatch):
+    """replay_evidence=False：拒绝产出 evidence（fail-closed，不写误导性 JSON）。"""
+    import evo_replay
+    monkeypatch.setattr(evo_replay, "call_claude_stream", _ev_stream_fake())
+    cfg = {"replay_evidence": False, "replay_min_cases": 8,
+           "replay_k": 1, "replay_pass_threshold": 1.0}
+    assert evo_replay.cmd_evidence_llm(
+        "ddl-guard", cfg, lambda p, c: "", out_root=tmp_path) == 1
+    assert not (tmp_path / "skills" / "skill-evo" / "artifacts"
+                / "replay-evidence" / "ddl-guard.json").exists()
+
+
+def test_cmd_evolve_replay_evidence_kill_switch(tmp_path, monkeypatch):
+    # replay_evidence=False → GEPA 照跑，但部署态证据 pass 被跳过（不调
+    # cmd_evidence_llm），cmd_evolve 返回 0
+    import evo_replay
+    import evo_config as C
+    monkeypatch.setattr(evo_replay.subprocess, "run", _fake_run)
+    monkeypatch.setattr(evo_replay, "control_gate", lambda holdout: 0.0)
+    real = C.load_config()
+    real["replay_evidence"] = False
+    monkeypatch.setattr(C, "load_config", lambda: real)
+
+    def _boom(skill, cfg, raw, out_root=None):
+        raise AssertionError("kill switch 下不应调用证据 pass")
+
+    monkeypatch.setattr(evo_replay, "cmd_evidence_llm", _boom)
+    import evo
+
+    class FakeCandidate:
+        id, parent, gen, text = "c1", "c0", 1, "---\nname: ddl-guard\ndescription: d\n\n## 审查工作流\n新内容"
+
+    monkeypatch.setattr(evo_replay.G, "run_gepa",
+                        lambda *a, **kw: (FakeCandidate(), {},
+                                          [{"holdout": {"c0": 0.5, "c1": 0.9}}]))
+    sys = types.SimpleNamespace(
+        skill="ddl-guard", eval="", budget=None, seed=0, dry_run=False)
+    assert evo.cmd_evolve(sys) == 0
+
+
+def test_dry_run_refuses_overwrite_stream_evidence(tmp_path, monkeypatch, capsys):
+    """真实 stream-json 证据落盘后，dry-run 冒烟拒绝覆写（fail-closed：
+    未提交的 k×cases LLM 成本被抹掉不可恢复）；dry-run→dry-run 幂等不受影响。"""
+    import json
+    import evo_replay
+    monkeypatch.setattr(evo_replay.subprocess, "run", _ev_fake_run)
+    cfg = {"replay_min_cases": 8, "replay_k": 1, "replay_pass_threshold": 1.0}
+    # 先落一份真实证据（write_replay_evidence 直写最小合法 payload，
+    # 形态等价 cmd_evidence_llm 产物）
+    path = evo_replay.write_replay_evidence("ddl-guard", {
+        "content_hash": "sha256:deadbeef", "k": 1,
+        "pass_at_k": 1.0, "pass_cap_k": 1.0,
+        "invocation": {"skill_invoked": True, "evidence": "stream-json"},
+        "cases": 12,
+    }, root=tmp_path)
+    # dry-run 冒烟 → 拒绝覆写，原文件原封不动
+    assert evo_replay.cmd_evidence_dry_run("ddl-guard", cfg, out_root=tmp_path) == 1
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    assert doc["invocation"] == {"skill_invoked": True, "evidence": "stream-json"}
+    assert doc["content_hash"] == "sha256:deadbeef"
+    assert "拒绝覆写" in capsys.readouterr().out
+    # 移除真实证据（模拟人工确认）后，dry-run→dry-run 幂等冒烟恢复可用
+    path.unlink()
+    assert evo_replay.cmd_evidence_dry_run("ddl-guard", cfg, out_root=tmp_path) == 0
+    assert evo_replay.cmd_evidence_dry_run("ddl-guard", cfg, out_root=tmp_path) == 0

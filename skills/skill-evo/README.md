@@ -87,10 +87,17 @@ prompt 不嵌候选文本，改为指令 Agent 用 Read 工具完整读取部署
 素材逐回合应答；素材耗尽 / 空应答走确定性兜底（不走 LLM），调用预算
 `2*(回合数+1)` 封顶。
 
-证据产物（跨路契约，schema `replay-evidence/1`，未跟踪交付物）：
+证据产物（跨路契约，schema `replay-evidence/1`；`artifacts/` 默认 gitignore，
+唯 `replay-evidence/` 豁免——登记后的真实证据可入库）：
 `skills/skill-evo/artifacts/replay-evidence/<skill>.json`，字段顺序固定
 `schema/skill/content_hash（SKILL.md+scripts 字节级指纹）/generated_at/k/
 pass_at_k/pass_cap_k/invocation/cases（整数计数）`；逐 case 明细走 CLI stdout。
+写入方两个：dry-run 冒烟入口（零 LLM）与 `evo.py evolve --skill` GEPA 结束后
+的部署态证据 pass（stream-json 实测 `cmd_evidence_llm`；`replay_evidence=False`
+跳过）。dry-run 载荷拒绝覆写既有 stream-json 证据（或无法核验的既有文件），
+fail-closed——防本地冒烟静默抹掉 k×cases LLM 成本（已提交证据可 checkout
+恢复）。证据 JSON 落地 ≠ 技能合格：登记与消费由 release_guard
+`EVIDENCE_ENROLLED` 驱动（见 ../../scripts/release_guard.py）。
 
 ```bash
 python3 skills/skill-evo/scripts/evo_replay.py ddl-guard   # 证据 dry-run 冒烟（零 LLM，CI 可跑）
