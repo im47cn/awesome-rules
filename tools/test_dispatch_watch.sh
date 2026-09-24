@@ -33,6 +33,19 @@ newrepo() {
   (cd "$REPO" && git add tracked.txt && git commit -qm base)
 }
 cleanup() { [ -n "${WPID:-}" ] && kill "$WPID" 2>/dev/null || true; [ -n "${REPO:-}" ] && rm -rf "$REPO" "$LOG" || true; return 0; }
+# watcher 就绪握手：watcher_start 事件（dispatch_watch.sh 在初始快照紧邻之前
+# emit 到 stdout=$LOG）落盘 ⇒ 进程已活、参数/工作树校验已过；再留 0.3s 余量
+# 覆盖紧随的在飞初始 git status。上限 50×0.1s 后照常放行——watcher 未起的
+# 场景由各组事件/哨兵断言 fail-closed 兜底（空日志必败）。替代固定 sleep：
+# 七路并发下 CI 负载拉长启动时，固定等待会让变异落入基线（Sourcery #238）。
+ready() { # ready <LOG>
+  _n=0
+  until grep -q '"event":"watcher_start"' "$1" || [ "$_n" -ge 50 ]; do
+    sleep 0.1
+    _n=$((_n + 1))
+  done
+  sleep 0.3
+}
 # ── NC19a 参数校验：非数字 interval → rc 1 ─────────────────────────────
 newrepo; LOG=$(mktemp)
 printf 'tests/\n' > "$REPO/own.txt"
@@ -89,7 +102,7 @@ fi
   echo base > "$REPO/old.txt" && (cd "$REPO" && git add old.txt && git commit -qm old)
   bash "$W" --dir "$REPO" --own "$REPO/own.txt" --interval 1 --max 5 > "$LOG" 2>&1 &
   WPID=$!
-  sleep 1.5
+  ready "$LOG"
   mkdir -p "$REPO/tools"
   echo x > "$REPO/tools/x.py"          # 文件条目 owned（目录折叠下有条目覆盖 → 跳过）
   echo n > "$REPO/tests/new.py"        # 尾斜杠条目内新增
@@ -115,7 +128,7 @@ fi
   echo t > "$REPO/ren.txt" && (cd "$REPO" && git add ren.txt && git commit -qm ren)
   bash "$W" --dir "$REPO" --own "$REPO/own.txt" --interval 1 --max 8 > "$LOG" 2>&1 &
   WPID=$!
-  sleep 1.5
+  ready "$LOG"
   echo s > "$REPO/stray.md"
   echo m >> "$REPO/tracked.txt"
   sleep 1.5
@@ -137,7 +150,7 @@ fi
   printf 'tests/\n' > "$REPO/own.txt"
   bash "$W" --dir "$REPO" --own "$REPO/own.txt" --interval 1 --max 5 > "$LOG" 2>&1 &
   WPID=$!
-  sleep 1.5
+  ready "$LOG"
   mkdir "$REPO/中文外" && echo n > "$REPO/中文外/文档.md"
   mkdir "$REPO/带\"双引\"" && echo y > "$REPO/带\"双引\"/f.md"
   wait $WPID
@@ -160,7 +173,7 @@ for l in open(sys.argv[1]): json.loads(l)
   zsh -c 'sleep 120' & VPID=$!
   bash "$W" --dir "$REPO" --own "$REPO/own.txt" --pid $VPID --interval 1 --max 10 --kill-on-commit > "$LOG" 2>&1 &
   WPID=$!
-  sleep 1.5
+  ready "$LOG"
   echo c > "$REPO/c.txt" && (cd "$REPO" && git add c.txt && git commit -qm c)
   rc=0; wait $WPID || rc=$?
   if [ "$rc" = 3 ] && grep -q head_moved "$LOG" && grep -q '"killed"' "$LOG" \
@@ -179,7 +192,7 @@ for l in open(sys.argv[1]): json.loads(l)
   printf 'tests/\n' > "$REPO/own.txt"
   bash "$W" --dir "$REPO" --own "$REPO/own.txt" --interval 1 --max 10 > "$LOG" 2>&1 &
   WPID=$!
-  sleep 1.5
+  ready "$LOG"
   echo c > "$REPO/c.txt" && (cd "$REPO" && git add c.txt && git commit -qm c)
   rc=0; wait $WPID || rc=$?
   if [ "$rc" = 3 ] && grep -q head_moved "$LOG" && ! grep -q '"killed"' "$LOG"; then
@@ -196,7 +209,7 @@ for l in open(sys.argv[1]): json.loads(l)
   printf 'tests/\n' > "$REPO/own.txt"
   bash "$W" --dir "$REPO" --own "$REPO/own.txt" --interval 1 --max 5 > "$LOG" 2>&1 &
   WPID=$!
-  sleep 1.5
+  ready "$LOG"
   echo a > "$REPO/staged.md" && (cd "$REPO" && git add staged.md)
   wait $WPID
   if grep -q '"untracked_outside","path":"staged.md","detail":"code=A ' "$LOG"; then
@@ -207,7 +220,8 @@ for l in open(sys.argv[1]): json.loads(l)
   cleanup
 ) >"$CASES/j.verdict" 2>&1 &
 
-wait
+wait || :  # wait 状态不透传：组子壳崩溃（set -e 早退）时其 verdict 无判定行，
+           # 由下方聚合按 FAIL 计（fail-closed）；此处非零早退反而绕过聚合与清理
 # 按组序聚合判定（文件中第一条锚定格式的判定行）：bash 会对被信号杀死的
 # 后台作业向 stderr 打 job 通知（NC19h 的 watcher kill 即此形态），判定行
 # 之前可能有噪声行，不能按物理首行取。案例组中途崩溃（set -e 早退）→ 无
