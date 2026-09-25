@@ -60,3 +60,4 @@ python3 scripts/sql_check.py path/to/project/ --format json
 - SQL 人工规则：[`sql-manual-rules.md`](sql-manual-rules.md)
 - 设计规范：[`steering/database-design-specification.md`](../../steering/database-design-specification.md)
 - 审查样例：[`test/`](test/)
+- 目录说明：[`badcase/`](badcase/) 回归语料（CI 由仓顶 `scripts/badcase_runner.py` 消费）；[`eval/`](eval/) 评估集；[`test/`](test/) 审查样例——三者均非 skill 运行时物料，模型无需加载

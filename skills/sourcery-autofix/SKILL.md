@@ -59,3 +59,4 @@ sourcery issue → 按场景 1 完整循环修复，以 `sourcery review --check
 - 硬闸为 **opt-in 门禁**：仅当仓库根存在 `.sourcery.yaml` 才启用（主动声明，
   同 xx-java-sdk gate 模式）；未 opt-in / 未装 CLI / 无支持语言文件均跳过
   （支持面=CLI 实测 py/ts/js，见 sourcery-gate.sh 头注释）；
+  设计论证与实测证据见 [README](README.md)。

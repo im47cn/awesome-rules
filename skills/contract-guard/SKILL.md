@@ -55,3 +55,5 @@ bash scripts/check-contract.sh [--base <git-ref>] [<仓库根目录>]
 - 只管**编译期契约**（Java public API / DTO 字段）；运行时 HTTP 契约走
   `api-guard` / `openapi-standards.md`；
 - 不做人工契约清单维护——下游用了哪些字段由下游真实编译发现（C 方案），不做登记。
+
+设计论证与 japicmp baseline 三步法详见 [README](README.md)。

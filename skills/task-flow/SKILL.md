@@ -83,6 +83,10 @@ files:
 
 ## 命令
 
+执行入口：`python3 <技能根>/scripts/taskflow.py <子命令>`——在**用户业务项目根**
+执行（`--project` 默认当前目录，勿在技能目录内跑，防 `.taskflow/` 落错位置）。
+快速上手样例与目录结构见 [README](README.md)。
+
 | 子命令 | 作用 | 退出码 |
 | --- | --- | --- |
 | `init [--title T] [--id ID]` | 生成三层状态（`.taskflow/` 已存在则拒绝，防覆盖） | 0 / 2 |
