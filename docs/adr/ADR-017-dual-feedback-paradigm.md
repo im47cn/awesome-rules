@@ -8,7 +8,7 @@
 **决策**：
 1. **执行层 OODA**：目标模糊先 grill（Orient 前置）；API 盲试错门禁
    （同一端点 2 次失败禁发第 3 次，转权威文档/子代理）压缩 Observe→
-   Orient 成本上限；异构对抗/反向角色校正 Orient 偏差；commit 即 push、
+   Orient 成本上限；异构对抗/反向角色校正 Orient 偏差；获得明确授权后 commit 即 push、
    长会话收尾门禁压回路周期（tempo）。
 2. **治理层 PDCA**：否决沉淀（人类否决 → 门禁/checklist/ADR =
    Act→标准化）；doc-freshness、mutation/负控制测试 = Check 机械化
