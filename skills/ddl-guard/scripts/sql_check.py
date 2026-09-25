@@ -12,7 +12,6 @@ MyBatis SQL 规范检查脚本
 
 import argparse
 import copy
-import json
 import os
 import re
 import sys
@@ -31,6 +30,8 @@ from guard_lib import (  # noqa: E402
     Severity,
     run_gate,
 )
+from guard_lib import format_report_json as guard_report_json  # noqa: E402
+from guard_lib import format_report_text as guard_report_text  # noqa: E402
 
 
 @dataclass
@@ -815,59 +816,21 @@ def check_po_file(file_path: str):
 
 
 def format_report_text(file_path: str, issues: list) -> str:
-    if not issues:
-        return f"✓ {file_path} — 检查通过\n"
-
-    mandatory = [i for i in issues if i.severity == Severity.MANDATORY]
-    recommended = [i for i in issues if i.severity == Severity.RECOMMENDED]
-
-    lines = [
-        f"{'='*60}",
-        f"SQL 审查报告: {file_path}",
-        f"{'='*60}",
-        f"  【强制】问题: {len(mandatory)} 项",
-        f"  【推荐】问题: {len(recommended)} 项",
-        "",
-    ]
-
-    for issue in issues:
-        lines.extend(
-            (
-                f"  [{issue.severity.value}] {issue.rule}",
-                f"    语句: {issue.statement_type} ({issue.statement_id})",
-                f"    问题: {issue.description}",
-            )
-        )
-        if issue.suggestion:
-            lines.append(f"    建议: {issue.suggestion}")
-        lines.append("")
-
-    return "\n".join(lines)
+    return guard_report_text(
+        file_path, issues, "SQL 审查报告",
+        lambda i: (f"语句: {i.statement_type} ({i.statement_id})",
+                   f"问题: {i.description}"))
 
 
 def format_report_json(file_path: str, issues: list) -> str:
-    data = {
-        "file": file_path,
-        "summary": {
-            "total": len(issues),
-            "mandatory": sum(i.severity == Severity.MANDATORY
-                         for i in issues),
-            "recommended": sum(i.severity == Severity.RECOMMENDED
-                           for i in issues),
-        },
-        "issues": [
-            {
-                "statement_id": i.statement_id,
-                "statement_type": i.statement_type,
-                "severity": i.severity.value,
-                "rule": i.rule,
-                "description": i.description,
-                "suggestion": i.suggestion,
-            }
-            for i in issues
-        ],
-    }
-    return json.dumps(data, ensure_ascii=False, indent=2)
+    return guard_report_json(file_path, issues, lambda i: {
+        "statement_id": i.statement_id,
+        "statement_type": i.statement_type,
+        "severity": i.severity.value,
+        "rule": i.rule,
+        "description": i.description,
+        "suggestion": i.suggestion,
+    })
 
 
 def main():
