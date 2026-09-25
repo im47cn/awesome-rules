@@ -32,7 +32,6 @@ awesome-rules/
 │   ├── task-flow/                     # 五阶段门驱任务工作流（三层状态可恢复）
 │   ├── code-review/                   # 两轴代码审查（规范轴+规格轴并行子代理，聚合抽验）
 │   └── sourcery-autofix/              # Sourcery AI 审查自动修复（fix→测试→过目→闭环）
-├── arch-hawkeye/                      # 架构鹰眼：全局架构观测与治理（消费 doc-gen manifest）
 ├── hooks/                             # Claude Code hooks（SessionStart 规范索引 + SessionEnd 会话总结）
 ├── scripts/                           # 工具脚本
 │   ├── badcase_runner.py              # Badcase 回归测试
@@ -96,11 +95,11 @@ Java/Spring Cloud 微服务（`gtsp-*`/`fss-*`）编码规范，按维度拆分�
 | [code-review](skills/code-review/README.md) | 两轴代码审查（规范轴+规格轴并行子代理+聚合抽验，GitHub/云效适配） |
 | [sourcery-autofix](skills/sourcery-autofix/SKILL.md) | Sourcery AI 审查自动修复：fix→全量测试→diff 人过目→剩余项闭环（配 lefthook pre-push opt-in 硬闸） |
 
-**独立工程**（非技能，随仓库发布）：
+**独立工程**（非技能，不随本仓发布）：
 
-| 工程 | 说明 |
-|------|------|
-| [arch-hawkeye](arch-hawkeye/README.md) | 架构鹰眼：全局架构观测与治理 — 联邦聚合 + 跨项目链路（HTTP/MQ/DB/缓存/定时 5 通道，confirmed/inferred 双置信度）+ 变更影响分析 + 治理闭环（基线/趋势/blame 归属/债务/超期告警/增量零容忍门禁）+ 本地双模式（`hawkeye local` 零依赖） |
+- 架构鹰眼 `arch-hawkeye` — 多项目聚合 / 跨项目链路（HTTP/MQ/DB/缓存/定时 5 通道）/
+  变更影响分析 / 治理闭环 / 本地双模式。已拆分为独立仓库（2026-09-23），
+  消费 doc-gen 产出的 `doc-manifest/`，契约快照与漂移门禁见其 `contracts/manifest/`。
 
 各技能的详细文档、用法和检查规则见各自目录下的 README。
 
