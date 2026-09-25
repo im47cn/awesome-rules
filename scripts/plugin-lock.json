@@ -17,7 +17,7 @@
   },
   "evidence": {
     "api-guard": "sha256:ff47fd6a911b8ea3cc72fa87bf39bfd4e03902eba87f549d5d6d924e825afd51",
-    "arch-guard": "sha256:3df1914e127b8d9bddb90c448b95bcac4366b7dd94e5bdd9cda3de4de09d8fc0",
+    "arch-guard": "sha256:63c6ddb4b1d141fd1a0024ebd5163f332908e54108005f4dd949b18f8d31c61d",
     "contract-guard": "sha256:17d3704dc3300245679080f1ed60460420414c346e69b86b2f1259ac88c7589f",
     "ddl-guard": "sha256:cd2f63b0097c8a117e665e6b83717ef9fb6b8f71046dd3d1406f34dded256c6f",
     "doc-gen": "sha256:589fa20e0d85481fb96a2cd0f9571413e50009e75248ec9a9dc1351d20d342e0",
