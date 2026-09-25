@@ -57,6 +57,11 @@
      须原样出现在 hooks/load-steering.sh 文本中（钩子在生成上下文的
      Python 字符串里硬编码了第二份副本，任一侧修订未同步即漂移；
      比较前两侧做转义形态还原，规避 shell/python 引号转义差异）
+  R12 技能工具计数禁令：skills/*/{SKILL,README}.md 禁止「N+ 工具 /
+     N 个工具」静态计数——外部 MCP/CLI 工具数随上游版本漂移，改写为
+     「数量以 <实时查询命令> 为准」（2026-09-24 审查实证：
+     alibabacloud-devops「165+ 工具」与自身「以 mcporter list 实时
+     为准」原则三处自相矛盾）
 
 豁免（误报控制，两条稳定通道）：
   --allow REGEX（可重复）：正则 search 命中证据行（[级别] 文件:行 →
@@ -98,6 +103,9 @@ R2_COUNT_RE = re.compile(r"[（(]?\s*" + _NUM + r"\s*[)）]?\s*个[^。\n|]{0,30
 R4_TESTED_RE = re.compile(r"测试\s*[（(]?\s*(\d+)\s*[)）]?\s*[项条个]")
 R4_PAREN_RE = re.compile(r"[（(]\s*(\d+)\s*[项条]\s*[)）]")
 R4_REVERSED_RE = re.compile(r"(\d+)\s*[项条]\s*测试")
+# R12 陈述口径：数字+可选加号/量词紧邻「工具」（165+ 工具 / 100 个工具），
+# 及数字后置形态（工具数量：165 个 / 工具 N 个）
+R12_TOOL_COUNT_RE = re.compile(r"\d+\s*\+?\s*个?\s*工具|工具[^，。\n]{0,6}?\d+\s*个")
 
 R5_REUSE_RE = re.compile(r"复用\s*arch-guard")
 R5_CHECKOUT_RE = re.compile(r"git\s+checkout\s+-b\s+factory/issue")
@@ -689,8 +697,26 @@ def rule_r11(root: Path, g: Gate) -> None:
     g.fail(where, f"R11 总则句与 AGENTS.md:{idx} 不一致（双源硬编码，修订须两侧同步）")
 
 
+def rule_r12(root: Path, g: Gate) -> None:
+    """R12 技能工具计数禁令：skills/*/{SKILL,README}.md 禁止「N+ 工具/N 个工具」。
+
+    外部 MCP server / CLI 的工具数随上游版本漂移，静态计数即易腐陈述
+    （CLAUDE.md「文档不写易腐数字」）。fail-open：无 skills 目录跳过。
+    """
+    skills = root / "skills"
+    if not skills.is_dir():
+        return
+    mds = sorted(skills.glob("*/SKILL.md")) + sorted(skills.glob("*/README.md"))
+    for md in mds:
+        for i, ln in enumerate(_lines(md), 1):
+            if m := R12_TOOL_COUNT_RE.search(ln):
+                g.fail(f"skills/{md.parent.name}/{md.name}:{i}",
+                       f"R12 工具计数「{m.group(0)}」属易腐数字（上游版本漂移）："
+                       f"改写为「数量以实时查询为准」")
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description="实现↔文档一致性门禁（R1-R11）")
+    ap = argparse.ArgumentParser(description="实现↔文档一致性门禁（R1-R12）")
     ap.add_argument("root", nargs="?", default=".",
                     help="仓库根（默认当前目录）")
     ap.add_argument("--allow", action="append", default=[], metavar="REGEX",
@@ -727,6 +753,7 @@ def main() -> int:
     rule_r9(root, g)
     rule_r10(root, g)
     rule_r11(root, g)
+    rule_r12(root, g)
 
     fails: list[str] = []
     infos: list[str] = []

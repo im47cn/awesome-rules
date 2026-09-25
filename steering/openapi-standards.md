@@ -1,7 +1,6 @@
 ---
 title: Open API 设计规范
 scenario: 设计/审查对外 Open API
-inclusion: always
 ---
 
 # Open API 设计与安全规范
@@ -44,7 +43,7 @@ inclusion: always
 - **分页请求**：`{ pageNum（从 1 开始）, pageSize（上限 2000）, condition }`
 - **分页响应**：`{ total, pages, pageNum, list }`
 - **强类型**：禁止 `Map<String, Object>` 作为对外契约，必须有明确 DTO/Schema
-- **枚举传值**【强制】：状态/类型类字段（status/type/state/level/kind 等）必须定义为枚举类型（Schema `enum`），禁止用裸 `String`/`Integer` 传魔法值（如 `status=1`）；枚举值须在文档完整列出
+- **枚举传值**【强制】：状态/类型类字段（status/type/state/level/kind 等）必须定义为枚举类型（Schema `enum`），禁止用裸 `String`/`Integer` 传魔法值（如 `status=1`）；枚举值须在文档完整列出（仅靠人记：当前无静态门禁；可接线方向为 api-guard 扫描 Schema `enum` 定义 + 负控制）
 
 分页响应示例：
 
@@ -69,7 +68,7 @@ inclusion: always
 
 ## 4. 统一响应体
 
-所有 API（包括业务失败和平台异常）统一返回 **HTTP 200**，仅限流 429、网关故障 5xx 除外。
+所有 API（包括业务失败和平台异常）统一返回 **HTTP 200**，仅限流 429、网关故障 5xx 除外。（仅靠人记：响应码语义需运行时验证；可接线方向=目标仓 CI 集成测试断言响应码）
 
 ### 成功响应
 
@@ -158,7 +157,7 @@ inclusion: always
 
 ## 8. 变更规范
 
-- 接口或字段**只允许增加，不允许删除**
+- 接口或字段**只允许增加，不允许删除**（仅靠人记：可接线方向=OpenAPI spec 版本间 diff 入目标仓 CI）
 - 废弃时须标记 `@Deprecated` 并公告下线时间表
 
 ## 9. 文档规范

@@ -58,13 +58,13 @@ commit 正文**（多数团队现实：没有独立规格文档）。都没有�
 
 单批 `tasks[]` 同时发出。两个 prompt 都必须包含：
 
-**可证伪性条款（强制）**
+**可证伪性条款（强制）**（机械检查现状：仓级 gauntlet 未覆盖，靠执行方自检）
 
 > 任何存在性/否定性断言（「X 已无引用」「Y 是死配置」「Z 未配置」）必须先
 > 全仓 grep 验证并附命令输出；diff 里看不到 ≠ 仓库没有。每条发现标注
 > `verified: yes/no` 与 evidence（命令输出或 file:line）。
 
-**输出契约（强制）**
+**输出契约（强制）**（机械检查现状：仓级 gauntlet 未覆盖，靠执行方自检；可接线方向=聚合报告 JSON schema 静态检查+负控制）
 
 > 最终输出必须是完整报告（结构化 JSON：`findings[]`，每项含
 > `title/severity(hard-violation|judgement-call)/confidence/file/line/

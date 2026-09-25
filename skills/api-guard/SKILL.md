@@ -16,7 +16,6 @@ files:
   - badcase/002-jsonformat-shape-number/input/src/main/java/com/example/order/client/dto/ExampleDTO.java
   - badcase/002-jsonformat-shape-number/input/src/main/java/com/example/order/infrastructure/repository/po/ExamplePO.java
   - badcase/002-jsonformat-shape-number/prompts.md
-  - openapi-manual-rules.md
   - scripts/api_check.py
   - scripts/pytest.ini
   - scripts/test_api_check.py
@@ -51,7 +50,7 @@ python3 scripts/api_check.py <目标文件或目录> [--format json]
 
 读取 [`api-manual-rules.md`](api-manual-rules.md)，逐个端点核对脚本无法覆盖的规则（响应信封、参数约定、安全、文档等）。
 
-审查对外 Open API 时，另读 [`openapi-manual-rules.md`](openapi-manual-rules.md)，逐条核对脚本外条款。
+对外 Open API 设计/审查不在本技能范围：读 [`../../steering/openapi-standards.md`](../../steering/openapi-standards.md)（SessionStart 按 scenario 触发加载），其脚本外条款以该规范正文为准。
 
 ### 第 3 步：输出报告
 
