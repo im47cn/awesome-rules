@@ -131,7 +131,7 @@ require_dir() {
 LAYER_DIRS='scripts .factory/tests tools/tests
 skills/api-guard/scripts skills/ddl-guard/scripts skills/arch-guard/scripts
 skills/impact-guard/scripts/tests skills/skill-evo/scripts/tests
-skills/doc-gen/scripts/tests arch-hawkeye/scripts/tests'
+skills/doc-gen/scripts/tests'
 
 # 语法探针面 = 门禁实跑面的导入闭包（find_py 候选必须过这批源码的
 # 语法+模块级执行，见 py_syntax_ok）：层清单（pytest 收集面）+ 各 tests
@@ -143,7 +143,7 @@ skills/doc-gen/scripts/tests arch-hawkeye/scripts/tests'
 # 时 find_py 不拒候选、退化为 pytest 层晚爆）
 PY_SYNTAX_DIRS="$LAYER_DIRS .factory skills/_shared
 skills/impact-guard/scripts skills/skill-evo/scripts skills/doc-gen/scripts
-arch-hawkeye/scripts tools"
+tools"
 
 # ── doctor 模式：环境自诊断，不跑层、不清产物 ───────────────────────────
 # 与门禁语义互补：门禁 fail-closed 首坏即断；doctor 逐项报全量再汇总，
@@ -273,9 +273,9 @@ else
     # shellcheck disable=SC2086  # 层目录按词展开
     require_dir $LAYER_DIRS
 
-    # ── 并发批：自测层 + dispatch-watch + pytest 9 套件（2026-09-24）──
+    # ── 并发批：自测层 + dispatch-watch + pytest 8 套件（2026-09-24）──
     # 墙钟 = max(层) 而非 sum(层)：实测全门 84s→31s，其中批段 ≈15s
-    #（长极 = pytest-factory 553 例 ≈14.6s；9 个 pytest 层 sum≈62s，被批
+    #（长极 = pytest-factory 553 例 ≈14.6s；8 个 pytest 层 sum≈62s，被批
     # 并发压到单层 max）。批内层互相独立：自测层各用密封临时仓（顶层剥除
     # GIT_*），3 个 cov 套件各写独立 COVERAGE_FILE（diff-cover 层批后
     # combine）。批语义负控制：T10/T11。
@@ -310,7 +310,6 @@ else
     run_layer_bg pytest-impact-guard "$PY" -m pytest skills/impact-guard/scripts/tests -q
     run_layer_bg pytest-skill-evo "$PY" -m pytest skills/skill-evo/scripts/tests -q
     run_layer_bg pytest-doc-gen "$PY" -m pytest skills/doc-gen/scripts/tests -q
-    run_layer_bg pytest-arch-hawkeye "$PY" -m pytest arch-hawkeye/scripts/tests -q
     wait_layers
     run_layer plugin-versions "$PY" tools/check_plugin_versions.py
     # 实现↔文档一致性（数字/清单/指向漂移，R1-R11 语义见脚本头注释）
@@ -329,7 +328,7 @@ else
     layer_must_not_secrets() {
         # shellcheck disable=SC1091
         . tools/must_not_match.sh
-        must_not_match "$SECRET_PATTERN" scripts tools hooks skills arch-hawkeye .factory .github
+        must_not_match "$SECRET_PATTERN" scripts tools hooks skills .factory .github
     }
     run_layer must-not-secrets layer_must_not_secrets
 
@@ -390,19 +389,19 @@ else
     # 管道早退静态门（issue #30 三犯成类）：pipefail 下非末位早退消费者
     # （grep -m/head）与 true 管道段。扫描面 = tracked *.sh（67c2965b 原则）
     run_layer lint-pipe-early-exit "$PY" tools/check_pipe_early_exit.py \
-        .factory tools scripts hooks skills arch-hawkeye .github
+        .factory tools scripts hooks skills .github
     # 进程组信号平台语义门（PR #36 flake 沉淀，约定见 steering/testing-standards.md
     # 「进程组信号的平台语义」）：os.killpg 缺 EPERM 容忍 / raises 单发探活。
     # 扫描面 = tracked *.py（67c2965b 原则）
     run_layer lint-killpg-strict "$PY" tools/check_killpg_strict.py \
-        .factory tools scripts hooks skills arch-hawkeye .github
+        .factory tools scripts hooks skills .github
     # 测试 tempdir 枚举静态门（PR #137 泄漏断言隔离的防回归面；该未隔离
     # 形态已扩散 8 个下游仓）：测试进程 gettempdir()/对 /tmp 字面量直接
     # glob/listdir 枚举的是系统共享目录，套件外写者随机打破差集断言——
     # 须走 conftest private_tmp 夹具注入（范式 .factory/tests/conftest.py）。
     # 扫描面 = tracked 测试文件（test_*.py / conftest.py）。负控制 NC17。
     run_layer lint-tempdir-isolation "$PY" tools/check_tempdir_usage.py \
-        .factory tools scripts hooks skills arch-hawkeye .github
+        .factory tools scripts hooks skills .github
     # 托管平台出口收口门（ADR-007 层级契约）：零 gh 直调 + issue 副作用
     # 经 factory-lib 收口（hosting.py 仅传输层）。负控制 NC12。
     run_layer lint-factory-hosting-exit "$PY" tools/check_hosting_exit.py .

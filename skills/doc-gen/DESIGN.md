@@ -255,7 +255,7 @@ python3 scripts/doc_gen.py scan /path/to/java-project --init
 python3 scripts/doc_gen.py scan --from-manifest doc-manifest/ --build
 
 # 多项目聚合已迁移至架构鹰眼：
-python3 arch-hawkeye/scripts/hawkeye.py aggregate projects.json --output site/ --build
+python3 <arch-hawkeye 仓根>/scripts/hawkeye.py aggregate projects.json --output site/ --build
 ```
 
 ### 4.2 模块划分
@@ -272,7 +272,7 @@ doc_gen.py                  入口 + CLI 参数解析
   │   └── （generator/manifest.py 内含运行时证据提取：_extract_endpoints 复用到
   │       Feign 接口、_extract_mq_channels/_extract_cache_keys/_extract_schedules、
   │       _extract_feign_client_meta + _string_const_index 常量两层解析——
-  │       全部供架构鹰眼跨项目链路，见 arch-hawkeye/AH-MANIFEST.md §4）
+  │       全部供架构鹰眼跨项目链路，见独立仓 arch-hawkeye 的 AH-MANIFEST.md §4）
   ├── generator/
   │   ├── manifest.py        DocManifest JSON 生成 + Mermaid 图表生成
   │   ├── layers.py          DDD 分层识别
@@ -283,7 +283,7 @@ doc_gen.py                  入口 + CLI 参数解析
       ├── writer.py          Manifest 分片写入（支持域级并友）
       └── astro.py           Astro 构建触发
 
-# 多项目聚合（原 builder/aggregate.py）已迁移至 arch-hawkeye/scripts/aggregate.py
+# 多项目聚合（原 builder/aggregate.py）已迁移至独立仓 arch-hawkeye 的 scripts/aggregate.py
 ```
 
 ## 5. Architecture AI Agent 设计

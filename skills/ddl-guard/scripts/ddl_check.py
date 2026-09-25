@@ -9,7 +9,6 @@ DDL 规范检查脚本
 """
 
 import argparse
-import json
 import os
 import re
 import sys
@@ -28,6 +27,7 @@ from guard_lib import (  # noqa: E402
     find_files,
     run_gate,
 )
+from guard_lib import format_report_json as guard_report_json  # noqa: E402
 
 
 @dataclass
@@ -1107,29 +1107,15 @@ def format_report_text(file_path: str, issues: list) -> str:
 
 
 def format_report_json(file_path: str, issues: list) -> str:
-    """Format issues as JSON."""
-    data = {
-        "file": file_path,
-        "summary": {
-            "total": len(issues),
-            "mandatory": sum(i.severity == Severity.MANDATORY
-                         for i in issues),
-            "recommended": sum(i.severity == Severity.RECOMMENDED
-                           for i in issues),
-        },
-        "issues": [
-            {
-                "table": i.table,
-                "severity": i.severity.value,
-                "rule": i.rule,
-                "location": i.location,
-                "description": i.description,
-                "suggestion": i.suggestion,
-            }
-            for i in issues
-        ],
-    }
-    return json.dumps(data, ensure_ascii=False, indent=2)
+    """Format issues as JSON（骨架在 guard_lib.format_report_json）."""
+    return guard_report_json(file_path, issues, lambda i: {
+        "table": i.table,
+        "severity": i.severity.value,
+        "rule": i.rule,
+        "location": i.location,
+        "description": i.description,
+        "suggestion": i.suggestion,
+    })
 
 
 def main():
