@@ -259,7 +259,8 @@ python3 scripts/sql_check.py [--format json]
 
 将脚本自动检查结果与人工判断合并，输出完整审查报告；按
 [`../../steering/review-report-standards.md`](../../steering/review-report-standards.md)
-五段式输出（含证据边界段）。
+五段式输出（含证据边界段）。目录说明（badcase/ 回归语料、eval/ 评估集、
+test/ 审查样例）见 [README](README.md)。
 
 ## 设计新表
 

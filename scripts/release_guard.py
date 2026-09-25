@@ -23,8 +23,10 @@
   区间无可发布提交 → 拒绝发布退出（防误发空版本）。
 
 用法：
-  npm run release              # 防呆发布（默认）
-  python3 scripts/release_guard.py --check   # 只报告决策，不执行
+  npm run release              # 防呆发布（唯一发布入口，显式 --release）
+  python3 scripts/release_guard.py          # 裸调用=只报告决策，不执行（防误触）
+  python3 scripts/release_guard.py --check   # 同上，显式只读
+  python3 scripts/release_guard.py --release  # 直接执行发布（等价 npm run release）
   python3 scripts/release_guard.py --verify-evidence   # 单跑证据门禁
 """
 
@@ -404,11 +406,20 @@ def decide(check_only: bool = False) -> int:
     return 0
 
 
-if __name__ == "__main__":
-    _args = sys.argv[1:]
-    if "--verify-evidence" in _args:
+def _main(argv: "list[str]") -> int:
+    if "--verify-evidence" in argv:
         print("（--verify-evidence：全量审计口径，独立于发布门禁——"
               f"decide() 仅校验登记集 EVIDENCE_ENROLLED，当前登记 "
               f"{len(EVIDENCE_ENROLLED)} 个）")
-        sys.exit(verify_skill_evidence())
-    sys.exit(decide(check_only="--check" in _args))
+        return verify_skill_evidence()
+    if "--release" not in argv and "--check" not in argv:
+        # 防误触（2026-09 两次实证：裸调用/帮助探针直接跑完 catv 提交版本 bump）：
+        # 无 --release 一律只报告决策，catv 执行仅经 npm run release 显式发起
+        print("（未传 --release：只报告决策不执行。发布请用 npm run release，"
+              "或 python3 scripts/release_guard.py --release）")
+        return decide(check_only=True)
+    return decide(check_only="--check" in argv)
+
+
+if __name__ == "__main__":
+    sys.exit(_main(sys.argv[1:]))
