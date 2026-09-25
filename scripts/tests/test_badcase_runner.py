@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from badcase_runner import parse_prompts, run_badcase
+from badcase_runner import parse_expected, parse_prompts, run_badcase
 
 # 放行型 expected.md（与 skills/ddl-guard/eval/007-clean 同构：
 # 「预期检查输出」小节内无「脚本自动检出」行 → expected_rules = []）
@@ -126,3 +126,24 @@ class TestParsePrompts:
         f.write_text("# 提示词集\n\n---\n\n## 回合1\n\n素材一\n继续行\n\n"
                      "---\n\n- 素材二a\n- 素材二b\n", encoding="utf-8")
         assert parse_prompts(f) == (["素材一 继续行", "素材二a", "素材二b"], [])
+
+
+def test_parse_expected_manual_channels(tmp_path):
+    """manual 双通道口径钉死（真相源 scripts/badcase_format.py，2026-09-25 收编）：
+
+    - 「人工补充规则：」逐 ID 拆分入列（旧实现整串单元素）
+    - 别名串剥首 token 外溢到 manual 通道（strip_aliases 全通道生效）
+    - 「人工补充：」描述行保留原文
+    - 规则 ID 恒排描述前（拼接序），仅展示不参与比对
+    """
+    f = tmp_path / "expected.md"
+    f.write_text(
+        "check: x.py\n\n## 预期检查输出\n\n"
+        "- 脚本自动检出：命名规范|命名、类型规范\n"
+        "- 人工补充规则：M1、M2、M3|别名\n"
+        "- 人工补充：拼音、泛化词（描述）\n",
+        encoding="utf-8")
+    script, rules, manual = parse_expected(f)
+    assert script == "x.py"
+    assert rules == ["命名规范", "类型规范"]
+    assert manual == ["M1", "M2", "M3", "拼音、泛化词（描述）"]

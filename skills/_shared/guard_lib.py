@@ -125,3 +125,52 @@ def run_gate(targets: list, fmt: str, report_text, report_json) -> int:
         print(f"{'='*60}")
 
     return 1 if any(count_mandatory(v) for v in all_issues.values()) else 0
+
+
+# ── 报告格式骨架（原 api_check/sql_check/ddl_check 三份复制，易漂移）──────
+
+def format_report_text(file_path: str, issues: list, title: str,
+                       detail_fn, pass_line: str = "") -> str:
+    """通用文本报告骨架：标题/计数头 + 逐 issue 明细。
+
+    detail_fn(issue) 返回明细行列表（不含 severity/rule 头行与建议行）；
+    pass_line 覆盖零问题文案（空串用通用默认）。分组/编号等特殊排版
+    （如 ddl_check 按表分组）不在此列，保留在调用方。
+    """
+    if not issues:
+        return pass_line or f"✓ {file_path} — 检查通过\n"
+
+    mandatory = [i for i in issues if i.severity == Severity.MANDATORY]
+    recommended = [i for i in issues if i.severity == Severity.RECOMMENDED]
+
+    lines = [
+        f"{'='*60}",
+        f"{title}: {file_path}",
+        f"{'='*60}",
+        f"  【强制】问题: {len(mandatory)} 项",
+        f"  【推荐】问题: {len(recommended)} 项",
+        "",
+    ]
+
+    for issue in issues:
+        lines.append(f"  [{issue.severity.value}] {issue.rule}")
+        lines.extend(f"    {detail}" for detail in detail_fn(issue))
+        if issue.suggestion:
+            lines.append(f"    建议: {issue.suggestion}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def format_report_json(file_path: str, issues: list, issue_to_dict) -> str:
+    """通用 JSON 报告骨架；issue_to_dict(issue) 返回单条 issue 的字段字典。"""
+    data = {
+        "file": file_path,
+        "summary": {
+            "total": len(issues),
+            "mandatory": sum(i.severity == Severity.MANDATORY for i in issues),
+            "recommended": sum(i.severity == Severity.RECOMMENDED for i in issues),
+        },
+        "issues": [issue_to_dict(i) for i in issues],
+    }
+    return json.dumps(data, ensure_ascii=False, indent=2)

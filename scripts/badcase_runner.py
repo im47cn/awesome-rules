@@ -33,11 +33,13 @@ expected.md 期望模型（双通道）:
 
 import argparse
 import json
-import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from badcase_format import parse_prompts
+from badcase_format import parse_expected as _parse_expected
 
 
 @dataclass
@@ -77,110 +79,14 @@ def parse_expected(expected_path: Path):
     """解析 expected.md，返回 (check_script, expected_rules, manual_rules)。
 
     双通道期望模型（见模块 docstring）：脚本自动检出参与比对，
-    人工补充仅记录不比对——把人工审查项计入失败会让 runner 永远红着。
+    人工补充（规则 ID + 描述）仅记录不比对——把人工审查项计入失败会让
+    runner 永远红着。别名串剥首 token 规范名（纯脚本回归语义），
+    解析真相源在 scripts/badcase_format.py。
     """
-    if not expected_path.is_file():
-        return None, [], []
+    check_script, expected_rules, manual_ids, manual_notes = _parse_expected(
+        expected_path, strip_aliases=True)
+    return check_script, expected_rules, [*manual_ids, *manual_notes]
 
-    text = expected_path.read_text(encoding="utf-8")
-
-    check_script = None
-    m = re.search(r"(?:check|脚本)\s*[:：]\s*(\S+\.py)", text)
-    if m:
-        check_script = m[1].strip()
-
-    expected_rules, manual_rules = [], []
-
-    def _split_rules(payload: str):
-        # 别名串（「规范名|别名1|别名2」）只取首 token 规范名：脚本侧比对按规范名，
-        # 别名（对齐 LLM 报告措辞）是 GEPA 评估集（evo_replay.parse_expected）的
-        # 概念，badcase_runner 保持纯脚本回归语义（strict 精确等值不受影响）。
-        return [p.strip().split("|")[0] for p in re.split(r"[、,，;；]", payload) if p.strip()]
-
-    section = re.search(r"##\s*预期检查输出\s*\n(.*?)(?=\n##\s|$)", text, re.DOTALL)
-    if section:
-        # 新式：只认「预期检查输出」小节的 bullet
-        for line in section[1].split("\n"):
-            m = re.match(r"^[-*]\s+(.+)", line.strip())
-            if not m:
-                continue
-            item = m[1].strip()
-            if item.startswith("脚本自动检出"):
-                expected_rules.extend(_split_rules(
-                    re.split(r"[:：]", item, 1)[-1]))
-            elif item.startswith("人工补充"):
-                manual_rules.append(re.split(r"[:：]", item, 1)[-1].strip())
-            elif item and not item.startswith("#"):
-                expected_rules.append(item)
-    else:
-        # 旧式：第一个 ## 标题前的顶层 bullet（违规语句/改进建议等
-        # 小节里的 bullet 是给人工看的叙述，不是脚本期望）
-        head = re.split(r"\n##\s", text, 1)[0]
-        for line in head.split("\n"):
-            m = re.match(r"^[-*]\s+(.+)", line.strip())
-            if m:
-                rule = m[1].strip()
-                if rule and not rule.startswith("#"):
-                    expected_rules.append(rule)
-
-    return check_script, expected_rules, manual_rules
-
-
-def parse_prompts(prompts_path: Path):
-    """解析 prompts.md，返回 (prompts, known_issues)。
-
-    两种格式（@date 2026-09-20 双 Agent 扩展，与
-    skills/skill-evo/scripts/evo_replay.py 的 parse_prompts 同构）：
-    - 旧式纯 bullet：每行 `- 内容` 即一条 prompt（一个回合），行为与历史
-      版本逐字一致（零回归锚）
-    - `---` 围栏块：每个围栏块一条 prompt；块内有 bullet → 逐 bullet 一条
-      （bullet 恒等于回合）；无 bullet → 剥 `#` 标题行后整块压缩空白为一条
-    已知问题 section 先剥离再解析。prompts.md 无 YAML frontmatter，
-    ^---$ 行不与其分隔符冲突。
-    """
-    if not prompts_path.is_file():
-        return [], []
-
-    text = prompts_path.read_text(encoding="utf-8")
-
-    # 提取"已知问题"section
-    known_section = ""
-    if km := re.search(
-        r"##\s*已知问题\s*\n(.*?)(?=\n##\s|$)", text, re.DOTALL
-    ):
-        known_section = km[1].strip()
-        # 从 text 中移除已知问题部分，避免解析到 prompts
-        text = text[: km.start()] + text[km.end():]
-
-    blocks = re.split(r"(?m)^---\s*$", text)
-    prompts = []
-    if len(blocks) > 1:
-        # 围栏模式：逐块 → prompt
-        for block in blocks:
-            bullets = [m[1].strip() for line in block.split("\n")
-                       if (m := re.match(r"^[-*]\s+(.+)", line.strip()))]
-            if bullets:
-                prompts.extend(b for b in bullets if b)
-            else:
-                body = "\n".join(l for l in block.split("\n")
-                                 if not l.strip().startswith("#"))
-                if compact := " ".join(body.split()):
-                    prompts.append(compact)
-    else:
-        # 无围栏 → 既有纯 bullet 行为（零回归）
-        for line in text.split("\n"):
-            line = line.strip()
-            if m := re.match(r"^[-*]\s+(.+)", line):
-                if prompt := m[1].strip():
-                    prompts.append(prompt)
-
-    known_issues = []
-    for line in known_section.split("\n"):
-        line = line.strip()
-        if m := re.match(r"^[-*]\s+(.+)", line):
-            known_issues.append(m[1].strip())
-
-    return prompts, known_issues
 
 
 def run_check_script(script_path: Path, input_dir: Path):
