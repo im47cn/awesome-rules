@@ -7,7 +7,7 @@ files:
 
 # tokensave 代码图谱（mcporter 代理模式）
 
-**红线：刻意不注册为 MCP server**（连接时全量注入 ~100 个工具名约 1.2k token，关闭 tool search 时 schema 约 20k token/轮）。
+**红线：刻意不注册为 MCP server**（两种模式常驻注入成本实测与性价比裁决见 [README](README.md)）。
 所有调用走 mcporter CLI 按需查询与执行，设计论证见 [README](README.md)。
 
 ## 职责边界（先读这个）

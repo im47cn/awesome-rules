@@ -115,7 +115,7 @@ opportunity-scan / evolution-review）作为"流程的 CI"。
    不引入其技能包，只取思想。
 2. 元闭环不重造：本仓库 `skills/skill-evo/` 已是本地化实现（会话经验自动提炼
    → 人工审核应用，GEPA 引擎自进化），与元技能四件套一一对应（见 §10 映射表）。
-   工厂的 decisions.md 喂给 skill-evo，即完成"流程数据 → 规则进化"闭环，且进化
+   工厂的 ADR 台账（docs/adr/）喂给 skill-evo，即完成"流程数据 → 规则进化"闭环，且进化
    权锁在人类（skill-evo 本就是人工审核制）。
 
 ### 2.4 对上一轮头脑风暴的自查修正
@@ -364,7 +364,7 @@ mutation kill rate 回归。
 | R4 | 成本失控 | locks/floor.json（S2）：每 PR 上限 + 每日总额，超限熔断停摆并 needs-human |
 | R5 | SDK 依赖（Bun 版本、isTerminal 语义） | S1–S2 用 CLI 形态规避；SDK 直连仅白名单节点，接口已把坑写进注释（§4） |
 | R6 | L3 心理陷阱（人生是 diff，感觉变糟就回退） | 级别 = §8 度量，不 = 感觉；反指标触发才降级 |
-| R7 | triage 判据漂移（MISSION 语义模糊） | 判据三条保持可机械核对；歧义 case 记 decisions.md，季度人审收编 |
+| R7 | triage 判据漂移（MISSION 语义模糊） | 判据三条保持可机械核对；歧义 case 记 docs/adr/，季度人审收编 |
 | R8 | 门腐化（新缺陷类型不在 mutation 集内） | 每次漏拦事故 → 新 defect 条目（坏例回归，badcase_runner 同思想） |
 
 ---
@@ -376,7 +376,7 @@ mutation kill rate 回归。
 | 确定性测试门 | `scripts/run_tests.sh`（7 套件 + badcase 双通道 + plugin_lock + md_link_check） | 直接引用，不包装 |
 | 坏例回归 | `scripts/badcase_runner.py` | S1 扩编为 mutation 行为破坏类缺陷素材库 |
 | 锁定先例 | `scripts/plugin_lock.py`（安装入口 zero-regression） | 治理锁思想同源，三层锁之一 |
-| 元技能闭环 | `skills/skill-evo/`（会话经验提炼 → 人工审核 → GEPA 自进化） | 对应 drift/ablate/scan/evolution-review 四件套；decisions.md 喂入 |
+| 元技能闭环 | `skills/skill-evo/`（会话经验提炼 → 人工审核 → GEPA 自进化） | 对应 drift/ablate/scan/evolution-review 四件套；docs/adr/ 喂入 |
 | triage 依据 | `steering/*.md`（唯一真相源，人工维护） | fix-issue 的 prime 上下文 + 评审节点的规范依据 |
 | AI 评审节点 | `skills/api-guard` `ddl-guard` `arch-guard` | validate-PR 按 PR 触及面选配的并行评审器 |
 | hooks 注入 | `hooks/load-steering.sh` | AI 节点会话自动携带治理上下文 |
