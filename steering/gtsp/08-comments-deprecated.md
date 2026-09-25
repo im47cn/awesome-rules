@@ -13,7 +13,7 @@ scenario: Javadoc/@Deprecated
 
 ## 2. 方法注释
 
-public 方法应有 Javadoc（功能说明 + `@param` + `@return`）。**Feign 接口方法和 Controller 方法必须注释。**
+public 方法应有 Javadoc（功能说明 + `@param` + `@return`）。**【强制】Feign 接口方法和 Controller 方法必须注释。**
 
 ## 3. 字段注释
 

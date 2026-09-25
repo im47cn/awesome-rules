@@ -16,7 +16,7 @@ scenario: GTSP 工程规范总索引
 | # | 维度 | 文件 | 适用场景 |
 |---|---|---|---|
 | 01 | 架构与分层 | [01-project-structure.md](01-project-structure.md) | 架构设计/业务域/模块档位/分层/CQRS/状态机/扩展点 |
-| 02 | 命名规范 | [02-naming.md](02-naming.md) | 类后缀/方法分层/扩展点/常量类 |
+| 02 | 命名规范 | [02-naming.md](02-naming.md) | 类后缀/方法/注入/常量类 |
 | 03 | API 接口（Feign） | [03-api-feign.md](03-api-feign.md) | Feign/URL 版本/参数校验 |
 | 04 | 数据库与 MyBatis-Plus | [04-database-mybatis.md](04-database-mybatis.md) | PO/Mapper/XML/分页插件 |
 | 05 | 日志规范 | [05-logging.md](05-logging.md) | SLF4J+Log4j2/链路追踪 |

@@ -2,11 +2,11 @@
 
 ## 为什么不常驻注册
 
-tokensave MCP server 暴露 ~100 个工具。实测两种常驻成本：
+tokensave MCP server 暴露上百工具（数量以 `mcporter list` 实时结果为准）。实测两种常驻成本：
 
 | 场景 | 注入成本 |
 |---|---|
-| 开启 tool search（schema 按需） | 连接时全量注入 ~100 个工具名，约 1.2k token |
+| 开启 tool search（schema 按需） | 连接时全量注入全部工具名（2026-09 实测约百个），约 1.2k token |
 | 关闭 tool search（schema 前置） | 约 20k token/轮 |
 
 而 30 天实测调用约 10 次，按「性价比排序」（调用数 ÷ 注入万 token）远低于保留阈值。

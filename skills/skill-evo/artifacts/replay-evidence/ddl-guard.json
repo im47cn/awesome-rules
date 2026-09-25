@@ -1,0 +1,14 @@
+{
+  "schema": "replay-evidence/1",
+  "skill": "ddl-guard",
+  "content_hash": "sha256:af1eb41a1dd24fd78a203fe9f6fc80df6b1d665206611e9f06c7fb6c76bb2715",
+  "generated_at": "2026-09-25T13:11:52+00:00",
+  "k": 3,
+  "pass_at_k": 0.9865,
+  "pass_cap_k": 0.9865,
+  "invocation": {
+    "skill_invoked": true,
+    "evidence": "dry-run"
+  },
+  "cases": 74
+}
