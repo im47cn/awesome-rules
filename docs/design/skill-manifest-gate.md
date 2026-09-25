@@ -77,6 +77,22 @@ M1 校验强制 steering title/scenario 为单行标量 ⇒ simple 路径的假�
   时 NC19-21 已被 diff-cover/md-link-check/sourcery-gate 占用）
   （M1 缺 scenario / M2 断链 / M2 路径逃逸 / M2 缺键 + 正控制放行）
 
+## 已声明的规范偏离：`files:` 非 Claude 官方 frontmatter 字段
+
+2026-09-25 官方文档核验（platform.claude.com skill authoring best practices
+页 + 同域 skills 页字段表）：官方字段集不含 `files`。行为差异——
+Claude Code 对未识别字段静默忽略（运行时零影响）；claude.ai 上传 /
+Agent Skills API / 官方打包路径对未知键硬报错。
+
+裁决：维持 `files:` 现状。依据：本仓 skills 走整仓插件分发（8 平台 marketplace
+均指向仓库根，docs/platform-matrix.md），不经过官方严格校验路径；`files` 承载
+本设计的断链单向门禁（ADR-3），迁移到官方 `metadata` 自定义通道需同步改
+frontmatter_lib / backfill_skill_manifests / 门禁三处，收益仅在单 skill 上传
+claude.ai 场景兑现（当前无此需求）。
+
+falsifier：出现把单 skill 上传 claude.ai / Skills API 的真实分发需求 →
+届时迁移 `metadata.files`（三处工具同步改读新位置）。
+
 ## 维护规则
 
 - 改 `tools/frontmatter_lib.py` 须跑全量 gauntlet（口径变更同时影响

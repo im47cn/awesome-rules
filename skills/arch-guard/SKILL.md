@@ -46,8 +46,6 @@ files:
   - scripts/tests/test_arch_archunit_gen.py
   - scripts/tests/test_arch_baseline.py
   - scripts/tests/test_arch_check.py
-  - templates/archunit-spike/ArchitectureGuardTest.java
-  - templates/archunit-spike/archunit.properties
 ---
 
 # DDD 架构分层守护

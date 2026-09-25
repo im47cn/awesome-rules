@@ -126,7 +126,7 @@ arch-guard、ArchUnit、ArchGuard 是三个物种（AI 技能 / 测试断言库 
 
 **2b go/no-go 判据数据**（判据：手写成本 < 半天且项目数 < 4 时放弃生成器）：手写一份验证过的规则集实际耗时 ~0.5h（含排错）；已索引 GTSP 项目 12 个 ≥ 4。**判据不满足放弃条件 → 生成器路线 GO**（价值在于规则演进时 12 个项目同步再生成的规模效应，而非首写成本）。
 
-Spike 产物存档：`skills/arch-guard/templates/archunit-spike/`（ArchitectureGuardTest.java + archunit.properties，作为 2b 生成器模板基线）。
+Spike 产物已删除（2026-09-25）：生成器内嵌于 `arch_check.py --mode archunit`，模板不再静态存档（静态基线会与生成器输出失同步）；Spike 踩坑要点见上文 2a 实录。
 
 #### 2b. 生成器：`--mode archunit`
 
