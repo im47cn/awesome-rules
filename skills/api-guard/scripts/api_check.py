@@ -13,7 +13,6 @@
 """
 
 import argparse
-import json
 import os
 import re
 import sys
@@ -26,6 +25,8 @@ if str(_SHARED) not in sys.path:
     sys.path.insert(0, str(_SHARED))
 
 from guard_lib import SKIP_DIRS, Severity, run_gate  # noqa: E402
+from guard_lib import format_report_json as guard_report_json  # noqa: E402
+from guard_lib import format_report_text as guard_report_text  # noqa: E402
 
 
 @dataclass
@@ -539,55 +540,21 @@ def check_mapper_xml_file(file_path: str) -> list:
 
 
 def format_report_text(file_path: str, issues: list) -> str:
-    if not issues:
-        return f"✓ {file_path} — 检查通过\n"
-
-    mandatory = [i for i in issues if i.severity == Severity.MANDATORY]
-    recommended = [i for i in issues if i.severity == Severity.RECOMMENDED]
-
-    lines = [
-        f"{'='*60}",
-        f"API 审查报告: {file_path}",
-        f"{'='*60}",
-        f"  【强制】问题: {len(mandatory)} 项",
-        f"  【推荐】问题: {len(recommended)} 项",
-        "",
-    ]
-
-    for issue in issues:
-        lines.extend([
-            f"  [{issue.severity.value}] {issue.rule}",
-            f"    端点: {issue.http_method} {issue.endpoint}",
-            f"    问题: {issue.description}",
-        ])
-        if issue.suggestion:
-            lines.append(f"    建议: {issue.suggestion}")
-        lines.append("")
-
-    return "\n".join(lines)
+    return guard_report_text(
+        file_path, issues, "API 审查报告",
+        lambda i: (f"端点: {i.http_method} {i.endpoint}",
+                   f"问题: {i.description}"))
 
 
 def format_report_json(file_path: str, issues: list) -> str:
-    data = {
-        "file": file_path,
-        "summary": {
-            "total": len(issues),
-            "mandatory": sum(i.severity == Severity.MANDATORY for i in issues),
-            "recommended": sum(i.severity == Severity.RECOMMENDED for i in issues),
-        },
-        "issues": [
-            {
-                "endpoint": i.endpoint,
-                "http_method": i.http_method,
-                "severity": i.severity.value,
-                "rule": i.rule,
-                "description": i.description,
-                "suggestion": i.suggestion,
-            }
-            for i in issues
-        ],
-    }
-    return json.dumps(data, ensure_ascii=False, indent=2)
+    return guard_report_json(file_path, issues, lambda i: {
+        "endpoint": i.endpoint,
+        "http_method": i.http_method,
+        "severity": i.severity.value,
+        "rule": i.rule,
+        "description": i.description,
+        "suggestion": i.suggestion,
+    })
 
 
 # ── 主流程 ───────────────────────────────────────────────────────────────
