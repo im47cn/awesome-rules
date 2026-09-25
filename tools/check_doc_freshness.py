@@ -709,8 +709,7 @@ def rule_r12(root: Path, g: Gate) -> None:
     mds = sorted(skills.glob("*/SKILL.md")) + sorted(skills.glob("*/README.md"))
     for md in mds:
         for i, ln in enumerate(_lines(md), 1):
-            m = R12_TOOL_COUNT_RE.search(ln)
-            if m:
+            if m := R12_TOOL_COUNT_RE.search(ln):
                 g.fail(f"skills/{md.parent.name}/{md.name}:{i}",
                        f"R12 工具计数「{m.group(0)}」属易腐数字（上游版本漂移）："
                        f"改写为「数量以实时查询为准」")

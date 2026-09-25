@@ -122,7 +122,7 @@ LOG_TABLE_TAGS = ("_log", "_flow", "_journal")
 def _is_log_table(name: str) -> bool:
     """判断是否为日志/流水类表（表名词边界匹配，防 _logistics/_flowmeter 类子串误伤）。"""
     low = name.lower()
-    return any(re.search(tag + r"(_|$)", low) for tag in LOG_TABLE_TAGS)
+    return any(re.search(f"{tag}(_|$)", low) for tag in LOG_TABLE_TAGS)
 
 
 def _check_abbreviation(name: str, owner: str, issues: list, kind: str = "字段"):
