@@ -122,7 +122,7 @@ def test_main_no_command_exits_zero(monkeypatch, capsys):
     assert "子命令" in capsys.readouterr().out or True
 
 
-# aggregate 子命令已迁移至架构鹰眼（arch-hawkeye/scripts/tests/test_hawkeye.py）
+# aggregate 子命令已迁移至架构鹰眼（独立仓 arch-hawkeye，scripts/tests/test_hawkeye.py）
 
 
 def test_scan_legacy_compat(tmp_path, monkeypatch):

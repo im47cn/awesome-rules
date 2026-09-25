@@ -48,7 +48,7 @@ npm run dev      # http://localhost:4321
 | 业务全景 | 客户/角色/场景/流程：人工 `business-context.md` + 代码弱信号（`@PreAuthorize`/状态机） | ✅ |
 | 运行时证据提取 | 5 通道供架构鹰眼跨项目链路：Feign/MQ（含常量两层解析）/Redis key/`@XxlJob`/`@Scheduled` | ✅ |
 | 违规责任归属 | risks.json 逐条 `git blame`（author + introducedAt，失败降级 null） | ✅ |
-| 多项目聚合 | 已迁移至架构鹰眼（`arch-hawkeye/`），doc-gen 专注单项目 | ➡️ |
+| 多项目聚合 | 已迁移至独立仓架构鹰眼，doc-gen 专注单项目 | ➡️ |
 | CI 集成 | GitHub Actions 自动构建部署 | 📋 |
 
 > ✅ = 已实现 🚧 = 模板就绪，CLI 集成中 📋 = 计划中
@@ -91,9 +91,12 @@ npm run dev      # http://localhost:4321
 ## 与架构鹰眼的关系（职责边界）
 
 doc-gen 专注**单项目**入门文档；多项目聚合、跨项目真实链路、治理闭环归**架构鹰眼**
-（`arch-hawkeye/`），以 `doc-manifest/` 为唯一交接物（契约见
-[`../../arch-hawkeye/AH-MANIFEST.md`](../../arch-hawkeye/AH-MANIFEST.md)）。
-原 `doc_gen.py aggregate` 子命令已迁移至 `arch-hawkeye/scripts/hawkeye.py`；
+（独立仓 arch-hawkeye，2026-09 拆分），以 `doc-manifest/` 为唯一交接物
+（契约见其仓 `AH-MANIFEST.md`）。跨仓复用机制：鹰眼侧 `scripts/docgen.py`
+是与本仓的唯一耦合点——经 `RULES_PATH` 环境变量定位本仓检出目录（未设置时用其内置默认），
+将本仓 `skills/doc-gen/scripts/` 注入 `sys.path` 后复用 `doc_gen.py` CLI 与
+`builder/astro` 渲染器，本仓代码对 `RULES_PATH` 无感知、无需改动。
+原 `doc_gen.py aggregate` 子命令已迁移至鹰眼仓 `scripts/hawkeye.py`；
 单项目文档站渲染复用 doc-gen 的 Astro 模板（单一真相源）。
 
 ## Manifest Schema 契约（原理）

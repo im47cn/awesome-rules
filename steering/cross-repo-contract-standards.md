@@ -1,7 +1,6 @@
 ---
 title: 跨仓契约兼容性规范
 scenario: 变更会被其他仓库依赖的 API 模块（api jar / Feign 契约 / DTO）、配置跨仓 CI 门禁
-inclusion: always
 ---
 
 # 跨仓契约兼容性规范

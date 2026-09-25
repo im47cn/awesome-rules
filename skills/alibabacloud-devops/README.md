@@ -1,10 +1,10 @@
 # alibabacloud-devops
 
-阿里云云效 DevOps 平台工具集（165+ 工具），经 mcporter CLI 按需代理调用。
+阿里云云效 DevOps 平台工具集（上百工具，数量以 mcporter list 实时结果为准），经 mcporter CLI 按需代理调用。
 
 ## 设计说明：为何不注册为 MCP server
 
-本技能**刻意不**通过 `.mcp.json` 注册云效 MCP server。该 server 暴露 165+ 工具，
+本技能**刻意不**通过 `.mcp.json` 注册云效 MCP server。该 server 暴露上百工具，
 注册后所有工具 schema 会常驻上下文（约 15k token/轮；使用第三方模型代理时
 Claude Code 的 Tool Search 可能被禁用，无法按需加载）。改用 mcporter CLI 代理后：
 

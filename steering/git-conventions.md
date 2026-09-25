@@ -1,13 +1,12 @@
 ---
 title: Git 提交规范
 scenario: 提交代码/创建分支/PR
-inclusion: always
 ---
 
 # Git 提交规范
 
 ## Commit 格式（强制）
-- 手工创建的合并提交（`git merge` / `git commit-tree`）同样适用本格式与主题行长度限制，示例：`chore: 合并 origin 链分支收敛异哈希重复提交`；不得沿用平台默认的 `Merge branch 'xxx' of ...` 主题行。
+- 手工创建的合并提交（`git merge` / `git commit-tree`）同样适用本格式与主题行长度限制，示例：`chore: 合并 origin 链分支收敛异哈希重复提交`；不得沿用平台默认的 `Merge branch 'xxx' of ...` 主题行。（本地 commit-msg 钩子对 `Merge ` 前缀整体豁免，本条当前仅靠人记）
 
 ```
 <type>[(<scope>)][!]: <subject>
@@ -39,7 +38,7 @@ inclusion: always
 | --- | --- |
 | 业务域 | `api`、`db`、`ui`、`ci` |
 | 技能 | `skills/`（指针行——各技能 scope 由根配置的 scope 枚举自动包含，无需手工登记） |
-| 工程 | `dependency`、`tools`、`scripts`、`docs`、`deps`、`release`、`arch-hawkeye`、`task-package` |
+| 工程 | `dependency`、`tools`、`scripts`、`docs`、`deps`、`release`、`task-package` |
 
 新增技能时追加到根 `commitlint.config.js` 的 `scope-enum`（分发件 `tools/git/commitlint.config.cjs` 为下游通用子集，不要求同步）。
 
@@ -116,7 +115,7 @@ Refs #321
 
 - git filter-repo 重写历史时：文本替换规则需覆盖敏感串的变体形态（截断的 org ID、`git@` SSH 形态、`.` 与 `/` 分隔符形态），否则会漏网残留；`--path-rename` 仅锚定路径开头，重命名路径中间的目录需以完整前缀锚定
 - 历史重写前先 `git bundle` 做全量备份；重写后在工作区、全部历史 blob、全部提交消息三处复扫验证零残留，并重跑全量测试（目录改名可能破坏 fixtures 路径）
-- 【强制】仓内禁提交凭据/密钥/令牌（API key、secret、token、私钥等）；已接线门禁：`tools/gauntlet.sh` `must-not-secrets` 层（`tools/must_not_match.sh`，`SECRET_PATTERN` 锚定「凭据名 + 赋值 + 引号内字面量」与私钥头形态）——门禁先于本条款存在，规范侧补记（2026-09-20 审计 D-06：反向漂移修复）
+- 【强制】仓内禁提交凭据/密钥/令牌（API key、secret、token、私钥等）；已接线门禁：`tools/gauntlet.sh` `must-not-secrets` 层（`tools/must_not_match.sh`，`SECRET_PATTERN` 锚定「凭据名 + 赋值 + 引号内字面量」与私钥头形态）——门禁先于本条款存在，规范侧补记（2026-09-20 审计 D-06：反向漂移修复）。门禁覆盖面=所列 7 目录中 tracked 的 .py/.sh/.yml/.yaml/.js（tools/must_not_match.sh `_SCAN_EXTS`+`git ls-files`）；其他文件类型及 steering/、docs/、仓根文件暂仅靠人记
 - 提交前自检不得混入公司敏感信息：内网代码托管地址、公司内部包名、内部服务依赖、与根 LICENSE 矛盾的清单 license 声明；提交消息中的仓库链接同样计入
 - 仓库开源或对外迁移托管前，先做全历史敏感信息扫描（含全部提交消息与文件路径）；泄漏一旦进入 git 历史，仅删除当前文件无效，必须用 git filter-repo 重写全历史
 

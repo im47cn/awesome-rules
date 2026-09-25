@@ -143,7 +143,7 @@ scenario: 适用场景（何时该读它）
 - frontmatter 字段：
   - `title` — 索引表显示名（缺失时回退到 H1 标题）
   - `scenario` — 适用场景，AI 据此判断何时加载（缺失时显示 `—`，强烈建议填写）
-  - `inclusion: always` — 部分历史文件保留的既有字段，新增文件无需写
+  - `inclusion` — 已废除（2026-09-24 清理）：hook 从未消费该字段，禁止新增；存量文件已全部移除
 
 > 本地验证：`CLAUDE_PLUGIN_ROOT=$(pwd) bash hooks/load-steering.sh` 可查看生成的索引，确认新文件已出现。
 

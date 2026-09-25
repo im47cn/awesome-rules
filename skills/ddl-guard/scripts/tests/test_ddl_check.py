@@ -140,11 +140,12 @@ def _issues_for(ddl_text):
         os.unlink(path)
 
 
-def _ddl_with_field(field_line, table="t_demo"):
+def _ddl_with_field(field_line, table="t_demo", with_del_flag=True):
     """生成含指定字段行、其余必含字段齐全的最小 DDL。
 
     必含字段使用规范名 + 规范注释（如 last_update_time → COMMENT '最后更新时间'）。
     必含字段名豁免缩写检查（ddl_check.py: REQUIRED_FIELDS 硬编码豁免）。
+    with_del_flag=False 供"业务表缺逻辑删除字段"场景复用。
     """
     return (
         f"CREATE TABLE {table} (\n"
@@ -153,9 +154,9 @@ def _ddl_with_field(field_line, table="t_demo"):
         "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人id',\n"
         "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
         "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
-        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
-        "  del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]'\n"
-        ") COMMENT='demo';\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间'"
+        + (",\n  del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]'\n" if with_del_flag else "\n")
+        + ") COMMENT='demo';\n"
     )
 
 
@@ -903,6 +904,58 @@ def test_comment_paren_meaningful_ok():
 
 
 # ── 日志/流水表必含字段豁免 ─────────────────────────────────────────────────
+
+# ── 业务表必含逻辑删除字段（2026-09-24 del_flag 口径 A 接线）──────────────
+
+def test_business_table_missing_del_flag():
+    """业务表五必含字段齐全但无 del_flag → 报【强制】逻辑删除字段缺失。"""
+    ddl = _ddl_with_field("order_no varchar(36) COMMENT '订单编号'", with_del_flag=False)
+    issues = _issues_for(ddl)
+    assert any(i.rule == "逻辑删除字段缺失" and i.severity == ddl_check.Severity.MANDATORY for i in issues)
+
+
+def test_business_table_with_del_flag_passes():
+    """业务表含 del_flag → 不报逻辑删除字段缺失。"""
+    ddl = _ddl_with_field("del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]'")
+    issues = _issues_for(ddl)
+    assert all(i.rule != "逻辑删除字段缺失" for i in issues)
+
+
+def test_business_table_with_equivalent_alias_passes():
+    """业务表含等价别名 is_deleted → 不报（存在性满足，命名统一由 del_flag 命名规则另行约束）。"""
+    ddl = _ddl_with_field("is_deleted tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]'")
+    issues = _issues_for(ddl)
+    assert all(i.rule != "逻辑删除字段缺失" for i in issues)
+
+
+def test_logistics_substring_table_not_exempt():
+    """业务表名含 _log 子串（t_order_logistics）→ 不豁免，缺 del_flag 仍报。"""
+    ddl = (
+        "CREATE TABLE t_order_logistics (\n"
+        "  id bigint COMMENT '主键',\n"
+        "  order_no varchar(36) COMMENT '订单编号',\n"
+        "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间'\n"
+        ") COMMENT='物流订单表';\n"
+    )
+    issues = _issues_for(ddl)
+    assert any(i.rule == "逻辑删除字段缺失" for i in issues)
+
+
+def test_log_table_missing_del_flag_exempt():
+    """日志表无 del_flag → 豁免，不报逻辑删除字段缺失。"""
+    ddl = (
+        "CREATE TABLE call_log (\n"
+        "  id bigint COMMENT '主键',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  content varchar(100) COMMENT '内容'\n"
+        ") COMMENT='日志表';\n"
+    )
+    issues = _issues_for(ddl)
+    assert all(i.rule != "逻辑删除字段缺失" for i in issues)
+
 
 def test_log_table_exempt_updater_fields():
     """日志表缺 last_updater_id/last_update_time → 不报必含字段。"""

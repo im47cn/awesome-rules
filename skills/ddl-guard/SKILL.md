@@ -154,6 +154,8 @@ files:
   - badcase/073-atomic-table-name-chars/input/example.sql
   - badcase/074-atomic-field-name-chars/expected.md
   - badcase/074-atomic-field-name-chars/input/example.sql
+  - badcase/075-atomic-del-flag-required/expected.md
+  - badcase/075-atomic-del-flag-required/input/example.sql
   - ddl-manual-rules.md
   - eval/007-clean/expected.md
   - eval/007-clean/input/example.sql

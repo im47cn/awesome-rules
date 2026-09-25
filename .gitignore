@@ -45,3 +45,6 @@ docs/research/taskpkg-exp/probe-*/
 # 真实证据（stream-json 实测）经 release_guard EVIDENCE_ENROLLED 登记后可入库
 skills/skill-evo/artifacts/*
 !skills/skill-evo/artifacts/replay-evidence/
+
+# 本地开发 worktree 区（.dev/worktree/：gauntlet 并行验证等临时工作树，永不入库）
+.dev/

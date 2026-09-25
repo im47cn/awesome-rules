@@ -35,8 +35,6 @@ GIT_FIXTURE_CASES = [
      "tests/test_impact_guard.py::TestRenderer::test_commit_binding_git_semantics"),
     ("skills/doc-gen/scripts",
      "tests/test_risks.py::test_blame_file_batch_parses_full_file"),
-    ("arch-hawkeye/scripts",
-     "tests/test_integration.py::test_handoff_docgen_manifest_to_hawkeye"),
     (".factory",
      "tests/test_factory_local.py::TestStampRoundtrip::test_full_cycle_announce_then_refresh"),
  ]

@@ -40,7 +40,7 @@ scenario: 设计表结构/编写 SQL
 
 说明：主键可用自增或雪花 ID。日期时间建议由前端传入而非数据库生成。
 
-> **日志/流水表豁免**：仅追加不更新的日志/流水类表（表名含 `_log` / `_flow` / `_journal`）可豁免 `creator_id` / `last_updater_id` / `last_update_time`，但必须保留 `id` 与 `create_time`。
+> **日志/流水表豁免**：仅追加不更新的日志/流水类表（表名含 `_log` / `_flow` / `_journal`）可豁免 `creator_id` / `last_updater_id` / `last_update_time` / `del_flag`（只追加不删除，无逻辑删除语义），但必须保留 `id` 与 `create_time`。
 
 ## 四、字段
 
@@ -67,7 +67,7 @@ scenario: 设计表结构/编写 SQL
 
 ### 逻辑删除字段
 
-统一使用：
+【强制】所有业务表必含逻辑删除字段，统一使用：
 
 ```sql
 del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]'
@@ -130,7 +130,7 @@ del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]'
 
 **表**：表注释 ≤ 64 / 表名合规 ≤ 30 / 含 5 个必含字段（日志/流水表按 :43 豁免保留 id+create_time）。
 
-**字段**：字段注释 ≤ 128 无全角 / 类型禁用项已规避 / 字段数 ≤ 40 / 命名按属性级别 / `del_flag` 统一。
+**字段**：字段注释 ≤ 128 无全角 / 类型禁用项已规避 / 字段数 ≤ 40 / 命名按属性级别 / `del_flag` 业务表必含且命名统一。
 
 **索引**：uk_/ix_ 命名 ≤ 64 / 已避开低区分度单字段索引 / id 不重复建索引。
 
