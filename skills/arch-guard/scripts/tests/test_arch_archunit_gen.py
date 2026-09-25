@@ -7,6 +7,7 @@ allowEmptyShould、Java 8 兼容、prefix 强制、--verify 防漂移。
 import json
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import arch_check  # noqa: E402
@@ -18,7 +19,13 @@ def _cfg(**overrides):
     return cfg
 
 
-def _gen(project_root=".", **overrides):
+def _gen(project_root=None, **overrides):
+    # 密封性：不扫真实 CWD（badcase/ fixture 目录含 adapter/domain 等目录名，
+    # 会被 _detect_existing_layers 命中而裁层，断言随环境漂移）；
+    # 空目录探测为空 → 回退全层，正是全层断言的前提
+    if project_root is None:
+        with tempfile.TemporaryDirectory() as d:
+            return arch_check._generate_archunit_test(_cfg(**overrides), d)
     return arch_check._generate_archunit_test(_cfg(**overrides), project_root)
 
 
