@@ -59,7 +59,7 @@ MYSQL_RESERVED = {
     "unsigned", "update", "usage", "use", "using", "utc_date", "utc_time",
     "utc_timestamp", "values", "varbinary", "varchar", "varcharacter", "varying",
     "virtual", "when", "where", "while", "window", "with", "write", "xor",
-    "year_month", "zerofill", "date", "time", "timestamp", "text", "blob",
+    "year_month", "zerofill", "date", "time", "timestamp", "text",
     "enum", "json", "geometry", "point", "linestring", "polygon",
     "multipoint", "multilinestring", "multipolygon", "geometrycollection",
 }
@@ -83,14 +83,13 @@ def find_files(path: str, accept) -> list:
         for dirpath, dirnames, filenames in os.walk(path):
             # 原地修改 dirnames 跳过非源码目录
             dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
-            for f in filenames:
-                if accept(f):
-                    matched.append(os.path.join(dirpath, f))
+            matched.extend(os.path.join(dirpath, f)
+                           for f in filenames if accept(f))
     return matched
 
 
 def count_mandatory(issues: list) -> int:
-    return sum(1 for i in issues if i.severity == Severity.MANDATORY)
+    return sum(i.severity == Severity.MANDATORY for i in issues)
 
 
 def run_gate(targets: list, fmt: str, report_text, report_json) -> int:
