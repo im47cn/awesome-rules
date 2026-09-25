@@ -255,7 +255,7 @@ python3 scripts/doc_gen.py scan /path/to/java-project --init
 python3 scripts/doc_gen.py scan --from-manifest doc-manifest/ --build
 
 # 多项目聚合已迁移至架构鹰眼：
-python3 ~/sources/arch-hawkeye/scripts/hawkeye.py aggregate projects.json --output site/ --build
+python3 <arch-hawkeye 仓根>/scripts/hawkeye.py aggregate projects.json --output site/ --build
 ```
 
 ### 4.2 模块划分
