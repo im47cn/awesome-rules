@@ -103,8 +103,9 @@ R2_COUNT_RE = re.compile(r"[（(]?\s*" + _NUM + r"\s*[)）]?\s*个[^。\n|]{0,30
 R4_TESTED_RE = re.compile(r"测试\s*[（(]?\s*(\d+)\s*[)）]?\s*[项条个]")
 R4_PAREN_RE = re.compile(r"[（(]\s*(\d+)\s*[项条]\s*[)）]")
 R4_REVERSED_RE = re.compile(r"(\d+)\s*[项条]\s*测试")
-# R12 陈述口径：数字+可选加号/量词紧邻「工具」（165+ 工具 / 100 个工具）
-R12_TOOL_COUNT_RE = re.compile(r"\d+\s*\+?\s*个?\s*工具")
+# R12 陈述口径：数字+可选加号/量词紧邻「工具」（165+ 工具 / 100 个工具），
+# 及数字后置形态（工具数量：165 个 / 工具 N 个）
+R12_TOOL_COUNT_RE = re.compile(r"\d+\s*\+?\s*个?\s*工具|工具[^，。\n]{0,6}?\d+\s*个")
 
 R5_REUSE_RE = re.compile(r"复用\s*arch-guard")
 R5_CHECKOUT_RE = re.compile(r"git\s+checkout\s+-b\s+factory/issue")

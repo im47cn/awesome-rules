@@ -603,6 +603,20 @@ else
     bad "NC23 期望 rc=1+R12+165+ 工具, 实际 rc=${_rc23}: $(cat "$TMP/out23")"
 fi
 
+# R12 数字后置形态：工具数量：165 个（CodeRabbit 复审 #7 补充形态）
+NC23C="$TMP/nc23c"; cp -r "$NC23" "$NC23C"
+printf '平台工具集工具数量：165 个，经 mcporter CLI 代理调用。\n' >"$NC23C/skills/foo/SKILL.md"
+if "$PY" tools/check_doc_freshness.py "$NC23C" >"$TMP/out23c" 2>&1; then
+    _rc23c=0
+else
+    _rc23c=$?
+fi
+if [ "$_rc23c" -eq 1 ] && grep -q 'R12' "$TMP/out23c"; then
+    ok "NC23c R12 数字后置形态检出"
+else
+    bad "NC23c 期望 rc=1+R12, 实际 rc=${_rc23c}: $(cat "$TMP/out23c")"
+fi
+
 # R12 修绿：改写为实时口径后同一夹具转绿（证明可修复、非结构性拒判）
 printf '平台工具集（上百工具，数量以 mcporter list 实时结果为准）。\n' \
     >"$NC23/skills/foo/SKILL.md"

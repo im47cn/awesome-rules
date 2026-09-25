@@ -19,7 +19,7 @@
     "api-guard": "sha256:fb6cd25ab3e3be3700423f7341a765474aeeedb3375fe7fb2f435ec4a4ffb50d",
     "arch-guard": "sha256:3df1914e127b8d9bddb90c448b95bcac4366b7dd94e5bdd9cda3de4de09d8fc0",
     "contract-guard": "sha256:17d3704dc3300245679080f1ed60460420414c346e69b86b2f1259ac88c7589f",
-    "ddl-guard": "sha256:ee0e1081e784e443abf9e475bb00c2436c8abbca74e4831548f32c298f969827",
+    "ddl-guard": "sha256:af9a4fef6326ed250c9cde49b203e46bc48f4210d6f0000aae39b242b528b028",
     "doc-gen": "sha256:dce9066c667a9a32199ccd68663d2303317c3a9ee0fd3fedfffb03943164fe51",
     "impact-guard": "sha256:3d39decbfa6822eea1e7269e9c48ba4fd0ea013fe8216527237f2ddcb28e6b18",
     "skill-evo": "sha256:45467fc27a496d3423c4aacb415557898c16e53377c54a22f5bcc76dde150059",

@@ -1,8 +1,8 @@
 {
   "schema": "replay-evidence/1",
   "skill": "ddl-guard",
-  "content_hash": "sha256:d0346be29c0164eef88155cf930faf0b9e5700bfab20844b9bf9d4ea147aa177",
-  "generated_at": "2026-09-25T04:21:38+00:00",
+  "content_hash": "sha256:de772d2dbbb403b349b619a16c7d6d0979db6ccf90248d1fb039277787d456c2",
+  "generated_at": "2026-09-25T12:31:12+00:00",
   "k": 3,
   "pass_at_k": 0.973,
   "pass_cap_k": 0.973,
