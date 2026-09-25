@@ -585,6 +585,33 @@ else
     bad "NC11c 期望 rc=1+R7c+ddl-guard, 实际 rc=${_rc11c}: $(cat "$TMP/out11c")"
 fi
 
+# ── NC23 doc-freshness R12 负控制：工具计数易腐陈述必须被拦下 ──
+# （夹具 README 树收录 skills/foo，隔离 R3——含 SKILL.md 的目录须在树内）
+NC23="$TMP/nc23"; nc10_setup "$NC23"
+# shellcheck disable=SC2016  # 字面 markdown 树，刻意单引号防展开
+printf '# T\n\n```\n├── skills\n│   ├── foo\n```\n' >"$NC23/README.md"
+printf '平台工具集（165+ 工具），经 mcporter CLI 代理调用。\n' >"$NC23/skills/foo/SKILL.md"
+if "$PY" tools/check_doc_freshness.py "$NC23" >"$TMP/out23" 2>&1; then
+    _rc23=0
+else
+    _rc23=$?
+fi
+if [ "$_rc23" -eq 1 ] && grep -q 'R12' "$TMP/out23" \
+    && grep -q '165+ 工具' "$TMP/out23"; then
+    ok "NC23 R12 工具计数检出"
+else
+    bad "NC23 期望 rc=1+R12+165+ 工具, 实际 rc=${_rc23}: $(cat "$TMP/out23")"
+fi
+
+# R12 修绿：改写为实时口径后同一夹具转绿（证明可修复、非结构性拒判）
+printf '平台工具集（上百工具，数量以 mcporter list 实时结果为准）。\n' \
+    >"$NC23/skills/foo/SKILL.md"
+if "$PY" tools/check_doc_freshness.py "$NC23" >"$TMP/out23b" 2>&1; then
+    ok "NC23b R12 修绿（实时口径放行）"
+else
+    bad "NC23b 期望 rc=0: $(cat "$TMP/out23b")"
+fi
+
 # 文件缺失跳过：无 .opencode/CONTRIBUTING/AGENTS/CLAUDE/hooks 面 → 整组
 # 跳过而非误报（NC10 最小仓本身即此形态，此处显式再证一次）
 NC11E="$TMP/nc11e"; nc10_setup "$NC11E"

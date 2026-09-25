@@ -863,6 +863,19 @@ def check_varchar_length(field: FieldInfo, table_name: str, issues: list):
             ))
 
 
+def check_del_flag_required(table: TableInfo, issues: list):
+    """业务表必含逻辑删除字段（日志/流水表豁免）——database-design-specification §逻辑删除字段【强制】。"""
+    if _is_log_table(table.name):
+        return
+    field_names = {f.name.lower() for f in table.fields}
+    if not field_names & {"del_flag", "delete_flag", "is_deleted", "is_del", "deleted"}:
+        issues.append(Issue(
+            table=table.name, severity=Severity.MANDATORY, rule="逻辑删除字段缺失",
+            location=f"表:{table.name}", description="业务表缺少逻辑删除字段（del_flag 及其等价别名均无）",
+            suggestion="新增 del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]'（日志/流水表豁免）",
+        ))
+
+
 def check_del_flag(table: TableInfo, issues: list):
     """Check del_flag field naming and comment."""
     for f in table.fields:
@@ -1039,6 +1052,7 @@ def check_file(file_path: str) -> list:
         check_required_fields(table, issues)
         check_field_count(table, issues)
         check_primary_key_int(table, issues)
+        check_del_flag_required(table, issues)
         check_del_flag(table, issues)
         check_foreign_key(table, issues)
 

@@ -61,7 +61,7 @@ gtsp-{域}-domain/.../domain/
 gtsp-{域}-{service|core}/src/main/java/com/acme/{module}/
 ├── adapter/web/                            # Controller
 ├── application/{service,executor,assembler,handler,manager}
-├── domain/{model/{entity,valueobject}, repository, service}
+├── domain/{model/{entity,valueobject,enum}, repository, service}
 └── infrastructure/repository/{mapper,po,converter}, exchange
 
 gtsp-{域}-api/src/main/java/com/acme/{module}/
@@ -170,7 +170,7 @@ gtsp-{域}-api/src/main/java/com/acme/{module}/
 client/        api/(Inter) dto/ command/ query/
 adapter/       web/(Controller) model/(可选)
 application/   service/(AppService) executor/(可选) assembler/ handler/(可选) manager/(可选)
-domain/        model/{entity,valueobject,condition} extensionpoint/(ExtPt) repository/(接口) service/(DomainService) event/
+domain/        model/{entity,valueobject,condition,enum} extensionpoint/(ExtPt) repository/(接口) service/(DomainService) event/
 infrastructure/ repository/{mapper,po,converter} extension/(Ext) exchange/ exception/ config/ constant/ enums/ util/
 ```
 

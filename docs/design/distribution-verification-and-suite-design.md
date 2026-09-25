@@ -4,7 +4,7 @@
 - 作者: P3 分发层验证(distribution verify)
 - 来源: `docs/P3-分发层数据验证与设计-task-brief.md`(P3 任务书)
 - 状态: accepted(数据已实测,设计待后续 spec 化实施)
-- 关联: `factory-harness-design.md` §11(M1–M4)、ADR-009/010/011(`.factory/decisions.md`)
+- 关联: `factory-harness-design.md` §11(M1–M4)、ADR-009/010/011(`docs/adr/`)
 
 ## 0. 摘要与结论
 
@@ -125,7 +125,7 @@
 
 - 每次分发动作(追平/反哺/门禁变更)追加一节:日期、上游锚点变迁(from→to)、diff 面(full/skip)、下游决策(接受/改造/拒绝+理由)、反哺链接。
 - 作用:把「下游为什么和上游不一样」从 git 考古变成一页可读记录;downstream-check 漂移报告的链接目标;死亡谷条款(DIST-8)的检查对象(移植完成但 REVIEW.md 无「合入 main」记录 → 触发告警)。
-- 形态参照 `.factory/decisions.md`(ADR 追加式),不引入新格式。
+- 形态参照 `docs/adr/`(ADR 追加式),不引入新格式。
 
 ### 2.5 CI gate 模板注入方案
 

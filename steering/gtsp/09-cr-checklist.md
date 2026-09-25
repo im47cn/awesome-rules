@@ -23,7 +23,7 @@ scenario: CR 清单/公共依赖速查
 
 - [ ]【强制】领域类（实体/值对象）**无后缀**，用业务名；其他类后缀与职责对应（Inter/Controller/AppService/Repository/RepositoryImpl/Mapper/PO/DTO/Command/Query/ExtPt/Ext）（已接线：arch_check.check_naming；领域类业务命名人工）
 - [ ]【强制】adapter 包用 `web`（非 `facade`）（人工）
-- [ ]【强制】方法命名分层：应用层用业务语义或 `create/remove/modify/get/page/list/count`，基础设施层用 `insert/update/delete/queryPage/queryList/queryDetail`（人工）
+- [ ]【强制】方法命名分层：应用层用业务语义或 `create/remove/modify/get/page/list/count`，基础设施层动词遵循 [02-naming.md](02-naming.md) §2 权威表（人工）
 - [ ]【强制】常量类使用 `final class` + private 构造方法，不使用 `interface`（人工）
 - [ ]【强制】依赖注入使用 `@Resource`，不使用 `@Autowired`（已接线：arch_check.check_injection_annotation）
 
@@ -67,6 +67,7 @@ scenario: CR 清单/公共依赖速查
 - [ ]【强制】公共依赖版本由父 POM 管理，敏感信息不硬编码（人工）
 - [ ]【推荐】类注释含 `@author` 和 `@date`（格式 yyyy-MM-dd）（人工）
 - [ ]【推荐】PO/Entity/DTO 字段有 Javadoc 注释，枚举字段说明码值映射（人工）
+- [ ]【强制】Feign 接口方法与 Controller 方法有 Javadoc 注释（功能 + @param + @return）（人工）
 - [ ]【强制】废弃方法/字段标注 `@Deprecated` 并说明替代方案（人工）
 
 ## 2. 公共依赖速查

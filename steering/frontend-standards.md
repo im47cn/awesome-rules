@@ -8,6 +8,8 @@ scenario: 开发或评审 open-platform-admin 等 Vue3 + Vite + Element Plus 管
 > 来源：open-platform-admin MR !5 评审修复沉淀（2026-09，回调中心管理域）。
 > 适用 Vue3 + Vite + Element Plus 管理端项目。条款分【强制】/【推荐】两级。
 
+> **执行承接**：本规范全部【强制】条款面向外部 Vue3 目标仓（open-platform-admin 等），本仓 gauntlet 结构上无法触达——可机械项（mock 门控、.env 分层）落点为目标仓 CI 片段（候选项：`! grep -rn 'enableDev:[[:space:]]*true' build/`、`! git grep -in 'VITE_MOCK.*true' -- .env`），其余仅靠目标仓 CR 评审承接。
+
 ## 1. Mock 与本地联调
 
 ### 【强制】mock 服务经环境变量显式开启，默认关闭
