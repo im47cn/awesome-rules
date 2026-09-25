@@ -373,3 +373,43 @@ class TestDecideIntegration:
         monkeypatch.setattr(release_guard, "interval_commits", lambda base: [])
         assert release_guard.decide() == 1
         assert "EVIDENCE_ENROLLED" in capsys.readouterr().out
+
+
+class TestMainDispatchReleaseIntent:
+    """防误触门禁：catv 执行仅经 --release（npm run release）显式发起。
+
+    负控制=首个用例：改动前裸调用直达 decide(check_only=False)，
+    本组断言 check_only=True，旧代码必然失败（2026-09 两次实证：
+    裸调用/帮助探针直接跑完 catv 提交版本 bump）。
+    """
+
+    def _spy_decide(self, monkeypatch):
+        seen = []
+        monkeypatch.setattr(release_guard, "decide",
+                            lambda check_only: seen.append(check_only) or 0)
+        return seen
+
+    def test_bare_invocation_forced_check_only(self, monkeypatch, capsys):
+        seen = self._spy_decide(monkeypatch)
+        assert release_guard._main([]) == 0
+        assert seen == [True]  # 门禁生效：未显式 --release 不给执行
+        assert "--release" in capsys.readouterr().out
+
+    def test_explicit_release_executes(self, monkeypatch, capsys):
+        seen = self._spy_decide(monkeypatch)
+        assert release_guard._main(["--release"]) == 0
+        assert seen == [False]
+        assert "--release" not in capsys.readouterr().out
+
+    def test_check_flag_unchanged(self, monkeypatch, capsys):
+        seen = self._spy_decide(monkeypatch)
+        assert release_guard._main(["--check"]) == 0
+        assert seen == [True]
+        out = capsys.readouterr().out
+        assert "未传 --release" not in out  # 显式只读不弹防误触提示
+
+    def test_verify_evidence_route_bypasses_release_gate(self, monkeypatch):
+        monkeypatch.setattr(release_guard, "verify_skill_evidence", lambda: 0)
+        seen = self._spy_decide(monkeypatch)
+        assert release_guard._main(["--verify-evidence"]) == 0
+        assert seen == []  # 证据审计独立于发布门禁，不触发 decide
