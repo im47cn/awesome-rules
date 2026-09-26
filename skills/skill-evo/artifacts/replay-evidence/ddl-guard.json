@@ -1,11 +1,11 @@
 {
   "schema": "replay-evidence/1",
   "skill": "ddl-guard",
-  "content_hash": "sha256:af1eb41a1dd24fd78a203fe9f6fc80df6b1d665206611e9f06c7fb6c76bb2715",
-  "generated_at": "2026-09-25T13:11:52+00:00",
+  "content_hash": "sha256:b75ba79a407d81f015dfe1f20c27953beb3918bde17d11130161edb859d562d8",
+  "generated_at": "2026-09-26T00:43:50+00:00",
   "k": 3,
-  "pass_at_k": 0.9865,
-  "pass_cap_k": 0.9865,
+  "pass_at_k": 0.973,
+  "pass_cap_k": 0.973,
   "invocation": {
     "skill_invoked": true,
     "evidence": "dry-run"
