@@ -696,6 +696,25 @@ def annotate_pending_block(md_path: Path, msg: str) -> None:
     md_path.write_text("".join(lines), encoding="utf-8")
 
 
+def set_pending_status(md_path: Path, new_status: str) -> None:
+    """pending .md 的 fm status 原位改写（approve 动作的落盘形式）。
+
+    审批标记必须以 status 值形态存在：_render_pending_body 模板含 status 键，
+    normalize_headings 重渲染不丢；独立 fm 键（approved_by/approved_at）会被
+    模板抹掉，禁用。只写 .md，永不动 .orig 快照（verdict 推导依据）。
+    fail-closed：无 fm 或 fm 无收尾 --- 的结构异常文件拒绝改写，不静默修复。
+    """
+    text = md_path.read_text(encoding="utf-8")
+    end = text.find("\n---", 3)
+    if not text.startswith("---") or end == -1:
+        raise ApplyError(f"{md_path.name}: 缺 frontmatter/无收尾 ---，拒绝改写 status")
+    fm = text[3:end + 1]                       # 只动 fm 区间，防误删正文 status 行
+    kept = "".join(ln + "\n" for ln in fm.splitlines()
+                   if not ln.startswith("status:"))   # 单键纪律：先删全部旧值
+    md_path.write_text(text[:3] + kept + f"status: {new_status}\n" + text[end + 1:],
+                       encoding="utf-8")
+
+
 def apply_proposal(p: Proposal, repo_root: Path, *, dry_run: bool = False,
                    force: bool = False, applied_dir: Optional[Path] = None,
                    extra_warnings: Optional[List[str]] = None,

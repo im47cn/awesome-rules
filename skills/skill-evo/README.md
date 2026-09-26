@@ -19,7 +19,7 @@ SessionEnd hook（hooks.json）                  session_shutdown hook（hooks/o
                 ├─ 搭车插件哑故障巡检（evo_patrol，节流 + 台账 patrol.json）
                 └─ 提案落盘 ~/.config/ar/skill-evo/proposals/pending/
                        ▼
-         人工审核：evo.py list / apply / reject
+         人工审核：evo.py list / approve / apply / reject
            ├─ apply：锚点级追加写入（两阶段校验，失配不盲写）
            └─ rejected + reason → GEPA 负样本
                        ▼
@@ -48,7 +48,8 @@ cp hooks/omp/skill-evo.ts ~/.omp/agent/hooks/pre/
 ```bash
 python3 skills/skill-evo/scripts/evo.py list            # 列 pending 提案（含护栏警告）
 python3 skills/skill-evo/scripts/evo.py apply <id> --dry-run   # 预演
-python3 skills/skill-evo/scripts/evo.py apply <id>      # 应用（锚点失配整体失败）
+python3 skills/skill-evo/scripts/evo.py approve <id>   # 人工批准（apply 前置门禁）
+python3 skills/skill-evo/scripts/evo.py apply <id>      # 应用（须先 approve；锚点失配整体失败）
 python3 skills/skill-evo/scripts/evo.py reject <id> --reason "证据不足"   # 驳回 → GEPA 负样本
 python3 skills/skill-evo/scripts/evo.py patrol [--force]          # 插件哑故障巡检复查
 ```
