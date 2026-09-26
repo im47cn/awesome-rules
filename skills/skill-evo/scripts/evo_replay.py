@@ -705,9 +705,10 @@ def skill_content_hash(skill: str, root: Optional[Path] = None) -> str:
     """技能内容指纹：逐文件摘要清单的 sha256（release_guard 契约一字不差）。
 
     契约（真相源 = scripts/release_guard.compute_content_hash，本函数为 B 路
-    对齐实现；两路不漂移由钉测试 test_skill_content_hash_matches_release_
-    guard_contract 守护。#247 r2 2026-09-26：旧「字节直拼」算法把 __pycache__
-    等派生产物吞入指纹，随本地测试生灭漂移，实证不可复现）：
+    对齐实现；两路不漂移由钉测试守护：
+    test_skill_content_hash_matches_release_guard_contract。
+    #247 r2 2026-09-26：旧「字节直拼」算法把 __pycache__ 等派生产物吞入
+    指纹，随本地测试生灭漂移，实证不可复现）：
     - manifest 条目 = "{文件内容 sha256 hex}  {skill 内相对 posix 路径}\\n"，
       按仓库根相对 posix 路径字典序逐条拼接后整体 sha256——路径与边界参与
       哈希：文件改名/增删/跨文件内容重排（"ab"+"c" vs "a"+"bc"）均改变 hash；
