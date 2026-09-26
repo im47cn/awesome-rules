@@ -40,8 +40,8 @@ status     tinyint      NOT NULL DEFAULT 10 COMMENT '订单状态[待支付/已�
 | R3：补充信息与主标题重复 | 脚本字符串比对 + AI 语义 | 脚本检查"完全相同"；语义重复由 agent 复核 |
 
 **R1 复核要点（agent 必读）**：
-- 字段英文名的每个分词（含缩写）必须能在 `scripts/abbreviations.py::LONG_TO_SHORT` 中查到对应中文
-- 缩写 → 中文释义参考：`mch→商户`、`cgo→货物`、`veh→车辆`、`vou→凭证`、`aut→鉴权`、`verf→验证`、`mapp→映射`、`subscr→订阅`、`insu→保险`、`pay→支付`、`addr→地址`、`cnt→数量`、`amt→金额`、`no→编号`、`status→状态`、`type→类型`、`time→时间`、`date→日期`、`del→删除`、`flag→标志`、`id→id` 等
+- `scripts/abbreviations.py::LONG_TO_SHORT` 是「长写法 → 标准缩写」映射（key 为长写法），用于判定分词是否为未规范化的长写法（命中即违规，脚本已检查）；该字典不提供中文释义，中文对照由 agent 依据字段业务语义给出
+- 缩写 → 中文释义参考（agent 语义对照，非字典内容）：`mch→商户`、`cgo→货物`、`veh→车辆`、`vou→凭证`、`aut→鉴权`、`verf→验证`、`mapp→映射`、`subscr→订阅`、`insu→保险`、`pay→支付`、`addr→地址`、`cnt→数量`、`amt→金额`、`no→编号`、`status→状态`、`type→类型`、`time→时间`、`date→日期`、`del→删除`、`flag→标志`、`id→id` 等
 - 拼接顺序与字段名分词顺序一致（下划线连接）
 - 中文注释中允许出现 `id`/`no`/`type` 等英文后缀（行业惯例），无需汉化
 

@@ -1627,6 +1627,15 @@ def iter_abbrev_violations(name: str) -> list[tuple[str, str]]:
             phrase = "_".join(parts[i:j])
             if phrase in LONG_TO_SHORT:
                 std = LONG_TO_SHORT[phrase]
+                # 链式缩写折叠：value 本身又是字典 key（如 website→web、
+                # web→onln）时改报终点标准形，避免按建议整改后二次违规
+                chain = {phrase}
+                while std in LONG_TO_SHORT and std not in chain:
+                    nxt = LONG_TO_SHORT[std]
+                    if nxt == std:
+                        break
+                    chain.add(std)
+                    std = nxt
                 if std != phrase and phrase not in KEYS_WITH_RESERVED_VALUE:
                     raw_violations.append((phrase, std))
                 step = j - i  # 消费短语覆盖的全部分词（含同字映射，不拆词复报）

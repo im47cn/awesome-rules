@@ -871,6 +871,35 @@ def test_index_abbreviation_with_del_flag_exempt():
     assert all(i.rule != "索引缩写未规范化" for i in issues)
 
 
+def test_abbreviation_chain_resolved_to_terminal():
+    """链式缩写折叠：website→web→onln 报终点 onln，整改后不再二次违规。"""
+    assert ddl_check.iter_abbrev_violations("website_url") == [("website", "onln")]
+    assert ddl_check.iter_abbrev_violations("onln_url") == []  # 按建议整改后干净
+    assert ddl_check.iter_abbrev_violations("undo_cnt") == [("undo", "canc")]
+    assert ddl_check.iter_abbrev_violations("recovery_time") == [("recovery", "recov")]
+
+
+def test_index_abbreviation_issue_table_name():
+    """索引缩写违规的 Issue.table 填表名（非索引名），location 含表与索引。"""
+    ddl = (
+        "CREATE TABLE t_demo (\n"
+        "  id bigint COMMENT '主键id',\n"
+        "  website_url varchar(200) NOT NULL COMMENT '网址',\n"
+        "  creator_id varchar(36) NOT NULL DEFAULT '' COMMENT '创建人id',\n"
+        "  create_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n"
+        "  last_updater_id varchar(36) NOT NULL DEFAULT '' COMMENT '最后更新人id',\n"
+        "  last_update_time datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',\n"
+        "  del_flag tinyint NOT NULL DEFAULT 0 COMMENT '删除标志[0-否,1-是]',\n"
+        "  KEY ix_website_url (website_url)\n"
+        ") COMMENT='demo';\n"
+    )
+    issues = _issues_for(ddl)
+    hits = [i for i in issues if i.rule == "索引缩写未规范化"]
+    assert hits, "website_url 索引缩写违规应命中"
+    assert all(i.table == "t_demo" for i in hits)
+    assert all("表:t_demo" in i.location and "索引:ix_website_url" in i.location for i in hits)
+
+
 # ── R3: 补充信息 () 格式（COL034）──────────────────────────────────
 
 def test_comment_paren_redundant_flagged():

@@ -166,7 +166,7 @@ def _index_col_name(col: str) -> str:
     return m[1].lower() if m else col.lower()
 
 
-def _check_index_abbreviation(idx: IndexInfo, issues: list):
+def _check_index_abbreviation(table: TableInfo, idx: IndexInfo, issues: list):
     """索引缩写检查：对索引引用的每个列名做反向命中检查。
 
     【强制级别：公司数据治理要求】命中即报 Severity.MANDATORY。
@@ -190,8 +190,8 @@ def _check_index_abbreviation(idx: IndexInfo, issues: list):
                 continue  # 多列命中同一违规时去重
             seen.add((part, std))
             issues.append(Issue(
-                table=idx.name, severity=Severity.MANDATORY, rule="索引缩写未规范化",
-                location=f"索引:{idx.name}",
+                table=table.name, severity=Severity.MANDATORY, rule="索引缩写未规范化",
+                location=f"表:{table.name} 索引:{idx.name}",
                 description=f"索引 '{idx.name}' 列 '{col_low}' 分词 '{part}' 含未规范化写法",
                 suggestion=f"改用标准缩写 '{part}' → '{std}'，并同步索引名",
             ))
@@ -1060,7 +1060,7 @@ def check_index_naming(table: TableInfo, issues: list):
             ))
 
         # 索引主体分词缩写（强制级：公司数据治理要求）
-        _check_index_abbreviation(idx, issues)
+        _check_index_abbreviation(table, idx, issues)
 
 
 def check_index_contains_columns(table: TableInfo, issues: list):
