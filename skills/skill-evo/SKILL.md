@@ -35,7 +35,7 @@ files:
 # 会话经验进化 (skill-evo)
 
 把每次会话中「用户纠正 AI / 反复失败后找到正确做法 / 被认可的模式」自动沉淀为
-本仓库规范与技能的进化提案。**提取全自动，应用必须人工审核**（机械检查现状：无静态门禁，靠 skill-evo 自身 pending→apply 流程纪律）——这是 Hermes
+本仓库规范与技能的进化提案。**提取全自动，应用必须人工审核**（机器执行层：apply 状态前置校验——evo.py cmd_apply 对非 approved 提案 rc=1 拒绝、目标文件零写入（仅向 pending .md 留 apply_blocked 审计行），--force 不可越过；批准动作 evo approve，pending→approved 为 fm status 原位改写）——这是 Hermes
 self-evolution 的核心护栏（一切进化走人工评审，绝不直改）。
 
 架构、omp hook 安装、GEPA 原理、配置详解、设计边界等背景知识见
@@ -95,7 +95,7 @@ python3 scripts/evo.py list
 - **steering 既有【强制】条款不可被削弱**——v1 仅支持追加（append_under/append_end），
   改写删除类变更一律驳回并等待人工直接编辑规范文件
 
-硬错（`--force` 不可越过）：`supersedes` 引用不在 applied 归档中的 lesson_id 或指向自身。
+硬错（`--force` 不可越过）：提案未处于 approved 状态（须先 `evo approve <id>`）；`supersedes` 引用不在 applied 归档中的 lesson_id 或指向自身。
 修正既有 lesson 的方式不是改写，而是新 lesson 填写 `supersedes: L-XXXXXXXX` 指向旧
 lesson_id（人工审核时在提案 JSON 块中填写），保留完整的演进链。
 
@@ -105,7 +105,10 @@ lesson_id（人工审核时在提案 JSON 块中填写），保留完整的演�
 # 预演（不落盘，展示将追加的内容与位置）
 python3 scripts/evo.py apply <id> --dry-run
 
-# 确认后应用（直接写入目标文件；护栏警告命中时加 --force）
+# 人工批准（apply 前置门禁；--force 不可替代此步）
+python3 scripts/evo.py approve <id>
+
+# 确认后应用（须先 approve；护栏警告命中时加 --force——force 只越软告警不越审批）
 python3 scripts/evo.py apply <id> [--force] [--codes "L-XXXX:content_overlap"]
 
 # 驳回

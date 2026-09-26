@@ -212,6 +212,7 @@ def test_list_apply_reject_flow(tmp_path, monkeypatch, capsys):
     # 前缀匹配 apply；dry-run 不落盘
     assert evo.cmd_apply(SimpleNamespace(id="20260818-12", dry_run=True, force=False)) == 0
     assert "- 新条款" not in (repo / "steering" / "demo-spec.md").read_text(encoding="utf-8")
+    assert evo.cmd_approve(SimpleNamespace(id="20260818-12")) == 0
     assert evo.cmd_apply(SimpleNamespace(id="20260818-12", dry_run=False, force=False)) == 0
     assert "- 新条款" in (repo / "steering" / "demo-spec.md").read_text(encoding="utf-8")
     assert not list((base / "proposals" / "pending").glob("*.md"))
@@ -228,6 +229,73 @@ def test_list_apply_reject_flow(tmp_path, monkeypatch, capsys):
     assert evo.cmd_reject(SimpleNamespace(id="20260818-13", reason="证据不足")) == 0
     assert not list((base / "proposals" / "pending").glob("*.md"))
     assert list((base / "proposals" / "rejected").glob("*.md"))
+
+
+def test_apply_requires_approval_gate(tmp_path, monkeypatch, capsys):
+    """issue #247：未 approved 的提案 apply 被拒——门禁先于一切写入，--force 不可越过审批。"""
+    cfg, base, repo = make_env(tmp_path, monkeypatch)
+    spec = repo / "steering" / "demo-spec.md"
+    p = PR.Proposal(id="20260926-100000-cc-aaaa0001", source_agent="cc",
+                    source_session="s", source_path="/t", created="T",
+                    lessons=[PR.Lesson(
+                        type="correction", evidence="e", target_file="steering/demo-spec.md",
+                        confidence="High", reason="r", change=PR.Change(
+                            action="append_end", new_text="- 门禁测试条款"))])
+    md = PR.write_proposal(p, base / "proposals" / "pending")
+
+    # ① 未批准 apply → rc=1、目标零写入、仍在 pending、输出明示 approve 路径、痕迹落 .md
+    assert evo.cmd_apply(SimpleNamespace(id="20260926-10", dry_run=False, force=False)) == 1
+    out = capsys.readouterr().out
+    assert "未批准" in out and "approve" in out
+    assert "- 门禁测试条款" not in spec.read_text(encoding="utf-8")
+    assert md.exists()                                    # 仍在 pending
+    assert "apply_blocked:" in md.read_text(encoding="utf-8")
+
+    # ② --force 只越软告警，不可越过审批
+    assert evo.cmd_apply(SimpleNamespace(id="20260926-10", dry_run=False, force=True)) == 1
+    assert "- 门禁测试条款" not in spec.read_text(encoding="utf-8")
+    assert md.exists()
+
+    # ③ dry-run 属预演审核环节，门禁不拦（且本就不写目标文件）
+    assert evo.cmd_apply(SimpleNamespace(id="20260926-10", dry_run=True, force=False)) == 0
+    assert "- 门禁测试条款" not in spec.read_text(encoding="utf-8")
+
+    # ④ approve：pending → approved（fm status 原位改写，单键）
+    assert evo.cmd_approve(SimpleNamespace(id="20260926-10")) == 0
+    status_lines = [ln for ln in md.read_text(encoding="utf-8").splitlines()
+                    if ln.startswith("status:")]
+    assert status_lines == ["status: approved"]
+
+    # ⑤ 重复 approve 幂等
+    assert evo.cmd_approve(SimpleNamespace(id="20260926-10")) == 0
+
+    # ⑥ approve 后 apply 畅通：落盘、归档、last-wins status=applied
+    assert evo.cmd_apply(SimpleNamespace(id="20260926-10", dry_run=False, force=False)) == 0
+    assert "- 门禁测试条款" in spec.read_text(encoding="utf-8")
+    assert not list((base / "proposals" / "pending").glob("*.md"))
+    archived = list((base / "proposals" / "applied").glob("*.md"))
+    assert len(archived) == 1
+    assert PR.load_proposal(archived[0]).status == "applied"
+
+
+def test_approval_gate_invalid_status_not_approvable(tmp_path, monkeypatch, capsys):
+    """issue #247：非 pending/approved 的异常状态不可批准（fail-closed，rc=1）。"""
+    cfg, base, repo = make_env(tmp_path, monkeypatch)
+    p = PR.Proposal(id="20260926-110000-cc-bbbb0002", source_agent="cc",
+                    source_session="s", source_path="/t", created="T",
+                    lessons=[PR.Lesson(
+                        type="correction", evidence="e", target_file="steering/demo-spec.md",
+                        confidence="High", reason="r", change=PR.Change(
+                            action="append_end", new_text="- 状态机测试条款"))])
+    md = PR.write_proposal(p, base / "proposals" / "pending")
+    md.write_text(md.read_text(encoding="utf-8").replace(
+        "status: pending", "status: unknown_state"), encoding="utf-8")
+
+    assert evo.cmd_approve(SimpleNamespace(id="20260926-11")) == 1
+    assert "不可批准" in capsys.readouterr().out
+    assert "status: unknown_state" in md.read_text(encoding="utf-8")   # 未被改写
+    assert evo.cmd_apply(SimpleNamespace(id="20260926-11", dry_run=False, force=False)) == 1
+    assert "- 状态机测试条款" not in (repo / "steering" / "demo-spec.md").read_text(encoding="utf-8")
 
 
 def test_apply_evidence_miss_requires_force(tmp_path, monkeypatch, capsys):
@@ -247,6 +315,7 @@ def test_apply_evidence_miss_requires_force(tmp_path, monkeypatch, capsys):
     assert evo.cmd_list(SimpleNamespace()) == 0
     assert "✗" in capsys.readouterr().out
 
+    assert evo.cmd_approve(SimpleNamespace(id="20260818-14")) == 0
     assert evo.cmd_apply(SimpleNamespace(id="20260818-14", dry_run=False, force=False)) == 1
     assert "- 证据核验测试条款" not in (repo / "steering" / "demo-spec.md").read_text(encoding="utf-8")
     assert evo.cmd_apply(SimpleNamespace(id="20260818-14", dry_run=False, force=True)) == 0
@@ -276,6 +345,7 @@ def test_apply_evidence_edited_requires_force(tmp_path, monkeypatch, capsys):
     assert evo.cmd_list(SimpleNamespace()) == 0
     assert "✎" in capsys.readouterr().out
 
+    assert evo.cmd_approve(SimpleNamespace(id="20260902-14")) == 0
     assert evo.cmd_apply(SimpleNamespace(id="20260902-14", dry_run=False, force=False)) == 1
     out = capsys.readouterr().out
     assert "人工" in out and "改写" in out          # 阻断原因明示人工必审
@@ -326,6 +396,7 @@ def test_apply_semantic_dup_exitcode(tmp_path, monkeypatch, capsys):
                             action="append_end", new_text=f"- {variant}"))])
     path = PR.write_proposal(p, base / "proposals" / "pending")
 
+    assert evo.cmd_approve(SimpleNamespace(id="20260826-10")) == 0
     assert evo.cmd_apply(SimpleNamespace(id="20260826-10", dry_run=False, force=False)) == 1
     out = capsys.readouterr().out
     assert "语义重复" in out and "0.9" in out
@@ -349,6 +420,7 @@ def test_apply_instance_blocked(tmp_path, monkeypatch, capsys):
                                          new_text="- 云效 fieldId 101586 是选项型字段"))])
     path = PR.write_proposal(p, base / "proposals" / "pending")
 
+    assert evo.cmd_approve(SimpleNamespace(id="20260826-11")) == 0
     assert evo.cmd_apply(SimpleNamespace(id="20260826-11", dry_run=False, force=False)) == 1
     out = capsys.readouterr().out
     assert "instance" in out and "ADR" in out
@@ -371,6 +443,7 @@ def test_apply_evidence_hit_passes(tmp_path, monkeypatch, capsys):
     PR.write_proposal(p, base / "proposals" / "pending")
     assert evo.cmd_list(SimpleNamespace()) == 0
     assert "✓" in capsys.readouterr().out
+    assert evo.cmd_approve(SimpleNamespace(id="20260818-15")) == 0
     assert evo.cmd_apply(SimpleNamespace(id="20260818-15", dry_run=False, force=False)) == 0
 
 
@@ -480,5 +553,6 @@ def test_apply_evidence_paraphrase_passes(tmp_path, monkeypatch, capsys):
     assert evo.cmd_list(SimpleNamespace()) == 0
     out = capsys.readouterr().out
     assert "⚠" in out and "✗" not in out
+    assert evo.cmd_approve(SimpleNamespace(id="20260818-16")) == 0
     assert evo.cmd_apply(SimpleNamespace(id="20260818-16", dry_run=False, force=False)) == 0
     assert "- 转述证据测试条款" in (repo / "steering" / "demo-spec.md").read_text(encoding="utf-8")

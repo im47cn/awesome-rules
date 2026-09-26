@@ -1320,6 +1320,34 @@ def test_annotate_pending_block_truncated_fm_inserts_header(tmp_path):
     assert text.startswith("apply_blocked: 拦截原因\n---\nid: x\n")
 
 
+def test_set_pending_status(tmp_path):
+    """issue #247：fm status 原位改写（单键纪律）+ .orig 快照零触碰 + 残缺 fm fail-closed。"""
+    path = PR.write_proposal(make_proposal(tmp_path), tmp_path / "pending")
+    orig = path.parent / f"{path.stem}.orig"
+    orig_bytes = orig.read_bytes()
+
+    PR.set_pending_status(path, "approved")
+    text = path.read_text(encoding="utf-8")
+    assert [ln for ln in text.splitlines() if ln.startswith("status:")] == ["status: approved"]
+    assert PR.load_proposal(path).status == "approved"    # 改写后可加载
+    assert orig.read_bytes() == orig_bytes                # verdict 推导依据不动
+
+    # 多源 source_paths：fm 缩进列表行不得被字符串手术误删/误留
+    multi = make_proposal(tmp_path, pid="20260818-000001-cc-abcd1234")
+    multi.source_paths = ["/tmp/s-2.jsonl", "/tmp/s-3.jsonl"]
+    mpath = PR.write_proposal(multi, tmp_path / "pending")
+    PR.set_pending_status(mpath, "approved")
+    mtext = mpath.read_text(encoding="utf-8")
+    assert "  - /tmp/s-2.jsonl" in mtext and "  - /tmp/s-3.jsonl" in mtext
+    assert PR.load_proposal(mpath).all_source_paths() == [
+        "/tmp/s-1.jsonl", "/tmp/s-2.jsonl", "/tmp/s-3.jsonl"]
+
+    bare = tmp_path / "bare.md"
+    bare.write_text("# 裸文档", encoding="utf-8")
+    with pytest.raises(PR.ApplyError, match="拒绝改写 status"):
+        PR.set_pending_status(bare, "approved")
+
+
 def test_check_idempotent_skips_blank_paragraph():
     """首空行产出的空段：跳过但占原序号（docstring 明示设计行为）。"""
     hit = PR.check_idempotent("目标内容", "\n\n段一\n\n目标内容", 0.8)

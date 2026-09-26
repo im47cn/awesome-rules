@@ -302,6 +302,18 @@ def cmd_apply(args) -> int:
     paths = C.base_paths(cfg)
     path = _find_pending(cfg, args.id)
     proposal = PR.load_proposal(path)
+    if not args.dry_run and proposal.status != "approved":
+        # issue #247 审批门禁：位于 normalize_headings/写入之前——目标文件零写入；
+        # 仅向 pending .md 注入 apply_blocked 审计行（OSError 不影响退出码）。
+        # dry-run 属预演审核环节不拦（本就不落盘）。
+        msg = (f"提案未批准（status: {proposal.status}）：apply 前须人工审核，"
+               "先执行 evo approve <id>（--force 只越软告警，不可越过审批）")
+        print(f"❌ 应用失败：{msg}")
+        try:    # 门禁拦截留痕 pending .md（audit），失败不影响退出码
+            PR.annotate_pending_block(path, msg)
+        except OSError:
+            pass
+        return 1
     for line in PR.normalize_headings(proposal, C.repo_root(), path):
         print(f"ℹ {line}")
     for e in proposal.parse_errors:         # 坏快照/解析诊断上浮（Tripwire 可见）
@@ -348,6 +360,26 @@ def cmd_apply(args) -> int:
 
 def _split_codes(raw: str) -> list:
     return [c.strip() for c in (raw or "").split(",") if c.strip()]
+
+
+def cmd_approve(args) -> int:
+    """人工批准提案（apply 前置门禁）：pending → approved，fm status 原位改写。"""
+    cfg = C.load_config()
+    path = _find_pending(cfg, args.id)
+    proposal = PR.load_proposal(path)
+    if proposal.status == "approved":
+        print("ℹ 提案已处于 approved，无需重复批准")
+        return 0
+    if proposal.status != "pending":
+        print(f"❌ 当前状态 {proposal.status} 不可批准（仅 pending → approved）")
+        return 1
+    try:
+        PR.set_pending_status(path, "approved")
+    except (PR.ApplyError, OSError) as e:
+        print(f"❌ 批准失败：{e}")
+        return 1
+    print("提案已批准（status: approved）：可 apply；--force 仅越过软告警，不可越过审批")
+    return 0
 
 
 def cmd_reject(args) -> int:
@@ -522,15 +554,19 @@ def main() -> int:
 
     p_list = sub.add_parser("list", help="列出 pending 提案")
     p_list.set_defaults(func=cmd_list)
-
     p_apply = sub.add_parser("apply", help="应用提案")
     p_apply.add_argument("id", help="提案 id（可前缀匹配）")
     p_apply.add_argument("--dry-run", action="store_true", help="预演不落盘")
-    p_apply.add_argument("--force", action="store_true", help="越过护栏警告（人工已确认）")
+    p_apply.add_argument("--force", action="store_true",
+                         help="越过护栏软警告（人工已确认）；不可越过审批（apply 前置 evo approve）")
     p_apply.add_argument("--codes", default="",
                          help="语义码（GEPA 标注）：裸码=提案级；L-XXXX:code=lesson 级。"
                               "合法码见 evo_proposal.REASON_CODES，逗号分隔")
     p_apply.set_defaults(func=cmd_apply)
+
+    p_appr = sub.add_parser("approve", help="人工批准提案（apply 前置门禁，--force 不可替代）")
+    p_appr.add_argument("id", help="提案 id（可前缀匹配）")
+    p_appr.set_defaults(func=cmd_approve)
 
     p_rej = sub.add_parser("reject", help="驳回提案")
     p_rej.add_argument("id")
