@@ -278,7 +278,6 @@ def test_apply_requires_approval_gate(tmp_path, monkeypatch, capsys):
     assert PR.load_proposal(archived[0]).status == "applied"
 
 
-
 def test_approval_gate_invalid_status_not_approvable(tmp_path, monkeypatch, capsys):
     """issue #247：非 pending/approved 的异常状态不可批准（fail-closed，rc=1）。"""
     cfg, base, repo = make_env(tmp_path, monkeypatch)
