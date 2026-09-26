@@ -894,8 +894,14 @@ def test_skill_content_hash_deterministic_order(tmp_path):
     (skill / "SKILL.md").write_bytes(b"A")
     (skill / "scripts" / "a.py").write_bytes(b"C")
     (skill / "scripts" / "b.py").write_bytes(b"B")
-    # 字典序 SKILL.md < scripts/a.py < scripts/b.py，字节顺序拼接
-    want = f"sha256:{hashlib.sha256(b'A' + b'C' + b'B').hexdigest()}"
+    # 契约算法：逐文件摘要清单（内容 sha256 + 两空格 + skill 内相对 posix
+    # 路径 + 换行），按仓库根相对 posix 路径字典序（SKILL.md < scripts/a.py
+    # < scripts/b.py）拼接后整体 sha256——路径与边界参与哈希
+    manifest = (
+        f"{hashlib.sha256(b'A').hexdigest()}  SKILL.md\n"
+        f"{hashlib.sha256(b'C').hexdigest()}  scripts/a.py\n"
+        f"{hashlib.sha256(b'B').hexdigest()}  scripts/b.py\n")
+    want = f"sha256:{hashlib.sha256(manifest.encode('utf-8')).hexdigest()}"
     assert R.skill_content_hash("demo", root=tmp_path) == want
     # SKILL.md 缺失 → fail-closed
     (skill / "SKILL.md").unlink()
@@ -904,6 +910,38 @@ def test_skill_content_hash_deterministic_order(tmp_path):
         assert False, "应抛 FileNotFoundError"
     except FileNotFoundError:
         pass
+
+
+def test_skill_content_hash_excludes_derived_artifacts(tmp_path):
+    # 派生产物（__pycache__/.pytest_cache/.DS_Store/*.pyc）生灭不得扰动指纹
+    # ——2026-09-21 plugin_lock 事故与 #247 r2 replay 证据漂移同根因
+    skill = tmp_path / "skills" / "demo"
+    (skill / "scripts" / "__pycache__").mkdir(parents=True)
+    (skill / "scripts" / ".pytest_cache").mkdir()
+    (skill / "SKILL.md").write_text("demo", encoding="utf-8")
+    (skill / "scripts" / "a.py").write_text("print()", encoding="utf-8")
+    base = R.skill_content_hash("demo", root=tmp_path)
+    (skill / "scripts" / "__pycache__" / "a.cpython-311.pyc").write_bytes(b"\x00junk")
+    (skill / "scripts" / ".pytest_cache" / "lastfailed.json").write_text("{}", encoding="utf-8")
+    (skill / "scripts" / ".DS_Store").write_bytes(b"\x00")
+    assert R.skill_content_hash("demo", root=tmp_path) == base
+
+
+def test_skill_content_hash_matches_release_guard_contract():
+    # 跨路契约钉测试（plugin_lock 单一真相源纪律）：replay 证据 content_hash
+    # 必须与 scripts/release_guard.compute_content_hash 逐字相等——任一侧算法
+    # 漂移此测试先红（#247 r2 回流：此前字节直拼实现随 __pycache__ 生灭漂移，
+    # 同源码状态下四种哈希值互不相等）
+    import sys
+    repo_root = Path(R.__file__).resolve().parents[3]
+    scripts_dir = repo_root / "scripts"
+    sys.path.insert(0, str(scripts_dir))
+    try:
+        import release_guard
+    finally:
+        sys.path.remove(str(scripts_dir))
+    assert R.skill_content_hash("ddl-guard") == \
+        release_guard.compute_content_hash(repo_root, "ddl-guard")
 
 
 def test_execute_evidence_kill_switch_uses_raw_channel():
